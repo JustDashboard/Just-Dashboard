@@ -219,6 +219,9 @@ async function serveSites(page: Page, sites: unknown[]) {
 const card = (page: Page, name: string) =>
   page.locator("[data-slot='choice-row']").filter({ has: page.getByText(name, { exact: true }) })
 
+/** The line the page opens on: the host's facts and, at its end, the verdict. */
+const identity = (page: Page) => page.locator("[data-slot='host-identity']")
+
 async function openMenu(page: Page, name: string) {
   await page.getByRole("button", { name: `More actions for ${name}` }).click()
   return page.getByRole("menu")
@@ -494,8 +497,8 @@ test("with nginx stopped no nginx site reads serving, and the page says why", as
   const turnedOn = card(page, "off.example.com")
   await expect(turnedOn.getByText("enabled", { exact: true })).toBeVisible()
   await expect(turnedOn.getByText("serving", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("every site enabled")).toBeVisible()
-  await expect(page.getByText("every site serving")).toHaveCount(0)
+  // Only the Docker Caddy route serves while nginx is stopped.
+  await expect(identity(page)).toContainText("1 serving")
   await expect(stopped).toBeVisible()
 
   // nginx is started, and the next verb's read of systemd finds it running:
@@ -525,7 +528,7 @@ test("a reader sees nginx is not running, without the way to start it", async ({
   ).toBeVisible()
   await expect(page.getByRole("link", { name: "Start it from the Overview" })).toHaveCount(0)
   await expect(card(page, "legacy.example.com").getByText("enabled", { exact: true })).toBeVisible()
-  await expect(page.getByText("every site enabled")).toBeVisible()
+  await expect(identity(page)).toContainText("0 serving")
 })
 
 test("a switch nginx did not reload reads not reloaded until nginx has loaded it", async ({
@@ -580,7 +583,9 @@ test("a switch nginx did not reload reads not reloaded until nginx has loaded it
       .locator("[data-slot='choice-row']")
       .filter({ has: page.getByText("off.example.com", { exact: true }) })
   await expect(inGroup("Needs attention")).toBeVisible()
-  await expect(page.getByText("every site enabled")).toBeVisible()
+  // Enabled, and not counted as serving until nginx has loaded it.
+  await expect(identity(page)).toContainText("2 serving")
+  await expect(identity(page)).not.toContainText("disabled")
   // nginx is running: nothing says it is not.
   await expect(page.getByText("nginx is not running")).toHaveCount(0)
   expect(
@@ -741,6 +746,7 @@ test("with Caddy's unit stopped, its Caddyfile sites do not read serving", async
   ])
   await page.goto("/proxy/sites")
   await expect(page.getByText("Caddy is not running", { exact: true })).toBeVisible()
+  await expect(identity(page)).toContainText("No Caddy site is served")
   await expect(
     page.getByText(
       "systemd reports caddy.service failed, so no Caddy site below is served until it starts.",
@@ -1026,8 +1032,9 @@ test("every place nginx reads a site from is listed, a link to nothing first", a
   await page.keyboard.press("Escape")
   await page.goto("/proxy/sites")
 
-  // Nothing is disabled, and the reading does not call that "every site serving".
-  await expect(page.getByText("none, but 2 broken links")).toBeVisible()
+  // Nothing is disabled, and the verdict says what is wrong instead.
+  await expect(identity(page)).not.toContainText("disabled")
+  await expect(identity(page)).toContainText("2 broken links")
   await page.getByRole("button", { name: /^Broken \d/ }).click()
   await expect(page.locator("[data-slot='choice-row']")).toHaveCount(2)
 
@@ -1225,7 +1232,7 @@ test("a site served through a link under another name reads serving and names th
   const site = card(page, "default")
   await expect(site.getByText("serving", { exact: true })).toBeVisible()
   await expect(site).toContainText("nginx serves this file through sites-enabled/00-default.")
-  await expect(page.getByText("every site serving")).toBeVisible()
+  await expect(identity(page)).toContainText("2 serving")
   const menu = await openMenu(page, "default")
   // Deleting it would leave 00-default pointing at nothing.
   await expect(menu.getByRole("menuitem", { name: "Delete" })).toHaveCount(0)
@@ -1435,23 +1442,20 @@ test("the distribution's untouched default site waits on nobody", async ({ page 
   await expect(page.getByRole("list", { name: "Serving" })).not.toContainText("default")
   await expect(page.getByRole("list", { name: "Serving" })).toContainText("app.example.com")
 
-  // The Overview's tile counts the site someone has to decide about, and
-  // not the stock default.
+  // The Overview's engine line counts the site someone has to decide about,
+  // and not the stock default.
   await page.goto("/proxy")
   await expect(page.getByText("off.example.com is on disk but not serving")).toBeVisible()
   await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
-  const tile = page
-    .getByRole("link", { name: "Sites", exact: true })
-    .filter({ has: page.locator("[data-slot='stat-tile']") })
-  await expect(tile).toContainText("1 disabled")
-  await expect(tile.locator(".text-warning")).toHaveCount(1)
+  const identity = page.locator("[data-slot='host-identity']")
+  const disabled = identity.getByRole("link", { name: "1 disabled" })
+  await expect(disabled).toHaveClass(/text-warning/)
 
-  // With only the stock default off, nothing on the tile warns.
+  // With only the stock default off, nothing in the line warns about sites.
   await serveSites(page, [app, stock])
   await page.goto("/proxy")
-  await expect(tile).toContainText("on TLS")
-  await expect(tile).not.toContainText("disabled")
-  await expect(tile.locator(".text-warning")).toHaveCount(0)
+  await expect(identity.getByRole("link", { name: /^\d+ sites?, \d+ on TLS$/ })).toBeVisible()
+  await expect(identity.getByRole("link", { name: /disabled/ })).toHaveCount(0)
 
   // And on Sites, nothing needs attention: what serves, and what is not in use.
   await page.goto("/proxy/sites")
@@ -1600,7 +1604,7 @@ test("a change nginx has not loaded reads not live, and the strip tests and relo
   await expect(waiting).toContainText("app.example.com")
   await expect(waiting).toContainText("off.example.com")
   await expect(waiting).not.toContainText("calm.example.com")
-  await expect(page.getByText("every site serving")).toHaveCount(0)
+  await expect(identity(page)).toContainText("1 serving")
 
   await strip.getByRole("button", { name: "Test config" }).click()
   const valid = page
@@ -1892,7 +1896,9 @@ test("a save that did not reload is read at once, and one that did waits for ngi
   await expect(site.getByText("serving", { exact: true })).toBeVisible()
 })
 
-test("the Disabled tile does not call a site nginx still serves not serving", async ({ page }) => {
+test("the identity line does not call a disabled site nginx still serves not serving", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
   await serveSites(page, [app, off])
@@ -1902,8 +1908,9 @@ test("the Disabled tile does not call a site nginx still serves not serving", as
   await expect(
     card(page, "off.example.com").getByText("disabled, not live", { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText("1 still served until nginx reloads", { exact: true })).toBeVisible()
-  await expect(page.getByText("on disk, not serving")).toHaveCount(0)
+  await expect(
+    identity(page).getByText("1 still served until nginx reloads", { exact: true }),
+  ).toBeVisible()
   const overflow = await page
     .locator("[data-slot='page']")
     .evaluate((el) => el.scrollWidth - el.clientWidth)
@@ -1912,6 +1919,152 @@ test("the Disabled tile does not call a site nginx still serves not serving", as
   answer.current = pendingNone
   await page.reload()
   await expect(card(page, "off.example.com").getByText("disabled", { exact: true })).toBeVisible()
-  await expect(page.getByText("on disk, not serving", { exact: true })).toBeVisible()
+  await expect(identity(page)).toContainText("1 disabled")
   await expect(page.getByText(/still served until nginx reloads/)).toHaveCount(0)
+})
+
+test("the page opens on what the host serves: its applications, its hour and its certificates", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const grafana = {
+    ...app,
+    name: "grafana.example.com",
+    path: "/etc/nginx/sites-available/grafana.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/grafana.example.com",
+    serverNames: ["grafana.example.com"],
+    upstreams: ["http://127.0.0.1:3000"],
+    certPath: "/etc/letsencrypt/live/grafana.example.com/fullchain.pem",
+  }
+  const home = {
+    ...app,
+    name: "home.example.com",
+    path: "/etc/nginx/sites-available/home.example.com",
+    enabledPath: "/etc/nginx/sites-enabled/home.example.com",
+    serverNames: ["home.example.com"],
+    upstreams: ["http://127.0.0.1:8123"],
+    certPath: "/etc/letsencrypt/live/home.example.com/fullchain.pem",
+  }
+  await serveSites(page, [grafana, home, legacy])
+  const socket = (port: number, image: string, name: string) => ({
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port,
+    pid: port,
+    process: "docker-proxy",
+    container: { id: name, name, image, published: true },
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  })
+  await page.route("**/api/v1/ports", (route) =>
+    json(route, [
+      socket(3000, "grafana/grafana:11.2.0", "grafana"),
+      socket(8123, "homeassistant/home-assistant:stable", "home"),
+    ]),
+  )
+  const target = (site: typeof grafana, port: number, state: string) => ({
+    site: site.name,
+    kind: "http",
+    directive: "proxy_pass",
+    address: `127.0.0.1:${port}`,
+    file: site.path,
+    line: 12,
+    state,
+    ms: state === "up" ? 4 : undefined,
+  })
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: new Date().toISOString(),
+      targets: [target(grafana, 3000, "up"), target(home, 8123, "refused")],
+    }),
+  )
+  const hour = (site: string, requests: number, errorRate: number) => ({
+    site,
+    file: "",
+    status: "available",
+    requests,
+    errorRate,
+    bytes: 0,
+    complete: true,
+  })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [hour(grafana.name, 4200, 0), hour(home.name, 3100, 0.18), hour(legacy.name, 0, 0)],
+    }),
+  )
+  const certificate = (site: typeof grafana, daysLeft: number) => ({
+    name: site.name,
+    path: site.certPath,
+    domains: [site.name],
+    issuer: "R11",
+    notBefore: new Date().toISOString(),
+    notAfter: new Date(Date.now() + daysLeft * 86_400_000).toISOString(),
+    daysLeft,
+    expired: false,
+    expiring: daysLeft < 14,
+    selfSigned: false,
+    source: "certbot",
+    usedBy: [site.name],
+  })
+  await page.route("**/api/v1/certificates/", (route) =>
+    json(route, [certificate(grafana, 62), certificate(home, 9)]),
+  )
+  await page.goto("/proxy/sites")
+
+  // No tiles: the line counts the sites and ends on the verdict, red because
+  // an application refuses connections.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  const line = identity(page)
+  await expect(line).toContainText("nginx/1.26.3")
+  await expect(line).toContainText("3 sites")
+  await expect(line).toContainText("7.3K requests in the hour")
+  const verdict = line.getByRole("button", { name: /^2 sites need attention/ })
+  await expect(verdict).toContainText("1 application refusing · 1 on plain HTTP")
+  await expect(verdict.locator(".text-destructive")).toHaveCount(1)
+  // Its sites are drawn as the applications they front.
+  await expect(line.locator("img[src='/logos/grafana.svg']")).toHaveCount(1)
+
+  const band = page.locator("[data-slot='site-band']")
+  const traffic = band.getByRole("region", { name: "Traffic" })
+  await expect(traffic.getByRole("link", { name: "Open grafana.example.com" })).toContainText(
+    "4.2K",
+  )
+  await expect(traffic.getByRole("link", { name: "Open home.example.com" })).toContainText(
+    "18.0% 5xx",
+  )
+  await expect(traffic).toContainText("1 site served none")
+  // Soonest to end first, in amber inside its last fortnight.
+  const runway = band.getByRole("list", { name: "Certificate runway" }).getByRole("link")
+  await expect(runway.first()).toContainText("home.example.com")
+  await expect(runway.first().locator(".text-warning")).toHaveText("9 d left")
+  const apps = band.getByRole("region", { name: "Applications" })
+  await expect(apps.getByRole("link", { name: "Open home.example.com" })).toContainText("refused")
+  await expect(apps.locator("img[src='/logos/home-assistant.svg']")).toHaveCount(1)
+
+  // The card says what it fronts, as itself, beside the address.
+  const grafanaCard = card(page, "grafana.example.com")
+  await expect(grafanaCard.locator("img[src='/logos/grafana.svg']")).toHaveCount(2)
+  await expect(grafanaCard.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
+  await expect(grafanaCard).toContainText("http://127.0.0.1:3000")
+
+  // The application refusing joins the attention group, and the verdict
+  // narrows the list to exactly what it counts.
+  await expect(page.getByRole("list", { name: "Needs attention" })).toContainText(
+    "home.example.com",
+  )
+  await verdict.click()
+  await expect(verdict).toHaveAttribute("aria-pressed", "true")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(2)
+  await expect(page.getByRole("button", { name: /^Needs attention 2/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  // A press in the band narrows the same way.
+  await apps.getByRole("button", { name: "1 refuses connections" }).click()
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(card(page, "home.example.com")).toBeVisible()
 })

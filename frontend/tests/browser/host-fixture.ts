@@ -2,7 +2,7 @@ import type { Page, Route } from "@playwright/test"
 
 /**
  * One mocked host — its identity, a live snapshot, an hour of recorded
- * history with one spike in it, storage, processes and a health verdict —
+ * history with one spike in it, storage and processes —
  * shared by the pages that describe the machine: the Overview and Metrics.
  */
 
@@ -175,10 +175,20 @@ export const snapshot = {
   uptimeSeconds: 86_400 * 12,
   pressure: { supported: true, cpuSome: 0.8, memSome: 0, memFull: 0, ioSome: 2.4, ioFull: 0.3 },
   sockets: { tcpInUse: 312, tcpTimeWait: 1_840, tcpOrphan: 2, udpInUse: 14, used: 640 },
+  tcp: {
+    supported: true,
+    outSegsRate: 1200,
+    retransRate: 3,
+    attemptFailsRate: 0.1,
+    estabResetsRate: 0.2,
+    listenDropsRate: 0,
+    retransPercent: 0.25,
+    latency: { supported: true, sockets: 18, medianMs: 38, p90Ms: 120 },
+  },
   procs: { running: 3, blocked: 0, total: 184 },
   files: { open: 4_640, max: 9_223_372 },
   sensors: [
-    { name: "coretemp_Package id 0", tempC: 62, high: 95, critical: 100 },
+    { name: "k10temp_Tctl", tempC: 62, high: 95, critical: 100 },
     { name: "nvme_Composite", tempC: 41, high: 70, critical: 85 },
   ],
 }
@@ -199,14 +209,14 @@ export function history(from: number, to: number, base: number) {
       memPeak: 57,
       swap: 5,
       swapPeak: 5,
-      rx: 2_000_000,
+      rx: spike ? 12_000_000 : 2_000_000,
       rxPeak: spike ? 40_000_000 : 2_500_000,
       tx: 400_000,
       txPeak: 500_000,
-      diskRead: 1_000_000,
-      diskReadPeak: 1_200_000,
-      diskWrite: 3_000_000,
-      diskWritePeak: 3_500_000,
+      diskRead: spike ? 6_000_000 : 1_000_000,
+      diskReadPeak: spike ? 7_000_000 : 1_200_000,
+      diskWrite: spike ? 9_000_000 : 3_000_000,
+      diskWritePeak: spike ? 10_000_000 : 3_500_000,
       load1: spike ? 5.2 : 0.9,
       load1Peak: spike ? 5.2 : 1,
       diskPercent: 87,
@@ -232,6 +242,15 @@ export function history(from: number, to: number, base: number) {
       tcpConns: 310,
       tcpConnsPeak: 320,
       tcpTimeWait: 1_800,
+      retransPct: spike ? 4.1 : 0.3,
+      retransPctPeak: spike ? 7.5 : 0.6,
+      attemptFails: 0.1,
+      attemptFailsPeak: spike ? 2 : 0.2,
+      resets: 0.2,
+      listenDrops: 0,
+      listenDropsPeak: spike ? 1.5 : 0,
+      rtt: spike ? 160 : 38,
+      rttPeak: spike ? 420 : 120,
       load5: 0.7,
       load15: 0.6,
       memAvailable: 6.5 * 1024 ** 3,
@@ -320,24 +339,6 @@ export const processes = [
   ioWriteRate: 2048,
 }))
 
-export const health = {
-  status: "warning",
-  findings: [
-    {
-      id: "disk:/",
-      level: "warning",
-      title: "/ is filling up",
-      detail: "87% used — 10.4 GB free",
-      advice: "Scan the mount from the Filesystems panel to see what is taking the space.",
-      metric: "disk",
-      value: 87,
-      threshold: 85,
-    },
-  ],
-  checkedAt: iso(now),
-  recorded: true,
-}
-
 export async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -363,7 +364,6 @@ export async function mockHost(page: Page) {
     if (path === "/auth/session") return json(route, user)
     if (path === "/system/host") return json(route, host)
     if (path === "/system/metrics") return json(route, snapshot)
-    if (path === "/system/health") return json(route, health)
     if (path === "/system/metrics/history") {
       const w = windowOf(url)
       // The prior window is quieter, so the tiles have a delta to show.

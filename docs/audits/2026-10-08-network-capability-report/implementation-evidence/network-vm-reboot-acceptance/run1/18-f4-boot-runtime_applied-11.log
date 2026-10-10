@@ -1,0 +1,296 @@
+{
+  "at": "2026-10-10T01:04:34Z",
+  "bootId": "fcdb8675-24ce-43b4-b064-7f3deae67cc9",
+  "evidence": {
+    "backend": {
+      "active": "inactive",
+      "pid": "0",
+      "startedThisBoot": false,
+      "sub": "dead"
+    },
+    "driftAfterRecoveredBoot": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          1,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "fcdb8675-24ce-43b4-b064-7f3deae67cc9",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:04:30 UTC",
+        "invocationId": "46283d33da014e73bb2c35dfee61fa08",
+        "reason": "The measured activation or one of its commands failed, including commands whose errors the unit ignores.",
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:04:30 UTC",
+        "status": "failed"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "shaping:jdvmdum1",
+          "reason": "shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:shaping:jdvmdum1",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:04:10.567913266Z",
+      "boot": "not_verified",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "8404de4c151947ff82fa4b673c9badb850dea02318916d288d6f82a15fafceba",
+      "id": "dba64f134958bcc5d6f5d7e0d38b9750",
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-10T01:04:29.896761514Z",
+      "watchdog": "recovered"
+    },
+    "networkUnit": {
+      "ActiveState": "active",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:04:30 UTC",
+      "ExecMainStartTimestampMonotonic": "14055127",
+      "ExecMainStatus": "0",
+      "InvocationID": "46283d33da014e73bb2c35dfee61fa08",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "1"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      }
+    ],
+    "networkUnitFailedCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "1"
+      }
+    ],
+    "networkUnitJournal": [
+      "2026-10-10T01:04:29.922425+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made...",
+      "2026-10-10T01:04:30.041621+00:00 jd-vm-reboot iptables[1032]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.053102+00:00 jd-vm-reboot iptables[1036]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.061424+00:00 jd-vm-reboot iptables[1037]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.081174+00:00 jd-vm-reboot ip6tables[1039]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.101628+00:00 jd-vm-reboot ip6tables[1041]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.115451+00:00 jd-vm-reboot ip6tables[1043]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:04:30.148453+00:00 jd-vm-reboot tc[1045]: Error: Cannot delete qdisc with handle of zero.",
+      "2026-10-10T01:04:30.157728+00:00 jd-vm-reboot tc[1047]: Error: Parent Qdisc doesn't exists.",
+      "2026-10-10T01:04:30.157728+00:00 jd-vm-reboot tc[1047]: We have an error talking to the kernel",
+      "2026-10-10T01:04:30.173009+00:00 jd-vm-reboot tc[1049]: Error: Cannot delete qdisc with handle of zero.",
+      "2026-10-10T01:04:30.188815+00:00 jd-vm-reboot ip[1052]: Cannot create namespace file \"/run/netns/jdvmns\": File exists",
+      "2026-10-10T01:04:30.188815+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:3",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: RTNETLINK answers: File exists",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:4",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: RTNETLINK answers: File exists",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:5",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: RTNETLINK answers: File exists",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:6",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: RTNETLINK answers: File exists",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:7",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: RTNETLINK answers: File exists",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:8",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:11",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:12",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Error: ipv6: address already assigned.",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:13",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:14",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.189211+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:15",
+      "2026-10-10T01:04:30.189842+00:00 jd-vm-reboot ip[1052]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.189842+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:16",
+      "2026-10-10T01:04:30.191284+00:00 jd-vm-reboot ip[1055]: Error: ipv4: Address already assigned.",
+      "2026-10-10T01:04:30.191495+00:00 jd-vm-reboot ip[1052]: Command failed /etc/just-dashboard/network/links.batch:17",
+      "2026-10-10T01:04:30.220533+00:00 jd-vm-reboot tc[1061]: Warning: sch_htb: quantum of class 10010 is big. Consider r2q change.",
+      "2026-10-10T01:04:30.646842+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made."
+    ],
+    "priorGenerationInKernelMissing": [],
+    "recoveryUnit": {
+      "ActiveState": "inactive",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:04:29 UTC",
+      "ExecMainStartTimestampMonotonic": "12337282",
+      "ExecMainStatus": "0",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "recoveryUnitArgv": [
+      "/etc/just-dashboard/network/network-recovery --network-recover-boot /etc/just-dashboard/network pending"
+    ],
+    "recoveryUnitJournal": [
+      "2026-10-10T01:04:28.908358+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes...",
+      "2026-10-10T01:04:29.908435+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Deactivated successfully.",
+      "2026-10-10T01:04:29.908684+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes."
+    ]
+  },
+  "failures": [
+    "drift after the recovered boot: [{'id': 'shaping:jdvmdum1', 'status': 'drift', 'reason': 'shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s'}]"
+  ],
+  "phase": "f4-boot runtime_applied-11",
+  "result": "fail",
+  "seconds": 2.4
+}

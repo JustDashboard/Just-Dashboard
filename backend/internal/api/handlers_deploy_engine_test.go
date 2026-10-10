@@ -886,3 +886,133 @@ func TestDeploymentInsightsRouteReadsProjectHistory(t *testing.T) {
 		t.Fatalf("unknown project insights = %d", missing.Code)
 	}
 }
+
+func TestDeploymentRunStreamReplaysEveryPageBeforeTerminalSnapshot(t *testing.T) {
+	for _, scenario := range []struct {
+		name                  string
+		logs                  int64
+		finishBeforeSubscribe bool
+		compact               bool
+		disconnect            bool
+	}{
+		{name: "terminal-multiple-pages", logs: 10000, finishBeforeSubscribe: true},
+		{name: "finishes-during-replay", logs: 10000},
+		{name: "terminal-exact-page", logs: 4995, finishBeforeSubscribe: true},
+		{name: "pending-exact-page", logs: 4997},
+		{name: "compacted-pages", logs: 10000, finishBeforeSubscribe: true, compact: true},
+		{name: "disconnect-during-replay", logs: 10000, disconnect: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			s := testServer(t)
+			cookie := signIn(t, s)
+			project := createLegacyDeploymentFixture(t, s, "paged-stream")
+			environmentID, revision, err := s.modules.deployRuns.ProductionEnvironment(t.Context(), project.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, _, err := s.modules.deployRuns.Enqueue(t.Context(), deploy.RunRequest{
+				ProjectID: project.ID, EnvironmentID: environmentID,
+				Operation: deploy.OperationDeploy, Trigger: deploy.TriggerManual, Actor: "tester",
+				RequestDigest: "paged-stream", PlanRevision: revision,
+				SlotClass: deploy.SlotHeavy, Steps: []deploy.StepKey{deploy.StepLegacyPipeline},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Store.DB.Exec(`WITH RECURSIVE log_sequence(n) AS
+				(SELECT 4 UNION ALL SELECT n+1 FROM log_sequence WHERE n < ?)
+				INSERT INTO deploy_log_chunks(run_id, step_id, seq, event_type, stream, ts, text, data_json, truncated)
+				SELECT ?, 0, n, 'step.log', 'stdout', ?, 'build output', '{"stream":"stdout","text":"build output"}', 0
+				FROM log_sequence`, scenario.logs+3, run.ID, time.Now().Unix()); err != nil {
+				t.Fatal(err)
+			}
+			finish := func() {
+				t.Helper()
+				if _, err := s.modules.deployRuns.RequestCancellation(t.Context(), run.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario.finishBeforeSubscribe {
+				finish()
+			}
+			if scenario.compact {
+				if err := s.modules.deployRuns.CompactRunLogs(t.Context(), run.ID, 5000); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan struct{})
+			router := s.Routes()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(done)
+				router.ServeHTTP(w, r)
+			}))
+			defer srv.Close()
+			url := "ws" + strings.TrimPrefix(srv.URL, "http") + fmt.Sprintf(
+				"/api/v1/deploy/%d/runs/%d/stream?after=0", project.ID, run.ID)
+			conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Cookie": {cookie}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			kind, _ := readFrame(t, conn)
+			if kind != "snapshot" {
+				t.Fatalf("first frame = %q", kind)
+			}
+			if scenario.disconnect {
+				conn.Close()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("disconnected replay did not release its handler")
+				}
+				return
+			}
+			if !scenario.finishBeforeSubscribe {
+				finish()
+			}
+			var last int64
+			terminalEvent := false
+			resynced := false
+			for {
+				kind, payload := readFrame(t, conn)
+				if kind == "snapshot" {
+					var snapshot deploy.RunSnapshot
+					if err := json.Unmarshal(payload, &snapshot); err != nil {
+						t.Fatal(err)
+					}
+					if snapshot.Run.State != deploy.RunCancelled || !terminalEvent || last != scenario.logs+5 || resynced != scenario.compact {
+						t.Fatalf("final snapshot before complete replay: state=%s last=%d terminalEvent=%t", snapshot.Run.State, last, terminalEvent)
+					}
+					break
+				}
+				if kind != "events" {
+					t.Fatalf("unexpected frame %q: %s", kind, payload)
+				}
+				var events []deploy.RunEvent
+				if err := json.Unmarshal(payload, &events); err != nil {
+					t.Fatal(err)
+				}
+				if len(events) > deploy.RunEventReplayLimit+1 {
+					t.Fatalf("unbounded replay frame: %d events", len(events))
+				}
+				for _, event := range events {
+					if event.Type == deploy.EventResync {
+						if !scenario.compact || resynced || last != 0 {
+							t.Fatalf("unexpected resync: %#v", event)
+						}
+						last, resynced = event.Seq, true
+						continue
+					}
+					if event.Seq != last+1 {
+						t.Fatalf("gap or duplicate after %d: %d", last, event.Seq)
+					}
+					last = event.Seq
+					if event.Type == deploy.EventRunState && strings.Contains(string(event.Data), `"cancelled"`) {
+						terminalEvent = true
+					}
+				}
+			}
+		})
+	}
+}

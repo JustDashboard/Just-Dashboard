@@ -191,7 +191,7 @@ export function diagnosisLinks(scan: TLSScan): { label: string; href: string }[]
   if (failure.stage === "connect" && failure.reason === "unreachable") return []
   const links = [{ label: "Listening ports", href: `/proxy/ports?q=:${scan.port}` }]
   if (failure.stage === "connect" && failure.reason === "timeout")
-    links.push({ label: "Firewall", href: "/security/firewall" })
+    links.push({ label: "Firewall", href: "/network/firewall" })
   // A STARTTLS service is not one of nginx's sites.
   if (failure.stage === "handshake" && !scan.starttls)
     links.push({ label: "Sites", href: "/proxy/sites" })

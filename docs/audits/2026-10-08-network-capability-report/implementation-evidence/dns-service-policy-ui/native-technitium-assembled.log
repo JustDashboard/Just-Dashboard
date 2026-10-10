@@ -1,0 +1,15 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:253: Native exact-selection current read passed: record_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: record_add verified
+    provision_live_test.go:253: Native exact-selection current read passed: record_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: record_add verified
+    provision_live_test.go:317: Native exact-selection current read passed: record_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: record_remove verified
+    provision_live_test.go:317: Native exact-selection current read passed: record_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: record_remove verified
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/technitium-d0d625065f3e0c20eca10e86af5301e3.log (609 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/technitium-a53497908cbcf98216ae646d656312db.log (261 bytes)
+    provision_live_test.go:360: engine=technitium image=technitium/dns-server@sha256:1045db38fd2f2e4d9578f9168b7eb4862575469ed0ffc79e03f36bdc772a93b5 nativeVersion=15.6 UDP/TCP=owned-fixture.invalid owner=68ff1139da45ba1bd95e43713b1fb395 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (11.69s)
+PASS
+wrapper_elapsed=12.71 exit=0

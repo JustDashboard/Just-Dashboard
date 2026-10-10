@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"github.com/pquerna/otp/totp"
 )
 
 // newTestService is the service under one of the two two-factor policies.
 func newTestService(t *testing.T, require2FA bool) (*Service, *User) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

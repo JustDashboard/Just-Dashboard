@@ -1,0 +1,9 @@
+{
+  "binaryProcesses": [],
+  "nativeTempDirectories": [],
+  "hostNetworkd": "883 systemd-network",
+  "hostNetworkManagerDirectories": {
+    "/run/NetworkManager": false,
+    "/var/lib/NetworkManager": false
+  }
+}

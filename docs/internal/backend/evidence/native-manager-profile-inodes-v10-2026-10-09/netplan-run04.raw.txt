@@ -1,0 +1,20 @@
+=== RUN   TestNativeManagerAutomaticOwnerLive
+    native_manager_auto_live_test.go:35: Actual standalone helper SHA256=f1cf8427ca23c86353fe19914f13476988235c5cdaba036ba69e3b514976ec9a capability=jd-native-manager-v10
+=== RUN   TestNativeManagerAutomaticOwnerLive/netplan
+    native_manager_auto_live_test.go:300: automatic owner acceptance:
+        === RUN   TestNativeManagerAutomaticOwnerLive
+            native_manager_auto_live_test.go:91: Unrepresentable authored RA route suppression refused before selected-file/staging/journal effects; actual automatic acquisition remains unchanged
+            native_manager_auto_live_test.go:93: netplan saved/loaded/applied automatic intent, actual DHCPv4 lease, SLAAC prefix, DHCP/RA default routes and active-owner DNS/domain acquisition verified
+            native_manager_auto_live_test.go:161: netplan unchanged-profile actual bound helper SHA256=f1cf8427ca23c86353fe19914f13476988235c5cdaba036ba69e3b514976ec9a
+            native_manager_auto_live_test.go:161: netplan canonical unchanged-intent path=/etc/netplan/20-auto.yaml SHA256=fae92d7d868d4249817fc47641e656a1de4c21a6657ea17141b12da834501ac7 beforeInode=21 candidateInode=23 retainedAuthoredInode=21
+            native_manager_auto_live_test.go:161: netplan canonical unchanged-intent path=/run/systemd/network/10-netplan-d0.network SHA256=6be9767ca7a8f24b693a9925a51842ab7df6093874e4787ec21560cdc36f2e6c beforeInode=247 candidateInode=295 retainedAuthoredInode=247
+            native_manager_auto_live_test.go:161: netplan canonical unchanged-intent path=/etc/netplan/20-auto.yaml SHA256=fae92d7d868d4249817fc47641e656a1de4c21a6657ea17141b12da834501ac7 beforeInode=21 candidateInode=25 retainedAuthoredInode=21
+            native_manager_auto_live_test.go:161: netplan canonical unchanged-intent path=/run/systemd/network/10-netplan-d0.network SHA256=6be9767ca7a8f24b693a9925a51842ab7df6093874e4787ec21560cdc36f2e6c beforeInode=247 candidateInode=370 retainedAuthoredInode=247
+            native_manager_auto_live_test.go:161: netplan shipped helper v10 equal-byte candidate rollback restored exact authored inodes; unchanged-intent confirmation and terminal fresh-helper retry retained exact candidate inodes and full configured/runtime/boot agreement
+            native_manager_auto_live_test.go:179: netplan actual auto/manual activation, automatic DNS/routes suppression, independent rollback, applying-backend death, durable confirmation and cleanup retry verified; timer/reboot unmeasured
+            native_manager_auto_live_test.go:202: Owned RA raw socket closed and sender drained; DHCP/manager/bus children reaped; lease/pid files withdrawn; private PID namespace has no remaining child
+        --- PASS: TestNativeManagerAutomaticOwnerLive (28.95s)
+        PASS
+--- PASS: TestNativeManagerAutomaticOwnerLive (35.02s)
+    --- PASS: TestNativeManagerAutomaticOwnerLive/netplan (30.06s)
+PASS

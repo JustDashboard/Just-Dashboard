@@ -1,0 +1,9 @@
+{
+  "owned_processes_remaining": [],
+  "test_temp_dirs_remaining": [],
+  "host_networkd_pid_883": "systemd-network",
+  "host_nm_state": {
+    "/run/NetworkManager": false,
+    "/var/lib/NetworkManager": false
+  }
+}

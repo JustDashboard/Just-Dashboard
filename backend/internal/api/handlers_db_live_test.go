@@ -166,13 +166,19 @@ func TestLiveAPIMongo(t *testing.T) {
 	})
 
 	t.Run("browse_and_indexes", func(t *testing.T) {
+		// The database is the one the connection string names, which is where
+		// the inserts above put their documents.
+		database := "jdtest"
+		if info, err := dbx.ParseDSN(dbx.DriverMongo, dsn); err == nil && info.Database != "" {
+			database = info.Database
+		}
 		rec := do(t, r, http.MethodGet,
-			pathf("/databases/%d/browse", id)+"?schema=jdtest&table="+coll+"&limit=10", "")
+			pathf("/databases/%d/browse", id)+"?schema="+database+"&table="+coll+"&limit=10", "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("browse: %d %s", rec.Code, rec.Body.String())
 		}
 		rec = do(t, r, http.MethodGet,
-			pathf("/databases/%d/collections/indexes", id)+"?schema=jdtest&table="+coll, "")
+			pathf("/databases/%d/collections/indexes", id)+"?schema="+database+"&table="+coll, "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("indexes: %d %s", rec.Code, rec.Body.String())
 		}
@@ -208,7 +214,13 @@ func TestLiveAPIMongo(t *testing.T) {
 // TestLiveAPIRedis drives the key surface through HTTP, including the member
 // operations added for collection editing.
 func TestLiveAPIRedis(t *testing.T) {
-	dsn := envOr("JD_TEST_REDIS_DSN", "redis://127.0.0.1:6379/0")
+	// No default, unlike the SQL engines: this writes and deletes keys, and
+	// the port every Redis listens on is as likely to be somebody's real data
+	// as a fixture.
+	dsn := os.Getenv("JD_TEST_REDIS_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_REDIS_DSN to run this")
+	}
 	_, r, id := liveAPIRouter(t, dbx.DriverRedis, dsn)
 	const key = "jdapi:hash"
 

@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func testKey(t *testing.T) (*rsa.PrivateKey, string) {
@@ -405,7 +405,7 @@ func (f *credentialSyncFake) RemoveGitHubAppCredentials(context.Context) error {
 
 func newTestService(t *testing.T, server *httptest.Server) (*Service, *credentialSyncFake) {
 	t.Helper()
-	st, err := basestore.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

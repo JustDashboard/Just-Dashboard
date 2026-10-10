@@ -1,0 +1,22 @@
+=== RUN   TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim
+=== RUN   TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/adguard/override_add
+=== RUN   TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/pihole/override_add
+=== RUN   TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/technitium/record_add
+=== RUN   TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/pihole/client_groups
+--- PASS: TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim (10.21s)
+    --- PASS: TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/adguard/override_add (2.50s)
+    --- PASS: TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/pihole/override_add (2.57s)
+    --- PASS: TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/technitium/record_add (2.51s)
+    --- PASS: TestDNSServiceCurrentReviewReadsExactFreshSelectionWithoutClaim/pihole/client_groups (2.62s)
+=== RUN   TestDNSServiceCurrentReviewRefusesGenerationChangesAndMalformedSelection
+--- PASS: TestDNSServiceCurrentReviewRefusesGenerationChangesAndMalformedSelection (2.77s)
+=== RUN   TestDNSServiceCurrentReviewFailureIsBoundedAndNeverReplays
+--- PASS: TestDNSServiceCurrentReviewFailureIsBoundedAndNeverReplays (2.54s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	16.551s
+=== RUN   TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit
+--- PASS: TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit (2.89s)
+=== RUN   TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken
+--- PASS: TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken (0.36s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	4.479s

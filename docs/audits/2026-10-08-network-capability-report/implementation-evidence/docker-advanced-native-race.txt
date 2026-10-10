@@ -1,0 +1,5 @@
+=== RUN   TestLiveAdvancedNetworkDualStackReadbackAndAttachment
+    network_spec_live_test.go:209: native bridge accepted exact IPv4/IPv6 pools/gateways/allocation ranges, internal/attachable/IPv6, MTU option and label; connected owned full-ID member with both-family addresses/alias; refused overlap; disconnected; cleanup verifies exact labels/IDs
+--- PASS: TestLiveAdvancedNetworkDualStackReadbackAndAttachment (4.57s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	5.640s

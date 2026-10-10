@@ -1,0 +1,225 @@
+{
+  "at": "2026-10-10T01:12:45Z",
+  "bootId": "0fd7c04f-3a86-482b-94ed-2c9aa184541d",
+  "evidence": {
+    "backend": {
+      "active": "inactive",
+      "pid": "0",
+      "startedThisBoot": false,
+      "sub": "dead"
+    },
+    "file": {
+      "inode": 16295,
+      "mode": "0o600",
+      "path": "/etc/netplan/60-jdvm-networkd.yaml",
+      "sha256": "0f029772181f44f6f29c318ade964d1ea5f6c559ba4d4759a886ab82631e6570"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:12:18.34648075Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "complete",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:13:48.252806Z",
+      "files": [],
+      "generation": "50876c5e49fa336176c46403e79d9f9c3b361323d348a1d439507d585fb784fd",
+      "id": "815627c11e3299a9a5b3291e6ef67896",
+      "ownerUserId": 1,
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-10T01:12:40.590161302Z",
+      "watchdog": "recovered"
+    },
+    "networkUnit": {
+      "ActiveState": "active",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:12:41 UTC",
+      "ExecMainStartTimestampMonotonic": "16397159",
+      "ExecMainStatus": "0",
+      "InvocationID": "7be017dc68c244c399ea21714716c063",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      }
+    ],
+    "networkUnitFailedCommands": [],
+    "networkUnitJournal": [
+      "2026-10-10T01:12:40.612419+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made...",
+      "2026-10-10T01:12:40.733485+00:00 jd-vm-reboot iptables[935]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.751718+00:00 jd-vm-reboot iptables[940]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.767293+00:00 jd-vm-reboot iptables[941]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.776629+00:00 jd-vm-reboot ip6tables[943]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.785805+00:00 jd-vm-reboot ip6tables[945]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.796678+00:00 jd-vm-reboot ip6tables[947]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:12:40.826017+00:00 jd-vm-reboot tc[949]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:12:40.865306+00:00 jd-vm-reboot tc[954]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:12:40.890455+00:00 jd-vm-reboot tc[960]: Cannot find device \"jdvmbr0\"",
+      "2026-10-10T01:12:41.007294+00:00 jd-vm-reboot tc[987]: Warning: sch_htb: quantum of class 10010 is big. Consider r2q change.",
+      "2026-10-10T01:12:41.494865+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made."
+    ],
+    "profile": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s4",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.4.15/24",
+            "10.0.4.16/24"
+          ],
+          "dns": [
+            "10.0.4.3"
+          ],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.4.0/24",
+              "gateway": "10.0.4.2",
+              "metric": 100,
+              "table": 254
+            },
+            {
+              "destination": "10.91.4.0/24",
+              "gateway": "10.0.4.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:4::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "netplan",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "1.1.2-8ubuntu1~24.04.3"
+    },
+    "recoveryUnit": {
+      "ActiveState": "inactive",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:12:40 UTC",
+      "ExecMainStartTimestampMonotonic": "14181198",
+      "ExecMainStatus": "0",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "recoveryUnitJournal": [
+      "2026-10-10T01:12:39.275173+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes...",
+      "2026-10-10T01:12:40.598170+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Deactivated successfully.",
+      "2026-10-10T01:12:40.598529+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes.",
+      "2026-10-10T01:12:40.603892+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Consumed 1.155s CPU time."
+    ]
+  },
+  "failures": [],
+  "phase": "p11-boot netplan-networkd-18",
+  "result": "pass",
+  "seconds": 2.4
+}

@@ -506,3 +506,77 @@ test("/logs reads a site's record, and its access log's Requests view, with ngin
   await expect(page.getByRole("link", { name: "Export" })).toHaveCount(1)
   await expect(page.getByRole("button", { name: "Export" })).toHaveCount(0)
 })
+
+test("workspace: Back returns from a unit run's question to its Runs view", async ({ page }) => {
+  await mockViews(page)
+  let reads = 0
+  await page.route("**/api/v1/logs/search**", (route) => {
+    reads++
+    return json(route, result(POSTGRES_RUNS, { lens: "systemd" }))
+  })
+  await page.goto("/logs?source=journal:postgresql.service&mode=runs")
+  const runs = page.getByRole("list", { name: "Runs" })
+  await expect(runs.locator(":scope > li")).toHaveCount(3)
+  const beforeRefresh = reads
+  await page.keyboard.press("F5")
+  await expect.poll(() => reads).toBeGreaterThan(beforeRefresh)
+  await expect(runs.locator(":scope > li")).toHaveCount(3)
+  await runs.locator(":scope > li").first().getByRole("button").first().click()
+  await expect(strip(page).getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  const first = page.getByLabel("Log lines").locator("[data-workspace-item]").first()
+  await expect(first).toBeVisible()
+  const identity = await first.getAttribute("data-workspace-item")
+  await first.click()
+  await expect(page.locator("[data-line-detail]")).toHaveCount(1)
+  await page.goBack()
+  await expect(strip(page).getByRole("button", { name: "Runs", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(runs.locator(":scope > li")).toHaveCount(3)
+  await page.goForward()
+  await expect(strip(page).getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.locator(`[data-workspace-item="${identity}"]`)).toBeFocused()
+  await expect(page.locator("[data-line-detail]")).toHaveCount(1)
+})
+
+test("workspace: match navigation wraps and Escape closes the inspected record", async ({
+  page,
+}) => {
+  await mockViews(page)
+  await page.route("**/api/v1/logs/search**", (route) =>
+    json(
+      route,
+      result(
+        [0, 1, 2].map((index) => ({
+          ...POSTGRES_RUNS[0],
+          text: `needle in record ${index}`,
+          timestamp: new Date(now - index * 1000).toISOString(),
+          attrs: {},
+        })),
+      ),
+    ),
+  )
+  await page.goto("/logs?source=journal:postgresql.service&mode=search&q=needle&lens=none")
+  const rows = page.getByLabel("Log lines").locator("[data-workspace-item]")
+  await expect(rows).toHaveCount(3)
+  await page.getByRole("button", { name: "Previous match", exact: true }).click()
+  await expect(rows.last()).toBeFocused()
+  await page.keyboard.press("F3")
+  await expect(rows.first()).toBeFocused()
+  await page.keyboard.press("F3")
+  await expect(rows.nth(1)).toBeFocused()
+  await page.keyboard.press("Shift+F3")
+  await expect(rows.first()).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.locator("[data-line-detail]")).toHaveCount(1)
+  await page.keyboard.press("Escape")
+  await expect(page.locator("[data-line-detail]")).toHaveCount(0)
+  await expect(rows.first()).toBeFocused()
+})

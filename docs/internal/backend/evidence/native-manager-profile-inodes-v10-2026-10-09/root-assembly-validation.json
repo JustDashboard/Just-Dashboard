@@ -1,0 +1,44 @@
+{
+  "testedSource": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7",
+  "assemblyBeforeEvidence": "0fcc57203e2e3698d236d55517a96a28e65f421c",
+  "base": "c62a9fb59ff3bc407365afc1caff8e7e615e03bb",
+  "backendUnchangedAfterTestedSource": true,
+  "required": {
+    "command": "scripts/test-changed.sh c62a9fb59ff3bc407365afc1caff8e7e615e03bb",
+    "exit": 0,
+    "netxSeconds": 20.554,
+    "wrapperSeconds": 73.12
+  },
+  "race": {
+    "command": "go test -race ./internal/netx -run '^TestNative' -count=1 -timeout=180s",
+    "exit": 0,
+    "netxSeconds": 29.315,
+    "wrapperSeconds": 57.54,
+    "liveOptIns": "unset; opt-in native skips are not actual acceptance"
+  },
+  "environment": {
+    "TMPDIR": "/home/ubuntu/jd-r10-t",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2"
+  },
+  "logs": {
+    "required": {
+      "file": "root-assembly-required.log",
+      "workspaceOriginal": "/home/ubuntu/jd-network-validation-tmp/native-profile-v10-assembly-required.log",
+      "sha256": "dff77b42ba9d53eba95762c1cec717444e4644157137fa46e3d357249ef4f132"
+    },
+    "race": {
+      "file": "root-assembly-race.log",
+      "workspaceOriginal": "/home/ubuntu/jd-network-validation-tmp/native-profile-v10-assembly-race.log",
+      "sha256": "13424b3d64fb67879ee219b793fa23bc7a1880f96b2ad4ad72c42ff95ddc9a23"
+    }
+  },
+  "independentCodeReview": "DNS agent reviewed all3 equal-byte seams, captured restoration, foreign/cold guards, read-only unrecorded checkpoint prior and legacy undo1/2/3: clear",
+  "nativeProof": "Separate exact c3 source/race/helper all-four native manager owner proof; no root live replay",
+  "documentationReview": {
+    "README.md": "Existing operator contract remains correct; no additional update needed for this recovery/idempotence correction.",
+    "AGENTS.md": "Contributor workflow unchanged; no additional update needed.",
+    "CONTRIBUTING.md": "Added canonical unchanged-intent exact-inode fresh recovery and confirmation/retry acceptance.",
+    "docs/internal": "Owning native guide and evidence updated; full diff/link/187/protected review follows final evidence handoff."
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "source": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7",
+  "exit_code": 0,
+  "wall_seconds": 35.557,
+  "raw_sha256": "f2c97479a2f146fc49a21ac9e70a9bef571c6e150ce6237955f633cb51138c55",
+  "actual_helper_sha256": [
+    "8f5c829b1a63022236fde72b34f8e642c757127322770b37c70c42ca63807643"
+  ],
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "networkd883_start": "452",
+    "paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true
+}

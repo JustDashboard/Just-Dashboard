@@ -1,0 +1,25 @@
+[
+	{
+		"id": 1,
+		"node": {
+			"id": 1,
+			"machine_key": "mkey:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			"name": "laptop"
+		},
+		"prefix": "192.168.10.0/24",
+		"advertised": true,
+		"enabled": true,
+		"is_primary": true
+	},
+	{
+		"id": 2,
+		"node": {
+			"id": 1,
+			"name": "laptop"
+		},
+		"prefix": "0.0.0.0/0",
+		"advertised": true,
+		"enabled": false,
+		"is_primary": false
+	}
+]

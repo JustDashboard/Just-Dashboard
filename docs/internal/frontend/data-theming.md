@@ -1,5 +1,163 @@
 # Frontend data flow and theming
 
+Network pages retain useful readings when a poll fails and mark them with
+`components/network/read-warning.tsx`; a failed initial read stays an error or loading state.
+The workload traffic, bandwidth link inventory, eBPF and Firewall warnings include the last successful
+read time and a Refresh action. Each read owns its freshness independently: a working live sampler does
+not make a failed link inventory current. Docker attachment candidates retain failed-refresh context,
+disable attachment while unreadable, and offer retry instead of claiming the candidate list is empty.
+The overview's latest network-change record reports runtime, persistence, boot restoration and
+independent host recovery separately. A saved change means the host apply/save finished; the UI
+explicitly states that this status does not confirm browser reconnect or application reachability.
+Unavailable recovery, unverified boot restoration and recovery errors remain visible. Runtime-only
+changes say they are applied and explicitly state that they are not saved for boot.
+Device creation offers VXLAN unicast or multicast destinations; multicast requires a sending card
+and matching local/destination address families. Its notice leaves multicast-underlay readiness and
+peer reachability unverified. GRE and GRETAP, in both families, expose decimal uint32 tunnel keys
+and outer TTL/hop limits, with blank or zero retaining the kernel defaults. A key is an identifier;
+GRE remains unencrypted, and creating a link does not test endpoint reachability.
+The live throughput ring (`use-live-traffic.ts`) carries its own last-success time and retry, so
+the Overview, Interfaces and the live Traffic window show a dated "live throughput" warning while
+the retained ring stays drawn; the Overview's Throughput head also counts the newest reading's age
+on the browser clock and turns stale past three sampler intervals. A later namespaces poll failure
+keeps the list with its own dated warning; a single namespace whose devices could not be read says
+so in place, and the namespace sheet, device detail, bridge and readiness reads each keep their last
+answer with a dated warning. Parts of those reads that did not arrive (`Reading` state unavailable,
+not_applicable or failed) are worded as such, never as empty lists.
+Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
+the administrator capability, with destructive controls also following the destructive capability;
+backend route checks remain authoritative. VPN peer reads are disabled for a reader without the
+administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
+after a successful write. Their bridge selector reaches the existing guarded membership route, and
+the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+Administrator sheets for unmanaged devices read the existing
+[native persistent profile](../backend/network-native-managers.md). A response
+must name the requested device before it can create or refresh a draft. The editor keeps configured,
+runtime and boot evidence separate, and exposes only the supported IPv4/IPv6 address, DNS/domain
+and route intent. New routes inherit the observed VRF table, with table 254 for ordinary profiles;
+bond membership and mode remain with the existing owner. Failed reads and rejected writes retain
+the typed fields. A changed generation blocks apply until the operator reviews the latest owner
+and explicitly rebases the generation; rebasing preserves every draft field. An owner/profile change
+cannot be rebased into a different native profile.
+The leaf contract in `lib/network-native-profile.ts` validates every rendered metadata/evidence field,
+family method and preference, bounded string collection and route entry before a poll replaces its
+last successful data. Malformed items become a failed retained read and block apply. An already-open
+confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
+its old callback cannot send an obsolete client review. Backend identity fences remain authoritative.
+Native profile writes always request temporary apply and reconnection confirmation, even when the
+ordinary managed-network preference is off. A confirmed or recovered network decision with pending
+or failed native cleanup remains a warning, including outside Network. Further journaled changes
+remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
+until cleanup succeeds. Read accounts do not request administrator-only native profiles.
+The route form exposes an optional preferred source and shows returned sources in the existing
+table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
+IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family. Its
+highlighted policy rule is explicitly an inference. The target lookup asks the kernel through the
+read-only `/network/routing/lookup` endpoint with optional source and packet mark, without sending
+traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
+retry reads current preferences so an accepted offer with a lost response is not duplicated.
+Resolver fallback servers and cache modes are editable through the existing confirmed apply;
+managed values are preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
+custom ports, interface scopes and TLS names.
+
+Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
+submitting. VXLAN creation likewise rejects invalid UDP ports instead of choosing the default.
+WireGuard setup permits an intentionally empty automatic port and rejects any nonempty invalid
+port draft, including whitespace, before submitting.
+Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
+surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
+packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
+subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. It is available with read access;
+privileged server diagnostics are not mounted for readers and retain their backend admin gate.
+Saved runs retain bounded named artifacts with explicit queued/running/completed/failed/cancelled/
+interrupted lifecycle, dated scope, typed outcomes, compatible comparison and administrator-only
+export. They use polled status without a socket-only live halo and can watch the existing job stream.
+The connection investigator retains its previous report and tuple after a failed retry, labeling
+each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
+failed refresh and expire a selected repair review when compared identities or evidence change.
+Selected executable file/admission repairs require exact review tokens and pending reconnection;
+wider native objects remain advice.
+Packet captures retain dated native observations after poll failures. Their immutable scope uses
+one interface/family and literal filter fields; rejected launches retain the entire bounded draft.
+Original PCAP and redacted support have separate downloads. A cancel remains pending until native
+cleanup, and interrupted captures never replay. Admin-only rendering issues no private capture
+requests for read accounts. Incident references compare timestamps without assuming the same flow.
+DNS lookup defaults to the configured host resolver chain. Supported resolved delegation uses the
+native split-policy and explicit alias checks; static/foreign paths report private-policy and recursive
+alias behavior as unknown. The pre-query hint states this support boundary. Direct comparison requires selected,
+named destinations and acknowledgment that private names leave their usual policy scope; the old
+`includePublic` flag does not authorize fan-out. Resolver changes may carry a private
+`verificationName` for a network that cannot resolve public names. This verification input is a check
+for that apply, not saved resolver state.
+Native policy investigations retain answering-link, encryption, TLS trust and DNSSEC provenance
+separately from configured switches and classic direct comparisons. Effective resolved lookup uses
+the same safe native adapter; its optional typed `hops` retain each question, alias edge and complete
+policy fingerprint. Failed launches/history reads retain
+dated evidence and the query draft. Reload never reruns a private question or grants direct-query
+disclosure consent.
+Native DNS service sheets are private administrator surfaces and issue no service reads for reader
+accounts. `lib/network-dns-services.ts` validates connection, inventory and retained-review envelopes;
+an incomplete response is a read error. Credentials, tokens, CA material and bootstrap passwords stay
+request-only and are cleared after submission; only bounded review IDs are stored in account-scoped
+session storage to hold an uncertain apply across navigation/reload. Retained history never starts or
+replays a native action. Open confirmations check current capabilities, read freshness, generation,
+policy fingerprint and immutable reviewed intent again before sending. Owned removal checks the exact
+current owner/image/resource identities separately. HTTP 200 with a nonverified state remains a
+retained outcome requiring review. A late planned read cannot overwrite a terminal native response.
+Record/client forms retain typed drafts through field/native refusals, with linked focused error
+summaries and associated inline errors. Authoritative records require a fresh explicit zone reading;
+unsupported RR types stay read-only. Existing Pi-hole clients use native group IDs, with an explicit
+empty membership list. Successful refreshes preserve edited group choices and refuse staging if a
+selected client or group has disappeared. Retained reviews wait for their full baseline before
+polling `/changes/{id}/current`; ordinary connection inventory cannot supply selected-policy
+freshness. The current read retains raw record/client fingerprints, while open confirmations also
+compare the complete immutable request and selected metadata. Explicit null and empty client
+comments have distinct labels and remain unchanged in native readback.
+Unreadable native client memberships or group identities keep their own unknown evidence;
+their section headers withhold counts rather than presenting an unknown inventory as zero policy.
+Filter metadata uses the separate bounded `lib/network-dns-filters.ts` decoder and `/filters` read.
+It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
+entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain
+the previous same-owner data and observation time; a fresh partial reading shows unknown sections
+without treating them as empty. Connection replacement clears all retained filter rows, and a stale
+owner read suspends its filter poll. These reads do not stage or apply a filter change.
+Reviewed custom-domain forms use the closed `network-dns-service-policy` validator and retained
+service DTO reader. Engine-specific suffix/exact matching is explicit; raw rule syntax is not a
+draft field. Pi-hole add drafts preserve empty memberships and native zero, require configured
+native groups and refuse disappeared group IDs after refresh. A configured missing ID has an
+explicit removal control; unknown inventory retains selections and holds review. Refused reviews
+retain draft values. Selected-filter evidence distinguishes absence, ambiguous or other-target
+policy, native false/empty/null and unreported fields; owner and exact-match counts remain visible.
+Ordinary inventory cannot replace `/changes/{id}/current`; changed selected metadata or fingerprints
+hold apply even if a top-level digest is reused. Open confirmations also compare the complete
+immutable selected-filter baseline. Native readback shows configured policy rather than measured
+filter priority or client decisions.
+WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
+and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
+containment; successful setup says configured when native runtime is not up. Its Advanced fold
+checks an MTU and hand-typed resolver addresses before submitting. Peer edits send only changed
+fields, keep the draft and show the refusal when rejected, and confirm a site withdrawal before
+the request; budgets parse binary units as `bytes` prints them. The record's trend, endpoint and
+lifecycle reads poll per peer and window and keep their last data with a retry after a failure.
+SQM retains its entire bounded profile after rejected writes and requires pending reconnection
+even when the global preference is off. Failed native shaping polls block edits until fresh reads.
+IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
+review; planning release never deletes a native resource. Incomplete planning envelopes or malformed
+rows are failed reads: a selected owner draft survives an unreadable refresh and its handoff is blocked
+until fresh inventory is available. Creation links initialize once per seed identity after a valid
+row is available; consumed/detached seeds cannot overwrite retained edits or gate an unselected
+draft. A new seed identity and delayed admin authentication can still initialize a plan. External
+pickers accept only current option identities so synthetic empty
+form events cannot erase dependent scope. External check reload/filter/comparison never launch
+probes and retain source/family/time distinctions. Socket history keeps native decimal-string TCP
+counter deltas separate from opt-in kernel TCP/UDP transport-payload subtotals, including when both
+channels describe the same socket. Missing lengths, owners, UTC certainty and delivery/budget/storage
+gaps remain explicit. Observer activation and stop use reviewed destructive controls, gated by fresh
+admin reads and history recording; page reads, ordinary opt-in and restart never attach it. Retained
+attachments after a failed stop offer retry without claiming off. The observer must be stopped
+explicitly before ordinary history opt-out; history erasure also stops it. Historical program/link IDs
+are dated evidence, not proof of current attachment ownership.
+
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding
@@ -15,15 +173,36 @@
   `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
   the same file and opened on the wrong remembered filter.
 - `usePoll` schedules the next request only after the previous one settles and pauses scheduled
-  requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
-  immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
+  requests on hidden tabs. Each successful response records `lastSuccess`; failed refreshes retain
+  that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
+  changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
+  Live Processes treats its search and filters as resource identity, and ranking/row-count
+  changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
+  mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful
+  during that read. `components/procs/inspection-order.ts` holds row order during pointer or focus
+  inspection across the Processes lists without freezing values or retaining exited processes.
+- Database activity (`components/database/home/use-samples.ts`) reads retained snapshots from
+  `GET /databases/{id}/stats/history` every 30 seconds, independently of the live snapshot read.
+  The selected 1h, 6h, 24h or 7d range is view state per connection; the samples live in the backend
+  store, rather than a browser-owned rolling buffer. Failed refreshes retain the last result, and a
+  stopped database can show history without dialing its engine. Counter resets and recording gaps
+  longer than 90 seconds break chart lines and rates; missing snapshots are ignored. Historical
+  working-session counts are the recorded active count minus the recorded waiting count, while live
+  session filters use the current session list. SQLite has no activity chart or recording poll.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
 - Persisted view/session values use individual Web Storage entries, so changing a small filter does not
   serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
   documents migrate on first read, with restoration and the old persistence path if splitting exceeds
   quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
+- `components/workspace/` keeps row identifiers, field indices and scroll offsets per page/step/
+  log question. Logs and Login place memory use RAM; field values and server row payloads never
+  enter these snapshots. `useFilterHistory` pushes settled Audit/Security filter questions and
+  restores native Back/Forward. `useHeldList` preserves existing row order in React state while
+  polling updates values, and exposes counted new arrivals for explicit reveal. Git commit messages
+  and per-run backup archive selections are session drafts. See
+  [`workspace-interactions.md`](workspace-interactions.md) for the complete contract.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
@@ -43,8 +222,32 @@
   forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
   navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
   keeps a sheet's selection in the address bar and, per page and key, in the session store, so
-  arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
-  layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
+  arriving on the rail's bare link puts the last selection back with `replaceState`. A database's
+  layout does the same for the reader's place inside it — `?schema=&table=`, `?db=&collection=` — per
+  database (`databases.<id>.place`, `database/shell/place.ts`): a page's address holds only what that
+  page can use, so the place the last address stated is kept, every link the shell builds
+  (`useDatabase().href`) carries the part its target can hold, and a bare address is completed from it.
+  Which database is the path (`/databases/<id>`), never remembered. Inside a database a page writes its
+  address through the layout's context and never with a `router.replace` of its own, which the
+  context's next write would undo: `useDatabase().select` replaces, with the writes made in one press
+  batched into one change and read back at once, and `goto` pushes. The shared keys are the selection
+  (`schema`, `table`; `db`, `collection`; `db`, `key`); what a page adds is its own view of it — a
+  filter list, a sort and a page on Data, an object and a view on Schema, a view strip's choice, an
+  open session or statement on Performance — so a pasted link opens on what was being looked at, and
+  opening a table, a key or a view is a history entry while narrowing one is not. A statement handed
+  to Query (`?sql=`, `?saved=`) is read once, opened in a tab of its own and taken out of the address.
+  The stores follow the same three lifetimes under one naming: arrangement is `useViewState` under
+  `databases.<area>.…` where it is the area's (a rail shown, a split's share, the last generator) and
+  `databases.<id>.<area>.…` where it is one database's (a page size, a column layout per table, saved
+  pipelines, the diagram's copy of an arrangement the server also keeps); work in progress is
+  `useSessionState` (`databases.<id>.query.tabs`, a new-table draft, the place, and the rail's memory
+  of the databases this tab has opened, `databases.known`, which holds names and so must not outlive
+  a sign-out); and whatever holds rows of data or a secret — a staged change set, what a tab ran,
+  unsaved Redis values, a console's transcript, staged document edits, a connect form's password — is
+  `useMemoryState` and never reaches Web Storage. One thing is kept beside the stores on purpose: a
+  change of power in flight is written to `sessionStorage` and told over a `BroadcastChannel`
+  (`jd.databases.power`, `database/home/power.ts`), so a reload, or another tab, shows a start or a
+  stop that is under way. Every route area was reviewed for this:
   filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
   whole new-project flow are remembered; a search box is no longer the exception it used to be. A
   service's logs keep their reading — source, view, filter, lens, range, window — under the embedding
@@ -57,7 +260,7 @@
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
-  empty window with no obvious way out. `useMetricEvents`/`useHealth` poll on much slower cadences.
+  empty window with no obvious way out. `useMetricEvents` polls on a much slower cadence.
 - `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
   backend types change without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file
   per area of those pages, and `types.ts` re-exports them, so an import from `@/lib/types` finds them. `useAuth`'s `can("capability")` hides controls a role cannot use:
@@ -67,10 +270,29 @@
   after the server revokes sessions. `password_change_required` responses also return the shell to this
   flow; they never grant access to ordinary feature controls.
 - Database selection belongs to a specific query and result snapshot. Sorting, filtering, paging,
-  refreshing, and changing tables require a fresh selection. Row editors are bound to their original
-  connection and table. Exact integer/decimal SQL values and Redis scan cursors travel as strings;
-  `lib/db-values.ts` preserves precision and rejects non-finite ordinary numeric input. CSV exports
-  escape column names and carriage returns with the same rules as cell values.
+  refreshing, and changing tables require a fresh selection. A staged change set is scoped to one
+  connection and table (`useChangeSet({ scope })` in `database/grid/change-set.ts`): leaving the table
+  takes the set and its undo history with it, and the page asks before a dirty one is left. Exact
+  integer/decimal SQL values and Redis scan cursors travel as strings; `lib/db-values.ts` preserves
+  precision and rejects non-finite ordinary numeric input, the grid computes on them as strings
+  (`database/grid/decimal.ts`), and a JSON value is laid out and compared as text, token by token,
+  never through `JSON.parse`, so a `9007199254740993` goes back as it came. NULL is never drawn or
+  written as an empty string. CSV exports escape column names and carriage returns with the same
+  rules as cell values.
+- What a database engine is, the frontend knows in one module: `components/database/engine.ts`. It holds
+  how an engine is presented — its name and logo by flavour, the words it uses for its objects, which
+  page a capability opens, how a program connects to it — and states no capability: every flag comes from
+  the server's catalogue (`GET /databases/drivers`, per driver and per flavour) and, for one connection,
+  from its summary (`GET /databases/{id}`), resolved for the product that answered. A page asks
+  `engine.kind`, `engine.can(flag)`, `engine.has(section)` and `engine.nouns`; no other file decides from
+  a driver's name what an engine can do. What stays beside the pages is how an engine is *written*, which
+  no flag says: each dialect's quoting, keywords and diagnostic snippets for the editor
+  (`database/query/dialect.ts`, `keywords.ts`, `snippets.ts`), each engine's index methods and
+  foreign-key actions for the schema forms (`database/schema/engine-notes.ts`), and how each driver's
+  connection string spells TLS (`database/connect/dsn.ts`, beside `lib/db-dsn.ts`). The registry's tests
+  and the browser fixture read the catalogue from the file a Go test holds to the route
+  (`backend/internal/api/testdata/database-drivers.json`), so a capability given to an engine or taken
+  from one reaches the frontend's tests as the table the server really serves.
 - PM2 actions and deletes send both the trusted `daemonId` as `user` and numeric `id`, and a PM2
   application's logs are the `pm2:<daemon>/<id>/<name>` source on `/logs/stream` (`pm2Source`, the
   account and name escaped): the application name alone cannot identify a process across multiple
@@ -105,11 +327,15 @@
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
-  when things happened. Container charts offer only recorded ranges; the container Usage tab also has
-  a separate `container-live-usage.tsx` reading section on its existing stats WebSocket. Its rate helper
-  differences Docker timestamps and per-interface counters, rejects resets and gaps, and establishes a
-  new baseline after reconnects. Pausing freezes labelled readings; a disconnected or ten-second-stale
-  feed clears current figures without hiding recorded history. `hooks/use-metrics.ts` and
+  when things happened. A container's Usage tab is a project Runtime's `RuntimeUsage`: its Live range
+  is the stats socket's last five minutes bucketed apart from the recorded ranges, never joined to
+  them, and its breakdowns read the newest frame of that same socket (`useContainerFrame`). The rate
+  helper differences Docker timestamps and per-interface counters, rejects resets and gaps, and
+  establishes a new baseline after reconnects; a ten-second-stale feed says so without hiding
+  recorded history, and a stopped container opens no socket at all. The Overview tab's four readings
+  (`docker/container-readings.tsx`) open the same socket only while that tab is showing, so the two
+  never run together, and draw the recorded hour as each tile's trend beside the live figure rather
+  than splicing the frames into that line. `hooks/use-metrics.ts` and
   `hooks/use-metrics-history.ts` are the React surface over those two.
 - `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run
@@ -149,3 +375,8 @@
   `color-scheme`, and clears the stored light/dark preference from anyone upgrading. `hooks/use-theme.tsx`,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
+
+Saved connection investigations share the `netdiag` lifecycle and exact-source comparison. The
+`kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
+is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
+not a connected/live state. The shared naming dialog snapshots its discriminated request kind.

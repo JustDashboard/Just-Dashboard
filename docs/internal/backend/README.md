@@ -1,6 +1,21 @@
 # Backend guides
 
 - [`observability-security.md`](observability-security.md) — metrics, security, sshd, firewall, fail2ban, and packages.
+- [`network.md`](network.md) — the network module: devices, namespaces, routing, forwarding, the gateway table, protections, shaping, WireGuard, Tailscale, the resolver and traffic.
+- [`network-investigator.md`](network-investigator.md) — typed host/container path explanations and bounded native measurements.
+- [`network-diagnostics.md`](network-diagnostics.md) — durable diagnostic lifecycle, admin-only artifacts and retention.
+- [`network-captures.md`](network-captures.md) — bounded private PCAP artifacts, native deadlines and retention.
+- [`network-file-durability.md`](network-file-durability.md) — owned file identity and durable restoration of prior absence.
+- [`network-external-checks.md`](network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
+- [`network-flow-accounting.md`](network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
+- [`network-flow-observer.md`](network-flow-observer.md) — separately reviewed kernel packet observations, owned links, durable batches and explicit quality gaps.
+- [`network-ipam.md`](network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`network-dns-evidence.md`](network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
+- [`network-dns-services.md`](network-dns-services.md) — sealed native engine connections, reviewed records/client groups and bounded owned Docker provisions.
+- [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
+- [`wireguard-dual-stack.md`](wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
+- [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.
+- [`network-egress.md`](network-egress.md) — monitored egress groups: member paths, hysteresis, guarded switching, connection pinning, boot restore and the simulation automation waits on.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.
 - [`git-backups-users.md`](git-backups-users.md) — Git, backup execution/restore, host users, and SSH keys.

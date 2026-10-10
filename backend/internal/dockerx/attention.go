@@ -113,6 +113,7 @@ type RuntimeHealth struct {
 	Unhealthy   int `json:"unhealthy"`
 	Starting    int `json:"starting"`
 	NoHealthchk int `json:"noHealthcheck"`
+	Unknown     int `json:"unknown,omitempty"`
 
 	// Status is the worst runtime state present: "ok", "degraded" (something
 	// is down that looks like it should not be) or "critical" (something is
@@ -162,7 +163,10 @@ func summarizeRuntime(list []Container, healthByID map[string]healthFacts) Runti
 		if ct.State != "running" {
 			continue
 		}
-		switch facts := healthByID[ct.ID]; {
+		facts, inspected := healthByID[ct.ID]
+		switch {
+		case !inspected:
+			rh.Unknown++
 		case !facts.hasCheck:
 			rh.NoHealthchk++
 		case facts.status == "healthy":
@@ -197,7 +201,7 @@ func describeRuntime(rh RuntimeHealth) (status, summary string) {
 		status = "critical"
 	case rh.Restarting > 0 || rh.Paused > 0:
 		status = "warning"
-	case rh.Exited > 0:
+	case rh.Exited > 0 || rh.Unknown > 0:
 		// Something stopped is not automatically a problem — a one-shot job
 		// exits — so this is the level that says "look", not "act".
 		status = "notice"
@@ -220,6 +224,9 @@ func describeRuntime(rh RuntimeHealth) (status, summary string) {
 	}
 	if rh.NoHealthchk > 0 {
 		parts = append(parts, itoa(rh.NoHealthchk)+" without a health check")
+	}
+	if rh.Unknown > 0 {
+		parts = append(parts, itoa(rh.Unknown)+" with unread health checks")
 	}
 	return status, join(parts, ", ")
 }

@@ -45,9 +45,10 @@ export const RANGES: RangeSpec[] = [
 /**
  * The windows that come from the server.
  *
- * A container has no in-browser live buffer to fall back on — nothing
- * accumulates its stats across a page load — so its charts offer only the
- * recorded ranges rather than a "Live" option that would draw nothing.
+ * Docker's container page keeps no live buffer for its charts — its live
+ * readings are a section of their own — so it offers only the recorded ranges
+ * rather than a "Live" option that would draw nothing. A project's Runtime
+ * does keep one (`useContainerLive`) and offers every range.
  */
 export const HISTORY_RANGES = RANGES.filter((r) => r.query)
 
@@ -223,6 +224,16 @@ export type ChartRow = {
   tcpPeak: number | null
   tcpTimeWait: number | null
 
+  /** How connections fared; recorded only, so null on live rows. */
+  retransPct: number | null
+  retransPctPeak: number | null
+  attemptFails: number | null
+  attemptFailsPeak: number | null
+  listenDrops: number | null
+  listenDropsPeak: number | null
+  rtt: number | null
+  rttPeak: number | null
+
   load1: number | null
   load5: number | null
   load15: number | null
@@ -272,6 +283,14 @@ export function liveRows(history: MetricsPoint[]): ChartRow[] {
     tcp: p.tcp,
     tcpPeak: null,
     tcpTimeWait: null,
+    retransPct: null,
+    retransPctPeak: null,
+    attemptFails: null,
+    attemptFailsPeak: null,
+    listenDrops: null,
+    listenDropsPeak: null,
+    rtt: null,
+    rttPeak: null,
     // The live feed carries no load averages in its buffer — the tiles read
     // them from the newest snapshot instead, which is where "right now"
     // belongs.
@@ -347,6 +366,14 @@ function toRow(point: MetricsHistoryPoint, ts: number, step: number): ChartRow {
     tcp: point.tcpConns,
     tcpPeak: point.tcpConnsPeak,
     tcpTimeWait: point.tcpTimeWait,
+    retransPct: point.retransPct ?? null,
+    retransPctPeak: point.retransPctPeak ?? null,
+    attemptFails: point.attemptFails ?? null,
+    attemptFailsPeak: point.attemptFailsPeak ?? null,
+    listenDrops: point.listenDrops ?? null,
+    listenDropsPeak: point.listenDropsPeak ?? null,
+    rtt: point.rtt ?? null,
+    rttPeak: point.rttPeak ?? null,
     load1: point.load1,
     load5: point.load5,
     load15: point.load15,
@@ -402,6 +429,14 @@ function gapRow(ts: number): ChartRow {
     tcp: null,
     tcpPeak: null,
     tcpTimeWait: null,
+    retransPct: null,
+    retransPctPeak: null,
+    attemptFails: null,
+    attemptFailsPeak: null,
+    listenDrops: null,
+    listenDropsPeak: null,
+    rtt: null,
+    rttPeak: null,
     load1: null,
     load5: null,
     load15: null,
@@ -475,6 +510,7 @@ export type ContainerRow = {
   blockReadPeak?: number | null
   blockWritePeak?: number | null
   pids: number | null
+  pidsPeak?: number | null
 }
 
 export function containerRows(history: ContainerHistory): ContainerRow[] {
@@ -513,10 +549,11 @@ function toContainerRow(point: ContainerHistoryPoint, ts: number, step: number):
     blockReadPeak: point.blockReadPeak ?? point.blockRead,
     blockWritePeak: point.blockWritePeak ?? point.blockWrite,
     pids: point.pids,
+    pidsPeak: point.pidsPeak ?? point.pids,
   }
 }
 
-function containerGapRow(ts: number): ContainerRow {
+export function containerGapRow(ts: number): ContainerRow {
   return {
     t: "",
     ts,

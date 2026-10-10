@@ -13,8 +13,8 @@ export default async function DeployPage({
     <Suspense
       fallback={
         // The placeholder of the page the address names, so it arrives in
-        // the shape it was drawn in: the fleet's readings over its cards, or
-        // the archive's rows — never the one and then the other.
+        // the shape it was drawn in: the fleet's cards, or the archive's rows
+        // — never the one and then the other.
         view === "archived" ? (
           <ArchivedSkeleton />
         ) : (

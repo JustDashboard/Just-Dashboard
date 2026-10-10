@@ -22,6 +22,7 @@ import (
 
 func (s *Server) mountDeployRoutes(r chi.Router) {
 	r.Route("/deploy", func(r chi.Router) {
+		r.Use(s.retiredImportReadOnly)
 		s.mountBlueprintRoutes(r)
 		s.mountGameRoutes(r)
 		s.mountGitHubAppRoutes(r)
@@ -100,8 +101,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
-				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
+				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/{id}/unarchive", s.handle(s.handleDeploymentUnarchive))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/releases/{release}/pin", s.handle(s.handleDeploymentReleasePin))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/reject", s.handle(s.handleDeploymentPreviewReject))
@@ -1180,7 +1181,11 @@ func (s *Server) handleDeploymentRunStream(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return mapDeployError(err)
 	}
-	defer unsubscribe()
+	defer func() {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+	}()
 	s.recordAudit(r, "deploy.run.stream.open", fmt.Sprint(runID), map[string]any{"after": after})
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -1194,8 +1199,23 @@ func (s *Server) handleDeploymentRunStream(w http.ResponseWriter, r *http.Reques
 	if err := conn.Send("snapshot", snapshot); err != nil {
 		return nil
 	}
-	if len(backlog) > 0 {
-		if err := conn.Send("events", backlog); err != nil {
+	for {
+		if len(backlog) > 0 {
+			if err := conn.Send("events", backlog); err != nil {
+				return nil
+			}
+			after = backlog[len(backlog)-1].Seq
+		}
+		if len(backlog) < deploy.RunEventReplayLimit {
+			break
+		}
+		// A full page is not the end of retained history. Re-subscribe after
+		// the delivered cursor so events committed during replay are read from
+		// the store; only the final page hands off to its live subscription.
+		unsubscribe()
+		backlog, live, unsubscribe, err = s.modules.deployRuns.Subscribe(ctx, runID, after)
+		if err != nil {
+			conn.SendError("could not replay deployment events; reconnect to resume")
 			return nil
 		}
 	}

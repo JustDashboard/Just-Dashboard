@@ -1,0 +1,24 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:215: native filter metadata shape engine=adguard field=filters kind=null count=-1 values=redacted
+    provision_live_test.go:215: native filter metadata shape engine=adguard field=whitelist_filters kind=null count=-1 values=redacted
+    provision_live_test.go:215: native filter metadata shape engine=adguard field=user_rules kind=null count=-1 values=redacted
+    provision_live_test.go:215: engine=adguard nativeFilterVersion=v0.107.71 sources=0 rules=0 ruleEvidence=configured fingerprint=caf8403f21f56a9bf08591fc87513e0c22fca6841a8f9bf2984e9c882337e496 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:272: native filter metadata shape engine=adguard field=filters kind=null count=-1 values=redacted
+    provision_live_test.go:272: native filter metadata shape engine=adguard field=whitelist_filters kind=null count=-1 values=redacted
+    provision_live_test.go:272: native filter metadata shape engine=adguard field=user_rules kind=array count=1 values=redacted
+    provision_live_test.go:272: engine=adguard nativeFilterVersion=v0.107.71 sources=0 rules=1 ruleEvidence=configured fingerprint=35dc59bd3f1df79471f7ebcd0d53f432319fa1330361f2b6fdf615089cf017ff subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:305: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:310: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:305: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:310: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:351: native filter metadata shape engine=adguard field=filters kind=null count=-1 values=redacted
+    provision_live_test.go:351: native filter metadata shape engine=adguard field=whitelist_filters kind=null count=-1 values=redacted
+    provision_live_test.go:351: native filter metadata shape engine=adguard field=user_rules kind=array count=1 values=redacted
+    provision_live_test.go:351: engine=adguard nativeFilterVersion=v0.107.71 sources=0 rules=1 ruleEvidence=configured fingerprint=35dc59bd3f1df79471f7ebcd0d53f432319fa1330361f2b6fdf615089cf017ff subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:373: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:378: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:373: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:378: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:416: engine=adguard image=adguard/adguardhome@sha256:92929135ced2554aaf94706f766a98ad348f211df61b0704e2db7e8498cc00b7 nativeVersion=v0.107.71 UDP/TCP=owned-fixture.invalid owner=7788bf73b2b1e858694e36e7d7b14093 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (42.29s)
+PASS

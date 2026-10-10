@@ -43,6 +43,10 @@ type Container struct {
 	// the alternative is an inspect per container on every poll — sixty round
 	// trips to the socket to draw one table.
 	Mounts []MountPoint `json:"mounts,omitempty"`
+	// Endpoints is the address on each network, keyed as Networks is. Kept
+	// off the wire: the containers socket has never carried addresses, and
+	// the network listing that needs them reads them from here.
+	Endpoints map[string]NetworkEndpoint `json:"-"`
 
 	// Exposure is the port list with its meaning attached: which of these
 	// bindings reach beyond this server and which do not. Computed once here
@@ -64,6 +68,15 @@ type Container struct {
 	// absence, so the UI never renders "no memory limit" for a container it
 	// simply did not look at.
 	Inspected bool `json:"inspected"`
+
+	// What the last run left behind, read from the same inspect. Not on the
+	// wire here: ContainerDetail already reports its own, and the listing's
+	// consumers have never been promised these. Restarts is the daemon's
+	// restart count; Exited is set only for a container that has stopped
+	// running, since a running container's exit code describes a previous run.
+	Restarts     int  `json:"-"`
+	Exited       *int `json:"-"`
+	WasOOMKilled bool `json:"-"`
 }
 
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, error) {
@@ -73,28 +86,41 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, err
 			index = 1
 		}
 		return snapshot.lists[index].get(ctx, snapshot.ctx, func(ctx context.Context) ([]Container, error) {
-			return c.listContainers(ctx, container.ListOptions{All: all})
+			return c.listContainers(ctx, container.ListOptions{All: all}, false)
 		})
 	}
-	return c.listContainers(ctx, container.ListOptions{All: all})
+	return c.listContainers(ctx, container.ListOptions{All: all}, false)
 }
 
 // ListContainersWithLabels filters at the daemon before uptime/health inspection,
 // so observing one deployment does not inspect every running container on the host.
 func (c *Client) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]Container, error) {
+	return c.listContainers(ctx, container.ListOptions{All: true, Filters: labelFilters(labels)}, false)
+}
+
+// ListContainersWithLastRun is ListContainersWithLabels that also inspects the
+// matching containers that have stopped, for their exit code, OOM verdict and
+// restart count. Only the runtime services read asks for it: the set is one
+// environment's, and the cleanup and recovery paths that share the labelled
+// listing have no use for a stopped container's last run.
+func (c *Client) ListContainersWithLastRun(ctx context.Context, labels map[string]string) ([]Container, error) {
+	return c.listContainers(ctx, container.ListOptions{All: true, Filters: labelFilters(labels)}, true)
+}
+
+func labelFilters(labels map[string]string) filters.Args {
 	args := filters.NewArgs()
 	for key, value := range labels {
 		args.Add("label", key+"="+value)
 	}
-	return c.listContainers(ctx, container.ListOptions{All: true, Filters: args})
+	return args
 }
 
-func (c *Client) listContainers(ctx context.Context, options container.ListOptions) ([]Container, error) {
+func (c *Client) listContainers(ctx context.Context, options container.ListOptions, inspectStopped bool) ([]Container, error) {
 	list, err := c.listContainerSummaries(ctx, options)
 	if err != nil {
 		return nil, err
 	}
-	c.enrichUptime(ctx, list)
+	c.enrichUptime(ctx, list, inspectStopped)
 	return list, nil
 }
 
@@ -141,8 +167,12 @@ func (c *Client) listContainerSummaries(ctx context.Context, options container.L
 			})
 		}
 		if it.NetworkSettings != nil {
-			for name := range it.NetworkSettings.Networks {
+			cn.Endpoints = make(map[string]NetworkEndpoint, len(it.NetworkSettings.Networks))
+			for name, ep := range it.NetworkSettings.Networks {
 				cn.Networks = append(cn.Networks, name)
+				if ep != nil {
+					cn.Endpoints[name] = endpointOf(ep)
+				}
 			}
 			sort.Strings(cn.Networks)
 		}
@@ -183,10 +213,10 @@ func (c *Client) listContainerSummaries(ctx context.Context, options container.L
 // database discovery, which reads the product off the name, skipped it. The
 // name survives in the container's own config, which is what `Inspect`
 // already reports, so the listing takes it from there and the two agree.
-func (c *Client) enrichUptime(ctx context.Context, list []Container) {
+func (c *Client) enrichUptime(ctx context.Context, list []Container, inspectStopped bool) {
 	for i := range list {
 		unnamed := IsImageID(list[i].Image)
-		if list[i].State != "running" && !unnamed {
+		if list[i].State != "running" && !unnamed && !inspectStopped {
 			continue
 		}
 		insp, err := c.inspectContainer(ctx, list[i].ID)
@@ -196,10 +226,27 @@ func (c *Client) enrichUptime(ctx context.Context, list []Container) {
 		if unnamed && insp.Config != nil && Pullable(insp.Config.Image) {
 			list[i].Image = insp.Config.Image
 		}
+		recordLastRun(&list[i], insp)
 		if list[i].State != "running" || insp.State == nil {
 			continue
 		}
 		enrichContainer(&list[i], insp)
+	}
+}
+
+// recordLastRun copies the restart count, and for a container that is not
+// running its exit code and OOM verdict. "created" is left out: it has never
+// run, and the 0 Docker reports there is not an exit.
+func recordLastRun(ct *Container, insp container.InspectResponse) {
+	ct.Restarts = insp.RestartCount
+	if insp.State == nil {
+		return
+	}
+	switch ct.State {
+	case "exited", "dead", "restarting":
+		code := insp.State.ExitCode
+		ct.Exited = &code
+		ct.WasOOMKilled = insp.State.OOMKilled
 	}
 }
 
@@ -272,6 +319,7 @@ type MountPoint struct {
 type NetworkBinding struct {
 	Name       string   `json:"name"`
 	IPAddress  string   `json:"ipAddress"`
+	IPv6       string   `json:"ipv6Address,omitempty"`
 	Gateway    string   `json:"gateway"`
 	MacAddress string   `json:"macAddress"`
 	Aliases    []string `json:"aliases"`
@@ -407,7 +455,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, erro
 		for name, ep := range insp.NetworkSettings.Networks {
 			d.Networks = append(d.Networks, name)
 			d.NetworkList = append(d.NetworkList, NetworkBinding{
-				Name: name, IPAddress: ep.IPAddress, Gateway: ep.Gateway,
+				Name: name, IPAddress: ep.IPAddress, IPv6: ep.GlobalIPv6Address, Gateway: ep.Gateway,
 				MacAddress: ep.MacAddress, Aliases: orEmpty(ep.Aliases), NetworkID: ep.NetworkID,
 			})
 		}

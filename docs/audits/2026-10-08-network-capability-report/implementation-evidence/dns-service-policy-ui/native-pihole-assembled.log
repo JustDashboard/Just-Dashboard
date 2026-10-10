@@ -1,0 +1,19 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:253: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:253: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:253: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:258: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:317: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:317: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:317: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:322: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/pihole-835ee74c77501e19d17b178568bc5ee1.log (8403 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/pihole-674c4533e98bf828f4bf1883b5de5693.log (701 bytes)
+    provision_live_test.go:360: engine=pihole image=pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be nativeVersion=v6.7.1 UDP/TCP=owned-fixture.invalid owner=56e3133523f8ee9a8d420a832384cca3 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (63.64s)
+PASS
+wrapper_elapsed=64.67 exit=0

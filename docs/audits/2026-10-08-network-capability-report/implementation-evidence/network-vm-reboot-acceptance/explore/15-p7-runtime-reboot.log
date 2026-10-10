@@ -1,0 +1,244 @@
+{
+  "at": "2026-10-09T23:39:53Z",
+  "bootId": "2152bd0f-5ecd-4347-abed-f9ced414bfa0",
+  "evidence": {
+    "backendAtBoot": {
+      "active": "inactive",
+      "pid": "0",
+      "startedThisBoot": false,
+      "sub": "dead"
+    },
+    "driftAfterBoot": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway"
+      ],
+      "execution": {
+        "bootId": "2152bd0f-5ecd-4347-abed-f9ced414bfa0",
+        "bootTrigger": "unknown",
+        "finishedAt": "Fri 2026-10-09 23:39:40 UTC",
+        "invocationId": "8404bacc545a49d996e808a8ea4b254a",
+        "reason": "A measured activation exists, but complete command outcomes are unavailable.",
+        "result": "success",
+        "startedAt": "Fri 2026-10-09 23:39:40 UTC",
+        "status": "unknown"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "recovery-helper:/etc/just-dashboard/network/network-recovery",
+          "reason": "file exceeds inspection limit",
+          "status": "unreadable"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [],
+        "status": "no_known_repairs"
+      },
+      "runtime": 34,
+      "status": "unknown"
+    },
+    "journal": {
+      "appliedAt": "2026-10-09T23:36:37.494257316Z",
+      "boot": "not_verified",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "4512cbfb03124cc0469756fa280b6f826ada969e48a8fd9813a5c1ce3185a0b4",
+      "id": "2aebd3916757d7be55c311efae9f238c",
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-09T23:37:10.569365385Z",
+      "watchdog": "recovered"
+    },
+    "kernelAfterBootMissing": [],
+    "networkUnit": {
+      "ActiveState": "active",
+      "ExecMainExitTimestamp": "Fri 2026-10-09 23:39:40 UTC",
+      "ExecMainStartTimestampMonotonic": "12644185",
+      "ExecMainStatus": "0",
+      "InvocationID": "8404bacc545a49d996e808a8ea4b254a",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "1"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      }
+    ],
+    "networkUnitJournal": [
+      "2026-10-09T23:39:39.064782+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made...",
+      "2026-10-09T23:39:39.423657+00:00 jd-vm-reboot tc[714]: Error: Cannot delete qdisc with handle of zero.",
+      "2026-10-09T23:39:39.423657+00:00 jd-vm-reboot tc[714]: Command failed /etc/just-dashboard/network/shaping.batch:4",
+      "2026-10-09T23:39:39.828616+00:00 jd-vm-reboot iptables[799]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:39.852056+00:00 jd-vm-reboot iptables[806]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:39.884634+00:00 jd-vm-reboot iptables[812]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:39.898814+00:00 jd-vm-reboot iptables[815]: iptables: No chain/target/match by that name.",
+      "2026-10-09T23:39:39.911714+00:00 jd-vm-reboot ip6tables[820]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:39.942327+00:00 jd-vm-reboot ip6tables[823]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:39.987960+00:00 jd-vm-reboot ip6tables[827]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-09T23:39:40.010274+00:00 jd-vm-reboot ip6tables[829]: ip6tables: No chain/target/match by that name.",
+      "2026-10-09T23:39:40.027608+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made."
+    ],
+    "recoveryUnit": {
+      "ActiveState": "inactive",
+      "ExecMainExitTimestamp": "Fri 2026-10-09 23:39:39 UTC",
+      "ExecMainStartTimestampMonotonic": "11085151",
+      "ExecMainStatus": "0",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "recoveryUnitJournal": [
+      "2026-10-09T23:39:38.453041+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes...",
+      "2026-10-09T23:39:39.045123+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Deactivated successfully.",
+      "2026-10-09T23:39:39.045370+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes."
+    ]
+  },
+  "failures": [
+    "just-dashboard-network.service commands failed (including ignored ones): [{'path': 'tc', 'argv': 'tc -force -batch /etc/just-dashboard/network/shaping.batch', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'iptables', 'argv': 'iptables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'iptables', 'argv': 'iptables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'iptables', 'argv': 'iptables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'iptables', 'argv': 'iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'ip6tables', 'argv': 'ip6tables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'ip6tables', 'argv': 'ip6tables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'ip6tables', 'argv': 'ip6tables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}, {'path': 'ip6tables', 'argv': 'ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT', 'status': '1', 'code': 'exited', 'ignoreErrors': 'yes'}]",
+    "drift after boot: [{'id': 'recovery-helper:/etc/just-dashboard/network/network-recovery', 'status': 'unreadable', 'reason': 'file exceeds inspection limit'}]",
+    "measured activation after boot: {'status': 'unknown', 'reason': 'A measured activation exists, but complete command outcomes are unavailable.', 'bootId': '2152bd0f-5ecd-4347-abed-f9ced414bfa0', 'invocationId': '8404bacc545a49d996e808a8ea4b254a', 'startedAt': 'Fri 2026-10-09 23:39:40 UTC', 'finishedAt': 'Fri 2026-10-09 23:39:40 UTC', 'result': 'success', 'bootTrigger': 'unknown'}"
+  ],
+  "phase": "p7-runtime-reboot",
+  "result": "fail",
+  "seconds": 1.9
+}

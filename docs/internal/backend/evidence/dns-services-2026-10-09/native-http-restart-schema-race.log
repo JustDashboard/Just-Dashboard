@@ -1,0 +1,32 @@
+=== RUN   TestDNSNativeTLSIdentityRedirectAndProxyBoundary
+2026/10/09 00:15:59 http: TLS handshake error from 127.0.0.1:53786: remote error: tls: bad certificate
+2026/10/09 00:15:59 http: TLS handshake error from 127.0.0.1:53794: remote error: tls: bad certificate
+--- PASS: TestDNSNativeTLSIdentityRedirectAndProxyBoundary (0.23s)
+=== RUN   TestDNSNativePiHoleSessionHeaderAndVersionContract
+--- PASS: TestDNSNativePiHoleSessionHeaderAndVersionContract (0.02s)
+=== RUN   TestDNSNativeTechnitiumBearerPOSTAndTypedNativeViews
+--- PASS: TestDNSNativeTechnitiumBearerPOSTAndTypedNativeViews (0.01s)
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/error
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/oversized
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/missing
+--- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal (0.03s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/error (0.00s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/oversized (0.02s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/missing (0.01s)
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/later_boot_same_pid
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/unknown_process_refused
+--- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation (8.99s)
+    --- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/later_boot_same_pid (4.90s)
+    --- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/unknown_process_refused (4.09s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	10.326s
+=== RUN   TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults
+=== RUN   TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults/fresh
+=== RUN   TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults/0.6.6
+--- PASS: TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults (7.46s)
+    --- PASS: TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults/fresh (2.76s)
+    --- PASS: TestDNSServicesSchemaUpgradeKeepsSealedStateAndDefaults/0.6.6 (4.56s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	8.687s

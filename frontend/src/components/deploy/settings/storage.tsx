@@ -1,10 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import type { FormEvent } from "react"
 import { Archive, Plus } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -16,10 +15,8 @@ import type {
 } from "@/lib/types"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { ProductLogo } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { MOUNT_STATUS, MountMark } from "@/components/deploy/vocabulary"
 import { volumeProduct } from "@/components/deploy/service-product"
@@ -32,6 +29,7 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { emptyMount, MountRows, type MountValue } from "@/components/deploy/settings/mounts"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { volumeBackup } from "@/components/deploy/settings/volume-backup"
 import { useProject } from "@/components/deploy/project-context"
 
 /**
@@ -41,19 +39,14 @@ import { useProject } from "@/components/deploy/project-context"
  * evidence under it whose one link per row was an 11px underline — nothing
  * said whether a source was a Docker volume or a directory on this server,
  * how much it held, or whether anything backed it up, and a missing mount
- * was the only colour on the page. It opens on four readings now: how many
- * mounts and of which kind, whether the live release found each one, how
- * much the volumes hold, and how many of them a backup job covers — the one
- * that is amber when the answer is "not all", because persistent storage is
- * not a backup. The editor draws each mount as what it is (`MountRows`), and
- * the live release's mounts are destinations — the volume or the folder
- * each one is — so they are cards you open rather than lines to read, with
- * a card to back up any volume nothing copies.
+ * was the only colour on the page. Now the editor draws each mount as what it
+ * is (`MountRows`), and the live release's mounts are destinations — the
+ * volume or the folder each one is — so they are cards you open rather than
+ * lines to read, with a card to back up any volume nothing copies.
  *
- * The four readings come from two places the page may not be allowed to
- * read: Docker's volume sizes and the backup coverage report. Each one
- * refused leaves its reading out rather than guessing at it; one still being
- * read is a dash until it lands, never the refusal's sentence.
+ * Docker's volume sizes and the backup coverage report are two reads the page
+ * may not be allowed to make. A card whose fact was refused or is still on its
+ * way leaves it out rather than guessing at it.
  */
 
 export function StorageSettings({
@@ -73,21 +66,13 @@ export function StorageSettings({
     (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
     60000,
   )
-  // A poll that fails after it has answered keeps its last answer, so only a
-  // read that never answered is a refusal — and one still in flight is
-  // neither, which is what "—" says until it lands.
   const facts: StorageFacts = {
     operations: project.operations,
     volumes: volumes.data,
-    volumesRefused: !volumes.data && Boolean(volumes.error),
     coverage: coverage.data,
-    coverageRefused: !coverage.data && Boolean(coverage.error),
   }
   return (
-    <SettingsPage
-      state={state}
-      readings={(configuration) => <StorageReadings configuration={configuration} {...facts} />}
-    >
+    <SettingsPage state={state}>
       {(configuration) => (
         <StorageForm configuration={configuration} save={state.save} {...facts} />
       )}
@@ -98,9 +83,7 @@ export function StorageSettings({
 type StorageFacts = {
   operations?: DeploymentOperations
   volumes?: DockerVolume[]
-  volumesRefused: boolean
   coverage?: BackupResourceReport
-  coverageRefused: boolean
 }
 
 /** A named volume's own record, and whether a backup job protects it. */
@@ -108,109 +91,6 @@ function volumeFacts(name: string, { volumes, coverage }: StorageFacts) {
   const volume = volumes?.find((item) => item.name === name)
   const resource = coverage?.resources.find((item) => item.kind === "volume" && item.name === name)
   return { volume, resource }
-}
-
-function StorageReadings({
-  configuration,
-  ...facts
-}: StorageFacts & { configuration: DeploymentEnvironmentConfiguration }) {
-  const mounts = configuration.runtime.mounts ?? []
-  const named = [
-    ...new Set(mounts.map((mount) => mount.source).filter((source) => !source.startsWith("/"))),
-  ]
-  const paths = mounts.filter((mount) => mount.source.startsWith("/")).length
-  const readOnly = mounts.filter((mount) => mount.readOnly).length
-
-  const storage = facts.operations?.storage
-  const live = storage?.status === "available" ? storage.mounts : undefined
-  const present = live?.filter((mount) => mount.status === "present").length ?? 0
-  const missing = live?.find((mount) => mount.status === "missing")
-
-  const sized = named
-    .map((name) => volumeFacts(name, facts).volume)
-    .filter((volume): volume is DockerVolume => Boolean(volume))
-  const total = sized.reduce((sum, volume) => sum + volume.size, 0)
-  const largest = [...sized].sort((a, b) => b.size - a.size)[0]
-
-  const covered = named.filter((name) => volumeFacts(name, facts).resource?.protected).length
-  const coveredBy = named
-    .flatMap((name) => volumeFacts(name, facts).resource?.coveredBy ?? [])
-    .map((job) => job.jobName)
-
-  return (
-    <StatGrid columns={facts.coverageRefused ? 3 : 4} dense>
-      <StatTile
-        label="Mounts"
-        value={mounts.length}
-        hint={
-          mounts.length === 0
-            ? "The runtime is stateless"
-            : [
-                // Counted per mount, so the words add up to the figure above
-                // them even where two mounts share one volume.
-                mounts.length - paths > 0 && plural(mounts.length - paths, "volume"),
-                paths > 0 && plural(paths, "host path"),
-                readOnly > 0 && `${readOnly} read-only`,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-        }
-      />
-      <StatTile
-        label="In the live release"
-        value={live ? `${present} of ${live.length}` : "—"}
-        tone={missing ? "danger" : live && live.length > 0 ? "success" : "default"}
-        hint={
-          !live
-            ? (storage?.reason ?? "Not observed yet")
-            : missing
-              ? `${missing.target} is missing`
-              : live.length > 0
-                ? "Every mount is present"
-                : "The release declares none"
-        }
-      />
-      <StatTile
-        label="Volume data"
-        value={!facts.volumes || total === 0 ? "—" : bytes(total)}
-        hint={
-          !facts.volumes
-            ? facts.volumesRefused
-              ? "Docker's volumes are not readable here"
-              : undefined
-            : named.length === 0
-              ? "No named volume"
-              : total === 0
-                ? "Docker reports no size"
-                : sized.length === 1
-                  ? `In ${sized[0].name}`
-                  : largest && `Most in ${largest.name} · ${bytes(largest.size)}`
-        }
-      />
-      {!facts.coverageRefused && (
-        <StatTile
-          label="Backed up"
-          value={facts.coverage && named.length > 0 ? `${covered} of ${named.length}` : "—"}
-          tone={
-            !facts.coverage || named.length === 0
-              ? "default"
-              : covered < named.length
-                ? "warning"
-                : "success"
-          }
-          hint={
-            !facts.coverage
-              ? undefined
-              : named.length === 0
-                ? "No named volume to back up"
-                : covered < named.length
-                  ? "Persistent storage is not a backup"
-                  : `By ${[...new Set(coveredBy)].join(", ")}`
-          }
-        />
-      )}
-    </StatGrid>
-  )
 }
 
 function StorageForm({
@@ -243,13 +123,12 @@ function StorageForm({
     project.product,
   )
 
-  const onSave = async (event: FormEvent) => {
-    event.preventDefault()
+  const onSave = async () => {
     setSaving(true)
     setMountError(undefined)
     try {
-      await save({ runtime: { ...configuration.runtime, mounts } })
-      notify.success("Storage saved")
+      await save({ runtime: (latest) => ({ ...latest.runtime, mounts }) })
+      return true
     } catch (error) {
       const index =
         error instanceof ApiError ? refusedIndex(error.field, "runtime.mounts") : undefined
@@ -258,6 +137,7 @@ function StorageForm({
       } else {
         notify.error("Could not save storage", error)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -276,7 +156,7 @@ function StorageForm({
     <>
       <SettingForm
         name="Persistent mounts"
-        onSubmit={(event) => void onSave(event)}
+        onSave={onSave}
         dirty={draft.dirty}
         changes={draft.changes}
         saving={saving}
@@ -324,19 +204,39 @@ function StorageForm({
             </EmptyNote>
           ) : (
             <ChoiceList aria-label="In the live release">
+              {/* One line where the column has room: what the source is, whether
+                  the container can write to it and what the release found are
+                  words on the line under the path, and the state is the card's
+                  other end — the kind and read-only were chips beside the
+                  state, and the release's detail a band of its own under the
+                  name. Narrow, the state and the detail keep a line under it. */}
               {storage.mounts.map((mount, index) => {
                 const status = MOUNT_STATUS[mount.status]
                 const size =
                   mount.kind === "volume"
                     ? volumeFacts(mount.source, facts).volume?.size
                     : undefined
-                const readings = (
-                  <>
+                const backup =
+                  mount.kind === "volume"
+                    ? volumeBackup(
+                        volumeFacts(mount.source, facts).resource,
+                        facts.operations?.backups.jobs,
+                      )
+                    : undefined
+                // The mount's own state, and beside it where its data stands
+                // against the backups that protect it.
+                const state = (
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {backup && (
+                      <Status
+                        tone={backup.tone}
+                        label={
+                          backup.at ? `${backup.word} ${relativeTime(backup.at)}` : backup.word
+                        }
+                      />
+                    )}
                     <Status tone={status.tone} label={status.label} />
-                    {/* The editor's word for the same thing, not the engine's "bind". */}
-                    <Tag>{mount.kind === "volume" ? "volume" : "host path"}</Tag>
-                    {mount.readOnly && <Tag>read-only</Tag>}
-                  </>
+                  </span>
                 )
                 return (
                   <ChoiceRow
@@ -355,15 +255,20 @@ function StorageForm({
                     description={
                       <>
                         <span className="font-mono">{mount.source}</span>
+                        {/* The editor's word for the same thing, not the engine's "bind". */}
+                        {" · "}
+                        <span>{mount.kind === "volume" ? "volume" : "host path"}</span>
+                        {mount.readOnly && " · read-only"}
                         {size ? <span className="numeric"> · {bytes(size)}</span> : null}
                         <span> · {mount.ownership}</span>
+                        {wide && mount.detail && ` · ${mount.detail}`}
                       </>
                     }
-                    trailing={wide ? readings : undefined}
+                    trailing={wide && state}
                   >
-                    {(!wide || mount.detail) && (
+                    {!wide && (
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:pl-11">
-                        {!wide && readings}
+                        {state}
                         {mount.detail && (
                           <span className="text-hint text-muted-foreground">{mount.detail}</span>
                         )}
@@ -372,14 +277,16 @@ function StorageForm({
                   </ChoiceRow>
                 )
               })}
+              {/* The row is a link and its title the verb, so where it goes
+                  needs no second clause; why it is here does. */}
               {unprotected.map(({ source, volume }) => (
                 <ChoiceRow
                   key={`protect-${source}`}
                   href={`/backups?source=${encodeURIComponent(volume!.mountpoint)}`}
                   verb={`Back up ${source}`}
-                  leading={<ProductLogo size="sm" fallback={Archive} />}
+                  leading={<ProductLogo id={product} size="sm" fallback={Archive} />}
                   title={`Back up ${source}`}
-                  description="No job copies it — opens Backups with this volume chosen"
+                  description="No backup job copies it"
                 />
               ))}
             </ChoiceList>

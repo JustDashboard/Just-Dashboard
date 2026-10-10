@@ -1,0 +1,20 @@
+
+Running 13 tests using 1 worker
+
+(node:1447911) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/network-dns-services.spec.ts:32:5 › private native services are absent for a reader and make no native GET (1.4s)
+  ✓   2 [chromium] › tests/browser/network-dns-services.spec.ts:39:5 › connection defaults read-only and sends only the selected native credential (2.5s)
+  ✓   3 [chromium] › tests/browser/network-dns-services.spec.ts:68:5 › replacement fixes native owner/origin, re-enters sealed trust and retains details after failure (2.8s)
+  ✓   4 [chromium] › tests/browser/network-dns-services.spec.ts:116:5 › inventory preserves separate native evidence, views, clients, zones, overrides and bounded queries (2.0s)
+  ✓   5 [chromium] › tests/browser/network-dns-services.spec.ts:153:5 › read-only connections cannot stage native changes (1.4s)
+  ✓   6 [chromium] › tests/browser/network-dns-services.spec.ts:163:5 › upstream draft becomes a retained review before any native apply (2.4s)
+  ✓   7 [chromium] › tests/browser/network-dns-services.spec.ts:182:5 › an expired retained review stays readable and cannot apply (2.4s)
+  ✓   8 [chromium] › tests/browser/network-dns-services.spec.ts:195:5 › a failed native read retains inventory and blocks staging (2.9s)
+  ✓   9 [chromium] › tests/browser/network-dns-services.spec.ts:210:5 › an open confirmation refuses a changed same-ID reviewed intent (2.4s)
+  ✓  10 [chromium] › tests/browser/network-dns-services.spec.ts:227:5 › an open confirmation refuses a failed native owner refresh (2.6s)
+  ✓  11 [chromium] › tests/browser/network-dns-services.spec.ts:249:5 › HTTP 200 needs-review is retained without verified success (2.3s)
+  ✓  12 [chromium] › tests/browser/network-dns-services.spec.ts:268:5 › a lost apply reply remains single-use after page reload (4.4s)
+  ✓  13 [chromium] › tests/browser/network-dns-services.spec.ts:292:5 › owned resource preview and removal name the exact bridge/container and both volumes (2.3s)
+
+  13 passed (33.6s)

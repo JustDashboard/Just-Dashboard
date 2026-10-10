@@ -1,0 +1,17 @@
+source 9b77e3050e8f04729fdfb620e4788c90cb6b7049 2026-10-09T15:54:56Z
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_false
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_true
+--- PASS: TestLiveWireGuardDualStackSplitFullAndContainment (49.92s)
+    --- PASS: TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_false (27.61s)
+    --- PASS: TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_true (22.30s)
+=== RUN   TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks
+    wgkillswitch_live_test.go:138: IPv4 exit translated 2 client connections
+    wgkillswitch_live_test.go:138: IPv6 exit translated 2 client connections
+--- PASS: TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks (9.33s)
+=== RUN   TestLiveWireGuardSiteVerificationTransportGuardAndRestore
+    wgsite_live_test.go:94: verified: [{Name:handshake Status:pass Detail:handshake 0s ago} {Name:route 192.168.88.0/24 Status:pass Detail:routed into jdst} {Name:transport Status:pass Detail:172.32.0.2:51820 leaves through transport} {Name:tunnel address Status:pass Detail:10.80.0.2 answered 10.80.0.1 through the tunnel} {Name:target 192.168.88.10 Status:pass Detail:192.168.88.10 answered 10.80.0.1 through the tunnel}]
+    wgsite_live_test.go:175: history: site_verified restored removed site_verified site_verified peer_added created
+--- PASS: TestLiveWireGuardSiteVerificationTransportGuardAndRestore (17.44s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	77.769s

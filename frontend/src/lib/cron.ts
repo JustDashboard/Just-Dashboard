@@ -168,6 +168,20 @@ function stepOf(values: Set<number>, spec: FieldSpec): number | null {
 }
 
 /**
+ * A step that starts past the field's first value and still covers it to the
+ * end — `5-55/10`, which sysstat ships, is every ten minutes from :05.
+ */
+function offsetStepOf(values: Set<number>, spec: FieldSpec): { step: number; from: number } | null {
+  const sorted = [...values].sort((a, b) => a - b)
+  if (sorted.length < 2) return null
+  const step = sorted[1] - sorted[0]
+  if (sorted[0] - spec.min >= step) return null
+  for (let i = 1; i < sorted.length; i++) if (sorted[i] - sorted[i - 1] !== step) return null
+  if (sorted[sorted.length - 1] + step <= spec.max) return null
+  return { step, from: sorted[0] }
+}
+
+/**
  * The schedule as a sentence: "Every day at 03:00", "Every 5 minutes",
  * "At 07:30 on Monday and Friday", "At 00:00 on the 1st of every month".
  */
@@ -184,12 +198,15 @@ export function describeCron(expression: string): string {
   let time: string
   const minuteStep = stepOf(cron.minute, SPECS[0])
   const hourStep = stepOf(cron.hour, SPECS[1])
+  const minuteOffset = offsetStepOf(cron.minute, SPECS[0])
   if (full(cron.minute, SPECS[0]) && full(cron.hour, SPECS[1])) {
     time = "Every minute"
   } else if (full(cron.minute, SPECS[0])) {
     time = `Every minute of ${hours.length === 1 ? `the hour from ${pad(hours[0])}:00` : `the hours ${listOf(hours, (h) => `${pad(h)}:00`)}`}`
   } else if (minuteStep && full(cron.hour, SPECS[1])) {
     time = `Every ${minuteStep} minutes`
+  } else if (minuteOffset && full(cron.hour, SPECS[1])) {
+    time = `Every ${minuteOffset.step} minutes from :${pad(minuteOffset.from)}`
   } else if (minuteStep && hours.length > 0) {
     time = `Every ${minuteStep} minutes between ${pad(hours[0])}:00 and ${pad(hours[hours.length - 1])}:59`
   } else if (minutes.length === 1 && hourStep) {
@@ -202,9 +219,12 @@ export function describeCron(expression: string): string {
   } else {
     const times: string[] = []
     for (const h of hours) for (const m of minutes) times.push(`${pad(h)}:${pad(m)}`)
+    // Past six the times are not a sentence; how many there are is, and it
+    // does not start with "At", which the day's wording below would turn
+    // into "Every day at 144 times a day".
     time =
       times.length > 6
-        ? `At ${times.length} times a day`
+        ? `${times.length} times a day`
         : `At ${listOf(
             times.map((_, i) => i),
             (i) => times[i],

@@ -2,7 +2,6 @@ package files
 
 import (
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,8 +66,12 @@ type FindResult struct {
 	// that quietly answers from a third of the disk is worse than one that
 	// admits it.
 	Truncated bool `json:"truncated"`
-	Visited   int  `json:"visited"`
-	ElapsedMS int  `json:"elapsedMs"`
+	// Total is how many matched before the best Limit were kept. More matches
+	// than fit is not a partial walk, and saying "partial" for it sent people
+	// widening a search that had already looked everywhere.
+	Total     int `json:"total"`
+	Visited   int `json:"visited"`
+	ElapsedMS int `json:"elapsedMs"`
 }
 
 const (
@@ -104,72 +107,77 @@ func (s *Service) Find(ctx context.Context, opts FindOptions) (*FindResult, erro
 
 	started := time.Now()
 	deadline := started.Add(opts.Budget)
-	baseDepth := strings.Count(root, string(os.PathSeparator))
 	visited := 0
 
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	// Breadth first, a level at a time. A depth-first walk spent its whole
+	// budget inside the first large directory it met — a checkout, a runner's
+	// work tree — and answered "partial" without ever reaching the folder
+	// beside it whose name was typed. Shallow results are the ones the scoring
+	// prefers anyway, so they are the ones the walk reaches first.
+	type pending struct {
+		path  string
+		depth int
+	}
+	queue := []pending{{path: root}}
+walk:
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		children, err := os.ReadDir(dir.path)
 		if err != nil {
 			// An unreadable directory is a fact about this host, not a failure
 			// of the search: skip it and keep going.
-			if d != nil && d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+			continue
 		}
-		visited++
-		// The clock and the caller are consulted rarely rather than per entry:
-		// time.Now on every one of a hundred thousand entries is itself a
-		// measurable part of the walk.
-		if visited%512 == 0 {
-			if ctx.Err() != nil || time.Now().After(deadline) {
+		for _, d := range children {
+			visited++
+			// The clock and the caller are consulted rarely rather than per
+			// entry: time.Now on every one of a hundred thousand entries is
+			// itself a measurable part of the walk.
+			if visited%512 == 0 && (ctx.Err() != nil || time.Now().After(deadline)) {
 				result.Truncated = true
-				return filepath.SkipAll
+				break walk
 			}
-		}
-		if visited >= opts.MaxVisit || len(result.Hits) >= findMaxMatches {
-			result.Truncated = true
-			return filepath.SkipAll
-		}
-		if path == root {
-			return nil
-		}
-		name := d.Name()
-		hidden := strings.HasPrefix(name, ".")
-		if d.IsDir() {
-			if skipDirs[name] || (hidden && !opts.Hidden) ||
-				strings.Count(path, string(os.PathSeparator))-baseDepth >= opts.MaxDepth {
-				return filepath.SkipDir
+			if visited >= opts.MaxVisit || len(result.Hits) >= findMaxMatches {
+				result.Truncated = true
+				break walk
 			}
-		} else if hidden && !opts.Hidden {
-			return nil
-		}
+			name := d.Name()
+			path := filepath.Join(dir.path, name)
+			hidden := strings.HasPrefix(name, ".")
+			if hidden && !opts.Hidden {
+				continue
+			}
+			if d.IsDir() && !skipDirs[name] && dir.depth+1 < opts.MaxDepth {
+				queue = append(queue, pending{path: path, depth: dir.depth + 1})
+			}
 
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
+			score, matches, ok := scoreCandidate(terms, name, rel)
+			if !ok {
+				continue
+			}
+			if d.IsDir() {
+				// A folder is a destination as well as a result: opening one is
+				// usually what a search for a directory name was for.
+				score += 8
+			}
+			hit := FindHit{
+				Path: path, Name: name, Rel: rel, Dir: filepath.Dir(rel),
+				IsDir: d.IsDir(), Score: score, Matches: matches,
+			}
+			if info, err := d.Info(); err == nil {
+				hit.Size = info.Size()
+				hit.Modified = info.ModTime().UTC()
+			}
+			result.Hits = append(result.Hits, hit)
 		}
-		score, matches, ok := scoreCandidate(terms, name, rel)
-		if !ok {
-			return nil
-		}
-		if d.IsDir() {
-			// A folder is a destination as well as a result: opening one is
-			// usually what a search for a directory name was for.
-			score += 8
-		}
-		hit := FindHit{
-			Path: path, Name: name, Rel: rel, Dir: filepath.Dir(rel),
-			IsDir: d.IsDir(), Score: score, Matches: matches,
-		}
-		if info, err := d.Info(); err == nil {
-			hit.Size = info.Size()
-			hit.Modified = info.ModTime().UTC()
-		}
-		result.Hits = append(result.Hits, hit)
-		return nil
-	})
-	if walkErr != nil && walkErr != filepath.SkipAll && ctx.Err() == nil {
-		return result, walkErr
+	}
+	if ctx.Err() != nil {
+		result.Truncated = true
 	}
 
 	sort.SliceStable(result.Hits, func(i, j int) bool {
@@ -182,9 +190,9 @@ func (s *Service) Find(ctx context.Context, opts FindOptions) (*FindResult, erro
 		}
 		return a.Rel < b.Rel
 	})
+	result.Total = len(result.Hits)
 	if len(result.Hits) > opts.Limit {
 		result.Hits = result.Hits[:opts.Limit]
-		result.Truncated = true
 	}
 	result.Visited = visited
 	result.ElapsedMS = int(time.Since(started).Milliseconds())
@@ -249,6 +257,12 @@ func scoreCandidate(terms []term, name, rel string) (int, []int, bool) {
 // pull the match as tight as it will go. Without the second pass "app" against
 // "a-package-application" matches the first three scattered letters and scores
 // worse than the run it should have found.
+//
+// A run of the typed characters, where one exists, is scored as well and the
+// better of the two kept. The tightening pass only ever finds the run that
+// ends where the forward pass did, so "promo" against
+// "proxy-tls-monitor.spec.ts" scattered across two words used to outscore
+// "Just-Dashboard-Promo.mp4", which holds the word itself.
 func fuzzyScore(needle, haystack, original []rune) (int, []int, bool) {
 	if len(needle) == 0 || len(needle) > len(haystack) {
 		return 0, nil, false
@@ -275,7 +289,35 @@ func fuzzyScore(needle, haystack, original []rune) (int, []int, bool) {
 			k--
 		}
 	}
+	score := scorePositions(positions, haystack, original)
 
+	for start := 0; start+len(needle) <= len(haystack); start++ {
+		if !runesAt(haystack, needle, start) {
+			continue
+		}
+		run := make([]int, len(needle))
+		for i := range run {
+			run[i] = start + i
+		}
+		// The bonus is what a person means by "it has the word in it": a run
+		// beats any scatter of the same letters, wherever in the name it sits.
+		if s := scorePositions(run, haystack, original) + 40; s > score {
+			score, positions = s, run
+		}
+	}
+	return score, positions, true
+}
+
+func runesAt(haystack, needle []rune, start int) bool {
+	for i, r := range needle {
+		if haystack[start+i] != r {
+			return false
+		}
+	}
+	return true
+}
+
+func scorePositions(positions []int, haystack, original []rune) int {
 	score := 0
 	for i, pos := range positions {
 		score += 12
@@ -298,7 +340,7 @@ func fuzzyScore(needle, haystack, original []rune) (int, []int, bool) {
 	score -= (span - len(positions)) * 3
 	score -= positions[0]
 	score -= len(haystack) / 4
-	return score, positions, true
+	return score
 }
 
 func isBoundary(r rune) bool {

@@ -11,7 +11,7 @@ import {
   RefreshClockwise,
   Stop,
 } from "@/components/icons"
-import { errorMessage, get, post } from "@/lib/api"
+import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration, plural } from "@/lib/format"
 import type {
@@ -44,6 +44,7 @@ import {
   stoppedLabel,
 } from "@/components/proxy/engine-lifecycle"
 import { warningCount } from "@/components/proxy/config-test"
+import { loadProofText, provenLive } from "@/components/proxy/load-proof"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -114,8 +115,9 @@ export function EngineStatus({
  * engine drawn as itself on the tile, its name and version, and after it the
  * facts a person opens the page to check — whether it is running, the
  * directory it reads, the ingress it serves through, whether certbot is here
- * and who renews. The service commands sit at the line's right end, where
- * the Overview keeps its verdict and Metrics link.
+ * and who renews — then what it serves. The verdict on its routes and the
+ * service commands sit at the line's right end, where the Overview keeps its
+ * verdict.
  *
  * It was a row of grey words. The engine is the one product this section is
  * about, and a page about nginx that never draws nginx opened on less than
@@ -133,6 +135,8 @@ export function EngineIdentity({
   serviceBusy,
   certbotVersion,
   renewSource,
+  inventory,
+  verdict,
   actions,
 }: {
   status: ProxyStatus
@@ -152,6 +156,10 @@ export function EngineIdentity({
   serviceBusy?: EngineAction
   certbotVersion?: string
   renewSource?: string | null
+  /** What the engine serves — its sites, certificates, streams and open ports — after its own facts. */
+  inventory?: React.ReactNode
+  /** How its routes are answering, at the line's right end before the commands. */
+  verdict?: React.ReactNode
   actions?: React.ReactNode
 }) {
   const engine = status.nginx || status.caddy
@@ -241,9 +249,17 @@ export function EngineIdentity({
               </span>
             </>
           )}
+          {inventory}
         </>
       }
-      aside={actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      aside={
+        (verdict || actions) && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {verdict}
+            {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+          </div>
+        )
+      }
     />
   )
 }
@@ -350,20 +366,27 @@ export function EngineActions({
     try {
       const res = await post<ProxyReloadResult>("/proxy/reload", { kind })
       const warnings = warningCount(res.validation)
-      notify.success(
-        `${engine} reloaded`,
-        warnings > 0
-          ? {
-              description: `Its config test has ${plural(warnings, "warning")}.`,
-              action: { label: "Show", onClick: () => onReloadTested(res.validation) },
-            }
-          : undefined,
-      )
+      const tested = warnings > 0 ? ` Its config test has ${plural(warnings, "warning")}.` : ""
+      const proof = res.loadProof ? loadProofText(res.loadProof) : ""
+      const description = `${proof}${tested}`.trim() || undefined
+      const show =
+        warnings > 0 ? { label: "Show", onClick: () => onReloadTested(res.validation) } : undefined
+      if (provenLive(res.loadProof)) {
+        notify.success(
+          `${engine} reloaded`,
+          description ? { description, action: show } : undefined,
+        )
+      } else {
+        // The signal went out; the master was not seen loading what it read.
+        notify.warning(`${engine} reload not confirmed`, { description, action: show })
+      }
       onChanged()
     } catch (err) {
       const refusal = refusalOf(err)
       if (refusal?.validation) {
         onReloadTested(refusal.validation)
+      } else if (err instanceof ApiError && err.code === "load_refused") {
+        notify.error(`${engine} refused the reload`, err)
       } else {
         notify.error("Reload failed", err)
       }

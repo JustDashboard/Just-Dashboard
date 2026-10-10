@@ -161,6 +161,11 @@ type Snapshot struct {
 	// reads both from the newest frame.
 	Files   FileHandles `json:"files"`
 	Sensors []Sensor    `json:"sensors"`
+
+	// TCP is how connections are faring, not only how many there are:
+	// retransmissions, failed attempts, resets, accept-queue drops and the
+	// round-trip time of established connections.
+	TCP TCPStats `json:"tcp"`
 }
 
 // ProcCounts is the run queue, straight from /proc/stat.
@@ -188,6 +193,9 @@ type Collector struct {
 	// did.
 	lastCPU    cpu.TimesStat
 	lastCPUSet bool
+	// lastTCP is the TCP MIB at the previous call, for the same reason.
+	lastTCP    TCPCounters
+	lastTCPSet bool
 }
 
 func NewCollector() *Collector {
@@ -270,6 +278,7 @@ func (c *Collector) Collect(ctx context.Context) (*Snapshot, error) {
 	snap.Sockets = ReadSockets()
 	snap.Files = ReadFileHandles()
 	snap.Sensors = ReadSensors(ctx)
+	snap.TCP = c.tcp(elapsed)
 	if misc, err := load.MiscWithContext(ctx); err == nil {
 		snap.Procs = ProcCounts{
 			Running: misc.ProcsRunning,
@@ -282,6 +291,25 @@ func (c *Collector) Collect(ctx context.Context) (*Snapshot, error) {
 	c.lastAt = now
 	c.mu.Unlock()
 	return snap, nil
+}
+
+// tcp reads the TCP MIB against the previous call and the latency of the
+// connections established now.
+func (c *Collector) tcp(elapsed float64) TCPStats {
+	cur, ok := ReadTCPCounters()
+	if !ok {
+		return TCPStats{Latency: ReadTCPLatency()}
+	}
+	c.mu.Lock()
+	prev, had := c.lastTCP, c.lastTCPSet
+	c.lastTCP, c.lastTCPSet = cur, true
+	c.mu.Unlock()
+	stats := TCPStats{Supported: true, Counters: cur}
+	if had {
+		stats = tcpRates(prev, cur, elapsed)
+	}
+	stats.Latency = ReadTCPLatency()
+	return stats
 }
 
 // cpuModes turns the cumulative per-mode counters into the share of the

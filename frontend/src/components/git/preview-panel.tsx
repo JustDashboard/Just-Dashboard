@@ -6,14 +6,12 @@ import {
   Copy,
   CornerUpLeft,
   Cross,
-  External,
   FloppyDisk,
   RotateCounterClockwise,
   GitTag,
-  PaperAirplane,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { errorMessage, get, post, put } from "@/lib/api"
+import { get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -24,8 +22,6 @@ import type {
   GitCommit,
   GitCommitDetail,
   GitComparison,
-  GitHubCheckRun,
-  GitPullRequest,
   GitResult,
   GitStash,
 } from "@/lib/types"
@@ -34,22 +30,19 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
 import type { GitRun } from "@/components/git/run"
-import { CommentDialog } from "@/components/git/comment-dialog"
 import { PreviewHeader } from "@/components/git/preview-header"
 import { ConflictPreview } from "@/components/git/conflict-preview"
 import { PartialPreview } from "@/components/git/partial-preview"
-import { PullReview, WorkflowPreview } from "@/components/git/github-review"
+import { WorkflowPreview } from "@/components/git/github-review"
+import { PullPreview } from "@/components/git/pull-preview"
 import { RebasePreview } from "@/components/git/rebase-preview"
 import { SubmodulePreview, LFSPreview, PatchPreview } from "@/components/git/extras-preview"
 import { ForgePreview } from "@/components/git/forge-preview"
 import { BlamePreview, RecoveryPreview, CommitSignature } from "@/components/git/inspect-panels"
 import { NameDialog } from "@/components/git/name-dialog"
-import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import { RefTags } from "@/components/git/ref-tags"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { IconAction } from "@/components/icon-action"
-import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -95,6 +88,8 @@ export type PreviewContext = {
   onSelect: (p: GitPreview) => void
   /** Narrow the history tab to one file's commits. */
   onFileHistory: (path: string) => void
+  /** The GitHub account comments and reviews are posted as, when signed in. */
+  githubLogin?: string
 }
 
 /**
@@ -925,282 +920,5 @@ export function CommitRow({ commit: c, onClick }: { commit: GitCommit; onClick: 
         )}
       </button>
     </li>
-  )
-}
-
-const REVIEW_LABEL: Record<string, string> = {
-  approved: "approved",
-  changes_requested: "changes requested",
-  review_required: "review required",
-}
-
-/** The dot for one check run: GitHub's status/conclusion pair folded to a word. */
-function checkReading(check: GitHubCheckRun): { tone: DotTone; label: string } {
-  if (check.status !== "completed")
-    return { tone: "warning", label: check.status.replace("_", " ") }
-  switch (check.conclusion) {
-    case "success":
-      return { tone: "running", label: "passed" }
-    case "failure":
-    case "timed_out":
-    case "action_required":
-      return { tone: "danger", label: check.conclusion.replace("_", " ") }
-    case "cancelled":
-    case "skipped":
-    case "neutral":
-      return { tone: "stopped", label: check.conclusion }
-    default:
-      return { tone: "unknown", label: check.conclusion || "completed" }
-  }
-}
-
-/**
- * A pull request: its state on GitHub, its description, the checks on its
- * head commit, and the merge — pinned to that commit, so what was reviewed
- * is what lands.
- */
-function PullPreview({
-  number,
-  title,
-  ctx,
-  onClose,
-}: {
-  number: number
-  title?: string
-  ctx: PreviewContext
-  onClose: () => void
-}) {
-  const pull = usePoll(
-    (signal) => get<GitPullRequest>(`/git/github/pulls/${number}`, { path: ctx.repoPath }, signal),
-    30_000,
-    [ctx.repoPath, number],
-  )
-  const [merging, setMerging] = useState(false)
-  const [commenting, setCommenting] = useState(false)
-  const p = pull.data
-  const q = { path: ctx.repoPath }
-  // Read against the head the detail reported, never a bare number: the
-  // route wants the sha, and a listing's checks for an older head would be a
-  // verdict on code that is no longer on the request.
-  const checks = usePoll(
-    (signal) =>
-      get<GitHubCheckRun[]>(
-        `/git/github/pulls/${number}/checks`,
-        { path: ctx.repoPath, head: p?.headSha },
-        signal,
-      ),
-    60_000,
-    [ctx.repoPath, number, p?.headSha],
-    { enabled: Boolean(p?.headSha) },
-  )
-
-  const verbs: Verb[] = [
-    {
-      key: "open",
-      label: "Open on GitHub",
-      icon: External,
-      inline: true,
-      run: () => window.open(p?.url, "_blank", "noopener"),
-    },
-  ]
-  if (ctx.canControl && p) {
-    verbs.push({
-      key: "comment",
-      label: "Comment",
-      icon: PaperAirplane,
-      inline: true,
-      run: () => setCommenting(true),
-    })
-  }
-  if (ctx.canControl && p && p.state === "open") {
-    verbs.unshift({
-      key: "merge",
-      label: "Merge",
-      icon: SourceMerge,
-      inline: true,
-      disabled: !!ctx.busy || p.draft || p.mergeable === "conflicting",
-      run: () => setMerging(true),
-    })
-    verbs.push({
-      key: "checkout",
-      label: "Check out the branch",
-      icon: SourceBranch,
-      disabled: !!ctx.busy,
-      run: () =>
-        void ctx
-          .run(`Checked out ${p.head}`, () =>
-            post<GitResult>(`/git/github/pulls/${number}/checkout`, undefined, { query: q }).then(
-              () => ({ command: "gh pr checkout", output: `On ${p.head}`, ok: true }),
-            ),
-          )
-          .catch(() => undefined),
-    })
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <PreviewHeader
-        mono={false}
-        title={p?.title ?? title ?? `#${number}`}
-        subtitle={
-          p ? (
-            <>
-              #{p.number} · <span className="font-mono">{p.head}</span> →{" "}
-              <span className="font-mono">{p.base}</span>
-              {p.author ? ` · ${p.author}` : ""}
-              {p.createdAt ? ` · ${relativeTime(p.createdAt)}` : ""}
-            </>
-          ) : (
-            `#${number}`
-          )
-        }
-        onClose={onClose}
-      />
-      <div className="min-h-0 flex-1 overflow-auto">
-        {pull.error && <ErrorState error={pull.error} className="m-3" />}
-        {pull.loading && !p && <LoadingRows className="p-3" rows={5} />}
-        {p && (
-          <div className="animate-rise space-y-3 px-3 py-2.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <Status
-                tone={
-                  p.state === "merged"
-                    ? "running"
-                    : p.state === "closed"
-                      ? "stopped"
-                      : p.draft
-                        ? "notice"
-                        : "running"
-                }
-                label={p.state === "open" && p.draft ? "draft" : p.state}
-              />
-              {p.checks && (
-                <Status
-                  tone={
-                    p.checks === "success"
-                      ? "running"
-                      : p.checks === "failure"
-                        ? "danger"
-                        : "warning"
-                  }
-                  label={
-                    p.checks === "success"
-                      ? "checks passed"
-                      : p.checks === "failure"
-                        ? "checks failed"
-                        : "checks running"
-                  }
-                />
-              )}
-              {p.review && REVIEW_LABEL[p.review] && (
-                <Status
-                  tone={
-                    p.review === "approved"
-                      ? "running"
-                      : p.review === "changes_requested"
-                        ? "danger"
-                        : "notice"
-                  }
-                  label={REVIEW_LABEL[p.review]}
-                />
-              )}
-              {p.mergeable === "conflicting" && <Status tone="danger" label="has conflicts" />}
-              <span className="numeric text-hint text-muted-foreground">
-                {p.files ?? 0} file{p.files === 1 ? "" : "s"} ·{" "}
-                <span className="font-mono">
-                  <span className="text-(--git-added)">+{p.additions ?? 0}</span>{" "}
-                  <span className="text-(--git-deleted)">−{p.deletions ?? 0}</span>
-                </span>
-              </span>
-            </div>
-            <VerbBar verbs={verbs} />
-            {p.body ? (
-              <p className="text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
-                {p.body}
-              </p>
-            ) : (
-              <p className="text-hint text-muted-foreground">No description.</p>
-            )}
-          </div>
-        )}
-        {p?.headSha && (
-          <div className="border-t border-hairline">
-            <div className="flex h-8 items-center gap-1.5 px-3">
-              <span className="eyebrow">Checks</span>
-              {checks.data && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {checks.data.length}
-                </span>
-              )}
-            </div>
-            {checks.error && (
-              <p className="px-3 pb-2 text-hint text-muted-foreground">
-                Could not list checks: {errorMessage(checks.error)}
-              </p>
-            )}
-            {checks.loading && !checks.data && <LoadingRows className="px-3 pb-2" rows={2} />}
-            {checks.data && checks.data.length === 0 && (
-              <p className="px-3 pb-3 text-hint text-muted-foreground">No checks on this commit.</p>
-            )}
-            {checks.data && checks.data.length > 0 && (
-              <ul className="divide-y divide-hairline">
-                {checks.data.map((check, i) => {
-                  const reading = checkReading(check)
-                  return (
-                    <li
-                      key={`${check.app ?? ""}:${check.name}:${i}`}
-                      className="group flex min-w-0 items-center gap-2 px-3 py-1.5"
-                    >
-                      <Status
-                        tone={reading.tone}
-                        label={reading.label}
-                        className="w-24 shrink-0 text-hint"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-xs">{check.name}</span>
-                      {check.app && (
-                        <span className="truncate text-micro text-muted-foreground">
-                          {check.app}
-                        </span>
-                      )}
-                      {check.url && (
-                        <IconAction
-                          label={`Open ${check.name}`}
-                          reveal
-                          onClick={() => window.open(check.url, "_blank", "noopener")}
-                        >
-                          <External />
-                        </IconAction>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        )}
-        {p && <PullReview key={p.number} pull={p} ctx={ctx} onChanged={pull.refresh} />}
-      </div>
-      <CommentDialog
-        open={commenting}
-        onOpenChange={setCommenting}
-        repoPath={ctx.repoPath}
-        number={number}
-        title={p?.title}
-        onCommented={pull.refresh}
-      />
-      {p && (
-        <MergePullDialog
-          open={merging}
-          onOpenChange={setMerging}
-          repoPath={ctx.repoPath}
-          pull={p}
-          headSha={p.headSha}
-          onMerged={() => {
-            pull.refresh()
-            ctx.onChanged()
-          }}
-        />
-      )}
-    </div>
   )
 }

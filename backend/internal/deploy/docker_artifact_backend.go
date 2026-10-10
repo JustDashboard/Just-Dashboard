@@ -75,6 +75,16 @@ func (b *DockerArtifactBackend) PullImage(
 	return resolvedDockerImage(image), nil
 }
 
+func (b *DockerArtifactBackend) TagImage(ctx context.Context, source, target string) (ResolvedImage, error) {
+	if b == nil || b.docker == nil {
+		return ResolvedImage{}, ErrBuilderUnavailable
+	}
+	if err := b.docker.TagImage(ctx, source, target); err != nil {
+		return ResolvedImage{}, err
+	}
+	return b.InspectImage(ctx, target)
+}
+
 func (b *DockerArtifactBackend) InspectImage(ctx context.Context, reference string) (ResolvedImage, error) {
 	if b == nil || b.docker == nil {
 		return ResolvedImage{}, ErrBuilderUnavailable

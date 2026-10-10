@@ -1,0 +1,18 @@
+
+Running 14 tests using 1 worker
+
+[1/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:25:5 › the reply decision names the kernel's table and the evaluated rule, and says when it cannot
+[2/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:73:5 › a target narrows every table to its covering routes and the history to its changes
+[3/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:122:5 › a multipath route sends each leg, and a discard route is added only after its preview
+[4/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:187:5 › a managed route is edited by applying exactly the plan that was reviewed
+[5/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:249:5 › a policy rule takes UID, TOS and goto selectors and previews its effect before it is added
+[6/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:347:5 › forwarding shows its measured health and how Docker was counted
+[7/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:389:5 › BGP shows each neighbour's filters, OSPF adjacencies and a bounded route browser
+[8/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:469:5 › a pending routing change shows what it was checked against and the connections it moved
+[9/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:641:5 › the firewall page says which firewall is in charge, its zones, policy by family and preserved access
+[10/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:668:5 › enabling shows the preflight's refusal before anything is sent, and sends nothing on cancel
+[11/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:724:5 › rules carry their identity, findings and history, and removal names the identity
+[12/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:788:5 › several rule changes are staged, reviewed and applied as one plan
+[13/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:844:5 › an inactive ufw's configured rules and the owned nftables table say what is enforced
+[14/14] [chromium] › tests/browser/network-routing-firewall.spec.ts:919:5 › with temporary apply on, a firewall change asks the host to recover it unless confirmed
+  14 passed (25.9s)

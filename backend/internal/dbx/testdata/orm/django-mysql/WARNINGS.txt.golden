@@ -1,0 +1,2 @@
+blog.posts.flags has type set('pinned','featured'), which Django has no field for; it is declared as a TextField.
+Index ft_posts_body on blog.posts is a full-text index and was left out; it still exists in the database.

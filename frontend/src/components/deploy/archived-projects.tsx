@@ -36,18 +36,22 @@ import { purgeRequest } from "@/components/deploy/project-verbs"
  * a step of opacity: a project at rest, the way Backups dims a paused job.
  * What it was built from and what deleting it takes with it are on the row,
  * because that is what the one decision made here turns on.
+ *
+ * One line, so Restore stands on the row's middle: the source leads the line
+ * under the name, before when it was archived and created, and the count of
+ * variables sits at the end in a fixed measure, so down the list the counts
+ * are one column and end on one edge. Below `xl` the source and the count were
+ * a band under the name, and the verbs a third line under that. A phone has no
+ * room for the source and the count beside the name and keeps them on a second
+ * line; the verbs stay in the row's own slot at every width.
  */
 export function ArchivedProjects() {
   const router = useRouter()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  // Restore and Delete sit in the row's own slot where there is room for
-  // them, and on a line of their own under the name below that — chosen once,
-  // because each is found by its name and a hidden twin is a second answer.
-  // Room is `xl`: the source, the count and both buttons want about 520px
-  // beside the name, and with the sidebar beside it anything narrower left
-  // the name no width at all.
-  const wide = useMediaQuery("(min-width: 1280px)")
+  // Chosen once, because each reading is found by its text and a hidden twin
+  // is a second answer.
+  const wide = useMediaQuery("(min-width: 640px)")
   const [query, setQuery] = useSessionState("deploy.archived.query", "")
   const [restoringId, setRestoringId] = useState<number>()
   const result = usePoll(
@@ -165,42 +169,56 @@ export function ArchivedProjects() {
             />
           ) : (
             <ChoiceList aria-label="Archived deployments" className="animate-rise">
-              {projects.map((project) => (
-                <ChoiceRow
-                  key={project.id}
-                  href={`/deploy/${project.id}`}
-                  verb={`Open ${project.name}`}
-                  leading={<ArchivedMark project={project} />}
-                  title={project.name}
-                  description={
-                    <>
-                      Archived {relativeTime(project.archivedAt)} · created{" "}
-                      {calendarDate(project.createdAt)}
-                    </>
-                  }
-                  trailing={
-                    wide && (
-                      <>
-                        <span className="flex w-48 min-w-0">
+              {projects.map((project) => {
+                const variables = (
+                  <span className="numeric shrink-0">
+                    {plural(project.envVarCount, "variable")}
+                  </span>
+                )
+                return (
+                  <ChoiceRow
+                    key={project.id}
+                    href={`/deploy/${project.id}`}
+                    verb={`Open ${project.name}`}
+                    leading={<ArchivedMark project={project} />}
+                    title={project.name}
+                    description={
+                      wide ? (
+                        <span className="flex min-w-0 items-center gap-1.5">
                           <ArchivedSource project={project} />
+                          {/* Lower-case after the source, as a fact further
+                              along a line is everywhere else. */}
+                          <span className="min-w-0 truncate">
+                            {recorded(project)?.sourceRepository ? "· archived" : "Archived"}{" "}
+                            {relativeTime(project.archivedAt)} · created{" "}
+                            {calendarDate(project.createdAt)}
+                          </span>
                         </span>
-                        <span className="numeric w-24 text-right text-hint text-muted-foreground">
-                          {plural(project.envVarCount, "variable")}
+                      ) : (
+                        <>
+                          Archived {relativeTime(project.archivedAt)} · created{" "}
+                          {calendarDate(project.createdAt)}
+                        </>
+                      )
+                    }
+                    trailing={
+                      wide && (
+                        <span className="flex w-20 justify-end text-hint text-muted-foreground">
+                          {variables}
                         </span>
-                      </>
-                    )
-                  }
-                  actions={wide && <DimActions className="gap-1.5">{verbsFor(project)}</DimActions>}
-                >
-                  {!wide && (
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-hint text-muted-foreground">
-                      <ArchivedSource project={project} />
-                      <span className="numeric">{plural(project.envVarCount, "variable")}</span>
-                      <span className="flex w-full items-center gap-1.5">{verbsFor(project)}</span>
-                    </div>
-                  )}
-                </ChoiceRow>
-              ))}
+                      )
+                    }
+                    actions={<DimActions className="gap-1.5">{verbsFor(project)}</DimActions>}
+                  >
+                    {!wide && (
+                      <div className="flex min-w-0 items-center gap-3 text-hint text-muted-foreground">
+                        <ArchivedSource project={project} />
+                        {variables}
+                      </div>
+                    )}
+                  </ChoiceRow>
+                )
+              })}
             </ChoiceList>
           )}
         </PanelBody>

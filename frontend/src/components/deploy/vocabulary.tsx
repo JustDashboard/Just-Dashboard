@@ -7,7 +7,6 @@ import {
   Code,
   Envelope,
   GitBranch,
-  GitHubMark,
   Globe,
   GridMasonry,
   Inspect,
@@ -156,23 +155,37 @@ export function runTone(state: DeploymentRunState | string): DotTone {
 }
 
 /**
+ * A Stop that succeeded leaves its release stopped, so "Ready" — the word for
+ * a release answering — would say the opposite of what the run did.
+ */
+export function runStopped(run: { state: string; operation?: string }) {
+  return run.operation === "stop" && run.state === "succeeded"
+}
+
+export function runLabel(state: DeploymentRunState | string, operation?: string) {
+  if (runStopped({ state, operation })) return "Stopped"
+  return RUN_LABELS[state as DeploymentRunState] ?? humanize(state)
+}
+
+/**
  * The one way a run's state is drawn: a dot and the reader's word for it.
  * `live` is only honest on the run page, where the row is fed by the stream.
  */
 export function RunStatus({
   state,
+  operation,
   live,
   className,
 }: {
   state: DeploymentRunState | string
+  operation?: string
   live?: boolean
   className?: string
 }) {
-  const label = RUN_LABELS[state as DeploymentRunState] ?? humanize(state)
   return (
     <Status
-      tone={runTone(state)}
-      label={label}
+      tone={runStopped({ state, operation }) ? "stopped" : runTone(state)}
+      label={runLabel(state, operation)}
       live={Boolean(live) && isActiveRun(state)}
       className={className}
     />
@@ -497,11 +510,11 @@ export const SOURCE_KIND_LABELS: Record<DeploymentSourceKind, string> = {
  * "Git repository" was shown a different product's icon for the thing they had
  * chosen. One mapping, so step one and step two cannot drift again (§4).
  *
- * GitHub is spelled with its own brand mark rather than a generic git glyph,
- * for the same reason the chooser does: the identity that reaches the
- * repository is the fact the reader is checking here, and a repository on some
- * other host is genuinely a different thing. A non-GitHub remote keeps the
- * branch glyph — a made-up logo would be worse than none.
+ * A repository is drawn as the forge it lives on — GitHub, GitLab, Codeberg,
+ * Bitbucket, Gitea, Forgejo — in that product's own artwork, for the same
+ * reason the chooser does: the identity that reaches the repository is the
+ * fact the reader is checking here. A remote on a host that names no forge
+ * keeps the branch glyph — a made-up logo would be worse than none.
  */
 export function SourceMark({
   source,
@@ -522,21 +535,27 @@ export function SourceMark({
       return <GridMasonry className={className} />
     case "import":
       return <Inspect className={className} />
-    default:
-      return isGitHubSource(source) ? (
-        <GitHubMark className={className} />
+    default: {
+      const forge = gitSourceProduct(source)
+      return forge ? (
+        <ProductGlyph id={forge} className={className} />
       ) : (
         <GitBranch className={className} />
       )
+    }
   }
 }
 
-/** Whether a git source is on github.com, which is what `githubRepo` means. */
-function isGitHubSource(source: DeploymentDraftSource) {
-  if (source.kind !== "git" && source.kind !== "local") return false
+/** The forge a git source is on, from its host. */
+function gitSourceProduct(source: DeploymentDraftSource) {
+  if (source.kind !== "git" && source.kind !== "local") return undefined
   // A connected repository is always GitHub — it arrived through the App —
-  // and a pasted URL is one when it names the host.
-  return source.mode === "connected_repository" || /github\.com/i.test(source.url ?? "")
+  // and a pasted URL is a forge when it names the host.
+  return (
+    hostProduct(source.url) ??
+    gitProviderProduct(source.provider) ??
+    (source.mode === "connected_repository" ? "github" : undefined)
+  )
 }
 
 /**
@@ -1447,8 +1466,25 @@ const STEP_LABELS: Record<string, string> = {
   legacy_pipeline: "Compatibility pipeline",
 }
 
-export function stepName(key: string) {
+// Restart, Stop and Start run `start_candidate` against the live release
+// rather than a new one (`liveReleaseStepLabels` in the same read model), and
+// a Stop read as "Start new release" looked like a deploy had been started.
+const LIVE_RELEASE_STEPS: Record<string, string> = {
+  restart: "Restart live release",
+  stop: "Stop live release",
+  start: "Start live release",
+}
+
+export function stepName(key: string, operation?: string) {
+  if (key === "start_candidate" && operation && LIVE_RELEASE_STEPS[operation]) {
+    return LIVE_RELEASE_STEPS[operation]
+  }
   return STEP_LABELS[key] ?? sentence(key)
+}
+
+/** A release-path stage's name; a Stop's one stage at work stops rather than starts. */
+export function stageName(label: string, operation?: string) {
+  return label === "Start" && operation === "stop" ? "Stop" : label
 }
 
 /**

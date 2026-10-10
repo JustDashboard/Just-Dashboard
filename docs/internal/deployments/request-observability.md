@@ -285,9 +285,27 @@ tick at the line; its form speaks the rule back before it is saved, and removing
 
 The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
 address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
-verbs do, so a scanner seen here is stopped at the firewall without changing pages. Loopback and
+verbs do. This saves a persistent **host firewall rule**, rather than proving an ingress block:
+Docker-published ingress ports can bypass the host's inbound firewall. The scanner notice and the
+success toast state that limitation for Docker Caddy records. Loopback and
 private addresses never get the verb: a deny rule against something already inside the network the
 firewall stands at the edge of does nothing.
+
+The workspace reads `/firewall/` on mount and every 20 seconds for administrators, including while
+request traffic is live. A saved full-source inbound deny or reject (including a matching CIDR) removes
+that address from the scanner action notice; Clients keeps the historical traffic with **Deny saved**,
+and the opened request's block action reads **Deny rule saved** and is disabled. It does not delete
+requests or change the window's counts. A reload reads the saved rule again; removing it in Firewall
+restores the action on the next successful read. Port-, protocol-, destination- and direction-limited
+rules do not stand for a full-source deny.
+
+Pending blocks are tracked per address and guarded before React paints, so concurrent blocks cannot
+re-enable each other's actions. A successful write updates all three surfaces immediately, then
+refreshes the rule list. A refused duplicate is treated as already saved only after a fresh firewall
+read confirms the source deny. Other failures show the API's message and keep the action retryable.
+An unreadable, unavailable, disabled or read-only firewall disables Block with a reason and a link to
+Firewall; the workspace does not enable a firewall on the operator's behalf. The scanner sentence
+describes refused **probes**, without claiming that all traffic from a scanner was refused.
 
 "Private" is read from the actual reservations rather than from a prefix. The first version tested
 `172.` and so hid the verb for the whole of `172.32`–`172.255`, which is public space — 172.217 is
@@ -381,22 +399,21 @@ of a host's logs.
 
 ## Frontend
 
-`ProjectLogs` is a `StatGrid` of five readings (requests/min with page views, failing share, p95,
-bytes served, container events — the figures count up on arrival through `NumberTicker`) and the
+`ProjectLogs` is a `StatGrid` of four readings (requests/min with page views, failing share, p95,
+bytes served — the figures count up on arrival through `NumberTicker`) and the
 alerts line over a `Pane` with the five views, the pane a definite height (`max(28rem, 100dvh − 6rem)`,
 `40rem` from `sm`) with each view scrolling inside it — a 307-line live tail had stretched it to
 nearly seven thousand pixels. Each reading carries its last hour in the tile, as
 the host Overview's do: the request rate, the p95 and the bytes as lines from the buckets, the
 browsers, programs and crawlers that asked as their logos beside the tile's name, the failing share
-as a strip of the hour's sixty minutes (green where a minute went fine, red where it had a 5xx, grey
-where nothing came in), and the container as its newest disruption with a rail of a tick per exit,
-restart and start (`traffic-strip.tsx`, the Backups run strip's shape; two strips on one scale, so a
-red minute and an exit at the same place are one incident read twice), two to a row on a phone. An
-exit with status 0 is not a disruption: it is a routine stop or the old container of a release
-swap, which the server already logs as a notice. The rail draws it as a muted tick, never the
-failure's red; the reading counts it as a stop, reading "Stopped" in no tone when nothing started
-after it and "Steady" after a swap; and the Events tab does not count it. A kill is not counted
-either, because Docker reports the exit that follows it and one stop would read as two. The chart
+as a strip of the hour's sixty minutes (`traffic-strip.tsx`, the Backups run strip's shape: green
+where a minute went fine, red where it had a 5xx, grey where nothing came in), two to a row on a
+phone. What the container did is the Events tab's: its count is the hour's disruptions — an exit
+that was not clean, an OOM kill, a restart. An exit with status 0 is not a disruption: it is a
+routine stop or the old container of a release swap, which the server already logs as a notice, and
+the Events tab does not count it. A kill is not counted either, because Docker reports the exit
+that follows it and one stop would read as two. (A fifth reading, Container, named the newest
+disruption over a rail of ticks until 2026-10-03; the Events tab already said the same thing.) The chart
 carries marks through the house chart's `events`: a release going live (`releases[].activatedAt`,
 the Metrics page's deploy colour), a container exit that was not clean or an OOM kill (danger), a
 restart or a start (warning) — a clean exit is the other half of a release going live or of somebody
@@ -460,8 +477,8 @@ container's lens — folded under it while the container exists, open by default
 failure; a removed container's newest failure says it was removed rather than searching. The Overview
 carries two of this page's readings among its own four (requests a minute with
 the hour's line, and the failing share), and each fleet card a sparkline with the rate, both from
-`/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
-share and p95 before → after activation. The readings are
+`/deploy/traffic`. (The run page's Metrics view, which led with requests/min, failing share and p95
+before → after activation, left the page on 2026-10-05.) The readings are
 the page's own, over a fixed last hour, so they hold still while the reader narrows the rows beneath
 them — which is what lets the error rate be the thing that sent them to Output in the first place.
 Each is a rate or a share rather than a count: a figure whose meaning depends on a control somewhere
@@ -553,7 +570,7 @@ the verbs that change something step forward in weight.
   and dedups by sequence.
 - The Docker event buffer is memory-resident and bounded; it is an hour of a busy host, not an audit
   trail. What the dashboard itself did is in `audit_log`. A restart of the backend — a self-update
-  included — empties it, and the Events view, the Container reading and the chart's failure marks all
+  included — empties it, and the Events view, its count and the chart's failure marks all
   forget together. The empty state and the feed's own footer say so rather than leaving a reader to
   infer steadiness from a record that starts three minutes ago.
 - Access logs hold client addresses. They are removed with the route, and they sit behind the same
@@ -605,7 +622,18 @@ Took narrowings, the query surviving a reload, the alert's moment, chip narrowin
 absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
 on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
-addresses are offered a Block, and that the page fits at 390 and 1280 — and that a code, a latency
+addresses are offered a Block, saved denies clearing only the action notice, saved state surviving
+reloads and view changes, per-address concurrency, duplicate verification, readable refusal messages
+and disabled/read-only firewall feedback. `components/deploy/request-blocks.test.js` covers the scope
+and address-family matching of saved source denies and the firewall availability gate. The
+[before](../../audits/2026-10-06-deploy-logs/scanner-before.png),
+[after](../../audits/2026-10-06-deploy-logs/scanner-after.png) and
+[recording](../../audits/2026-10-06-deploy-logs/scanner-block.webm) show the scanner action clearing while
+the historical client stays in the list.
+The saved-deny journey and the multi-width screenshot walkthrough use `test.slow()` for their page
+changes, reloads and captures; assertion timeouts remain unchanged.
+
+The browser spec also holds that the page fits at 390 and 1280 — and that a code, a latency
 and a client on Insights each narrow the window through the API's own filters, that a chosen method
 keeps its chip as the way back, that a row opens from the keyboard, that a clean exit reads as a
 stop rather than a failure, and that a role which cannot add an alert rule is pointed at Automation

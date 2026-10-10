@@ -1,0 +1,7 @@
+=== RUN   TestLiveKernelObserverBackendDeathReleasesOwnedLinksAndPreservesForeign
+    observer_live_test.go:589: SIGKILL released all5 owned unpinned links=[182 183 184 185 186]; foreign link181/program158776 remained; shutdown tail stays unknown
+--- PASS: TestLiveKernelObserverBackendDeathReleasesOwnedLinksAndPreservesForeign (0.05s)
+=== RUN   TestLiveKernelDockerAttributionRejectsReplacedInstanceInSharedNamespace
+    observer_live_test.go:751: shared namespace containers2:32/32 correct native cgroup sender attribution; replacement same-name/same-netns leaves32/32 pending senders unknown; replacement-filter rows0 original retained rows64
+--- PASS: TestLiveKernelDockerAttributionRejectsReplacedInstanceInSharedNamespace (10.34s)
+PASS

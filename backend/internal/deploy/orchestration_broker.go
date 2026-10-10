@@ -8,6 +8,10 @@ import (
 
 const liveEventBuffer = 128
 
+// RunEventReplayLimit bounds one replay page before a subscriber catches up
+// through another page or hands off to live events.
+const RunEventReplayLimit = 5000
+
 type eventSubscription struct {
 	ch    chan RunEvent
 	after int64
@@ -72,7 +76,14 @@ func (s *OrchestrationStore) Subscribe(
 ) ([]RunEvent, <-chan RunEvent, func(), error) {
 	s.broker.mu.Lock()
 	defer s.broker.mu.Unlock()
-	backlog, err := s.EventsAfter(ctx, runID, after, 5000)
+	// Read terminal state first: if completion commits while backlog is read,
+	// its publisher still closes the registered subscription after this lock.
+	// Reading state afterwards could close it without delivering that tail.
+	run, err := s.Run(ctx, runID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	backlog, err := s.EventsAfter(ctx, runID, after, RunEventReplayLimit)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -81,10 +92,6 @@ func (s *OrchestrationStore) Subscribe(
 		if event.Seq > last {
 			last = event.Seq
 		}
-	}
-	run, err := s.Run(ctx, runID)
-	if err != nil {
-		return nil, nil, nil, err
 	}
 	sub := &eventSubscription{ch: make(chan RunEvent, liveEventBuffer), after: last}
 	if !run.State.Terminal() {

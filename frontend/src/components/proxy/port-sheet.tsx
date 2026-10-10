@@ -21,6 +21,7 @@ import {
 import { FirewallVerdict } from "@/components/proxy/ports-firewall"
 import { formatEndpoint } from "@/components/proxy/ports-list"
 import { proxyWords } from "@/components/proxy/ports-proxy"
+import { DockerPath, ExternalProof } from "@/components/proxy/port-reachability"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -223,6 +224,17 @@ function SocketDetail({
             <FirewallVerdict socket={socket} />
           </Detail>
           <Detail label="Proxy">{proxy ?? "Nothing in the proxy routes to it"}</Detail>
+          {/* Every grade above is the host's own reading. What stands in
+              front of the host is not visible from it, and a port graded
+              open here can still be closed upstream, or the reverse. */}
+          {socket.exposed && (
+            <Detail label="Provider">
+              <span className="text-muted-foreground">
+                Not visible — no provider adapter. Reaching it from outside is unproven until an
+                external check measures it.
+              </span>
+            </Detail>
+          )}
         </DetailList>
         {(socket.routes ?? []).length > 1 && (
           <ul className="space-y-1 text-xs">
@@ -237,6 +249,10 @@ function SocketDetail({
       </FormSection>
 
       {clients && <Clients port={socket.port} clients={clients} />}
+
+      {admin && socket.exposed && <ExternalProof socket={socket} />}
+
+      {admin && <DockerPath socket={socket} />}
 
       {admin && socket.protocol === "tcp" && !nat && <Identify socket={socket} />}
     </div>
@@ -256,7 +272,7 @@ function Clients({
       title="Clients"
       actions={
         <Button asChild variant="outline" size="xs">
-          <Link href={`/security/connections?q=${port}`}>
+          <Link href={`/network/connections?q=${port}`}>
             <NetworkDevice />
             Open in Connections
           </Link>
@@ -283,7 +299,7 @@ function Clients({
             {clients.peers.map((peer) => (
               <li key={peer.address} className="flex items-center justify-between gap-3 py-1.5">
                 <Link
-                  href={`/security/connections?q=${encodeURIComponent(peer.address)}`}
+                  href={`/network/connections?q=${encodeURIComponent(peer.address)}`}
                   className="truncate rounded-sm font-mono text-xs underline-offset-2 focus-ring hover:underline"
                 >
                   {peer.address}

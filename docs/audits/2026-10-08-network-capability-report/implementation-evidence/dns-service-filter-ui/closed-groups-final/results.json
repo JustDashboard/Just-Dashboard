@@ -1,0 +1,136 @@
+{
+  "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+  "build": {
+    "exit_code": 0,
+    "wall_seconds": 21.85,
+    "static_pages": 73,
+    "frontend_source_count": 1536
+  },
+  "required": {
+    "base": "6ebbf2d744c2680e5b163e9010b97e1659275f4d",
+    "exit_code": 0,
+    "wall_seconds": 521.43,
+    "bun_passed": 3255,
+    "bun_assertions": 14323,
+    "browser_selected": 189,
+    "browser_passed": 181,
+    "browser_skipped": 8,
+    "optional_skips": "JD_NETWORK_SHOTS captures remain unverified",
+    "api_seconds": 0.591,
+    "dns_seconds": 25.063
+  },
+  "filter_logic": {
+    "cases": 10,
+    "assertions": 70
+  },
+  "filter_browser_cases": 18,
+  "actual_native": {
+    "adguard": {
+      "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+      "engine": "adguard",
+      "exit_code": 0,
+      "wall_seconds": 43.324,
+      "raw_sha256": "1a47d34736418017850e6a0d5b639634123177f9a585f398204c2a19fabfc6f0",
+      "skipped": false,
+      "owned_processes_remaining": [],
+      "owned_docker_remaining": {
+        "container": [],
+        "network": [],
+        "volume": []
+      },
+      "owned_tmp_entries_remaining": [],
+      "host_after": {
+        "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+        "networkd883_start": "452",
+        "nm_paths": {
+          "/etc/NetworkManager": false,
+          "/var/lib/NetworkManager": false
+        }
+      },
+      "host_unchanged": true
+    },
+    "pihole": {
+      "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+      "engine": "pihole",
+      "exit_code": 0,
+      "wall_seconds": 72.962,
+      "raw_sha256": "2bca91d69cb8a2c892ef6fb9968b777d425769b327dcaff315ff108c1aab1781",
+      "skipped": false,
+      "owned_processes_remaining": [],
+      "owned_docker_remaining": {
+        "container": [],
+        "network": [],
+        "volume": []
+      },
+      "owned_tmp_entries_remaining": [],
+      "host_after": {
+        "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+        "networkd883_start": "452",
+        "nm_paths": {
+          "/etc/NetworkManager": false,
+          "/var/lib/NetworkManager": false
+        }
+      },
+      "host_unchanged": true
+    },
+    "technitium": {
+      "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+      "engine": "technitium",
+      "exit_code": 0,
+      "wall_seconds": 26.033,
+      "raw_sha256": "f087a153459b70d888bdf88c8ad6086dd70713537c4907b747999a79c4864e18",
+      "skipped": false,
+      "owned_processes_remaining": [],
+      "owned_docker_remaining": {
+        "container": [],
+        "network": [],
+        "volume": []
+      },
+      "owned_tmp_entries_remaining": [],
+      "host_after": {
+        "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+        "networkd883_start": "452",
+        "nm_paths": {
+          "/etc/NetworkManager": false,
+          "/var/lib/NetworkManager": false
+        }
+      },
+      "host_unchanged": true
+    }
+  },
+  "actual_native_child_seconds": {
+    "adguard": 42.29,
+    "pihole": 71.92,
+    "technitium": 25.0
+  },
+  "source_verification": {
+    "backend_go_files": 1860,
+    "module_files": 2,
+    "frontend_files": 1536,
+    "browser_fixture_spec_files": 2,
+    "race_binary_sha256": "5d78c5a84b7cd39f3647d0e457f7a22f1b54574bee3f92e89ffb5bd1bf39ee06",
+    "all_native_maps_match_current_source": true,
+    "all_raw_native_results_match": true,
+    "client_isolated_source": "05859bbd728d19f442ece85e0d8fd02041f50490",
+    "client_isolated_differences_from_assembled_source": [
+      "backend/internal/dnsservice/filters.go",
+      "backend/internal/dnsservice/filters_test.go"
+    ],
+    "client_results_not_relabeled": true
+  },
+  "screenshots": {
+    "captured": 12,
+    "inspected": [
+      "native-filters-pihole-390.png",
+      "native-filter-rules-adguard-390.png",
+      "native-filters-technitium-390.png",
+      "native-filters-pihole-1280.png",
+      "native-filters-adguard-1720.png",
+      "native-filters-technitium-1280.png"
+    ],
+    "containment": "settled sheet left>=0/right<=viewport+1/internal overflow<=1",
+    "finding": "no horizontal clipping in inspected phone/custom-rule/desktop captures; long inventories scroll vertically",
+    "scope": "mocked metadata, not actual filtering"
+  },
+  "scope": "read-only configured metadata and native persistence; unknown JSON groups/client counts withheld; no subscription download or effective client-filter decision claim"
+}

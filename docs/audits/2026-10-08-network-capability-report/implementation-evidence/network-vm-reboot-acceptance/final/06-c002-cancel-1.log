@@ -1,0 +1,123 @@
+{
+  "at": "2026-10-10T01:18:29Z",
+  "bootId": "47775ab0-e4ff-47e3-82e9-693ad6ad4f0d",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "47775ab0-e4ff-47e3-82e9-693ad6ad4f0d",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:18:20 UTC",
+        "invocationId": "774bfe6e39c940c497cea7112340274c",
+        "reason": null,
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:18:20 UTC",
+        "status": "succeeded"
+      },
+      "files": 8,
+      "notMatching": [],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [],
+        "status": "no_known_repairs"
+      },
+      "runtime": 35,
+      "status": "unknown"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:17:58.410601069Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "sysctl"
+      ],
+      "files": [
+        "/etc/sysctl.d/90-just-dashboard.conf",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "4f6946ba9551507cb0785e59be542eeb3232ac647dc868306b9d6a5c014e3bee",
+      "id": "f1996fb139a0bb9c0308e2c56f5b7824",
+      "persistence": "written",
+      "phase": "saved",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:17:58.460668068Z",
+      "watchdog": "completed"
+    },
+    "routeInKernel": false,
+    "routeInSpec": false
+  },
+  "failures": [],
+  "phase": "c002-cancel 1",
+  "result": "pass",
+  "seconds": 3.0
+}

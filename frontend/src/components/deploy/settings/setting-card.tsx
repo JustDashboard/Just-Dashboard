@@ -1,11 +1,14 @@
 "use client"
 
-import type { FormEvent } from "react"
 import { cn } from "@/lib/utils"
 import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { FormNote, FormSection, FormSections } from "@/components/form"
 import { Status } from "@/components/status-dot"
-import { Button } from "@/components/ui/button"
+import {
+  SaveBarProvider,
+  useSaveBarEntry,
+  type SettingApplies,
+} from "@/components/deploy/settings/save-bar"
 import { PendingChanges } from "@/components/deploy/settings/pending-changes"
 import { LastFailureRemedy } from "@/components/deploy/settings/last-failure"
 import {
@@ -20,89 +23,86 @@ import {
  * form, a footer holding Save — on the argument that a stack of things you
  * fill in one at a time reads best as bordered boxes. It was the last place
  * in the product where the whole page was containers, and it was the wrong
- * shape for a page that *is* a form: §7 puts such a page's section heads in
- * a rail, and Configuration and the account's Security page already read
- * that way. So the heads go down the left, each carrying what the section
- * currently is as data, and the fields go down the right — from `xl` rather
- * than `lg`, because beside the project's own navigation a rail at 1024
- * would leave three fields in a row about 130px each.
+ * shape for a page that *is* a form: §7 sets such a page as one column of
+ * sections divided by hairlines, each head over its fields carrying what the
+ * section currently is as data, and Configuration and the account's Security
+ * page read the same way.
  *
  * The pieces, outermost first:
  *
- *   `SettingsPage` — loads the configuration, then the pending strip, the
- *   page's readings and its forms, rising once when the first read lands.
- *   `SettingForm` — one form, one save. It may span several rail sections
- *   (Runtime is five), because what one PUT writes is what one Save means.
- *   `SettingSection` — one rail head and its fields.
- *   `SettingFoot` — when the change applies, Discard, and Save.
+ *   `SettingsPage` — loads the configuration, then the pending strip and the
+ *   page's forms, rising once when the first read lands; and the page's one
+ *   Save, which floats at the bottom while anything holds an edit
+ *   (`save-bar.tsx`).
+ *   `SettingForm` — one form, one write. It may span several sections
+ *   (Runtime is five), because what one PUT writes is one form; the bar
+ *   saves every dirty form on the page in order.
+ *   `SettingSection` — one head and its fields.
  */
 
-type SettingApplies = "next-deployment" | "immediately"
-
 /**
- * The fields column of a rail section, for what sits under a form rather
- * than in one of its sections: it starts past the 15rem rail and its 3rem gap
- * from `xl`, and stops where the fields stop, so Save sits under the fields it
- * saves rather than a thousand pixels to their right on a wide screen.
+ * The sections' centred column, for the page around them and for what sits
+ * under a form rather than in one of its sections.
  */
-const FIELDS_COLUMN = "max-w-3xl xl:max-w-[66rem] xl:pl-[18rem]"
-
-const APPLIES: Record<SettingApplies, string> = {
-  "next-deployment": "Applies on your next deployment",
-  immediately: "Applies immediately — no deployment",
-}
+const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
 
 /**
- * A settings page: its configuration read, what is saved but not live, the
- * page's figures when it has any, and its forms in one run of rail sections.
+ * A settings page: its configuration read, what is saved but not live, and
+ * its forms in one run of sections — all of it in the one centred column, so
+ * the strip lines up with the fields under it.
  *
  * No heading of its own. The project's other pages add none under the
- * project header, and the first rail head already names what the page is.
+ * project header, and the first section's head already names what the page is.
  * The content rises once when the first read lands and not on every revision
- * after it, because a save is not an arrival.
+ * after it, because a save is not an arrival. The room at the foot is the
+ * save bar's, so it never lies over the last field on the page.
  */
 export function SettingsPage({
   state,
   pageKinds,
-  readings,
   children,
 }: {
   state: ReturnType<typeof useConfiguration>
   /** The pending-change kinds this page edits — see `PendingChanges`. */
   pageKinds?: string[]
-  /** The page's figures, as a `StatGrid dense`. */
-  readings?: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
   children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
 }) {
   return (
-    <ConfigurationState state={state} readings={Boolean(readings)}>
-      {(configuration) => (
-        <div className="min-w-0 animate-rise space-y-8">
-          <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
-          <LastFailureRemedy />
-          {readings?.(configuration)}
-          <FormSections railFrom="xl">{children(configuration)}</FormSections>
-        </div>
-      )}
-    </ConfigurationState>
+    <SaveBarProvider>
+      <ConfigurationState state={state}>
+        {(configuration) => (
+          <div className={cn("min-w-0 animate-rise space-y-8 pb-20", FIELDS_COLUMN)}>
+            <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
+            <LastFailureRemedy />
+            <FormSections>{children(configuration)}</FormSections>
+          </div>
+        )}
+      </ConfigurationState>
+    </SaveBarProvider>
   )
 }
 
 /**
- * One form of a settings page: its sections, the refusal when the server
- * turned the save down, and the foot.
+ * One form of a settings page: its sections, and the refusal when the server
+ * turned the save down. It draws no Save of its own — it puts itself on the
+ * page's save bar, which counts its edits beside the rest of the page's and
+ * calls `onSave` when Save is pressed. Enter in a field submits the form,
+ * which is the bar's Save too, so one key never saves half a page.
  *
  * `name` is the form's accessible name — the thing a reader, an assistive
- * technology and a test all find it by, now that no frame draws its edge.
- * `dirty` and `changes` come from `useSettingDraft`; Save is the brand face
- * only while there is something to save.
+ * technology and a test all find it by — and the word the bar uses for the
+ * part of the page the edits are in. `dirty` and `changes` come from
+ * `useSettingDraft`. `onSave` resolves true when the write went through and
+ * false when it was refused, which is how the bar knows to say *Saved*.
+ * `note` is a line about this form at its foot — why it cannot be edited.
  */
 export function SettingForm({
   name,
-  onSubmit,
+  onSave,
   dirty = false,
   changes = 0,
   saving = false,
+  invalid = false,
   canEdit,
   onDiscard,
   applies = "next-deployment",
@@ -111,48 +111,56 @@ export function SettingForm({
   children,
 }: {
   name: string
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSave: () => Promise<boolean>
   dirty?: boolean
   changes?: number
   saving?: boolean
+  /** Holds the bar's Save while a field is out of range. */
+  invalid?: boolean
   canEdit: boolean
   onDiscard?: () => void
   applies?: SettingApplies
-  /** In place of the applies line, when the consequence is more particular. */
   note?: React.ReactNode
   /** A refusal that belongs to the whole form rather than to one field. */
   error?: React.ReactNode
   children: React.ReactNode
 }) {
+  const saveAll = useSaveBarEntry(
+    canEdit,
+    { name, dirty, changes, saving, invalid, applies },
+    { save: onSave, discard: onDiscard },
+  )
   return (
-    <form aria-label={name} onSubmit={onSubmit} className="min-w-0 py-8 first:pt-0 last:pb-0">
-      <FormSections railFrom="xl">{children}</FormSections>
+    <form
+      aria-label={name}
+      onSubmit={(event) => {
+        event.preventDefault()
+        void saveAll?.()
+      }}
+      className="min-w-0 py-8 first:pt-0 last:pb-0"
+    >
+      <FormSections>{children}</FormSections>
       {error && (
-        <FormNote tone="danger" role="alert" className={cn("mt-6", FIELDS_COLUMN)}>
+        <FormNote tone="danger" role="alert" className={cn("mt-6 animate-rise", FIELDS_COLUMN)}>
           {error}
         </FormNote>
       )}
-      <SettingFoot
-        applies={applies}
-        note={note}
-        dirty={dirty}
-        changes={changes}
-        saving={saving}
-        canEdit={canEdit}
-        onDiscard={onDiscard}
-      />
+      {note && <FormNote className={cn("mt-6", FIELDS_COLUMN)}>{note}</FormNote>}
     </form>
   )
 }
 
 /**
- * One section of a settings form: the head in the rail, the fields beside it.
+ * One section of a settings form: the head, the fields under it.
  *
- * The head carries three things under its title, each optional and each
- * data rather than a caption (§5): `state`, what the section currently is —
- * the host and branch it builds from, the port it answers on — which may
- * hold a product glyph or a branch chip; `status`, from `settingStatus`; and
- * `actions`, the small outline buttons that add a row to the section.
+ * The head carries three things, each optional and each data rather than a
+ * caption (§5): under its title `state`, what the section currently is — the
+ * host and branch it builds from, the port it answers on — which may hold a
+ * product glyph or a branch chip; and at its far end `status`, from
+ * `settingStatus`, then `actions`, the small outline buttons that add a row
+ * to the section. The status is at the end rather than under the state so
+ * that "Unsaved changes" arriving with the first keystroke does not push the
+ * field being typed in down a line.
  */
 export function SettingSection({
   id,
@@ -177,20 +185,19 @@ export function SettingSection({
   return (
     <FormSection
       aside
-      railFrom="xl"
       id={id}
       data-slot="setting"
       className={className}
       title={tone === "danger" ? <span className="text-destructive">{title}</span> : title}
-      hint={
-        state || status ? (
+      hint={state && <div className="min-w-0 break-words">{state}</div>}
+      actions={
+        status || actions ? (
           <>
-            {state && <div className="min-w-0 break-words">{state}</div>}
-            {status && <div className="pt-1">{status}</div>}
+            {status}
+            {actions}
           </>
         ) : undefined
       }
-      actions={actions}
     >
       {children}
     </FormSection>
@@ -199,7 +206,7 @@ export function SettingSection({
 
 /**
  * Where a section stands against what is saved and what is live, as the one
- * `Status` its rail head carries — or nothing, which is the common case: a
+ * `Status` its head carries — or nothing, which is the common case: a
  * "Live" on every head would be noise.
  *
  * `notLive` is for a section that one kind of pending change maps onto
@@ -229,109 +236,4 @@ export function settingStatus({
       <Status key="not-live" tone="notice" label="Saved · not live yet" className="animate-rise" />
     )
   return null
-}
-
-/**
- * The end of a settings form: when its change takes effect, and Save.
- *
- * Save is the outline face while the form is clean and the brand face once
- * it holds an edit — the command face as a function of state (§16), so the
- * one blue on a page of five forms is the form that has something to save.
- * It is never disabled when clean: saving an untouched Source checks it
- * again, which is how an operator finds out a credential stopped working.
- *
- * While dirty the foot follows the reader down the form, as Configuration's
- * apply bar does, because a Save a screen below the field that was changed
- * is how a form gets abandoned half-edited. It is opaque rather than frosted
- * (§16 has no glass), and it takes its hairline only then: at rest it is the
- * last line of the form, not a strip of chrome. Its row keeps to the fields
- * column. On a phone it stacks, at a thumb's height: while dirty, Discard and
- * Save take half the width each; clean, Save sits alone at the right edge,
- * because a full-width slab on every form read as the page's main command
- * with nothing to save.
- *
- * The line is `note` when there is one, else what `applies` says; with
- * neither it is empty. `invalid` holds Save while a field is out of range.
- */
-export function SettingFoot({
-  applies,
-  note,
-  dirty = false,
-  changes = 0,
-  saving = false,
-  invalid = false,
-  canEdit,
-  onDiscard,
-}: {
-  applies?: SettingApplies
-  note?: React.ReactNode
-  dirty?: boolean
-  changes?: number
-  saving?: boolean
-  invalid?: boolean
-  /** Draws Discard and Save; a reader who cannot edit sees only the line. */
-  canEdit?: boolean
-  onDiscard?: () => void
-}) {
-  const controls = canEdit && (
-    <>
-      {dirty && onDiscard && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={saving}
-          onClick={onDiscard}
-          className="max-sm:h-11 max-sm:flex-1"
-        >
-          Discard
-        </Button>
-      )}
-      <Button
-        type="submit"
-        size="sm"
-        variant={dirty ? "default" : "outline"}
-        pending={saving}
-        disabled={invalid}
-        className={cn("max-sm:h-11", dirty && "max-sm:flex-1")}
-      >
-        {saving ? "Saving…" : "Save"}
-      </Button>
-    </>
-  )
-  return (
-    <div
-      className={cn(
-        "mt-8",
-        dirty &&
-          "sticky bottom-0 z-20 -mx-5 border-t border-hairline bg-background px-5 py-3 md:-mx-8 md:px-8",
-      )}
-    >
-      <div
-        className={cn(
-          "flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between",
-          FIELDS_COLUMN,
-        )}
-      >
-        <p className="min-w-0 text-hint leading-relaxed text-muted-foreground">
-          {dirty && (
-            <>
-              <span className="font-medium text-foreground">
-                {changes > 0
-                  ? `${changes} unsaved change${changes === 1 ? "" : "s"}`
-                  : "Unsaved changes"}
-              </span>
-              {" — "}
-            </>
-          )}
-          {note ?? (applies && APPLIES[applies])}
-        </p>
-        {controls && (
-          <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
-            {controls}
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }

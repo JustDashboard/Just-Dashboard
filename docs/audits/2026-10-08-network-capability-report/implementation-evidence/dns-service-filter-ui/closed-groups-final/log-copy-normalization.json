@@ -1,0 +1,172 @@
+[
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-build-closed-groups.log",
+    "copy": "build.log",
+    "raw_gzip": "build.log.raw.gz",
+    "raw_sha256": "ca5c3583d87fd51b7e130327569a94a2cb04d960be8af6e7b82df4bc41595145",
+    "normalized_sha256": "faf836ed77b31b3ec0115a557bfd8927835f50b423ef3302b3b20f1b38ddbaa2",
+    "gzip_sha256": "623ada80b9d3422bc69dd7fd804c4e9a7fdc60c8212a18e1b78a185dd12769f6",
+    "raw_bytes": 3636,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-required-rule-elements.log",
+    "copy": "required-rule-elements.log",
+    "raw_gzip": "required-rule-elements.log.raw.gz",
+    "raw_sha256": "f2715ca1e979ed6bf7b7bd70030d0dd88c43280a9a459ef1119d5704b7035fba",
+    "normalized_sha256": "f2715ca1e979ed6bf7b7bd70030d0dd88c43280a9a459ef1119d5704b7035fba",
+    "gzip_sha256": "533c495a620d93c1eacc69a4435e016e0c335132a44b47ba71fc164ea27d9197",
+    "raw_bytes": 208,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-required-group-and-destination.log",
+    "copy": "required-groups-destination.log",
+    "raw_gzip": "required-groups-destination.log.raw.gz",
+    "raw_sha256": "34930d438ad52a5f31328ea02e9020e3210e39c4a0d9c030cb1348b86d599e0a",
+    "normalized_sha256": "34930d438ad52a5f31328ea02e9020e3210e39c4a0d9c030cb1348b86d599e0a",
+    "gzip_sha256": "a4ce242c65fa36dc782808524ebd0806fa221e12ce50a6c3d939d1b579586c3d",
+    "raw_bytes": 175,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-pi-group-shapes-race.log",
+    "copy": "filter-groups-race.log",
+    "raw_gzip": "filter-groups-race.log.raw.gz",
+    "raw_sha256": "bc549fa125c18c65b8f23dabbbd3f724a749dcfc7c8fc6594e5bab62d699733f",
+    "normalized_sha256": "bc549fa125c18c65b8f23dabbbd3f724a749dcfc7c8fc6594e5bab62d699733f",
+    "gzip_sha256": "88b90dd5205c4ebb09e59fe9de77cd6caa3c0040fd332b08259284e517672d5b",
+    "raw_bytes": 105,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/compile-e945fcea.log",
+    "copy": "compile.log",
+    "raw_gzip": "compile.log.raw.gz",
+    "raw_sha256": "821944862cac11138f3c8b3471626b41e40d3d236a747adebdff84692ed71cb6",
+    "normalized_sha256": "821944862cac11138f3c8b3471626b41e40d3d236a747adebdff84692ed71cb6",
+    "gzip_sha256": "ac7abe84d21b328e677af8080926bb5df714ce6b81c1b970bca44283ed410a63",
+    "raw_bytes": 31,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/compile-379a43fb-preparation.log",
+    "copy": "compile-preparation-379a43fb.log",
+    "raw_gzip": "compile-preparation-379a43fb.log.raw.gz",
+    "raw_sha256": "77300bab47df434065e9a3dd2d22707c2d0b65f5c7b4f6b56c990b8dc63941e0",
+    "normalized_sha256": "77300bab47df434065e9a3dd2d22707c2d0b65f5c7b4f6b56c990b8dc63941e0",
+    "gzip_sha256": "dd8269f597b05ba6123865d6fa6827995e9fe388cf1e317074bb2cea5c285070",
+    "raw_bytes": 31,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-adguard-final.log",
+    "copy": "native-adguard.log",
+    "raw_gzip": "native-adguard.log.raw.gz",
+    "raw_sha256": "1a47d34736418017850e6a0d5b639634123177f9a585f398204c2a19fabfc6f0",
+    "normalized_sha256": "1a47d34736418017850e6a0d5b639634123177f9a585f398204c2a19fabfc6f0",
+    "gzip_sha256": "2f33662bd00b3363be243d24809f18837f3d3c28087863021abbc1027146a9ad",
+    "raw_bytes": 3103,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-adguard-wrapper.log",
+    "copy": "native-adguard-wrapper.log",
+    "raw_gzip": "native-adguard-wrapper.log.raw.gz",
+    "raw_sha256": "96305c47f165d3f4c7c9eb43d9ce181eb3e8f069ce3b7ba2db2ce2a67df3a893",
+    "normalized_sha256": "b5b6703fc84526d39fba25e2f227e664c43864eb092f05ab18c48e2b9b11b27b",
+    "gzip_sha256": "4e2fe2940d351fcaf6ab74bb007b972d26239a68443706e0d00076acf79dcaa9",
+    "raw_bytes": 3769,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-pihole-final.log",
+    "copy": "native-pihole.log",
+    "raw_gzip": "native-pihole.log.raw.gz",
+    "raw_sha256": "2bca91d69cb8a2c892ef6fb9968b777d425769b327dcaff315ff108c1aab1781",
+    "normalized_sha256": "2bca91d69cb8a2c892ef6fb9968b777d425769b327dcaff315ff108c1aab1781",
+    "gzip_sha256": "1f6bcc4b013fb6e6dca86d6f4e972e06ce200e595e08de810033e86328c1cac0",
+    "raw_bytes": 2311,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-pihole-wrapper.log",
+    "copy": "native-pihole-wrapper.log",
+    "raw_gzip": "native-pihole-wrapper.log.raw.gz",
+    "raw_sha256": "bdf69920f6d0c87b681eb79f0a846b2e94db10097f52efb46fe7acf5f4511886",
+    "normalized_sha256": "6a4e643c12a9fa0a08a154fbf4357cdf9ad1d8a0e7f35b3c0a89f0469845bd2e",
+    "gzip_sha256": "0f73475508056656de6eb7043599d9a2235593a0809315a3dbd4fd4c8049b0eb",
+    "raw_bytes": 2976,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-technitium-final.log",
+    "copy": "native-technitium.log",
+    "raw_gzip": "native-technitium.log.raw.gz",
+    "raw_sha256": "f087a153459b70d888bdf88c8ad6086dd70713537c4907b747999a79c4864e18",
+    "normalized_sha256": "f087a153459b70d888bdf88c8ad6086dd70713537c4907b747999a79c4864e18",
+    "gzip_sha256": "c8ad67c135d30666646db3ebac1c28c9899367d7bb7cf00a1ebacf2bafde29f7",
+    "raw_bytes": 1920,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-native-final/native-technitium-wrapper.log",
+    "copy": "native-technitium-wrapper.log",
+    "raw_gzip": "native-technitium-wrapper.log.raw.gz",
+    "raw_sha256": "a937b9ecf466819bb26a4a747bc1943364c07d5558b70f9fbe67e89f3726c456",
+    "normalized_sha256": "dd288032bb6b9aaf66367b1ccfb4662ad41b503f5541511a6f91d18c00707785",
+    "gzip_sha256": "efe939fcd31d06a28fe69331148b6004e0af2b2827030fa2aa36e4c4a1fbfd26",
+    "raw_bytes": 2589,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/client-group-shapes-original.log",
+    "copy": "client-group-shapes-original.log",
+    "raw_gzip": "client-group-shapes-original.log.raw.gz",
+    "raw_sha256": "748a323d7441805b656277a833ce9c370ffb986b3d6cbe2169cd94561dbbe894",
+    "normalized_sha256": "748a323d7441805b656277a833ce9c370ffb986b3d6cbe2169cd94561dbbe894",
+    "gzip_sha256": "a230e90e2fdd66257c611ceefbdae506f4e246f7863a9c2157c01afaf8862b1b",
+    "raw_bytes": 3097,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/client-group-shapes-corrected.log",
+    "copy": "client-group-shapes-corrected.log",
+    "raw_gzip": "client-group-shapes-corrected.log.raw.gz",
+    "raw_sha256": "5bc18e4d990e3d463f2ba3db813b8907e040647bb09d9c9a98051d022a206090",
+    "normalized_sha256": "5bc18e4d990e3d463f2ba3db813b8907e040647bb09d9c9a98051d022a206090",
+    "gzip_sha256": "c9571f74b9312e7a287ac715e2007fd91959c872dabe13efe40de09b8ef0bd67",
+    "raw_bytes": 2551,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/client-group-shapes-required.log",
+    "copy": "client-group-shapes-required.log",
+    "raw_gzip": "client-group-shapes-required.log.raw.gz",
+    "raw_sha256": "b92e7226e4224cb258afb94a1eafe21a2b5c526cdfccde940aa1bb60fc75143e",
+    "normalized_sha256": "b92e7226e4224cb258afb94a1eafe21a2b5c526cdfccde940aa1bb60fc75143e",
+    "gzip_sha256": "4261b7c68500ac469d3d1d2fcd3bb0008a85213aa7c6428330651cc14c737375",
+    "raw_bytes": 225,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/client-group-shapes-race.log",
+    "copy": "client-group-shapes-race.log",
+    "raw_gzip": "client-group-shapes-race.log.raw.gz",
+    "raw_sha256": "c4408c0ce0bcb5dcc8339510e91b3b16e9086acb9ce8e83e9e7189aadeef8a57",
+    "normalized_sha256": "c4408c0ce0bcb5dcc8339510e91b3b16e9086acb9ce8e83e9e7189aadeef8a57",
+    "gzip_sha256": "8fe31f5f0b10b79bba9ed2d8d909da9c5eff080e774620b1e47106525e00ed66",
+    "raw_bytes": 140,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-required-closed-groups-e945fcea.log",
+    "copy": "required.log",
+    "raw_gzip": "required.log.raw.gz",
+    "raw_sha256": "68023ac624bda9cc8df15164636870ccc5d7bb05d3f7b02136ca2f6aeab7b401",
+    "normalized_sha256": "68023ac624bda9cc8df15164636870ccc5d7bb05d3f7b02136ca2f6aeab7b401",
+    "gzip_sha256": "89e74bc380eb23aa3e3c919a584c887b9af27c595352f93d9d8df1ea9c2507bb",
+    "raw_bytes": 334110,
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only; raw gzip round trips exactly"
+  }
+]

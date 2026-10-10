@@ -105,6 +105,7 @@ func (s *PlanningStore) OpenCredential(ctx context.Context, id int64) (Credentia
 }
 
 type ScopedVariableValue struct {
+	ValueMode   string
 	Name        string
 	Sensitivity string
 	Scopes      []string
@@ -124,7 +125,7 @@ func (s *PlanningStore) OpenScopedVariables(
 		return nil, fmt.Errorf("invalid deployment variable scope %q", scope)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT key, sensitivity, scopes, value_enc, value_digest
+		SELECT key, sensitivity, scopes, value_enc, value_digest, value_mode
 		  FROM deploy_variable_revisions
 		 WHERE environment_id = ? AND active = 1
 		 ORDER BY key`, environmentID)
@@ -136,7 +137,7 @@ func (s *PlanningStore) OpenScopedVariables(
 	for rows.Next() {
 		var value ScopedVariableValue
 		var scopes, sealed string
-		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest); err != nil {
+		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest, &value.ValueMode); err != nil {
 			return nil, err
 		}
 		value.Scopes = strings.Split(scopes, ",")
@@ -192,7 +193,7 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		return nil, fmt.Errorf("%w: run variable snapshot belongs to another environment", ErrInvalidPlan)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.key, v.sensitivity, v.scopes, v.value_enc, v.value_digest
+		SELECT v.key, v.sensitivity, v.scopes, v.value_enc, v.value_digest, v.value_mode
 		  FROM deploy_run_variable_revisions rv
 		  JOIN deploy_variable_revisions v ON v.id = rv.variable_revision_id
 		 WHERE rv.run_id = ? AND v.environment_id = ?
@@ -208,7 +209,7 @@ func (s *PlanningStore) OpenRunScopedVariables(
 	for rows.Next() {
 		var value ScopedVariableValue
 		var scopes, sealed string
-		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest); err != nil {
+		if err := rows.Scan(&value.Name, &value.Sensitivity, &scopes, &sealed, &value.ValueDigest, &value.ValueMode); err != nil {
 			return nil, err
 		}
 		if seen[value.Name] || !contentDigestRE.MatchString(value.ValueDigest) {
@@ -218,7 +219,7 @@ func (s *PlanningStore) OpenRunScopedVariables(
 		value.Scopes = strings.Split(scopes, ",")
 		snapshot = append(snapshot, ReleaseVariableSnapshot{
 			Name: value.Name, Sensitivity: value.Sensitivity,
-			Scopes: scopes, ValueDigest: value.ValueDigest,
+			Scopes: scopes, ValueDigest: value.ValueDigest, ValueMode: value.ValueMode,
 		})
 		sealedValues[value.Name] = sealed
 		all = append(all, value)
@@ -246,10 +247,11 @@ func resolveScopedVariableValues(
 	external func(VariableReference) (string, bool, error),
 ) ([]ScopedVariableValue, error) {
 	values := make(map[string]string, len(all))
+	modes := map[string]string{}
 	for _, value := range all {
-		values[value.Name] = value.Value
+		values[value.Name], modes[value.Name] = value.Value, value.ValueMode
 	}
-	resolved, secretLeaves, err := ResolveVariableGraph(values, external)
+	resolved, secretLeaves, err := ResolveVariableGraphWithModes(values, modes, external)
 	if err != nil {
 		return nil, err
 	}
@@ -702,6 +704,11 @@ func (s *PlanningStore) Save(
 			if err != nil {
 				return nil, err
 			}
+			for i := range copy.Variables {
+				if _, supplied := values[copy.Variables[i].Name]; supplied {
+					copy.Variables[i].ValueMode = "literal"
+				}
+			}
 			for _, name := range request.RetainEnvironmentKeys {
 				value, exists := draft.environment[name]
 				if !exists {
@@ -729,7 +736,7 @@ func (s *PlanningStore) Save(
 		if err := copy.Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
-		if _, _, err := ResolveVariableGraph(draft.variableValues(copy), nil); err != nil {
+		if _, _, err := ResolveVariableGraphWithModes(draft.variableValues(copy), draft.variableModes(copy), nil); err != nil {
 			return nil, err
 		}
 		draft.Data.Configuration = &copy
@@ -921,6 +928,17 @@ func (s *PlanningStore) Commit(
 	if err := AuthorizeDraft(draft, userID, admin); err != nil {
 		return nil, err
 	}
+	var data string
+	if err := s.db.QueryRowContext(ctx, `SELECT data_json FROM deploy_drafts WHERE id = ?`, id).Scan(&data); err != nil {
+		return nil, err
+	}
+	var savedData map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &savedData); err != nil {
+		return nil, err
+	}
+	if adoption := savedData["adoption"]; len(adoption) > 0 && string(adoption) != "null" {
+		return nil, fmt.Errorf("%w: existing-workload import reviews are no longer supported", ErrInvalidPlan)
+	}
 	if draft.CommittedProjectID != 0 {
 		var environmentID int64
 		err := s.db.QueryRowContext(ctx, `
@@ -1084,10 +1102,10 @@ func (s *PlanningStore) Commit(
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_variable_revisions(
 			  environment_id, key, revision, sensitivity, scopes, value_enc,
-			  value_digest, active, created_by, created_at)
-			VALUES(?, ?, 1, ?, ?, ?, ?, 1, ?, ?)`, environmentID, variable.Name,
+			  value_digest, active, created_by, created_at, value_mode)
+			VALUES(?, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?)`, environmentID, variable.Name,
 			sensitivity, strings.Join(variable.Scopes, ","), sealed,
-			digestBytes([]byte(value)), draft.OwnerUsername, now.Unix()); err != nil {
+			digestBytes([]byte(value)), draft.OwnerUsername, now.Unix(), draft.variableModes(configuration)[variable.Name]); err != nil {
 			return nil, err
 		}
 	}
@@ -1198,7 +1216,7 @@ func validateDraftComplete(draft *Draft) error {
 	if err := draft.Data.Configuration.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
-	values, _, err := ResolveVariableGraph(draft.variableValues(*draft.Data.Configuration), nil)
+	values, _, err := ResolveVariableGraphWithModes(draft.variableValues(*draft.Data.Configuration), draft.variableModes(*draft.Data.Configuration), nil)
 	if err != nil {
 		return err
 	}

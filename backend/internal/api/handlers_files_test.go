@@ -119,6 +119,48 @@ func TestPlacesStartsSomewhereListable(t *testing.T) {
 	}
 }
 
+func TestFileContentSearchDetailedAndLegacyResponses(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+	for _, name := range []string{"notes.txt", ".private.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("MATCH one\nmatch two\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "search-reader", auth.RoleReadOnly)}
+	params := map[string]string{"path": root, "q": "match", "content": "true"}
+	w := reader.do(http.MethodGet, query("/api/v1/files/search", params), "", nil)
+	var legacy []files.SearchHit
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &legacy) != nil || len(legacy) != 2 {
+		t.Fatalf("legacy response: %d %s", w.Code, w.Body.String())
+	}
+	params["detailed"] = "true"
+	params["hidden"] = "false"
+	w = reader.do(http.MethodGet, query("/api/v1/files/search", params), "", nil)
+	var detailed files.SearchResult
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &detailed) != nil {
+		t.Fatalf("detailed response: %d %s", w.Code, w.Body.String())
+	}
+	if len(detailed.Hits) != 2 || detailed.Hits[0].Line != 1 || detailed.Hits[1].Line != 2 || detailed.Truncated {
+		t.Fatalf("detailed hits = %+v", detailed)
+	}
+	for _, hit := range detailed.Hits {
+		if hit.Name != "notes.txt" || len(hit.Ranges) != 1 || hit.Ranges[0] != [2]int{0, 5} {
+			t.Fatalf("unexpected hit: %+v", hit)
+		}
+	}
+	params["ignoreCase"] = "false"
+	w = c.do(http.MethodGet, query("/api/v1/files/search", params), "", nil)
+	if json.Unmarshal(w.Body.Bytes(), &detailed) != nil || len(detailed.Hits) != 1 || detailed.Hits[0].Line != 2 {
+		t.Fatalf("case-sensitive search: %d %s", w.Code, w.Body.String())
+	}
+	params["regex"] = "true"
+	params["q"] = "["
+	if w := c.do(http.MethodGet, query("/api/v1/files/search", params), "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid regex: %d %s", w.Code, w.Body.String())
+	}
+}
+
 // The raw route hands a file back with a content type the browser acts on, on
 // the origin that holds the session. What it will serve is a closed list, and
 // this is the test that keeps it closed.

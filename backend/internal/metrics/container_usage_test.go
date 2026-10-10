@@ -168,3 +168,62 @@ func TestContainerUsageDoesNotInventLegacyAvailabilityOrLimits(t *testing.T) {
 		}
 	}
 }
+
+// The first sample after a container starts has nothing to difference against
+// and is stored as 0%. Read back as a measurement it draws a dip after every
+// deploy, so the history reports it as absent.
+func TestContainerUsageLeavesUnmeasuredCPUNull(t *testing.T) {
+	r := testRecorder(t, 5*time.Second, time.Hour)
+	base := time.Unix(1_800_000_000, 0).UTC()
+	samples := []dockerx.ContainerStats{
+		{ID: "old", Name: "web", CPUPercent: 40, CPUReady: true, CPUTotal: 500},
+		{ID: "old", Name: "web", CPUPercent: 60, CPUReady: true, CPUTotal: 900},
+		{ID: "new", Name: "web", CPUPercent: 0, CPUTotal: 10},
+		{ID: "new", Name: "web", CPUPercent: 20, CPUReady: true, CPUTotal: 50},
+	}
+	for i, st := range samples {
+		if err := r.writeContainers(t.Context(), base.Add(time.Duration(i)*5*time.Second), []dockerx.ContainerStats{st}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One point per sample, so each reports its own reading.
+	series, err := r.ContainerRange(t.Context(), "web", base.Add(5*time.Second), base.Add(15*time.Second), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series.Points) != 3 {
+		t.Fatalf("points = %d", len(series.Points))
+	}
+	for i, want := range []*float64{ptr(60.0), nil, ptr(20.0)} {
+		p := series.Points[i]
+		switch {
+		case want == nil && (p.CPU != nil || p.CPUPeak != nil):
+			t.Fatalf("point %d: the first sample of a new container reported cpu %v / %v, want null", i, p.CPU, p.CPUPeak)
+		case want != nil && (p.CPU == nil || *p.CPU != *want || p.CPUPeak == nil || *p.CPUPeak != *want):
+			t.Fatalf("point %d: cpu = %v / %v, want %v", i, p.CPU, p.CPUPeak, *want)
+		}
+	}
+}
+
+func TestContainerUsageReportsPeakPIDs(t *testing.T) {
+	r := testRecorder(t, 5*time.Second, time.Hour)
+	base := time.Unix(1_800_000_000, 0).UTC()
+	for i, pids := range []uint64{4, 40, 10} {
+		st := dockerx.ContainerStats{ID: "id", Name: "web", PIDs: pids}
+		if err := r.writeContainers(t.Context(), base.Add(time.Duration(i)*5*time.Second), []dockerx.ContainerStats{st}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	series, err := r.ContainerRange(t.Context(), "web", base, base.Add(time.Minute), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(series.Points) != 1 {
+		t.Fatalf("points = %d", len(series.Points))
+	}
+	if p := series.Points[0]; p.PIDs != 18 || p.PIDsPeak != 40 {
+		t.Fatalf("pids mean/peak = %v / %d, want 18 / 40", p.PIDs, p.PIDsPeak)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
 )
@@ -153,6 +154,26 @@ func TestPostureAnswersOnABareHost(t *testing.T) {
 	}
 	if posture.CheckedAt.IsZero() {
 		t.Error("no evaluation time")
+	}
+	// Provider policy is never visible to this dashboard; a bare host's
+	// verdict says so rather than leaving it out.
+	if len(posture.Unknowns) == 0 || posture.Unknowns[0].Layer != "provider" {
+		t.Errorf("unknowns = %+v", posture.Unknowns)
+	}
+}
+
+func TestPolicyCoverageKeepsAnUnreadRulesetApartFromAnEmptyOne(t *testing.T) {
+	unread := policyCoverage(netx.Capability{Reason: "nftables is not installed on this host; the gateway needs the nft command."})
+	if unread.Error == "" || len(unread.Layers) != 0 {
+		t.Fatalf("unread ruleset: %+v", unread)
+	}
+	read := policyCoverage(netx.Capability{Writable: true, Layers: []netx.PolicyLayer{{Family: "inet", Table: "crowdsec", Chain: "input", Hook: "input", Policy: "accept", Status: "unknown"}}})
+	if read.Error != "" || len(read.Layers) != 1 || read.Layers[0].Table != "crowdsec" || read.Layers[0].Status != "unknown" {
+		t.Fatalf("read ruleset: %+v", read)
+	}
+	blocked := policyCoverage(netx.Capability{Reason: "The inet table \"edge\" can drop translated traffic", Layers: []netx.PolicyLayer{{Family: "inet", Table: "edge", Chain: "fwd", Hook: "forward", Status: "blocked"}}})
+	if blocked.Error != "" || len(blocked.Layers) != 1 {
+		t.Fatalf("a read ruleset with a blocker is not an unread one: %+v", blocked)
 	}
 }
 
@@ -337,6 +358,38 @@ func TestSSHApplyRefusesACertainLockout(t *testing.T) {
 	}
 	if w.Code == http.StatusConflict && !strings.Contains(w.Body.String(), "would_lock_you_out") {
 		t.Fatalf("refused for the wrong reason: %s", w.Body.String())
+	}
+}
+
+// A pending SSH apply ends in the reconnection protocol, which only an
+// administrator's interactive session can complete. Both refusals happen
+// before the plan is read; the body is one the lockout guard refuses as well,
+// so nothing here can reach a real sshd.
+func TestPendingSSHApplyNeedsAnAdministratorSession(t *testing.T) {
+	c, s := newClient(t)
+	body := `{"settings":{"passwordauthentication":"no","pubkeyauthentication":"no"}}`
+	if w := c.do(http.MethodPost, "/api/v1/ssh/config", body,
+		map[string]string{"X-JD-Network-Apply": "later"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown apply mode=%d %s", w.Code, w.Body.String())
+	}
+	var adminID int64
+	if err := s.Store.DB.QueryRow(`SELECT id FROM users WHERE username='tester'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.Auth.UserByID(t.Context(), adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Auth.CreateAPIToken(t.Context(), user, "ssh-pending", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenClient := &client{t: t, h: s.Routes()}
+	w := tokenClient.do(http.MethodPost, "/api/v1/ssh/config", body, map[string]string{
+		"Authorization": "Bearer " + token, "X-JD-Network-Apply": "pending",
+	})
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "session_required") {
+		t.Fatalf("token pending apply=%d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -599,5 +652,45 @@ func TestFailedLoginSummaryIsAdminOnly(t *testing.T) {
 		}
 	default:
 		t.Fatalf("unexpected status %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// The boundary is read for any signed-in role and judges a proposal with a
+// GET, so asking is never audited as a change.
+func TestAccessBoundaryAndItsCheckAreReads(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/security/boundary", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("boundary=%d %s", w.Code, w.Body.String())
+	}
+	var b netsec.AccessBoundary
+	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil || len(b.Checks) != 5 {
+		t.Fatalf("boundary=%+v %v", b, err)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/security/boundary/check?kind=reboot", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown kind=%d", w.Code)
+	}
+	w = c.do(http.MethodGet, "/api/v1/security/boundary/check?kind=ssh&setting=allowtcpforwarding=no", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"level":"cuts"`) {
+		t.Fatalf("a tunnel session turning forwarding off=%d %s", w.Code, w.Body.String())
+	}
+}
+
+// A ban that refuses a network the allowlist admits is refused until the
+// request says the operator saw it. The refusal comes before fail2ban is
+// asked anything, so no host is touched.
+func TestABanInsideTheAllowlistNeedsAcknowledgement(t *testing.T) {
+	s := testServer(t)
+	_, office, _ := net.ParseCIDR("10.20.0.0/16")
+	s.Cfg.AllowedCIDRs = append(s.Cfg.AllowedCIDRs, office)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	w := c.do(http.MethodPost, "/api/v1/fail2ban/sshd/ban", `{"ip":"10.20.4.4"}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "boundary_acknowledgement_required") ||
+		!strings.Contains(w.Body.String(), "10.20.0.0/16") {
+		t.Fatalf("unacknowledged ban=%d %s", w.Code, w.Body.String())
+	}
+	w = c.do(http.MethodPost, "/api/v1/security/crowdsec/decisions", `{"value":"10.20.0.0/24","duration":"4h"}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "boundary_acknowledgement_required") {
+		t.Fatalf("unacknowledged decision=%d %s", w.Code, w.Body.String())
 	}
 }

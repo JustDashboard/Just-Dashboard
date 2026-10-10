@@ -1,0 +1,59 @@
+build 140s
+
+Running 52 tests using 1 worker
+
+[1/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:31:5 › the identity says both forwarding families and keeps a translated source from posing as public
+[2/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:71:5 › paths in use come from tracked flows and pointing at a node lights who it trades with
+[3/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:100:5 › a failed connection-tracking read is said, not drawn as no traffic
+[4/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:125:5 › throughput says how old its newest reading is and turns stale when the ring stops
+[5/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:147:5 › a failed live poll keeps the ring with a dated retry
+[6/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:167:5 › the throughput tiles and the chart drill into the devices under them
+[7/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:196:5 › a failed reading is its own finding, and history keeps unobserved incidents open
+[8/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:254:5 › interfaces flag Docker devices that could not be joined instead of hiding them
+[9/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:281:5 › a device sheet reads its driver, offloads, error counters and address origins
+[10/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:308:5 › namespaces keep a failed item visible and open as their own network
+[11/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:342:5 › a later namespaces poll failure keeps the list with a dated retry
+[12/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:362:5 › a veth hands off to the namespace it leads into and a container's to the investigator
+[13/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:396:5 › a managed bridge reads as a switch and a port's VLAN policy is applied and confirmed
+[14/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:433:5 › a refused bridge move is previewed with what it would leave behind and cannot be applied
+[15/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:466:5 › a VXLAN's readiness names its checks and limits and edits its flood ends
+[16/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:527:5 › bridges, macvlans and dummies explain themselves before they are made
+[17/52] [chromium] › tests/browser/network-topology-interfaces.spec.ts:552:5 › a dummy's sheet hands a route into it to the routing page
+[18/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network at 390
+[19/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/interfaces at 390
+[20/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/routing at 390
+[21/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/vpn at 390
+[22/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/firewall at 390
+[23/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/connections at 390
+[24/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/tools at 390
+[25/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network at 1440
+[26/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/interfaces at 1440
+[27/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/routing at 1440
+[28/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/vpn at 1440
+[29/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/firewall at 1440
+[30/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/connections at 1440
+[31/52] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/tools at 1440
+[32/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network keeps the design system's structural rules
+[33/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/interfaces keeps the design system's structural rules
+[34/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/routing keeps the design system's structural rules
+[35/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/vpn keeps the design system's structural rules
+[36/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/firewall keeps the design system's structural rules
+[37/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/connections keeps the design system's structural rules
+[38/52] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/tools keeps the design system's structural rules
+[39/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network never scrolls sideways
+[40/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/interfaces never scrolls sideways
+[41/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/routing never scrolls sideways
+[42/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/vpn never scrolls sideways
+[43/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/firewall never scrolls sideways
+[44/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/connections never scrolls sideways
+[45/52] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/tools never scrolls sideways
+[46/52] [chromium] › tests/browser/network-ui.spec.ts:130:5 › the old Security addresses lead to the Network pages, keeping their questions
+[47/52] [chromium] › tests/browser/network-ui.spec.ts:142:5 › the overview draws the topology, the readings and the attention list
+[48/52] [chromium] › tests/browser/network-ui.spec.ts:158:5 › a device opens its sheet, and only what may change offers to
+[49/52] [chromium] › tests/browser/network-ui.spec.ts:170:5 › a new VLAN sends exactly what the create route takes
+[50/52] [chromium] › tests/browser/network-ui.spec.ts:197:5 › the routing page lights the rule that answers this browser
+[51/52] [chromium] › tests/browser/network-ui.spec.ts:206:5 › a peer opens its sheet and shows its QR code again
+[52/52] [chromium] › tests/browser/network-ui.spec.ts:222:5 › every control in the forms has a name
+  14 skipped
+  38 passed (1.6m)
+command 95s status 0

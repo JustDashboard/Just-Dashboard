@@ -1,0 +1,15 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:253: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:253: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:258: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:317: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:317: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:322: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/adguard-8c59dfdeae5d55c914647aa2ae848e19.log (6367 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/native-logs/adguard-da33f89aeebe802220b323a82691224b.log (2144 bytes)
+    provision_live_test.go:360: engine=adguard image=adguard/adguardhome@sha256:92929135ced2554aaf94706f766a98ad348f211df61b0704e2db7e8498cc00b7 nativeVersion=v0.107.71 UDP/TCP=owned-fixture.invalid owner=bf746b2642d1d3e4928d792ad4ce61d6 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (38.48s)
+PASS
+wrapper_elapsed=39.50 exit=0

@@ -66,6 +66,9 @@ type RenewalHealth struct {
 	// error. certbot only warns about one, so a run whose reload hook
 	// refused to reload nginx still passes.
 	HookFailures []HookFailure `json:"hookFailures,omitempty"`
+	// Problems are what the last failed run's authority or certbot reported,
+	// each at the stage of validation it failed and that stage's owner.
+	Problems []IssuanceDiagnosis `json:"problems,omitempty"`
 	// Error is why the runs could not be read.
 	Error string `json:"error,omitempty"`
 }
@@ -298,6 +301,7 @@ func judgeFailedRun(health *RenewalHealth, run *journalRun, written map[string]t
 		return
 	}
 	failures, reason := runFailures(run.lines)
+	health.Problems = runProblems(run.lines)
 	start := run.start()
 	for _, f := range failures {
 		if written != nil {
@@ -320,12 +324,28 @@ func judgeFailedRun(health *RenewalHealth, run *journalRun, written map[string]t
 	if len(failures) > 0 && len(health.Failures) == 0 {
 		health.State = "recovered"
 	}
+	// What failed validation then is nothing to fix once every certificate
+	// it failed on has renewed or gone.
+	if health.State == "recovered" {
+		health.Problems = nil
+	}
 }
 
 // runFailures reads certbot's lines from one run: each certificate it failed
 // to renew, and otherwise the last thing it said, which is why the whole run
 // failed. certbot writes a plugin's error on a line of its own after the
 // failure ("The error was: …"), and the journal keeps each line apart.
+// runProblems reads a failed run's lines into its problems by stage.
+func runProblems(lines []RenewalLine) []IssuanceDiagnosis {
+	texts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !line.Systemd {
+			texts = append(texts, line.Text)
+		}
+	}
+	return DiagnoseIssuanceHere(texts)
+}
+
 func runFailures(lines []RenewalLine) ([]RenewalFailure, string) {
 	var failures []RenewalFailure
 	// What certbot said, and of that what it logged as an error: certbot's

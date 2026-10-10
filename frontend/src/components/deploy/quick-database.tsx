@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
-import { Database, Eye, EyeOff, Copy, Warning } from "@/components/icons"
+import { Database, Warning } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import type {
   DbConnection,
@@ -11,37 +10,20 @@ import type {
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
-import { ChoiceGrid, EngineCard, driverKind } from "@/components/choice-card"
-import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
-import { ProductLogo } from "@/components/product-logo"
+import { ChoiceGrid, EngineCard } from "@/components/choice-card"
+import { engineOf } from "@/components/database/engine"
+import { Field, FieldRow, FormNote } from "@/components/form"
 import { RunPhases, phaseStates } from "@/components/run-phases"
 import { SidePanelFooter, useInSidePanel } from "@/components/side-panel"
-import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { useCopy } from "@/hooks/use-copy"
+import { DatabaseReady } from "@/components/deploy/database-ready"
 import { cn } from "@/lib/utils"
 
 /**
- * A database started on this server in one step: an engine, two optional
- * names, and a connection string to take away — or to hand straight to the
- * project that asked for one.
- *
- * Starting one is three things that take between seconds and a minute each,
- * and it used to be a centred spinner and a sentence that changed under it.
- * The engines stay drawn now, the one being started with a light running
- * round its edge (§11 *live*), and under them the three stages as the
- * release path draws a run's — the one at work lit, the one that failed red
- * — so what is happening and how much is left read at a glance. The result
- * is a plain panel, since both places this is drawn — a sheet, and
- * `/deploy/new`'s focused surface — already give it its edge; in the sheet
- * its commands sit in the sheet's footer, beside the sheet's Cancel.
+ * The compact creation form inside a project's Add database sheet. It waits
+ * for adoption and a fresh ping before offering the managed application URL,
+ * and resumes the existing container if preparing that URL fails.
  */
 
 const PHASES = ["Start the container", "Wait for connections", "Prepare the connection string"]
@@ -71,8 +53,6 @@ export function DatabaseQuickDeploy({
   const alive = useRef(true)
   const provisioning = useRef(false)
   const [startedContainer, setStartedContainer] = useState<string | undefined>(resume?.container)
-  const [revealed, setRevealed] = useState(false)
-  const { copy } = useCopy()
   const [options, setOptions] = useState<DbProvisionOption[]>()
   const [optionsAttempt, setOptionsAttempt] = useState(0)
   const [engine, setEngine] = useState(resume?.engine ?? initialEngine ?? "")
@@ -192,108 +172,22 @@ export function DatabaseQuickDeploy({
   }
 
   if (created) {
-    const { connection } = created
-    const address = connection.host
-      ? `${connection.host}${connection.port ? `:${connection.port}` : ""}`
-      : undefined
     return (
-      <Panel plain className="animate-rise">
-        <PanelHeader title={`${connection.name} is ready`} />
-        <PanelBody className="space-y-5">
-          {/* The ping answered before this panel could be drawn, so the state
-              is a reading, not a hope. */}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <ProductLogo size="sm" id={connection.driver} fallback={Database} />
-            <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="truncate text-body font-medium">{connection.name}</p>
-              {(address || connection.database) && (
-                <FormFacts>
-                  {address && (
-                    <FormFact label="Host" mono>
-                      {address}
-                    </FormFact>
-                  )}
-                  {connection.database && (
-                    <FormFact label="Database" mono>
-                      {connection.database}
-                    </FormFact>
-                  )}
-                </FormFacts>
-              )}
-            </div>
-            {/* The one reading this panel exists for, so a phone keeps it —
-                under the name when the line has no room beside it. */}
-            <Status
-              tone="running"
-              label="Accepting connections"
-              className="max-sm:basis-full max-sm:pl-11"
-            />
-          </div>
-          <Field
-            label="Connection string"
-            htmlFor="database-connection-string"
-            hint={
-              target === "container"
-                ? "Use this database to connect the application over its managed private network. The saved connection follows replacement database containers."
-                : "This address is for processes on the host. Use Add database during project setup to get the address for an application container."
-            }
-          >
-            <InputGroup>
-              <InputGroupInput
-                id="database-connection-string"
-                type={revealed ? "text" : "password"}
-                readOnly
-                value={created.url}
-                className="font-mono"
-              />
-              <InputGroupAddon align="inline-end" className="gap-0 p-0">
-                <InputGroupButton
-                  aria-label={revealed ? "Hide connection string" : "Reveal connection string"}
-                  onClick={() => setRevealed(!revealed)}
-                >
-                  {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                </InputGroupButton>
-                <InputGroupButton
-                  aria-label="Copy connection string"
-                  onClick={() => copy(created.url, "Connection string copied")}
-                >
-                  <Copy className="size-3.5" />
-                  <span className="max-sm:hidden">Copy</span>
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </Field>
-        </PanelBody>
-        <Foot className="justify-between">
-          <Button variant="outline" asChild>
-            <Link href={`/databases/overview?conn=${connection.id}`}>Open in Databases</Link>
-          </Button>
-          {onConnect ? (
-            <Button
-              disabled={!canConnect}
-              onClick={() => onConnect(connection, created.reference || created.url)}
-            >
-              Use this database
-            </Button>
-          ) : (
-            <Button
-              onClick={() => {
-                setCreated(undefined)
-                setRevealed(false)
-                setStartedContainer(undefined)
-                setFailedAt(undefined)
-                setEngine("")
-                setName("")
-                setDatabase("")
-                onReset?.()
-              }}
-            >
-              <Database className="size-4" />
-              Create another
-            </Button>
-          )}
-        </Foot>
-      </Panel>
+      <DatabaseReady
+        created={created}
+        target={target}
+        canConnect={canConnect}
+        onConnect={onConnect}
+        onReset={() => {
+          setCreated(undefined)
+          setStartedContainer(undefined)
+          setFailedAt(undefined)
+          setEngine("")
+          setName("")
+          setDatabase("")
+          onReset?.()
+        }}
+      />
     )
   }
 
@@ -334,7 +228,7 @@ export function DatabaseQuickDeploy({
               key={option.engine}
               engine={option.engine}
               label={option.label}
-              kind={driverKind(option.driver)}
+              kind={engineOf(option.driver).kind}
               detail={option.image}
               disabled={(Boolean(startedContainer) || inFlight) && engine !== option.engine}
               selected={engine === option.engine}

@@ -6,7 +6,9 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `jobs`, three backup pieces, and deployment components covering legacy
+`linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
+`dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
+`ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -17,12 +19,16 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
-purpose is to have been running while nobody was looking), the Docker event log, the self-update check,
-the backup scheduler, `selfupdate.Installer.Reconcile`, `selfcfg.Applier.Reconcile` and the Tailscale
+purpose is to have been running while nobody was looking), the database activity recorder, the Docker
+event log, the network module's interface sampler and its daily blocklist refresh, the self-update
+check, the backup scheduler, `selfupdate.Installer.Reconcile`,
+`selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
-sampler, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+samplers, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
-running holder back before the first request
+running holder back before the first request, including when preparing new holders fails. New direct
+terminals require that protection; an unavailable holder returns a reason instead of silently opening
+a process-owned PTY. Terminal sessions have no idle timeout
 ([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)).
 
 The deployment engine also starts automatic production Git branch monitoring after its recovery.
@@ -35,6 +41,31 @@ Startup marks interrupted archive runs failed and reconciles owned restore-check
 scheduling new backups. Interrupted restore checks are cleaned and recorded as failed, never promoted
 to recovery proof. Managed database network reconciliation follows retained environment bindings every
 five seconds and stops before deployment engine shutdown.
+Saved network diagnostics settle predecessor runs as interrupted at startup and never replay their
+probes. A recording failure leaves the service unavailable until a bounded pending write can be
+retained; it does not relaunch the probe. Shutdown cancels and drains active diagnostic jobs through
+their existing process-group cancellation. Saved artifacts and generic job views of those artifacts
+remain administrator-only. See [diagnostic lifecycle](../backend/network-diagnostics.md).
+Private PCAP startup marks unfinished captures interrupted without replay. Shutdown cancels and
+drains their native groups; a separate host `timeout` bounds a capture even after backend death.
+A final recording failure retains bounded pending data and blocks new launches until the same write
+can be retried. Capture changes no host network configuration. See
+[capture lifecycle](../backend/network-captures.md).
+Socket history starts independently of page reads and collects only after persisted admin opt-in.
+Shutdown cancels its bounded native capture and drains it before closing Docker. IPAM reconciles
+interrupted native handoffs to held review state at initialization, without replay or native cleanup.
+Controlled vantage checks persist signed single-use leases and expire lost results without repeating
+traffic; no polling listener or scanner is installed on a source by the dashboard.
+The separate Socket History collector stays off by default. Its explicitly opted-in kernel observer
+holds only owned unpinned cgroup links, drains bounded event batches through a durable SQLite receipt,
+and retains failed detach state for retry. Shutdown reports an unsuccessful final write or detach;
+restart records interruption and never automatically reloads the observer. Ordinary history opt-out
+requires an explicit observer stop first so it cannot bypass the destructive route and its rate budget. See
+[the observer contract](../backend/network-flow-observer.md).
+Native DNS services reconcile interrupted reviewed changes and owned setup/removal during startup
+with a forty-second deadline. They never replay native mutations or bootstrap, and retain verified
+owned engines. Shutdown closes the module's Docker SDK client without stopping those engines. See
+[native DNS service lifecycle](../backend/network-dns-services.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
@@ -130,7 +161,10 @@ An account has two names. `username` is the sign-in key and the actor every audi
 deployment record names: trimmed, lower-cased, one word, unique. `display_name` is what the account
 shows as — the username as typed at creation, case kept, until it is changed. Both are renamed by the
 holder (`PATCH /account/profile`, session-only) or by a `system.admin` (`PATCH /dashboard-users/{id}`);
-a rename is audited with both spellings, and earlier entries keep the old one. The picture
+a rename is audited with both spellings, and earlier entries keep the old one. Creation validates the
+display name before inserting the account; profile patches validate both names before one update.
+Administrative account edits commit all fields and any required session revocation in one transaction,
+so a rejected request cannot leave behind a rename, a new account, or only part of an edit. The picture
 (`avatar`, `avatar_type`, `avatar_at`, additive columns in 0.6.7) is uploaded as multipart to
 `POST /account/avatar`, bounded by `auth.MaxAvatarBytes`, and stored only after `image.DecodeConfig`
 has proven it a PNG or JPEG of at most 1024px a side under a type sniffed from the bytes — the
@@ -143,20 +177,34 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`); boards (`boards`); backups
+`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`); boards (`boards`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
 and previews; proxy
-watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
+watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`, holding TLS watches and TCP network probes by `kind`, with each check in `watched_checks`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
-hashed rather than stored); the general `settings` key/value table; and mount, container, and host metric
-samples. The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
+hashed rather than stored); the general `settings` key/value table; mount, container, interface
+(`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
+configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
+packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
+(`network_probe_vantages`, `network_probe_checks`), shared planning pools/reservations
+(`network_ipam_pools`, `network_ipam_reservations`), private native DNS investigation records
+(`network_dns_evidence`), private native DNS service connections, reviewed changes, provisions and
+resource owner identity (`network_dns_services`, `network_dns_service_changes`,
+`network_dns_service_provisions`, `network_dns_service_settings`), socket-hour/coverage records
+(`network_flow_buckets`, `network_flow_cycles`), and gateway counter totals across table generations
+with seven days of per-minute protection samples (`network_gateway_counters`,
+`network_protection_samples`). What the network module makes on the host is kept in
+`/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
+dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
-the database being tampered with. An `Entry` records who (user, role, `Actor` = session or token), from
+the database being tampered with. The row is written with the request's values but not its
+cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still
+leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.

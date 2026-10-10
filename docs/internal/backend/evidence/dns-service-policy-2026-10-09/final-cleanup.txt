@@ -1,0 +1,12 @@
+adguard owner=32387fd7cd9c07beebb772c0a165a33c containers: empty (Docker exit0)
+adguard owner=32387fd7cd9c07beebb772c0a165a33c networks: empty (Docker exit0)
+adguard owner=32387fd7cd9c07beebb772c0a165a33c volumes: empty (Docker exit0)
+pihole owner=46bb0cdddef876f7a4c8d39b7fea67f0 containers: empty (Docker exit0)
+pihole owner=46bb0cdddef876f7a4c8d39b7fea67f0 networks: empty (Docker exit0)
+pihole owner=46bb0cdddef876f7a4c8d39b7fea67f0 volumes: empty (Docker exit0)
+technitium owner=f7dd13727a8d5c0b2cfe3ea11f7dbdcb containers: empty (Docker exit0)
+technitium owner=f7dd13727a8d5c0b2cfe3ea11f7dbdcb networks: empty (Docker exit0)
+technitium owner=f7dd13727a8d5c0b2cfe3ea11f7dbdcb volumes: empty (Docker exit0)
+Owned final native test process: absent (anchored pgrep exit1)
+Task TMPDIR: empty
+Final22-file source manifest: all hashes match

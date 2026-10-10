@@ -96,6 +96,10 @@ export function PendingStrip({
           description: outputHeadline(err.message),
           action: showOutput(err.message),
         })
+      } else if (err instanceof ApiError && err.code === "load_refused") {
+        // The test passed and the master refused what it read: it serves
+        // what it had, and the changes stay not live.
+        notify.error("nginx refused the reload", err)
       } else {
         notify.error("Could not reload nginx", err)
       }

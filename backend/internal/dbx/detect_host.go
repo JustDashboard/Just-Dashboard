@@ -39,33 +39,14 @@ type HostListener struct {
 	Port     int
 	Process  string
 	User     string
-}
-
-type hostRule struct {
-	driver Driver
-	// procs are matched as prefixes of the process name, because Linux
-	// truncates the comm field at 15 characters: "clickhouse-server" is only
-	// ever seen here as "clickhouse-serv".
-	procs    []string
-	user     string
-	database string
-	// openByDefault marks an engine that ships accepting connections with no
-	// credentials at all. Those can simply be tried; the rest are asked about.
-	openByDefault bool
-}
-
-var hostRules = []hostRule{
-	{driver: DriverPostgres, procs: []string{"postgres", "postmaster"}, user: "postgres", database: "postgres"},
-	// The MySQL DSN takes an empty database happily, and picking one the
-	// server may not have would turn a working connection into a failing one.
-	{driver: DriverMySQL, procs: []string{"mysqld", "mariadbd"}, user: "root"},
-	{driver: DriverMongo, procs: []string{"mongod"}, database: "admin", openByDefault: true},
-	{driver: DriverRedis, procs: []string{"redis-server", "valkey-server", "keydb-server"}, database: "0", openByDefault: true},
-	{driver: DriverClickHouse, procs: []string{"clickhouse"}, user: "default", database: "default", openByDefault: true},
-	{driver: DriverMSSQL, procs: []string{"sqlservr"}, user: "sa", database: "master"},
-	// Oracle's listener is the process that owns the socket; the database
-	// itself is behind it and always wants credentials.
-	{driver: DriverOracle, procs: []string{"tnslsnr"}, user: "system"},
+	// PID groups the sockets one server holds. Cmdline tells apart the
+	// programs that share a name, and names the product where the process is
+	// only a runtime. Manager and ManagerName say who supervises it — systemd
+	// and a unit, or a container and its id — as the cgroup states it.
+	PID         int32
+	Cmdline     string
+	Manager     string
+	ManagerName string
 }
 
 // DetectHost recognises a database server from a listening socket, returning
@@ -83,35 +64,24 @@ func DetectHost(l HostListener) *Candidate {
 	if l.Port <= 0 {
 		return nil
 	}
-	rule, ok := hostRuleFor(l.Process)
-	if !ok {
+	// The name is matched exactly, allowing for the kernel cutting it at 15
+	// characters. A prefix match read "postgres_exporter" as a Postgres.
+	p := productForProcess(l.Process, l.Cmdline)
+	if p == nil || p.driver == "" || p.sidePort(l.Port) {
+		// A socket the server holds that its driver cannot speak to — MySQL's
+		// X protocol, ClickHouse's HTTP interface — is not a way in.
 		return nil
 	}
 	return &Candidate{
-		Driver:           rule.driver,
+		Driver:           p.driver,
 		Source:           SourceHost,
 		Process:          l.Process,
 		Host:             hostAddress(l.Address),
 		Port:             l.Port,
-		User:             rule.user,
-		Database:         rule.database,
-		NeedsCredentials: !rule.openByDefault,
+		User:             p.user,
+		Database:         p.database,
+		NeedsCredentials: !p.open,
 	}
-}
-
-func hostRuleFor(process string) (hostRule, bool) {
-	name := strings.ToLower(strings.TrimSpace(process))
-	if name == "" {
-		return hostRule{}, false
-	}
-	for _, rule := range hostRules {
-		for _, want := range rule.procs {
-			if strings.HasPrefix(name, want) {
-				return rule, true
-			}
-		}
-	}
-	return hostRule{}, false
 }
 
 // HostConnectionName is what a server found this way is called in the picker.

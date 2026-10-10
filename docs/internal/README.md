@@ -24,8 +24,40 @@ strategy, and feature ownership behind those rules.
 
 ## Backend features
 
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
-  posture, login history, sshd, firewall/fail2ban, and six package managers.
+- [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
+  client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
+  admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.
+- [`backend/network-recovery.md`](backend/network-recovery.md) — durable network change phases,
+  independent recovery, prerequisites and verification limits.
+- [`backend/network-native-managers.md`](backend/network-native-managers.md) — selected native profile
+  ownership, bounded persistent edits, reconnection confirmation and terminal cleanup.
+- [`backend/network-boot-recovery.md`](backend/network-boot-recovery.md) — reconstructing prior managed
+  dependencies before interrupted-change recovery after a cold start.
+- [`backend/gateway-health.md`](backend/gateway-health.md) — checked firewall layers, per-family
+  admission health and blocklist cache/render/runtime evidence.
+- [`backend/network-investigator.md`](backend/network-investigator.md) — source/container connection
+  explanations, pinned native DNS/route/TCP evidence and unknown foreign/provider layers.
+- [`backend/network-diagnostics.md`](backend/network-diagnostics.md) — bounded saved probe runs,
+  cancellation, restart interruption, comparison, export and retention.
+- [`backend/network-captures.md`](backend/network-captures.md) — bounded private PCAP jobs, native cleanup,
+  artifact integrity, incident references and redacted support export.
+- [`backend/network-file-durability.md`](backend/network-file-durability.md) — owned file identity and durable restoration of prior absence.
+- [`backend/network-external-checks.md`](backend/network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
+- [`backend/network-flow-accounting.md`](backend/network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
+- [`backend/network-ipam.md`](backend/network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`backend/network-dns-evidence.md`](backend/network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
+- [`backend/network-dns-services.md`](backend/network-dns-services.md) — sealed native engine connections, reviewed changes, bounded filter metadata and owned Docker provisions.
+- [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
+- [`backend/network-egress.md`](backend/network-egress.md) — monitored egress groups, hysteresis, guarded failover/failback, connection handling and the gating simulation.
+- [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
+- [`backend/wireguard-lifecycle.md`](backend/wireguard-lifecycle.md) — the WireGuard record, alerts, transport anchors, peer editing, budgets, site verification, archive restore, the Linux kill switch and Tailscale/Headscale inspection.
+- [`backend/network-flow-observer.md`](backend/network-flow-observer.md) — explicit bounded kernel
+  telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
+- [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
+  measured unit activation and generation-bound repair review.
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, posture, login history, sshd and its pending apply,
+  firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
+  and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
   archives, previews, log discovery/search/tailing, the lenses that read each kind of log, and the
   service logs every page embeds.
@@ -35,9 +67,12 @@ strategy, and feature ownership behind those rules.
   backup scheduling/storage/restore, and host accounts/SSH keys.
 - [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
   partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
-- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — eight database engines,
-  nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent mode, configuration, releases, self-update, and the
-  dashboard's own settings (restart, rebuild, rollback, Tailscale certificates).
+- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — the Databases section:
+  the inventory of what is on the machine, connections and protected connections, the capability table,
+  the SQL workbench, schema and operations, the Redis and MongoDB surfaces, code generation, transfer,
+  and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
+  mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
+  rollback, Tailscale certificates).
 - [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
   cards, and board route permissions.
 
@@ -46,7 +81,8 @@ strategy, and feature ownership behind those rules.
 - [`deployments/caddy-ingress.md`](deployments/caddy-ingress.md) — automatic public Docker Caddy sharing,
   fresh-host provisioning, certificates, route recovery and ownership boundaries.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
-  C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
+  C7, execution/activation/recovery, feature joins, automation, previews, production topology, and
+  compatibility after removing existing-workload import.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
 - The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout. Use the
@@ -59,11 +95,47 @@ strategy, and feature ownership behind those rules.
   the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
 - [`frontend/feature-map.md`](frontend/feature-map.md) — every route area, its user-facing
   responsibility, component owner, and cross-feature handoffs.
+- [`frontend/workspace-interactions.md`](frontend/workspace-interactions.md) — page-owned keyboard commands,
+  history, focus/scroll restoration, held live lists and pinned metric moments.
 - [`frontend/data-theming.md`](frontend/data-theming.md) — API and WebSocket clients, polling, metrics state,
   confirmations, and self-update state.
 
 ## Contributor reference
 
+- [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
+  — scored networking feature map, current implementation gaps, official competitor research and
+  prioritized proposals from single-host recovery through an optional future network fabric.
+- [`../audits/2026-10-08-docker-networks-overhaul/README.md`](../audits/2026-10-08-docker-networks-overhaul/README.md)
+  — the Docker Networks page's band, address pool, two tables and live sheet, with before/after
+  screenshots.
+- [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
+  — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
+
+- [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
+  — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
+
+- [`../audits/2026-10-07-process-refresh/README.md`](../audits/2026-10-07-process-refresh/README.md)
+  — mounted inventory refreshes, stable inspection order, cron focus and interaction recordings.
+
+- [`../audits/2026-10-07-pm2-overhaul/README.md`](../audits/2026-10-07-pm2-overhaul/README.md)
+  — PM2 screenshots and the Files history regression found during merge verification, with replays.
+
+- [`../audits/2026-10-07-packages-overhaul/README.md`](../audits/2026-10-07-packages-overhaul/README.md)
+  — Packages' software-size band, update queue, catalogue and single-scroll inspector, with screenshots.
+
+- [`../audits/2026-10-08-docker-images-overhaul/README.md`](../audits/2026-10-08-docker-images-overhaul/README.md)
+  — Docker Images' disk and registry band, the image table and sheet, two reclaim and pull defects
+  fixed, with before/after screenshots.
+
+- [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
+  select/menu inventory, single-column option layout, opening behavior and verification coverage.
+
+- [`../audits/2026-10-04-terminal-window-docking/README.md`](../audits/2026-10-04-terminal-window-docking/README.md) — terminal pane detachment, window docking and live overlay recording with native PTY checks.
+- [`../audits/2026-10-06-command-palette-overhaul/README.md`](../audits/2026-10-06-command-palette-overhaul/README.md)
+  — the palette's one-line results without hue tiles, the selected result's preview with its
+  connected resources, and before/after screenshots.
+- [`../audits/2026-10-04-command-search/README.md`](../audits/2026-10-04-command-search/README.md) — global
+  command search research, keyboard navigation plan, metadata inventory and recorded workflow.
 - [`operations/terminal-tools.md`](operations/terminal-tools.md) — installer stages and completion guide,
   local root account recovery, password handling, audit, and terminal stack commands.
 - [`../audits/2026-09-22-deploy-new/README.md`](../audits/2026-09-22-deploy-new/README.md) — deployment

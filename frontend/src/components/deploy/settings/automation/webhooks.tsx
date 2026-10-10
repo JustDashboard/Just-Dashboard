@@ -30,7 +30,6 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useGitHubApp } from "@/hooks/use-github"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentDraftSource,
@@ -72,6 +71,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { humanize, isActiveRun } from "@/components/deploy/vocabulary"
 import { useProject } from "@/components/deploy/project-context"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
@@ -94,11 +94,12 @@ import {
  * deployment: a forge's push or pull request, reached through the GitHub App
  * or a signed payload URL, or anything else that signs its request.
  *
- * Each webhook is a card that opens its deliveries, drawn as the forge that
- * sends to it, with how the last delivery went beside the name in the colour
- * of what happened and its last fourteen deliveries as a strip under it — so
- * a webhook whose signature has been failing reads as that before its name is
- * read. A light runs round the card while a delivery it accepted is deploying.
+ * Each webhook is a one-line card that opens its deliveries, drawn as the
+ * forge that sends to it, with how the last delivery went at its far end in
+ * the colour of what happened and its last fourteen deliveries as a strip
+ * beside that — so a webhook whose signature has been failing reads as that
+ * before its name is read. A light runs round the card while a delivery it
+ * accepted is deploying.
  */
 
 /** What the Add and Edit sheet is open on. */
@@ -206,14 +207,11 @@ export function Webhooks({
   environmentId,
   automation,
   sheet,
-  branch,
 }: {
   projectId: number
   environmentId: number
   automation: Automation
   sheet: WebhookSheetController
-  /** The branch the project already deploys by itself, when it watches one. */
-  branch?: string
 }) {
   const { can } = useAuth()
   const canAdmin = can("system.admin")
@@ -222,6 +220,10 @@ export function Webhooks({
   const { triggers } = automation
   const [openId, setOpenId] = useState<number>()
   const [rotated, setRotated] = useState<{ name: string; secret: string }>()
+  // A card's facts and readings share one line where the list's own column
+  // has room for both, and the readings take a second line where it has not.
+  const [column, columnWidth] = useColumnWidth()
+  const wide = columnWidth >= 560
   const list = triggers.data ?? []
   const opened = list.find((trigger) => trigger.id === openId)
 
@@ -340,74 +342,66 @@ export function Webhooks({
   ]
 
   const providers = [...new Set(list.map(triggerProduct))]
-  const repositories = [
-    ...new Set(list.map((trigger) => trigger.config.repository).filter(Boolean)),
-  ]
-  const enabled = list.filter((trigger) => trigger.enabled).length
+  const disabled = list.filter((trigger) => !trigger.enabled).length
 
+  // How many, and how many are off, as one line. Each card names its own
+  // repository, and the picture above already draws the branch that deploys
+  // it by itself, so the head no longer says either. With none yet there is
+  // nothing to count: the senders below are the section.
   return (
     <SettingSection
       id="webhooks"
       title="Webhooks"
       state={
-        list.length > 0 ? (
-          <span className="inline-flex flex-wrap items-center gap-1.5">
+        list.length > 0 && (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
             <ProductGlyphs ids={providers} />
-            {repositories.length > 0 ? (
-              <span>
-                for <span className="font-mono text-foreground/85">{repositories.join(", ")}</span>
+            <span className="numeric">{plural(list.length, "webhook")}</span>
+            {disabled > 0 && (
+              <span key={disabled} className="flex animate-rise items-center gap-x-1.5">
+                <span aria-hidden>·</span>
+                <span className="numeric">{disabled} disabled</span>
               </span>
-            ) : (
-              <span>signed requests</span>
             )}
           </span>
-        ) : branch ? (
-          <>
-            Pushes to <span className="font-mono text-foreground/85">{branch}</span> already deploy
-            it — a webhook adds another sender or pull-request previews.
-          </>
-        ) : (
-          "A webhook lets a forge or any service that signs its request start a deployment."
         )
       }
       actions={
-        <>
-          {list.length > 0 && (
-            <span className="mr-1.5 text-hint text-muted-foreground">
-              <span className="numeric text-foreground">{plural(list.length, "webhook")}</span> ·{" "}
-              <span className="numeric">{enabled}</span> on
-            </span>
-          )}
-          {canAdmin && (
-            <Button size="sm" variant="outline" onClick={() => sheet.openAdd()}>
-              <Plus className="size-3.5" /> Add webhook
-            </Button>
-          )}
-        </>
+        canAdmin && (
+          <Button size="sm" variant="outline" onClick={() => sheet.openAdd()}>
+            <Plus className="size-3.5" /> Add webhook
+          </Button>
+        )
       }
     >
-      {triggers.loading && !triggers.data ? (
-        <LoadingRows rows={2} />
-      ) : triggers.error && !triggers.data ? (
-        <ErrorState error={triggers.error} onRetry={triggers.refresh} />
-      ) : list.length === 0 ? (
-        canAdmin ? (
-          <ProviderStarters onPick={(provider) => sheet.openAdd({ provider })} />
+      <div ref={column} className="min-w-0">
+        {triggers.loading && !triggers.data ? (
+          <LoadingRows rows={2} />
+        ) : triggers.error && !triggers.data ? (
+          <ErrorState error={triggers.error} onRetry={triggers.refresh} />
+        ) : list.length === 0 ? (
+          canAdmin ? (
+            <ProviderStarters onPick={(provider) => sheet.openAdd({ provider })} />
+          ) : (
+            <EmptyNote className="px-0 py-2 text-left">No webhooks yet.</EmptyNote>
+          )
         ) : (
-          <EmptyNote className="px-0 py-2 text-left">No webhooks yet.</EmptyNote>
-        )
-      ) : (
-        <ChoiceList aria-label="Webhooks" className="animate-rise">
-          {list.map((trigger) => (
-            <WebhookCard
-              key={trigger.id}
-              trigger={trigger}
-              verbs={canAdmin ? verbsFor(trigger) : undefined}
-              onOpen={canAdmin ? () => setOpenId(trigger.id) : undefined}
-            />
-          ))}
-        </ChoiceList>
-      )}
+          // Each card lands by itself, so one added from the sheet rises in
+          // rather than appearing; a poll keeps the rest mounted, unmoved.
+          <ChoiceList aria-label="Webhooks">
+            {list.map((trigger, index) => (
+              <WebhookCard
+                key={trigger.id}
+                index={index}
+                trigger={trigger}
+                wide={wide}
+                verbs={canAdmin ? verbsFor(trigger) : undefined}
+                onOpen={canAdmin ? () => setOpenId(trigger.id) : undefined}
+              />
+            ))}
+          </ChoiceList>
+        )}
+      </div>
 
       <DeliveriesSheet
         projectId={projectId}
@@ -491,22 +485,44 @@ function DeliveryFact({ trigger }: { trigger: DeploymentTrigger }) {
 }
 
 /**
- * One webhook as a card that opens its deliveries. The two readings — how
- * the last delivery went, and whether it is on — sit beside the name when
- * the card is wide and lead the line under it on a phone; chosen once
- * (`useMediaQuery`) rather than drawn twice, so each is in the page once.
+ * One webhook as a card that opens its deliveries, on one line: drawn as the
+ * forge that sends to it, named, with what it listens to under the name — the
+ * repository and branch, the paths it is narrowed to, whether it opens
+ * previews, and how deliveries arrive. At its other end are how the last
+ * delivery went, in the colour of what happened, whether it is on, and its
+ * last fourteen deliveries as a strip. Each reading rises into its new state
+ * when it changes: a delivery arriving, the run it started, the switch.
+ *
+ * One line, so the verbs stand on the card's middle: the strip, the paths and
+ * the preview address were a second band under the name, which left the verbs
+ * level with the name over an empty corner. The address went rather than
+ * moved — the picture above and the previews' own head both draw it. The
+ * strip keeps fourteen squares' width however few it holds, so down a list
+ * the strips are one column and the states end on one edge. A column too
+ * narrow for that line keeps a second one for the readings and the strip, and
+ * lets the facts wrap rather than lose their end.
+ *
+ * The facts say how deliveries arrive only where that is the exception —
+ * through the GitHub App — and the paths only where it is narrowed to some:
+ * "signed hook" under every other webhook, and "all paths" under every
+ * unfiltered one, were the default said on each card, and a signed hook's own
+ * card read "Signed hook · signed hook".
  */
 function WebhookCard({
   trigger,
+  index,
+  wide,
   verbs,
   onOpen,
 }: {
   trigger: DeploymentTrigger
+  index: number
+  /** Whether the list's column has room for the card's one line. */
+  wide: boolean
   verbs?: Verb[]
   onOpen?: () => void
 }) {
   const project = useProject()
-  const wide = useMediaQuery("(min-width: 640px)")
   const runId = trigger.lastDelivery?.runId
   const deploying =
     runId === undefined
@@ -515,23 +531,29 @@ function WebhookCard({
   const readings = (
     <>
       {deploying ? (
-        <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
-          {`deploying #${deploying.runNumber}`}
-        </TextShimmer>
+        <span key={`deploying-${deploying.id}`} className="flex animate-rise">
+          <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
+            {`deploying #${deploying.runNumber}`}
+          </TextShimmer>
+        </span>
       ) : (
         <LastDelivery trigger={trigger} />
       )}
       <Status
+        key={trigger.enabled ? "enabled" : "disabled"}
         tone={trigger.enabled ? "running" : "stopped"}
         label={trigger.enabled ? "Enabled" : "Disabled"}
+        className="animate-rise"
       />
     </>
   )
+  const strip = <DeliveryStrip recent={trigger.recent} />
   const include = trigger.config.watchInclude ?? []
   const forge = trigger.kind !== "generic_hook" && trigger.kind !== "api"
   return (
     <ChoiceRow
       verb={`Open ${trigger.name}`}
+      index={index}
       onSelect={onOpen}
       disabled={!onOpen}
       busy={Boolean(deploying)}
@@ -539,7 +561,7 @@ function WebhookCard({
       leading={<TriggerMark trigger={trigger} />}
       title={trigger.name}
       description={
-        <>
+        <span className={cn(!wide && "whitespace-normal")}>
           {trigger.config.repository ? (
             <span className="font-mono">{trigger.config.repository}</span>
           ) : (
@@ -551,44 +573,36 @@ function WebhookCard({
               <span className="font-mono">{trigger.config.ref}</span>
             </>
           )}
-          {viaApp(trigger) ? " · via GitHub App" : " · signed hook"}
-        </>
+          {forge && include.length > 0 && (
+            <>
+              {" · "}
+              <span className="font-mono">{include[0]}</span>
+              {include.length > 1 && <span className="numeric">{` +${include.length - 1}`}</span>}
+            </>
+          )}
+          {trigger.config.preview && " · previews"}
+          {viaApp(trigger) && " · via GitHub App"}
+        </span>
       }
-      trailing={wide ? <span className="flex items-center gap-4">{readings}</span> : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {readings}
+            {/* Only an administrator's list carries deliveries, so only theirs
+                keeps a column for them: anyone else's would be an empty one
+                on every card. */}
+            {onOpen && <span className="flex w-27.5 justify-end">{strip}</span>}
+          </span>
+        )
+      }
       actions={verbs && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${trigger.name}`} />}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
-        {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
-        <DeliveryStrip recent={trigger.recent} />
-        {forge && (
-          <span className="inline-flex min-w-0 items-center gap-1.5">
-            {include.length === 0 ? (
-              "all paths"
-            ) : (
-              <>
-                <span className="truncate font-mono text-foreground/85">{include[0]}</span>
-                {include.length > 1 && <span className="numeric">+{include.length - 1}</span>}
-              </>
-            )}
-          </span>
-        )}
-        {trigger.config.preview && (
-          <span className="inline-flex min-w-0 items-center gap-1.5">
-            <SourcePull aria-hidden className="size-3.5 shrink-0" />
-            <span className="truncate">
-              previews
-              {trigger.config.previewDomain && (
-                <>
-                  {" at "}
-                  <span className="font-mono text-foreground/85">
-                    {trigger.config.previewDomain}
-                  </span>
-                </>
-              )}
-            </span>
-          </span>
-        )}
-      </div>
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>
+          {strip}
+        </div>
+      )}
     </ChoiceRow>
   )
 }
@@ -602,7 +616,8 @@ const LAST_WORD: Record<string, string> = {
 /**
  * How the last delivery went, in its colour. An administrator's list carries
  * the delivery itself; anyone else's only the trigger's own last status and
- * time, which say the same thing less exactly.
+ * time, which say the same thing less exactly. A new delivery rises in over
+ * the last one; the clock ticking on the same one does not.
  */
 function LastDelivery({ trigger }: { trigger: DeploymentTrigger }) {
   const decision = trigger.lastDelivery?.decision ?? trigger.lastStatus
@@ -614,8 +629,10 @@ function LastDelivery({ trigger }: { trigger: DeploymentTrigger }) {
   const word = LAST_WORD[decision] ?? humanize(decision).toLowerCase()
   return (
     <Status
+      key={`${decision}-${at}`}
       tone={deliveryDecision(decision).tone}
       label={at ? `${word} ${relativeTime(at)}` : word}
+      className="animate-rise"
     />
   )
 }
@@ -1193,13 +1210,21 @@ export function WebhookSheet({
             </FormSection>
           )}
 
+          {/* A forge's three sections rise in when its card is picked after
+              Signed hook's, rather than snapping in under the pointer. */}
           {forge && (
-            <FormSection title="Repository">
+            <FormSection title="Repository" className="animate-rise">
               <FieldRow>
+                {/* The placeholder shows the shape; the hint says only what the
+                    field cannot, that this is the project's own repository. */}
                 <Field
                   label="Repository"
                   htmlFor="webhook-repository"
-                  hint={ownRepository ? "This project's repository" : "owner/repository"}
+                  hint={
+                    ownRepository && (
+                      <span className="block animate-rise">{"This project's repository"}</span>
+                    )
+                  }
                 >
                   <InputGroup>
                     <InputGroupAddon>
@@ -1224,6 +1249,7 @@ export function WebhookSheet({
                     </InputGroupAddon>
                     <InputGroupInput
                       id="webhook-branch"
+                      placeholder="main"
                       value={draft.branch}
                       onChange={(event) => patch({ branch: event.target.value })}
                       className="font-mono sm:text-xs"
@@ -1237,15 +1263,17 @@ export function WebhookSheet({
           )}
 
           {forge && (
-            <FormSection title="What it deploys">
+            <FormSection title="What it deploys" className="animate-rise">
+              {/* As General's path filters: the placeholder's two lines say
+                  "one per line", and the rest is behind the ⓘ. */}
               <Field
                 label="Watched paths"
                 htmlFor="webhook-paths"
-                hint="One glob per line. Leave empty to watch everything."
+                info="One glob per line; empty watches everything."
               >
                 <Textarea
                   id="webhook-paths"
-                  placeholder="services/api/**"
+                  placeholder={"services/api/**\npackages/shared/**"}
                   rows={3}
                   value={draft.watchedPaths}
                   onChange={(event) => patch({ watchedPaths: event.target.value })}
@@ -1262,7 +1290,7 @@ export function WebhookSheet({
           )}
 
           {forge && (
-            <FormSection title="Pull requests">
+            <FormSection title="Pull requests" className="animate-rise">
               <OptionRow
                 title="Create isolated environments for pull requests"
                 hint="Each revision waits for an administrator's approval before it builds."
@@ -1275,13 +1303,20 @@ export function WebhookSheet({
                     container preview gets a network of its own; Compose and workloads that reach
                     the host need a separate plan.
                   </FormNote>
+                  {/* What {number} stands for is behind the ⓘ; the placeholder
+                      already shows where it goes. Once one is typed the hint
+                      is the address it makes, which is what is checked while
+                      typing, and it rises in the first time it can be said. */}
                   <Field
                     label="Preview address"
                     htmlFor="webhook-preview-domain"
+                    info="Use {number} where the pull request's number goes."
                     hint={
-                      example
-                        ? `PR #42 → ${example} · point its DNS at this server`
-                        : "Use {number} where the pull request's number goes."
+                      example && (
+                        <span className="block animate-rise">
+                          PR #42 → {example} · point its DNS at this server
+                        </span>
+                      )
                     }
                   >
                     <InputGroup>
@@ -1304,14 +1339,11 @@ export function WebhookSheet({
             </FormSection>
           )}
 
-          {!forge && (
-            <FormNote>
-              Anything that can sign its request with the secret can start a deployment: a CI job, a
-              registry, a script.
-            </FormNote>
-          )}
+          {/* A signed hook has no fields past its name: its card, "anything
+              that signs", says what can send to it, and a sentence under the
+              form saying it again was the only other thing in the sheet. */}
           {error && (
-            <FormNote tone="danger" role="alert">
+            <FormNote key={error} tone="danger" role="alert" className="animate-rise">
               {error}
             </FormNote>
           )}
@@ -1365,15 +1397,13 @@ function TryAChange({
   return (
     <Disclosure quiet summary="Try a change">
       <div className="space-y-2">
-        <Field
-          label="Changed paths"
-          htmlFor="webhook-try-paths"
-          hint="One per line, as a commit lists them."
-        >
+        {/* The placeholder lists two paths as a commit would, which is the
+            whole of what the hint under it said. */}
+        <Field label="Changed paths" htmlFor="webhook-try-paths">
           <Textarea
             id="webhook-try-paths"
             rows={2}
-            placeholder="docs/readme.md"
+            placeholder={"docs/readme.md\nservices/api/main.go"}
             value={paths}
             onChange={(event) => setPaths(event.target.value)}
             className="font-mono sm:text-xs"
@@ -1392,7 +1422,13 @@ function TryAChange({
             Check
           </Button>
           {current && (
-            <FormNote tone={current.matched ? "success" : "default"} className="animate-rise">
+            // Keyed on the answer, so a different answer rises in rather than
+            // being repainted where the last one stood.
+            <FormNote
+              key={current.matched ? "deploys" : "ignored"}
+              tone={current.matched ? "success" : "default"}
+              className="animate-rise"
+            >
               {current.matched ? (
                 <>
                   <Check aria-hidden className="mr-1 inline size-3 align-[-1px]" />

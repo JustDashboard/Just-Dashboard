@@ -1,0 +1,114 @@
+{
+  "at": "2026-10-10T01:12:13Z",
+  "bootId": "0811de16-2f74-44a2-914a-c2b4ece6be71",
+  "evidence": {
+    "backend": {
+      "active": "failed",
+      "pid": "0",
+      "startedThisBoot": true,
+      "sub": "failed"
+    },
+    "file": {
+      "inode": 15006,
+      "mode": "0o644",
+      "path": "/etc/systemd/network/30-jdvm-direct.network",
+      "sha256": "0b9543db3f328545cc21416bd48e195da6364ecd7906309ba29163749631f042"
+    },
+    "helperJournal": [
+      "2026-10-10T01:12:11.916696+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recover-37bf89442996b132cfeb1f8298b50f59.service - /etc/just-dashboard/network/network-recovery --network-recover /etc/just-dashboard/network 37bf89442996b132cfeb1f8298b50f59...",
+      "2026-10-10T01:12:12.304336+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recover-37bf89442996b132cfeb1f8298b50f59.service: Deactivated successfully.",
+      "2026-10-10T01:12:12.304646+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recover-37bf89442996b132cfeb1f8298b50f59.service - /etc/just-dashboard/network/network-recovery --network-recover /etc/just-dashboard/network 37bf89442996b132cfeb1f8298b50f59."
+    ],
+    "journal": {
+      "appliedAt": "2026-10-10T01:10:41.242014425Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "complete",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:12:11.140006343Z",
+      "files": [],
+      "generation": "0f989955c15e63a05c2ce0c2043a8425c79bfb7a6d19fe51fb6e3c5ba039c214",
+      "id": "37bf89442996b132cfeb1f8298b50f59",
+      "ownerUserId": 1,
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-10T01:12:12.294993476Z",
+      "watchdog": "recovered"
+    },
+    "profile": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s6",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.6.15/24",
+            "10.0.6.16/24"
+          ],
+          "dns": [
+            "10.0.6.3"
+          ],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.6.0/24",
+              "gateway": "10.0.6.2",
+              "metric": 100,
+              "table": 254
+            },
+            {
+              "destination": "10.91.6.0/24",
+              "gateway": "10.0.6.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:6::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "networkd",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "systemd 255 (255.4-1ubuntu8.17)"
+    },
+    "waitedSeconds": 90.5
+  },
+  "failures": [],
+  "phase": "p11-timer networkd-17",
+  "result": "pass",
+  "seconds": 91.2
+}

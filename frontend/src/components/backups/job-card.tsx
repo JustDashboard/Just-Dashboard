@@ -1,24 +1,18 @@
 "use client"
 
-import { useCallback } from "react"
-import { Archive, CloudUpload, FolderClosed } from "@/components/icons"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { Archive } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { BackupJob, BackupRun } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceRow } from "@/components/flow"
 import { OutcomeStrip } from "@/components/outcome-strip"
-import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
-import {
-  contentsLabel,
-  retentionLabel,
-  scheduleLabel,
-  targetLabel,
-} from "@/components/backups/shared"
+import { contentsLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
 import { destinationProduct } from "@/components/backups/marks"
 
 /** How many runs a card draws. Two weeks of a daily job, a day of an hourly one. */
@@ -34,8 +28,16 @@ const STRIP = 14
  * A card rather than a table row because every one of these opens the job's
  * own page — a list of destinations (§12, §16) — and because the four
  * readings the page used to open on (jobs, last backup, next backup, stored)
- * are this job's and belong on it: the last run beside the name, the next one
- * and the storage under it.
+ * are this job's and belong on it.
+ *
+ * One line where the card has room, so the verbs stand on its middle: what it
+ * captures, when it next runs, where it writes and what it holds are one line
+ * under the name, and the last run and the strip are its other end. They were
+ * a band under the name, which made every job three lines tall with the verbs
+ * level with its name over an empty corner. The strip keeps fourteen runs'
+ * width however few it holds, so down a list the strips are one column and
+ * the last runs end on one edge. How long archives are kept is the job's own
+ * page's to say. A card without the room keeps a line under the name.
  */
 export function JobCard({
   job,
@@ -44,6 +46,7 @@ export function JobCard({
   verb = job.name,
   note,
   working,
+  index,
 }: {
   job: BackupJob
   /** The products of what the job covers, from the coverage report. */
@@ -55,10 +58,15 @@ export function JobCard({
    * gates on, not one job among many.
    */
   verb?: string
-  /** A reading the surface adds to the card's second line: the live release's view of the job. */
+  /**
+   * A reading the surface adds beside the last run — the live release's view
+   * of the job — or under the name with it where the card is narrow.
+   */
   note?: React.ReactNode
   /** The job is running now, so a light runs round the card (§11 *live*). */
   working?: boolean
+  /** Position in the list, for the arrival stagger (§11 *arrived*). */
+  index?: number
 }) {
   const fetchRuns = useCallback(
     (signal: AbortSignal) =>
@@ -70,61 +78,118 @@ export function JobCard({
     [job.id],
   )
   const runs = usePoll(fetchRuns, 60_000, [job.id])
-  // On a phone the outcome goes under the name, which otherwise had the
-  // width the outcome and the verbs left it — none. Chosen once rather than
-  // drawn twice and hidden, so the reading is in the document once.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const [mark, width] = useCardWidth()
+  // The last run and the strip take some 280px of the card's end and the
+  // verbs 60 more; a reading the surface adds, up to another 200. Short of
+  // that the name would be left the width of a word, so they go under it.
+  const wide = width >= (note ? 760 : 600)
+
+  const contents = contentsLabel(job)
+  const product = destinationProduct(job)
+  const target = (
+    <>
+      {product && (
+        <>
+          <ProductGlyph id={product} className="inline-block align-[-2px]" />{" "}
+        </>
+      )}
+      <span className={cn(job.targetKind === "local" && "font-mono")}>{targetLabel(job)}</span>
+    </>
+  )
+  const next = (
+    <span className={cn(job.overdue && "font-medium text-warning")}>{nextLabel(job)}</span>
+  )
+  const stored = (
+    <span className="numeric">
+      {job.stored.runs > 0
+        ? `${bytes(job.stored.bytes)} in ${plural(job.stored.runs, "archive")}`
+        : "nothing stored yet"}
+    </span>
+  )
+  const last = <LastRun job={job} />
+  const strip = <RunStrip runs={runs.data?.runs} />
 
   return (
     <ChoiceRow
+      workspaceItem={{ id: String(job.id), name: job.name }}
       verb={verb}
       href={`/backups/${job.id}`}
       busy={working}
+      index={index}
       className={cn(!job.enabled && job.schedule && "opacity-80")}
       leading={
-        products.length > 1 ? (
-          <ProductLogos ids={products} ring="ring-choice-surface" />
-        ) : (
-          <ProductLogo id={products[0]} size="sm" fallback={Archive} />
-        )
+        <span ref={mark} className="flex">
+          {products.length > 1 ? (
+            <ProductLogos ids={products} ring="ring-choice-surface" />
+          ) : (
+            <ProductLogo id={products[0]} size="sm" fallback={Archive} />
+          )}
+        </span>
       }
       title={job.name}
-      description={contentsLabel(job)}
-      trailing={wide ? <LastRun job={job} /> : undefined}
+      description={
+        // When it next runs before where it writes: an overdue job says so in
+        // its colour, and the end of the line is what an ellipsis takes.
+        wide ? (
+          <>
+            {contents && `${contents} · `}
+            {next} · {target} · {stored}
+          </>
+        ) : (
+          <>
+            {contents && `${contents} · `}
+            {target}
+          </>
+        )
+      }
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {note}
+            {last}
+            <span className="flex w-27.5 justify-end">{strip}</span>
+          </span>
+        )
+      }
       actions={<VerbActions dim verbs={verbs} menuLabel={`More actions for ${job.name}`} />}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
-        {!wide && <LastRun job={job} />}
-        <span className="flex min-w-0 items-center gap-1.5">
-          {destinationProduct(job) ? (
-            <ProductLogo
-              id={destinationProduct(job)}
-              size="sm"
-              className="size-5 rounded-sm [&_img]:size-3.5"
-            />
-          ) : job.targetKind === "local" ? (
-            <FolderClosed aria-hidden className="size-3.5 shrink-0" />
-          ) : (
-            <CloudUpload aria-hidden className="size-3.5 shrink-0" />
-          )}
-          <span className={cn("truncate", job.targetKind === "local" && "font-mono")}>
-            {targetLabel(job)}
-          </span>
-        </span>
-        <RunStrip runs={runs.data?.runs} />
-        <span className={cn("whitespace-nowrap", job.overdue && "font-medium text-warning")}>
-          {nextLabel(job)}
-        </span>
-        <span className="numeric whitespace-nowrap">
-          {job.stored.runs > 0
-            ? `${bytes(job.stored.bytes)} in ${plural(job.stored.runs, "archive")}`
-            : "nothing stored yet"}
-          <span className="text-muted-foreground/60"> · {retentionLabel(job).toLowerCase()}</span>
-        </span>
-        {note}
-      </div>
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
+          {/* A line of their own, so the outcome is never read as one more
+              word of the schedule after it. */}
+          <div className="flex basis-full flex-wrap items-center gap-x-4 gap-y-1">
+            {last}
+            {note}
+          </div>
+          {strip}
+          <span className="whitespace-nowrap">{next}</span>
+          <span className="whitespace-nowrap">{stored}</span>
+        </div>
+      )}
     </ChoiceRow>
   )
+}
+
+/**
+ * The card's own width. A job is drawn across /backups, in one half of a
+ * project's runtime and in a settings page's 48rem column, so the window says
+ * nothing about the room beside its name: at 1280 the runtime's half is about
+ * 470px wide. The row is `ChoiceRow`'s list item, found from the mark inside
+ * it, and measured before the first paint so a card never lands in one shape
+ * and flips to the other.
+ */
+function useCardWidth() {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const card = ref.current?.closest("[data-slot=choice-row]")
+    if (!card) return
+    setWidth(card.getBoundingClientRect().width)
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(card)
+    return () => observer.disconnect()
+  }, [])
+  return [ref, width] as const
 }
 
 /**
@@ -138,7 +203,10 @@ export function LastRun({ job }: { job: BackupJob }) {
   const { status, startedAt } = job.lastRun
   return (
     <Status
+      // A backup that did not land is a failure, not a caution: red, as its
+      // square in the strip beside it and its line in the picture are.
       state={status}
+      tone={status === "failed" ? "danger" : undefined}
       live={status === "running"}
       label={
         status === "running"

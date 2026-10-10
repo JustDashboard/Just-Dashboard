@@ -1,0 +1,5 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:52: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-services-artifacts/native-logs/technitium-51119fec0ea619ef145572ac8a14de49.log (261 bytes)
+    provision_live_test.go:160: native technitium provision state=failed phase=cleaned error=native Technitium bootstrap did not become ready err=<nil>
+--- FAIL: TestDNSServiceNativeOwnedEngine (124.30s)
+FAIL

@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -125,5 +126,54 @@ func TestImageDetectionPlansTheVolumesTheImageDeclares(t *testing.T) {
 	})
 	if err != nil || len(result.Candidates[0].PersistentPaths) != 0 {
 		t.Fatalf("absent image persistent paths = %+v, %v", result.Candidates, err)
+	}
+}
+
+// The images on this server include ones no registry has — a Compose
+// project's own build is named after the project and pushed nowhere — and
+// choosing one answered "Docker or registry evidence is unavailable". The
+// daemon's copy is the image that was chosen, named by its local id.
+func TestImageDetectionFallsBackToTheImageOnThisServer(t *testing.T) {
+	id := "sha256:" + strings.Repeat("d", 64)
+	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), &planningDockerFake{
+		imageDetail: &dockerx.ImageDetail{
+			ID: id, OS: "linux", Architecture: "amd64", ExposedPorts: []string{"8000/tcp"},
+		},
+	}, nil)
+	result, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceImage, Mode: SourceModeImageReference, Image: "bet-bot-tracker:latest",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := result.Source
+	if !source.Local || source.Digest != id || source.Repository != "docker.io/library/bet-bot-tracker:latest" ||
+		source.OS != "linux" || source.Architecture != "amd64" || len(source.Platforms) != 1 {
+		t.Fatalf("local image identity = %#v", source)
+	}
+	if candidate := result.Candidates[0]; candidate.Port != 8000 || candidate.Evidence[0].Reason != "image on this server "+id {
+		t.Fatalf("local image candidate = %#v", candidate)
+	}
+
+	missing := NewHostSourceAnalyzer(nil, nil, t.TempDir(), &planningDockerFake{}, nil)
+	if _, err := missing.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceImage, Mode: SourceModeImageReference, Image: "nowhere/app:1",
+	}); !errors.Is(err, ErrDockerUnavailable) {
+		t.Fatalf("an image in neither place: error = %v", err)
+	}
+}
+
+// A registry that answers is still the authority for an image it has: the
+// release pulls the digest it names, as it always did.
+func TestImageDetectionPrefersTheRegistryWhenItAnswers(t *testing.T) {
+	analyzer := imageAnalyzer(t, &dockerx.ImageDetail{ID: "sha256:" + strings.Repeat("e", 64), OS: "linux", Architecture: "amd64"})
+	result, err := analyzer.Analyze(context.Background(), DraftSourceConfig{
+		Kind: SourceImage, Mode: SourceModeImageReference, Image: "ghcr.io/owner/app:1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Source.Local || result.Source.Digest != testImageDigest {
+		t.Fatalf("registry image identity = %#v", result.Source)
 	}
 }

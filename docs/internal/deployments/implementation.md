@@ -16,7 +16,12 @@ only renderer/executor/validation authority for their feature.
   replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
 - Events commit before publish and are monotonically sequenced per run. Reconnect resumes after a sequence;
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
-  allowed to stall execution.
+  allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
+  events before handing off to live events, including the terminal tail of an already completed run.
+- Reusing a run's `Idempotency-Key` with a different manual `sourceRevision` or `ref` returns
+  `409 idempotency_conflict`. The comparison includes the persisted source-request metadata alongside
+  the existing digest, so keys created before this check retain their behavior. Retrying the same ref
+  returns the original run and frozen commit even if that ref has since moved.
 - `deploy_projects.id` remains the deployment identity. The additive normalized schema and compatibility
   migration retain legacy route/hook/env/history behavior while the persistent engine and UI replace it.
   `PUT /deploy/{id}` keeps its legacy Compose contract byte for byte for a full body — every field
@@ -50,24 +55,40 @@ only renderer/executor/validation authority for their feature.
   release materializes through a second mirror that is neither: the run workspace is built by fetching the
   recorded object id into a fresh repository, because `git clone --local` ignores its local copy when the
   source is shallow and would silently produce an empty checkout. Registry inspection resolves a digest
-  without pulling. Planning-time Compose validation uses private temporary files, an explicit empty env
+  without pulling. An image no registry can name but this server holds — a Compose project's own build,
+  a tag made by hand — is identified by its local image id instead (`SourceIdentity.local`, the registry
+  lookup tried first), and its release tags that id under the release's own tag rather than pulling, so
+  retention owns it like a built image; a Compose service image the registry cannot resolve at build time
+  is taken from this server the same way (`source: "local"` on the resolved service). Planning-time Compose validation uses private temporary files, an explicit empty env
   file and inert placeholders for detected variable names, so the backend environment and a checkout
   `.env` cannot influence the result.
 - `/deploy/new` is one page, held to the window at `xl`. Unfinished setups (`GET /deploy/drafts`) are
   offered for resumption behind a counted button beside the question; a source strip offers a Git
-  repository (connected GitHub list or a pasted URL), a Docker image (images already on the server or
-  a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
-  fallback shelf for a blueprint the frontend does not name), a database and a Compose stack (paste,
-  upload, Git, local). Choosing a
-  source creates a draft, saves the intent and source, and runs detection in one action; when
+  repository (connected GitHub list or a pasted URL), Docker (what this server already has, or a
+  registry reference), a reviewed template (shelved client-side by topic, with the server's `category`
+  as the fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has
+  no tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
+  Project step's *Deploy as a Compose stack*), from its files on this server through the Docker tab, or
+  resumed as an unfinished setup. The Docker tab (`new-project/source-image.tsx` over
+  `server-sources.ts`) lists the Compose stacks whose files are still on disk — not the dashboard's own,
+  nor one a deployment already runs — each deployed from those files as a `compose_local` source, so
+  the stack's variables, volumes and network come with it; and every image tag, each saying which
+  containers run it. A row deploys its image alone; images ticked together become one project, a
+  generated `compose_paste` stack with a service per image (named after the container's Compose service
+  where it has one, restarting unless stopped). A deployment runs its own copy: a stack that fixes
+  `container_name` or host ports collides with the copy already running until that one is stopped.
+  Choosing a source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
   does (an example, a docs site, not a service), as a choice that re-runs detection with
-  `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
-  address, in the same `wire.tsx` vocabulary the project overview uses for a deployment that already
-  exists, with a dashed ring for a step not yet decided and nothing pulsing, because a pulse means
-  live traffic and a plan has none. Every step is pressable and opens the fields that decide it,
-  which is what puts the release strategy and the memory limit on screen without opening Advanced to
-  find them; an unbounded container reads as "No memory or CPU limit" there rather than as silence.
+  `selectedId`. Each configure screen reads the plan down a rail beside the form
+  (`new-project/plan-rail.tsx` over `plan-reading.ts`, the run page's rail before the run): the four
+  steps under their segments of the spine, each holding the parts of the plan it decides — source and
+  build; container, address, health check, resources and storage; the environment; the server's check
+  and automatic deployment — each on the tile of the product it is, with what it says now and, where
+  there is one, the command, request, path or variable name as code. Every row is pressable and opens
+  the fields that decide it, which is what puts the release strategy and the memory limit on screen
+  without opening a fold to find them; an unbounded container reads as "No memory or CPU limit" there
+  rather than as silence, and a part that wants a look before Deploy is marked in its tile's corner.
   The form itself holds the name, the type, the detected build and output
   settings, environment variables, an optional database, the public address (with the hostname
   suggestion and certificate readiness), automatic deployment for a Git source, and an Advanced
@@ -103,8 +124,9 @@ only renderer/executor/validation authority for their feature.
   with the plan read back and Deploy under it. **Review saves the configuration and runs preflight on
   arrival**, not under the button: preflight used to run inside the press, so the screen asking "is
   this right" had checked nothing by the time it was read, its findings landed under a button the
-  reader had already pressed, and the first press of Deploy was really a check. It reads the plan back
-  as what the drawing beside it cannot carry — the mounts kept between rebuilds and their backup
+  reader had already pressed, and the first press of Deploy was really a check. It opens on what the server said — the findings to fix and the warnings to acknowledge under one
+  line saying what stands between the plan and Deploy — and reads the plan back as what the rail
+  beside it cannot carry, each drawn as a row of what it is — the mounts kept between rebuilds and their backup
   coverage, the variables generated on this server and their length, the readiness check's target and
   budget, and what the cutover strategy costs — plus every preflight `pass` as a checked line, where
   before only `blocked`, `decision` and `warning` were drawn and a plan with nothing wrong with it
@@ -119,8 +141,7 @@ only renderer/executor/validation authority for their feature.
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
-  is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
-  through `/deploy/import/adopt` without a run. For a Git source the commit carries a `gitPolicy`
+  is re-detected rather than refused. `?mode=advanced` opens Advanced. For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
   every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.
@@ -130,9 +151,12 @@ only renderer/executor/validation authority for their feature.
   `GET /deploy/credentials`. The page is kept for the tab (`useSessionState`,
   [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
   configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a
-  reload until the project is created or the source is changed, and a remembered flow whose draft has
-  expired is dropped with a notice on the way in. Unsaved environment values and visitor passwords never
-  enter the URL or browser storage. Configuration saves stage environment values in the additive
+  reload until the project is created or the source is changed. `?step=source|project|runtime|variables|review`
+  makes step changes browser history entries; Back to the chooser preserves the inspected flow and
+  Forward reopens it. Each step remembers field focus and scroll indices without field values,
+  as detailed in [`../frontend/workspace-interactions.md`](../frontend/workspace-interactions.md).
+  A remembered flow whose draft has expired is dropped with a notice on the way in. Unsaved environment
+  values and visitor passwords never enter the URL or browser storage. Configuration saves stage environment values in the additive
   `deploy_drafts.environment_enc` column, sealed with the install key; only `environmentKeys` returns
   to the browser, including names whose explicit empty override must survive a reload. An omitted
   `dotenv` preserves staged inputs, an explicit empty document clears them,
@@ -757,7 +781,7 @@ only renderer/executor/validation authority for their feature.
   SvelteKit's header variables), which is safe only while the proxy fronts the release alone. The
   release's runtime snapshot records which of those settings the recipe image's final stage sets
   (`proxyTrust`, read from the rendered Dockerfile by `imageProxyTrust`); a repository Dockerfile, a
-  pulled image or an adopted container records none. When the release has no route, or its port is
+  pulled image records none. When the release has no route, or its port is
   reachable directly (a `0.0.0.0`/`::` bind, host networking, or the application's port published again
   on every interface), `startContainer` writes the withdrawn value of each recorded setting unless the
   plan sets the variable itself (`network_trust.go`). Nothing is written over a user's own image.
@@ -866,7 +890,13 @@ only renderer/executor/validation authority for their feature.
   release containers Docker reports all down counts as stopped for start (`ReleaseRuntimeDown`, checked
   at admission and again in `start_candidate`): containers that exit, are stopped in Docker, or are not
   brought back after a daemon restart never pass through a stop run, and the project page already draws
-  that observation as stopped and offers Start. The fleet and workspace read models report the
+  that observation as stopped and offers Start. A Stop's own run page — where pressing Stop lands — reads
+  as the runtime it left rather than as a release that went live: the run is *Stopped* (`runStopped`),
+  its one stage is Stop and `start_candidate` is *Stop live release* (Restart's and Start's are named for
+  the live release the same way, in the run lists' current step too: `liveReleaseStepLabels`), the
+  outcome says the release is stopped with Start beside it until a newer run starts it again, and it
+  offers neither Redeploy nor Visit and fires no confetti. Only a rollback's identity line names a
+  release it rolls back to; every other operation's `targetReleaseId` is the live release it acts on. The fleet and workspace read models report the
   live runtime's stopped state as `stopped`, folded into the existing batched runtime join, and the Git
   watcher persists the decision reason `stopped` instead of enqueueing an automatic deployment while the
   live runtime is stopped; a manual deploy remains allowed and, on success, leaves the new release live
@@ -885,10 +915,17 @@ only renderer/executor/validation authority for their feature.
   variable clones the source/build/runtime rows into the next complete revision and never moves the live
   release pointer. Pending state compares that desired revision with the live release's exact plan and
   frozen variable/dependency/check snapshots, by names and digests only; a run clears only the revision it
-  actually applied, so a change saved after enqueue stays pending.
+  actually applied, so a change saved after enqueue stays pending. It is pending only when that comparison
+  names a change: the revision number counts saves, so an edit undone (a variable added then removed) moves
+  it on with nothing to deploy. A variable compares by value digest, sensitivity, scope set and literal/reference mode, so a
+  scope-only edit is still named. The fleet summary's `pendingChanges` — the header's "Deploy changes",
+  the Settings dot, the fleet chip — runs the same comparison for each deployment whose desired revision
+  is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
-  explicit audit entry. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
+  explicit audit entry. Stored `value_mode` keeps literal values literal, including reference-shaped
+  text. New values and dotenv entries are literal; an explicit reference uses reference mode. Empty
+  mode preserves historical value-shape inference. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
   closed kind/target model; missing variable references and cycles fail before commit, secret leaves stay
   masked, and enqueue freezes exact variable revision ids so retries cannot observe a later variable
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
@@ -904,7 +941,7 @@ only renderer/executor/validation authority for their feature.
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
-  line the parser cannot read past, a bad sensitivity or scope, a reference that would not resolve —
+  line the parser cannot read past or a bad sensitivity or scope —
   is refused with the import's own error; a refusal that belongs to one name is that name's verdict,
   so every other line can still be read. `dryRun` must parse as a boolean, because a preview that
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
@@ -929,9 +966,20 @@ only renderer/executor/validation authority for their feature.
   artifact existence. See [restore verification](restore-verification.md).
   Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
   manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
-- Import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
-  exact acknowledgement of unsupported observations. It records the external resource as observed and
-  does not start, stop, reset or claim it. Archiving disables deployment triggers, the project's schedules
+- Existing-workload discovery and adoption were removed by reverting #136 and #145. The
+  `/deploy/import` page and workload discovery/recovery endpoints are absent. The older
+  `/deploy/import/preview` and `/deploy/import/adopt` APIs remain only for Git-checkout imports;
+  container and Compose workload imports are refused.
+  Previously adopted projects and legacy external observations retain their database records and
+  runtime resources, but project mutations, new runs, queued execution, provider hooks and schedules
+  are refused. Their baseline and native startup authority require the removed engine; use the
+  original Docker/Compose/PM2/systemd tools, or restore an import-capable version to manage them.
+  Existing Git-checkout sources remain supported. The additive `adoption_enc` and `value_mode`
+  columns and the immutable-value trigger remain in the migration path. Literal/reference value
+  interpretation and variable snapshot digests are retained for compatibility with saved releases;
+  no stored data is erased.
+  Stop or drain deployment runs before switching versions. An import review draft cannot be committed
+  through the ordinary draft endpoint. Archiving disables deployment triggers, the project's schedules
   and visibility; it never removes runtime or data. Schedules are disabled directly (`ClaimDueSchedules`
   already excludes an archived *environment*, not an archived *project*, so without this a schedule kept
   firing and failing every occurrence at `environment_not_found`, invisibly, because even its summary
@@ -1114,11 +1162,15 @@ only renderer/executor/validation authority for their feature.
   page reads whether messages arrive without a request per channel. See
   [notifications](notifications.md).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
-  managed environment labels at the daemon before inspecting matching running containers once each.
+  managed environment labels at the daemon before inspecting matching containers once each — running
+  or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled
+  listing that cleanup and recovery read still inspects only running ones).
   The five-second bounded read returns container/release/Compose identities, the image reference the
   container was created from as Docker reports it (`image`, so a service is drawn as the product it
   runs without a join to the container list), state, health and start
-  time, without command text, environment values or arbitrary labels. `liveRelease` identifies the
+  time, and from the same inspect `restartCount`, `exitCode` (only for an exited, dead or restarting
+  container; a running or never-started one has no exit to report) and `oomKilled`, each omitted when
+  unknown or zero, without command text, environment values or arbitrary labels. `liveRelease` identifies the
   persisted live release, not a current health verdict. Failed or missing Docker is `unavailable` with
   a fixed recovery hint; a successful empty inventory is `available`. Missing health inspection evidence
   remains `unavailable`. The overview renders these services with live/other-release labels and links to
@@ -1134,13 +1186,14 @@ only renderer/executor/validation authority for their feature.
   successful activation step's completion only when
   its persisted evidence identifies that release and contains no recovery. It never uses the current
   live release's activation timestamp to describe an older run. Missing/failed activation has no history
-  link; removed runtimes point the operator to the transcript or an external log archive. The run page embeds application runtime logs separately from the orchestrator transcript, and the
-  project Logs page's Output view reads the observed runtime sources (the live release's containers,
-  "All services" for a stack, then older releases'). Both embed the service logs
-  (`components/logs/service-logs.tsx`) for live streaming, pause/resume, filters, each image's lens and
-  historical search without leaving the deployment. The run
-  viewer uses the server-provided activation window when available. A removed selected service
-  is reported as unavailable rather than silently replaced by another service.
+  link; removed runtimes point the operator to the transcript or an external log archive. No page
+  reads it since the run page's Runtime logs view was removed on 2026-10-05 (the endpoint, like
+  `…/runs/{run}/metrics` and `…/traffic`, stays for API callers). The project Logs page's Output view
+  reads the observed runtime sources (the live release's containers, "All services" for a stack, then
+  older releases') through the service logs (`components/logs/service-logs.tsx`) for live streaming,
+  pause/resume, filters, each image's lens and historical search without leaving the deployment. A
+  removed selected service is reported as unavailable rather than silently replaced by another
+  service.
 - `GET /deploy/{id}/operations` is the one operational read. It resolves the live release's own runtime
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
@@ -1152,11 +1205,12 @@ only renderer/executor/validation authority for their feature.
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
   certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
   finding. A dependency's `deepLink` is the page that owns it: a backup
-  job's own page (`/backups/<id>`) and Databases with the connection selected
-  (`/databases/connection?conn=<id>`), each only once the resource is known to exist and the list page
-  until then. The connection link used to be `/databases/<id>`, which is not a route, because the
-  Databases pages select a connection by query rather than by path, and the job link was always the
-  list. `deploy.Diagnose` is a pure function over those
+  job's own page (`/backups/<id>`) and the linked database's Settings page
+  (`/databases/<id>/settings`), each only once the resource is known to exist and the list page
+  (`/backups`, `/databases`) until then. A database is a path now — `/databases/<id>` is its home and
+  each of its pages a segment under it — so the link no longer selects a connection by query; the
+  older `/databases/connection?conn=<id>` a previous release emitted still resolves, through the
+  section's redirect for such addresses. `deploy.Diagnose` is a pure function over those
   observations returning findings and explicit *silences*: an owner that could not be read is never a
   claim and never a clean result. Release comparison (`.../releases/{release}/comparison`) names source,
   image, command, ports, runtime plan, storage, dependencies, checks and domains, compares variables by
@@ -1504,10 +1558,8 @@ names** — remove a mount and the file manager silently browses the container's
 
 ## Deployment workspace
 
-`/deploy` opens on four readings the chips under them cannot say — how many projects are live,
-requests a minute across the fleet with its hour as a line, the share of them failing (weighted by
-traffic; amber from 1%, red from 5%) and the build slots in use — then the runs in progress as rows
-that open the run, an attention list, and the projects under a search field and counted state
+`/deploy` opens on the runs in progress as rows that open the run (it has no row of figures: each
+card carries its own traffic and the counts are the chips'), then an attention list, and the projects under a search field and counted state
 chips, ordered worst first: failed, unhealthy, deploying, ready with pending changes, ready,
 stopped, not deployed. What needs attention is decided apart from how it is drawn
 (`components/deploy/fleet.ts`, `fleetAttention`): a failed deploy with the engine's own terminal
@@ -1515,8 +1567,14 @@ reason, a live release failing its health check, and a site failing 5% or more o
 health reading of *unavailable* is not a finding. A card carries the project drawn as itself
 (`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
 hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
-the last one, and the verbs the project context row offers (`useProjectVerbs`); the list view carries
-the same readings in fixed columns from 1280. The fleet is read every five seconds and the traffic
+the last one, and the verbs the project context row offers (`useProjectVerbs`). Every card draws
+every part at one fixed height, so a row of cards is one height with nothing stretched: the second
+source line is the commit, or for anything not built from a repository the images it runs (an
+image project's first line then names its registry); the traffic band says "No web traffic" over a
+flat rule for a project with no address on the web; and the footer never wraps, its words
+truncating instead. The list view carries the same readings from 1024 in columns two lines tall — the
+state over the address or pending changes and the run strip over the last run, with the traffic
+joining from 1280 — so a row stays one row's height. The fleet is read every five seconds and the traffic
 every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
 `/deploy?view=archived` lists archived projects drawn as what they deployed (`ArchivedDeployment`),
@@ -1533,13 +1591,19 @@ The project pages under `/deploy/[id]` share one read of the project through a l
 read once, the Git watch every fifteen seconds for a normalized Git source — one poll the header and
 the Overview share — and a template's definition), so moving between a project's pages never
 refetches the project, and a configuration save on any page is re-read there when the desired
-revision moves. The shell draws the name, then the identity line the host Overview opens on
-(`HostIdentity`): the project drawn as itself, its address with the certificate's state in the
-lock's colour, its source, commit, runtime, live release and automatic-deployment status as facts
-on their own marks, and its state — deploying, ready, failed, unhealthy, stopped, not deployed,
-derived from the summary and the runtime observation — with the diagnosis verdict or the stage in
-flight under it. Its actions are Visit, the one command (`projectCommand`: View deployment while a
-run is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
+revision moves. The shell draws the project identity line as one compact header at the top of
+every project page, so the page's own content starts directly under it: the project drawn as
+itself, its address with the certificate's state in the lock's colour, then its state — deploying,
+ready, failed, unhealthy, stopped, not deployed, derived from the summary and the runtime
+observation — and the diagnosis verdict or stage in flight on that same line, with the command at
+the far end. One line of facts runs under the address: source, tracked branch, runtime (the
+framework, else the language and version), the live release's age and automatic-deployment status.
+Exact commits, authors and trigger details remain in the deployment history and run pages; the
+Overview's wiring also names the live commit. The header has no back link and no Visit button —
+the rail's panel leads back to Deployments and the address is the link to the site. Below `sm` the
+state and the facts each take the full width under the mark, address and command. Its actions are
+the one command (`projectCommand`: View deployment while a run
+is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
 Building and Project — Restart and Stop; Redeploy live release, Retry, Rebuild without cache and
 Deploy a specific version; Duplicate project and Open in Docker — with Archive and Delete
 permanently under the danger rule. Starting a run goes through `useProjectStart`, the fleet card's
@@ -1616,9 +1680,19 @@ caching, so an SVG opened directly is a picture and not a document; `404 favicon
 product, Compose, its framework, its recipe's language, Docker or nginx), and only a project no
 product names keeps its workload glyph.
 
-Deployments carries the delivery insights — a failure reason among them narrows the list to the
-failed runs — then the runs under a strip of the last twenty outcomes and the environment picker,
-grouped under In progress and then by day, narrowed by counted chips. A run is one shared row
+Deployments carries delivery insights as two charts over the same days: success rate and weekly
+frequency over releases per day, and median release time and recovery time over release time per
+day — a bar for each day a release succeeded, the window's median as a dashed rule and the slowest
+day naming the scale's top. It is not drawn for a window in which nothing succeeded. These replace
+the history page's four tiles; the Overview keeps its delivery tiles. Why releases failed runs under
+both charts, counting the failed releases and when the last one was; each cause's bar is its share
+of every failed release, and a single cause is a line with its count and no bar. A failure reason
+narrows the list to the failed runs. The runs sit under a strip of the last twenty outcomes and the environment picker,
+grouped under In progress and then by day, narrowed by counted, underlined status filters. Zero-count
+filters remain selectable and show the empty state with Clear filters. Switching status or environment
+reserves the results' current height, including pagination, for this page visit so a shorter list
+cannot clamp the shell's scroll position and move the controls. History rows appear without replaying
+the arrival stagger when a filter changes. A run is one shared row
 (`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
 branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
 fixed columns, the duration with a bar that turns amber past twice the median of at least five
@@ -1645,41 +1719,44 @@ Settings are nine pages — General, Build, Runtime, Environment variables, Doma
 & backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
 command (the header's is the one), then, on the page that holds it, the newest failed deployment's
-fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings, then its forms with their heads in a rail
-from `xl`. Each form saves the whole configuration with the revision it read, keeps its draft keyed on
-a digest of its own saved value (`useSettingDraft`) so a save of the form beside it no longer throws
-the draft away, and ends in a foot with when the change applies, Discard and Save; a refusal that
-names a field lands on that control (a refused row is marked in place), and one that names none
-lands on the form. General holds the name, the Source (a repository, branch, root directory,
-credential — read through the App's installation for a connected GitHub repository — submodule and
-LFS choice, or an image reference and platform, changed in place through
+fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings,
+then its forms, each head over its fields in one centred 48rem column. Each form saves the whole
+configuration with the revision it read, keeps its draft keyed on a digest of its own saved value
+(`useSettingDraft`) so a save of the form beside it no longer throws the draft away, and ends in a
+foot with when the change applies, Discard and Save; a refusal that names a field lands on that
+control (a refused row is marked in place), and one that names none lands on the form. General holds
+the name, the Source (a repository, branch, root directory, credential — read through the App's
+installation for a connected GitHub repository — submodule and LFS choice, or an image reference and
+platform, changed in place through
 `PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
 policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
-Build opens on what it builds with, the last build (read from the live release's own Build step), the
-release tasks and the build variables, over the builder — every recipe, a Dockerfile or a static site
+None of the settings pages opens on a row of figures; each section's head says what it currently
+is. Build is the builder — every recipe, a Dockerfile or a static site
 — the package manager, the commands, the image and the build variables as one form and the release
 tasks, reorderable and
 each with its last run, as another; choosing a builder that is not a recipe clears the recipe's
-versions, secrets and package manager, which the plan would otherwise refuse. Runtime opens on where
-it listens, the memory limit against the live release's last-hour peak, how a release is replaced —
-naming a blue/green plan the executor would refuse, before it is deployed — and container access,
-over the runtime, where it listens, resources, the release strategy and container access as one form
-and the health checks, grouped by phase, as another. Environment variables is the list, its counts on
+versions, secrets and package manager, which the plan would otherwise refuse; the Build and Image
+heads name what the live release's own Build step prepared. Runtime is the runtime, where it
+listens, resources (each limit against the live release's last-hour peak), the release strategy —
+naming a blue/green plan the executor would refuse, before it is deployed — and container access as
+one form, and the health checks, grouped by phase, as another. Environment variables is the list, its counts on
 filter chips, each variable drawn as the service its name names and a reference as its database, with
 Reveal, Copy value (the audited reveal route; the value is never drawn), Rotate and Remove, and a
 removed name still live as a struck-through row; the editor is a sheet, and editing an existing
 variable asks for its value again (an administrator can reveal the current one into it) so a scope
 change can never blank a secret; the `.env` import is a sheet that previews every name through the
-dry run before anything is written, and cannot import while any name is refused. Domains opens on four
-readings and checks a new hostname in its Add domain sheet through `GET /deploy/hostname`, showing the
-A record to create and, for an administrator, whether it already resolves here. Storage opens on four
-readings joined from Docker's volume sizes and the backup coverage report, each refused read leaving
-its reading out, and draws each host path as the Files page's folder in its colour, over the mount
-editor and the live release's mounts as cards, with a card to back up any volume nothing copies. Databases & backups links databases
+dry run before anything is written, and cannot import while any name is refused. Domains warns in
+its section when the environment binds a public address, and checks a new hostname in its Add
+domain sheet through `GET /deploy/hostname`, showing the A record to create and, for an
+administrator, whether it already resolves here. The ownership selector shared with mounts and
+volume dependencies shows only the chosen word in its button and plain option names in its menu.
+The selected removal consequence stays beside it and is connected as its accessible description;
+managed, linked and observed semantics are unchanged. Storage draws each host path as the Files page's
+folder in its colour, in the mount editor and the live release's mounts as cards, each volume with
+its size from Docker where that read is allowed, with a card to back up any volume nothing copies. Databases & backups links databases
 through the same sheet the creation flow uses — in a section of its own, since linking is its own write
-— and never commits a half-filled sibling row when a database is connected or removed. It opens on
-four readings — linked count, connection, backup policy and native-dump coverage — and draws each link
-as a card carrying its engine, database, managed hostname, observed status, the variables that carry
+— and never commits a half-filled sibling row when a database is connected or removed. It draws each
+link as a card carrying its engine, database, managed hostname, observed status, the variables that carry
 it and the reason reconciliation recorded when it could not repair one, under a picture of how the
 application reaches them. Because runtime activation attaches a database by reading the variable that
 holds its address rather than the dependency row, removing a link offers to delete the variables that
@@ -1687,8 +1764,8 @@ reference it, and says so plainly when it is bound by a value it cannot name. Th
 gates on is drawn as the Backups page draws it — its products, last run, destination, last fourteen
 runs, next run and stored size — with the live release's observation folded onto the same card, runs
 on demand, and warns when it takes no native dump of a linked database — which the gate would
-otherwise refuse mid-deployment — with one press to add the dump; Automation opens on four readings
-and a picture of what deploys the project, and holds webhooks (each with its deliveries in a sheet,
+otherwise refuse mid-deployment — with one press to add the dump; Automation opens on a picture of
+what deploys the project, and holds webhooks (each with its deliveries in a sheet,
 the hook URL shown absolute, and a signed hook's secret shown once when it is made and when it is
 rotated), schedules (a builder in the schedule's own time zone, the server's check before saving,
 and each schedule's past firings and next five runs), previews (approve with a fork warning, reject,
@@ -1700,40 +1777,48 @@ or Start, Archive or Restore, managed-resource removal — whose plan loads as s
 archived — and permanent deletion, which asks for the project's name.
 
 The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream, resync and the
-5,000-event cap. It opens on an identity line — the source as its forge, the commit, who or what
-started the run and where, how long it has taken, and beside its state the verbs that act on it
-(Cancel, Retry, Redeploy, Visit and the release's menu) — then the release path (a stage the run did
-not include drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
-the failing step, the live address, or which release is live now. A failure is titled from the cause
+5,000-event cap. It opens on the header every page of its project opens on, saying what the run is
+(`run-header.tsx`): the project's tile, the commit as the title, the run's state with the step at work
+and how long it has taken, the verbs that act on it at the far end (Cancel, Retry, Redeploy, Visit and
+the release's menu), and one line of provenance — the run's number, branch and commit with their forge,
+the commit's author, what the run did and who or what started it, the environment, when, and how long it
+queued. Then the release path (a stage the run did not include drawn dashed), and how the run ended: a
+failure (`run-outcome.tsx`) drawn on the tile of the step it stopped at, in words with the engine's
+code beside it, where in the run it stopped, the engine's reason, the last four lines the step wrote and
+what to do — the fix, Show in build logs (Show the line when the cause names one) and Step details —
+the live address, or which release is live now. A failure is titled from the cause
 the failed step recorded (`failure-cause.ts` reads a build's or release task's `cause` and a health
 gate's `diagnostics.cause`), lists the identifiers it named, and offers its fix — to an administrator —
 as a button that opens the field it targets: the Build section for a package manager or version, the
 commands for a command, the output or the root, Runtime for the port or memory, Databases for a
 localhost database, and Variables with the editor opened on the variable (`?variable=NAME&scope=…`,
-plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" selects the failing
-step and scrolls the console to the transcript line the cause points at, clearing a search or the
-errors filter that could hide it. When `GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
+plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" narrows the console to
+the failing step, brings it into view and scrolls it to the transcript line the cause points at,
+clearing a search or the errors filter that could hide it. When
+`GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
 the variables changed since the run — the plan revision's fields and the variables' names, digests
 and scopes, never a value — the header's command becomes Deploy with current settings (the run's own
 commit for a remote Git source whose drift names no source change, a plain deploy otherwise — a source
 moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
 "Retry with the settings it used", and one line under the failure says what changed. A run that failed
 with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
-be fetched again. The build console paints its lines
-through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
-them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
-errors (with a count), shows the time since the run began, wraps, follows, copies and downloads
-`deployment-N.log`, and stays mounted while Details, Runtime logs or Metrics are open so its search and
-scroll position survive the switch; the release path shows each group's duration; Details lists every
-step attempt with its evidence and where in the run it ran; Runtime logs draws each source as its
-image's product and keeps its server-provided windows, the one around activation offered as an
-*Around activation* chip that opens the history there rather than as a second Live beside the
-workspace's own. Metrics reads each figure as before → after, amber once a reading is half again
-what it was (the traffic panel's rule for "slower"), over one strip per measure: the ten minutes
-before and the ten after at equal widths on one scale, with a brand rule at the instant the release
-went live. Its windows name a single-container release's series by container (`sources`; a Compose
-release's stay unnamed, because its recorded runtime lists container ids without the service each
-ran). A successful run shows Visit
+be fetched again. Under that the run is two parts with no strip between them. The build console paints
+its lines through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`),
+numbers them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage
+and errors (with a count), shows the time since the run began, wraps, follows, copies and downloads
+`deployment-N.log`; the release path shows each group's duration. Details (`run-steps.tsx`) is one
+working surface: a rail of every step attempt under the stage it belongs to — each step on the tile of
+the product it works with (the forge for the source, the toolchain for the build context, Docker for the
+build and the runtime, Let's Encrypt for a certificate, a glyph for the dashboard's own bookkeeping),
+what it concluded, how long it took and where in the run it ran — beside an inspector of the picked
+step, which opens on the failed step, else the one at work, else the build. The inspector draws the
+step's state and times, its error, preflight's findings for Check plan, the last eight lines it wrote
+with Build output into the console, and its evidence read by shape (`run-evidence.tsx`): facts with
+the products they name, digests cut short with a copy, a commit as the Git page draws one, images and
+health checks as rows, a Dockerfile, a command and any record nested past two levels as code in the
+`--tag-*` hues, and the record as it was kept in a fold. Runtime logs and Metrics around activation
+were views of this page until 2026-10-05; what a release does once it runs is the project's Logs and
+Runtime pages. A successful run shows Visit
 only when its recorded release is the project's current live release; the success block waits for the
 project read so it never flashes Superseded first.
 

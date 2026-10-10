@@ -289,7 +289,7 @@ test("users are cards drawn by their faces, opening their editor", async ({ page
   await expect(page.getByRole("dialog", { name: "Edit Maria Rusu" })).toBeVisible()
 })
 
-test("security is a form with its state in the rail", async ({ page }) => {
+test("security is a form with its state under each head", async ({ page }) => {
   await mockAccount(page, session(false, false))
   await page.goto("/account/security")
   await expect(page.getByRole("heading", { name: "Two-factor" })).toBeVisible()

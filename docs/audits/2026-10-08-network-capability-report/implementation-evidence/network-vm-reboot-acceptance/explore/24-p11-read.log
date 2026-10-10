@@ -1,0 +1,275 @@
+{
+  "at": "2026-10-10T00:18:51Z",
+  "bootId": "877f2244-9be2-4eed-b36a-7aacaf706bff",
+  "evidence": {
+    "managers": [
+      {
+        "edits": [
+          "existing static/automatic addresses",
+          "per-link DNS and domains",
+          "explicit unicast routes"
+        ],
+        "manager": "NetworkManager",
+        "status": "supported",
+        "version": "1.46.0"
+      },
+      {
+        "edits": [
+          "existing static/automatic addresses",
+          "per-link DNS and domains",
+          "explicit unicast routes"
+        ],
+        "manager": "networkd",
+        "status": "supported",
+        "version": "systemd 255 (255.4-1ubuntu8.17)"
+      },
+      {
+        "edits": [
+          "existing static/automatic addresses",
+          "per-link DNS and domains",
+          "explicit unicast routes"
+        ],
+        "manager": "netplan",
+        "status": "supported",
+        "version": "1.1.2-8ubuntu1~24.04.3"
+      }
+    ],
+    "netplan-networkd": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s4",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.4.15/24"
+          ],
+          "dns": [
+            "10.0.4.3"
+          ],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.4.0/24",
+              "gateway": "10.0.4.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:4::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "netplan",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "1.1.2-8ubuntu1~24.04.3"
+    },
+    "netplan-nm": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "jdnm0",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.7.15/24"
+          ],
+          "dns": [
+            "10.0.7.3"
+          ],
+          "domains": [
+            "nmd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.7.0/24",
+              "gateway": "10.0.7.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:7::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "nmd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "netplan",
+      "refusal": null,
+      "renderer": "NetworkManager",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "1.1.2-8ubuntu1~24.04.3"
+    },
+    "netplan-nm-ethernet": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s5",
+      "editable": false,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.5.15/24"
+          ],
+          "dns": [
+            "10.0.5.3"
+          ],
+          "domains": [
+            "nm.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:5::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "nm.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "netplan",
+      "refusal": "this saved native profile has properties whose active effects are not yet verified",
+      "renderer": "NetworkManager",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "1.1.2-8ubuntu1~24.04.3"
+    },
+    "networkd": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s6",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.6.15/24"
+          ],
+          "dns": [
+            "10.0.6.3"
+          ],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.6.0/24",
+              "gateway": "10.0.6.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:6::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "networkd",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "systemd 255 (255.4-1ubuntu8.17)"
+    }
+  },
+  "failures": [],
+  "phase": "p11-read",
+  "result": "pass",
+  "seconds": 4.3
+}

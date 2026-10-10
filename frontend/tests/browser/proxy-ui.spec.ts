@@ -43,23 +43,93 @@ test("the reverse proxy is named once, in the identity line", async ({ page }) =
   await expect(identity.getByRole("button", { name: "Reload" })).toBeVisible()
 })
 
-test("the overview's sites are cards drawn as the engine serving them", async ({ page }) => {
+test("the overview's sites are cards drawn as what they reach, the engine in the corner", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy")
 
   const sites = page.getByRole("list", { name: "Sites" })
   const cards = sites.locator("[data-slot='choice-row']")
   await expect(cards).toHaveCount(3)
-  await expect(
-    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/nginx.svg']"),
-  ).toHaveCount(1)
-  await expect(
-    cards.filter({ hasText: "just-dashboard-shop" }).locator("img[src='/logos/caddy.svg']"),
-  ).toHaveCount(1)
+  // app.example.com forwards to 127.0.0.1:3000, where node listens: the
+  // card is Node's, with nginx's mark in the tile's corner.
+  const app = cards.filter({ hasText: "app.example.com" })
+  await expect(app.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
+  await expect(app.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
+  await expect(app).toContainText("nginx site → node")
+  // Nothing listens behind the shop's address, so no product is guessed.
+  const shop = cards.filter({ hasText: "just-dashboard-shop" })
+  await expect(shop.locator("img[src='/logos/caddy.svg']")).toHaveCount(1)
+  await expect(shop.locator("img")).toHaveCount(1)
   // A site whose certificate is certbot's says so with Let's Encrypt's mark.
-  await expect(
-    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/lets-encrypt.svg']"),
-  ).toHaveCount(1)
+  await expect(app.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
+})
+
+test("the overview draws each domain wired through nginx to what answers it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const target = (site: string, address: string, state: string, extra = {}) => ({
+    site,
+    kind: "http",
+    directive: "proxy_pass",
+    address,
+    file: `/etc/nginx/sites-available/${site}`,
+    line: 12,
+    state,
+    ...extra,
+  })
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: now,
+      targets: [
+        target("app.example.com", "127.0.0.1:3000", "up", { ms: 2, owner: "node" }),
+        target("legacy.example.com", "127.0.0.1:8080", "refused"),
+      ],
+    }),
+  )
+  const hour = (site: string, requests: number, errorRate: number) => ({
+    site,
+    file: `/etc/nginx/sites-available/${site}`,
+    status: "available",
+    requests,
+    errorRate,
+    bytes: requests * 2_000,
+    complete: true,
+  })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: now,
+      sites: [hour("app.example.com", 1_200, 0.002), hour("legacy.example.com", 80, 0.9)],
+    }),
+  )
+  await page.goto("/proxy")
+
+  // The verdict at the engine line's end is about its routes.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("1 route down")).toBeVisible()
+
+  const picture = page.locator("[data-slot='route-picture']")
+  const domains = picture.getByRole("list", { name: "Domains" })
+  // The route that is down leads, then the busiest.
+  await expect(domains.getByRole("listitem").first()).toContainText("legacy.example.com")
+  await expect(domains.getByRole("link", { name: "app.example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/app.example.com",
+  )
+  await expect(domains).toContainText("1.2k req/h")
+  // A domain in plain HTTP says so.
+  await expect(domains.getByRole("listitem").first()).toContainText("plain HTTP")
+  const apps = picture.getByRole("list", { name: "Applications" })
+  await expect(apps.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
+  await expect(apps.getByText("up 2 ms")).toBeVisible()
+  await expect(apps.getByText("refused")).toBeVisible()
+  await expect(picture.getByText(":443 nginx")).toBeVisible()
+
+  // The hour's traffic is shared out by site, and a site opens its traffic.
+  const traffic = page.getByRole("region", { name: "Traffic", exact: true })
+  await expect(traffic.getByText("1.3k req in the hour")).toBeVisible()
+  await traffic.getByRole("button", { name: "Open app.example.com's traffic" }).click()
+  await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
 })
 
 test("the overview's attention list is folded from conditions worth acting on", async ({
@@ -104,10 +174,12 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   ).toHaveAttribute("href", "/proxy/sites/just-dashboard-shop")
   // Worst first: the site proxying an application in plain text is under
   // the attention rule, above the two on TLS.
-  await expect(page.getByText("Needs attention")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Needs attention" })).toBeVisible()
   await expect(cards.first()).toContainText("legacy.example.com")
-  // The four readings sit on the page rather than in a box.
-  await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
+  // What the tiles counted is the identity line's and the chips'.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("3 sites")
+  await expect(page.getByRole("button", { name: /^Plain HTTP 1/ })).toBeVisible()
 })
 
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
@@ -267,7 +339,10 @@ for (const width of [390, 1280, 1720]) {
     page.on("pageerror", (error) => failures.push(error.message))
     for (const path of PROXY_PAGES) {
       await page.goto(path)
-      await expect(page.locator("[data-slot='stat-grid']").first()).toBeVisible()
+      // Sites opens on its identity line rather than tiles.
+      await expect(
+        page.locator("[data-slot='stat-grid'], [data-slot='host-identity']").first(),
+      ).toBeVisible()
       await page.waitForLoadState("networkidle")
       const overflow = await page
         .locator("[data-slot='page']")
@@ -722,28 +797,38 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   )
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("reverse proxy")).toBeVisible()
-  // Its two ends in their own columns under the line, as its card draws them.
-  const route = page.getByRole("main").locator("[data-slot='proxy-route']")
-  await expect(route.getByText("app.example.com", { exact: true })).toBeVisible()
-  await expect(route.getByText("http://127.0.0.1:3000", { exact: true })).toBeVisible()
   await expect(identity.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "Edit" })).toBeVisible()
+  // The four figures that stood over the logs are gone: the failed request
+  // is the line's verdict, the hour's rate the route's first node.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  await expect(identity.getByText("1 failed in the last hour")).toBeVisible()
+  // The way a request reaches it: who asked, the name, the engine and what
+  // answers behind it.
+  const route = page.getByRole("region", { name: "How a request reaches the site" })
+  await expect(route.getByText("Visitors", { exact: true })).toBeVisible()
+  await expect(route.getByText("3 requests in the last hour")).toBeVisible()
+  await expect(route.getByText("1 probe refused")).toBeVisible()
+  await expect(route.getByText("app.example.com", { exact: true })).toBeVisible()
+  await expect(route.getByText("29 days left")).toBeVisible()
+  await expect(route.getByText("HTTPS only")).toBeVisible()
+  await expect(route).toContainText("127.0.0.1:3000")
+  await expect(route.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
 
-  // It opens on its requests, from its own record, with the hour's figures
-  // over them.
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  // It opens on its requests, from its own record, in the pane a
+  // deployment's logs are read in.
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
+  await expect(views.getByRole("button", { name: "Insights" })).toBeVisible()
+  await expect(views.getByRole("button", { name: "Log files" })).toBeVisible()
   await expect(page.getByText("/cart", { exact: true })).toBeVisible()
   await expect(page.getByText("/.env", { exact: true })).toBeVisible()
   // The request record exports its own rows; the log's export beside it
   // would be a second Export about other lines.
   await expect(page.getByText("Export", { exact: true })).toHaveCount(1)
-  const readings = page.locator("[data-slot='stat-grid']")
-  await expect(readings.getByText("Server errors")).toBeVisible()
-  await expect(readings.getByText("Upstream failures")).toBeVisible()
   // nginx's combined line has no duration, and the page does not draw one.
   await expect(page.getByText("Took", { exact: true })).toHaveCount(0)
 
@@ -762,8 +847,12 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   // Nothing on the page sends the reader to the host Logs page.
   await expect(page.locator("a[href^='/logs']")).toHaveCount(0)
 
-  // The error log opens in place on the minute around it.
+  // The error log opens in place, among the log files, on the minute around it.
   await said.getByRole("button", { name: "Open in the error log" }).click()
+  await expect(views.getByRole("button", { name: "Log files" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
   await expect(page.getByRole("combobox", { name: "Site log" })).toHaveText(/Error log/)
   await expect(page.getByText(/^Around a failed request/)).toBeVisible()
   await expect
@@ -776,15 +865,12 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
       ),
     )
     .toBe(true)
-  await page
-    .getByRole("navigation", { name: "Log mode" })
-    .getByRole("button", { name: "Requests" })
-    .click()
+  await views.getByRole("button", { name: "Requests" }).click()
   await expect(page.getByText(/^Around a failed request/)).toHaveCount(0)
 
-  // The 5xx figure narrows the rows to the failed ones, by asking the
-  // site's record for them.
-  await readings.getByRole("button", { name: "Show the requests that failed" }).click()
+  // The verdict narrows the rows to the failed ones, by asking the site's
+  // record for them, as the 5xx figure it replaced did.
+  await identity.getByRole("button", { name: "Show the requests that failed" }).click()
   await expect(
     page.getByRole("button", { name: /^5xx/ }).and(page.locator("[aria-pressed='true']")),
   ).toBeVisible()
@@ -799,10 +885,8 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
   const logs = await mockLogs(page)
   await page.goto("/proxy/sites/app.example.com")
 
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  const views = page.getByRole("navigation", { name: "Log view" })
   await views.getByRole("button", { name: "Errors" }).click()
-  // The strip names the log the view reads.
-  await expect(page.getByRole("combobox", { name: "Site log" })).toHaveText(/Error log/)
   const search = logs.searches.find((q) => q.get("limit") === "1000")!
   expect(search.get("source")).toBe(`file:${ERROR_LOG}`)
   expect(search.get("levels")).toBe("critical,error,warn")
@@ -832,8 +916,11 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
     .poll(() => logs.searches.filter((q) => q.get("limit") === "1000").length)
     .toBeGreaterThan(asked)
 
-  // Live reads the error log through its lens, since that is the log named.
-  await views.getByRole("button", { name: "Live" }).click()
+  // The log files read the error log live through its lens, once it is the
+  // log picked.
+  await views.getByRole("button", { name: "Log files" }).click()
+  await page.getByRole("combobox", { name: "Site log" }).click()
+  await page.getByRole("option", { name: /^Error log/ }).click()
   await expect(page.getByText(`a line from file:${ERROR_LOG}`)).toBeVisible()
   expect(logs.sockets.at(-1)!.get("lens")).toBe("nginx-error")
   await expect(page.locator("a[href^='/logs']")).toHaveCount(0)
@@ -885,32 +972,237 @@ test("/proxy/certificates reads every renewal certbot ran", async ({ page }) => 
   await expect(page.getByRole("option", { name: "certbot.service" })).toBeVisible()
 })
 
-test("/proxy/sites/app.example.com's upstream figure opens its failures, and lets go when pressed again", async ({
+test("/proxy/sites/app.example.com's verdict narrows its requests, and lets go when pressed again", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const logs = await mockLogs(page)
+  await page.goto("/proxy/sites/app.example.com")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  const views = page.getByRole("navigation", { name: "Log view" })
+  // The day's failures are the Errors tab's count, which the view's All chip
+  // agrees with.
+  await expect(views.getByRole("button", { name: "Errors" })).toContainText("2")
+  await views.getByRole("button", { name: "Errors" }).click()
+  await expect(page.getByRole("button", { name: /^All/ })).toContainText("2")
+
+  // From any view, the verdict brings Requests back narrowed to what it counts.
+  await identity.getByRole("button", { name: "Show the requests that failed" }).click()
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect.poll(() => logs.requests.some((q) => q.get("classes") === "5xx")).toBe(true)
+  await expect(page.getByText("/.env", { exact: true })).toHaveCount(0)
+  await identity.getByRole("button", { name: "Show every request again" }).click()
+  await expect(page.getByText("/.env", { exact: true })).toBeVisible()
+})
+
+for (const width of [390, 1280, 1720]) {
+  test(`/proxy/sites/app.example.com is contained at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await mockProxy(page, { included: true })
+    await mockLogs(page)
+    await page.goto("/proxy/sites/app.example.com")
+    await expect(page.getByRole("region", { name: "How a request reaches the site" })).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    const overflow = await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+    expect(overflow, `the site page overflows at ${width}`).toBe(false)
+  })
+}
+
+test("/proxy/sites/app.example.com says who balances its requests and what nginx logged of each server", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
   await mockLogs(page)
+  const path = "/etc/nginx/sites-available/app.example.com"
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: new Date().toISOString(),
+      targets: [],
+      evidence: {
+        since: new Date(Date.now() - 3_600_000).toISOString(),
+        logs: ["/var/log/nginx/error.log"],
+        complete: true,
+      },
+      pools: [
+        {
+          name: "jd_app_example_com_pool",
+          kind: "http",
+          sites: ["app.example.com"],
+          files: [path],
+          method: "least_conn",
+          balancing: "native",
+          verdict: "degraded",
+          noLive: 2,
+          members: [
+            { address: "10.0.0.1:3000", weight: 3, state: "up", ms: 2 },
+            {
+              address: "10.0.0.2:3000",
+              maxFails: 1,
+              failTimeout: "30s",
+              state: "refused",
+              failures: { refused: 4, disabled: 1 },
+            },
+            { address: "10.0.0.3:3000", backup: true, state: "up", ms: 1 },
+          ],
+        },
+        {
+          kind: "http",
+          sites: ["other.example.com"],
+          files: ["/etc/nginx/sites-available/other"],
+          balancing: "single",
+          verdict: "serving",
+          members: [{ address: "127.0.0.1:9000", state: "up" }],
+        },
+      ],
+    }),
+  )
   await page.goto("/proxy/sites/app.example.com")
 
-  const readings = page.locator("[data-slot='stat-grid']")
-  const views = page.getByRole("navigation", { name: "Log mode" })
-  await readings.getByRole("button", { name: /upstream failures/ }).click()
-  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  const panel = page.getByRole("region", { name: "Balancing · jd_app_example_com_pool" })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText("Degraded")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "nginx sends requests to the server with the fewest active connections across 2 servers, and sets one aside after it fails. Its backup takes over only when every primary has failed.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByText("nginx had nowhere to send 2 requests")).toBeVisible()
+  const refused = panel.getByRole("row", { name: /10\.0\.0\.2:3000/ })
+  await expect(refused).toContainText("primary, set aside after 1 failure for 30s")
+  await expect(refused).toContainText("refused")
+  await expect(refused).toContainText("refused 4×, set aside 1×")
+  await expect(panel.getByRole("row", { name: /10\.0\.0\.3:3000/ })).toContainText("backup")
+  // The route's far end is the pool's servers, each with the check's reading.
+  const route = page.getByRole("region", { name: "How a request reaches the site" })
+  await expect(route.getByText("Pool · jd_app_example_com_pool")).toBeVisible()
+  await expect(route).toContainText("10.0.0.2:3000")
+  await expect(route).toContainText("refused 4×, set aside 1×")
+  // Another site's single endpoint is not this site's.
+  await expect(page.getByText("127.0.0.1:9000")).toHaveCount(0)
+})
+
+test("/proxy/sites/app.example.com reads its controls and measures what each one does", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  const controls = [
+    {
+      id: "rate-limit",
+      title: "Request limit",
+      configured: true,
+      setting: "10r/s, burst 20, no delay",
+      support: "built-in",
+    },
+    { id: "conn-limit", title: "Connection limit", configured: false, support: "built-in" },
+    {
+      id: "proxy-cache",
+      title: "Response cache",
+      configured: true,
+      setting: "zone jd_app_cache",
+      support: "built-in",
+    },
+    {
+      id: "static-cache",
+      title: "Browser caching of assets",
+      configured: false,
+      support: "built-in",
+    },
+    { id: "http2", title: "HTTP/2", configured: true, setting: "http2 on", support: "module" },
+    {
+      id: "http3",
+      title: "HTTP/3",
+      configured: true,
+      setting: "listen 443 quic",
+      support: "missing",
+    },
+  ]
+  const policy = {
+    site: "app.example.com",
+    file: "/etc/nginx/sites-available/app.example.com",
+    engine: "nginx/1.26.3",
+    controls,
+  }
+  await page.route("**/api/v1/proxy/sites/app.example.com/policy", (route) => json(route, policy))
+  const measured: unknown[] = []
+  await page.route("**/api/v1/proxy/sites/app.example.com/controls/verify", (route) => {
+    measured.push(route.request().postDataJSON())
+    return json(route, {
+      site: "app.example.com",
+      url: "https://app.example.com:443/shop",
+      checkedAt: new Date().toISOString(),
+      requests: 27,
+      policy,
+      checks: [
+        {
+          id: "rate-limit",
+          title: "Request limit",
+          state: "verified",
+          detail: "nginx answered 429 to the requests past the burst.",
+          evidence: ["22 requests at once: 21×200, 1×429"],
+        },
+        {
+          id: "conn-limit",
+          title: "Connection limit",
+          state: "not-configured",
+          detail: "The site sets no connection limit.",
+        },
+        {
+          id: "proxy-cache",
+          title: "Response cache",
+          state: "not-effective",
+          detail:
+            "nginx did not answer the second request from its cache. The application sets a cookie, and nginx does not store an answer that does.",
+          evidence: ["first request: 200 MISS", "second request: 200 MISS"],
+        },
+        {
+          id: "static-cache",
+          title: "Browser caching of assets",
+          state: "not-configured",
+          detail: "The site sets no browser caching for assets.",
+        },
+        {
+          id: "http2",
+          title: "HTTP/2",
+          state: "verified",
+          detail: "nginx negotiated HTTP/2 with a browser's offer.",
+          evidence: ["ALPN offered h2 and http/1.1; nginx chose h2"],
+        },
+        {
+          id: "http3",
+          title: "HTTP/3",
+          state: "not-effective",
+          detail:
+            "This nginx is built without the module it needs. Nothing answered QUIC on the port.",
+        },
+      ],
+    })
+  })
+  await page.goto("/proxy/sites/app.example.com")
+
+  const panel = page.getByRole("region", { name: "Controls" })
+  await expect(panel.getByText("10r/s, burst 20, no delay")).toBeVisible()
+  await expect(panel.getByText("this nginx lacks its module")).toBeVisible()
+  await expect(panel.getByText("nginx/1.26.3")).toBeVisible()
+  await panel.getByLabel("Path to measure").fill("shop")
+  await expect(panel.getByRole("button", { name: "Measure" })).toBeDisabled()
+  await panel.getByLabel("Path to measure").fill("/shop")
+  await panel.getByRole("button", { name: "Measure" }).click()
+  const cache = panel.getByRole("listitem").filter({ hasText: "Response cache" })
+  await expect(cache).toContainText("Not in effect")
+  await expect(cache).toContainText("The application sets a cookie")
+  await expect(cache).toContainText("second request: 200 MISS")
+  await expect(panel.getByRole("listitem").filter({ hasText: "Request limit" })).toContainText(
+    "Verified",
   )
-  const chip = (name: RegExp) =>
-    page.getByRole("button", { name }).and(page.locator("[aria-pressed='true']"))
-  await expect(chip(/^Upstream/)).toBeVisible()
-  // Pressed, the figure says it lets go — and does.
-  await readings
-    .getByRole("button", { name: "Show every line again, not only the upstream failures" })
-    .click()
-  await expect(chip(/^All/)).toBeVisible()
-  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(panel.getByText(/with 27\s+requests/)).toBeVisible()
+  expect(measured).toEqual([{ path: "/shop", asset: "" }])
 })
 
 test("/proxy/sites/legacy.example.com says why it has no requests to read, and reads nginx's shared error log for its names", async ({
@@ -939,9 +1231,13 @@ test("/proxy/sites/legacy.example.com says why it has no requests to read, and r
 
   await expect(page.getByText("This site has no access log of its own")).toBeVisible()
   await expect(page.getByText(/nginx's shared log, syslog or a stream/)).toBeVisible()
-  // Nothing records its requests: no Requests view, and no figures over one.
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  // Nothing records its requests: no Requests view, and the route says so.
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
+  await expect(views.getByRole("button", { name: "Insights" })).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "How a request reaches the site" }).getByText("Not recorded"),
+  ).toBeVisible()
   await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -1073,15 +1369,12 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("a deployment route")).toBeVisible()
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  await expect(identity.getByText("1 failed in the last hour")).toBeVisible()
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
-  // The ingress is every route's, so its figures are nobody's in particular.
-  const readings = page.locator("[data-slot='stat-grid']")
-  await expect(readings.getByText("Server errors")).toBeVisible()
-  await expect(readings.getByText("Upstream failures")).toHaveCount(0)
 
   await page.getByText("/cart", { exact: true }).click()
   const said = page.getByRole("region", { name: "Proxy said" })
@@ -1150,7 +1443,7 @@ test("the Caddyfile's page reads Caddy's journal whole, since its names are addr
   await expect(
     page.locator("[data-slot='host-identity']").getByText("a site in the Caddyfile"),
   ).toBeVisible()
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
   await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",

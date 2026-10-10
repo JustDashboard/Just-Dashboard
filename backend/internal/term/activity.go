@@ -402,16 +402,21 @@ func foregroundJob(group, root int) (busy bool, process string, gone bool) {
 // groupMember finds a live process in the shell's part of the tree that
 // belongs to the group, for the case where the group's leader has exited.
 func groupMember(group, root int) []string {
+	return cmdline(groupMemberPID(group, root))
+}
+
+func groupMemberPID(group, root int) int {
 	if root <= 0 {
-		return nil
+		return 0
 	}
-	shell := leafDescendant(root)
-	for _, pid := range append([]int{shell}, childrenOf(shell)...) {
+	for _, pid := range append([]int{root}, descendants(root, 64)...) {
 		if pid != group && processGroup(pid) == group {
-			return cmdline(pid)
+			if _, err := processCWD(pid); err == nil {
+				return pid
+			}
 		}
 	}
-	return nil
+	return 0
 }
 
 // cmdline is a process's argument vector, or nil for one that has gone or

@@ -1,6 +1,15 @@
 "use client"
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   Backspace,
   BlendMode,
@@ -15,6 +24,8 @@ import {
   Play,
   SettingsSliders,
 } from "@/components/icons"
+import { logPlaceIdentities } from "@/components/logs/log-place"
+import { useMemoryState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
 import { plural, timestamp } from "@/lib/format"
 import type { LogLine } from "@/lib/types"
@@ -125,6 +136,7 @@ const COLUMN_WIDTH: Partial<Record<LogFieldKind, string>> = {
  * things a windowed list gives up.
  */
 export function LogConsole({
+  stateKey,
   lines,
   filter,
   className,
@@ -145,6 +157,7 @@ export function LogConsole({
   dividers,
   renderDetail,
 }: {
+  stateKey?: string
   lines: LogLine[]
   filter: LogFilterState
   className?: string
@@ -187,9 +200,17 @@ export function LogConsole({
   renderDetail?: (line: LogLine, head: LogLine | undefined) => React.ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [following, setFollowing] = useState(true)
-  const [open, setOpen] = useState<number | null>(null)
-  const [active, setActive] = useState<number | null>(null)
+  const id = useId()
+  const key = stateKey ?? id
+  const [following, setFollowing] = useMemoryState(`logs.place.${key}.following`, true)
+  const [opened, rememberOpen] = useMemoryState<string | null>(
+    `logs.place.${key}.record.open`,
+    null,
+  )
+  const [focused, rememberActive] = useMemoryState<string | null>(
+    `logs.place.${key}.record.active`,
+    null,
+  )
   const [folds, setFolds] = useState<ReadonlySet<number>>(() => new Set())
   const { wrap, time, highlight, dedupe } = useLogView()
   const hostname = useMetrics().host?.hostname
@@ -287,12 +308,44 @@ export function LogConsole({
     [rows],
   )
 
-  const press = useCallback((key: number) => {
-    // A drag across the text is a copy, not a press.
-    if (window.getSelection()?.isCollapsed === false) return
-    setActive(key)
-    setOpen((current) => (current === key ? null : key))
-  }, [])
+  const identities = useMemo(() => {
+    const ids = logPlaceIdentities(lineRows.map((row) => row.line))
+    return new Map(lineRows.map((row, index) => [row.key, ids[index]]))
+  }, [lineRows])
+  const placeRows = useRef(identities)
+  useEffect(() => {
+    placeRows.current = identities
+  }, [identities])
+  const open = [...identities].find(([, id]) => id === opened)?.[0] ?? null
+  const active = [...identities].find(([, id]) => id === focused)?.[0] ?? null
+  const setActive = useCallback(
+    (next: number | null) => {
+      rememberActive(next === null ? null : (placeRows.current.get(next) ?? null))
+    },
+    [rememberActive],
+  )
+  const setOpen = useCallback(
+    (next: number | null | ((previous: number | null) => number | null)) => {
+      rememberOpen((previous) => {
+        const rows = placeRows.current
+        const before = [...rows].find(([, id]) => id === previous)?.[0] ?? null
+        const resolved = typeof next === "function" ? next(before) : next
+        return resolved === null ? null : (rows.get(resolved) ?? null)
+      })
+    },
+    [rememberOpen],
+  )
+
+  const press = useCallback(
+    (key: number) => {
+      // A drag across the text is a copy, not a press.
+      if (window.getSelection()?.isCollapsed === false) return
+      setFollowing(false)
+      setActive(key)
+      setOpen((current) => (current === key ? null : key))
+    },
+    [setActive, setOpen, setFollowing],
+  )
 
   const toggleFold = useCallback((head: number) => {
     setFolds((current) => {
@@ -308,12 +361,35 @@ export function LogConsole({
     el?.focus()
     el?.scrollIntoView({ block: "nearest" })
   }
+  const matches = lineRows.filter(
+    (row) =>
+      filter.q && (row.line.match?.length || highlightRanges(row.line.text, filter).length > 0),
+  )
+  const matchBy = (direction: number) => {
+    if (!matches.length) return
+    const at = matches.findIndex((row) => row.key === active)
+    const next =
+      matches[
+        at < 0
+          ? direction > 0
+            ? 0
+            : matches.length - 1
+          : (at + direction + matches.length) % matches.length
+      ]
+    setFollowing(false)
+    setActive(next.key)
+    focusRow(next.key)
+  }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
     // Keys typed inside an opened line's detail are that control's.
     if (target.closest("[data-line-detail]") || e.metaKey || e.ctrlKey || e.altKey) return
-    if (e.key === "j" || e.key === "k") {
+    if (e.key === "F3" || e.key === "n" || e.key === "N") {
+      if (!matches.length) return
+      e.preventDefault()
+      matchBy(e.shiftKey || e.key === "N" ? -1 : 1)
+    } else if (e.key === "j" || e.key === "k") {
       if (lineRows.length === 0) return
       e.preventDefault()
       const at = lineRows.findIndex((r) => r.key === active)
@@ -324,6 +400,7 @@ export function LogConsole({
             : lineRows.length - 1
           : Math.max(0, Math.min(lineRows.length - 1, at + (e.key === "j" ? 1 : -1)))
       const key = lineRows[next].key
+      setFollowing(false)
       setActive(key)
       focusRow(key)
     } else if (e.key === "Enter" && active !== null) {
@@ -344,6 +421,21 @@ export function LogConsole({
           the end. In a narrow pane the switches for how the lines are drawn
           are one menu, View: seven buttons left the chips room for one. */}
       <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-hairline px-2 py-1">
+        {filter.q && (
+          <>
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={!matches.length}
+              onClick={() => matchBy(-1)}
+            >
+              Previous match
+            </Button>
+            <Button size="xs" variant="ghost" disabled={!matches.length} onClick={() => matchBy(1)}>
+              Next match
+            </Button>
+          </>
+        )}
         <div className="scroll-affordance flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto [&::-webkit-scrollbar]:hidden">
           {leading}
         </div>
@@ -410,6 +502,7 @@ export function LogConsole({
 
       <div
         ref={scrollRef}
+        data-workspace-scroll
         onScroll={onScroll}
         onKeyDown={onKeyDown}
         tabIndex={0}
@@ -453,6 +546,7 @@ export function LogConsole({
                 <LineWithDetail
                   key={row.key}
                   row={row}
+                  placeKey={identities.get(row.key)}
                   open={open === row.key}
                   onPress={press}
                   time={time}
@@ -564,6 +658,7 @@ function Divider({ line, label, time }: { line: LogLine; label: string; time: Lo
 type LineProps = {
   line: LogLine
   rowKey?: number
+  placeKey?: string
   open?: boolean
   onPress?: (key: number) => void
   time: LogTime
@@ -608,6 +703,7 @@ type LineProps = {
 export const LogRow = memo(function LogRow({
   line,
   rowKey,
+  placeKey,
   open,
   onPress,
   time,
@@ -650,6 +746,7 @@ export const LogRow = memo(function LogRow({
   return (
     <div
       data-row-key={rowKey}
+      data-workspace-item={placeKey ? `line:${placeKey}` : undefined}
       tabIndex={rowKey === undefined ? undefined : -1}
       aria-current={open ? "true" : undefined}
       onClick={rowKey === undefined || !onPress ? undefined : () => onPress(rowKey)}

@@ -85,6 +85,9 @@ func (d *Deployer) Rollback(ctx context.Context, projectID int64, commit, actor 
 }
 
 func (d *Deployer) execute(ctx context.Context, projectID int64, trigger, actor, targetCommit string) (*Run, error) {
+	if err := RequireSupportedProject(ctx, d.store.st.DB, projectID); err != nil {
+		return nil, err
+	}
 	d.mu.Lock()
 	if d.running[projectID] {
 		d.mu.Unlock()

@@ -1,0 +1,21 @@
+
+Running 14 tests using 1 worker
+
+(node:891456) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/network-native-profile.spec.ts:104:5 › native apply carries the exact intent and stays pending when the managed preference is off (5.2s)
+  ✓   2 [chromium] › tests/browser/network-native-profile.spec.ts:146:7 › a 409 native apply retains every field for an explicit retry (3.5s)
+  ✓   3 [chromium] › tests/browser/network-native-profile.spec.ts:146:7 › a 500 native apply retains every field for an explicit retry (3.8s)
+  ✓   4 [chromium] › tests/browser/network-native-profile.spec.ts:180:7 › a later read failure keeps the draft and blocks native apply until a valid refresh (3.4s)
+  ✓   5 [chromium] › tests/browser/network-native-profile.spec.ts:180:7 › a later mismatched device keeps the draft and blocks native apply until a valid refresh (3.9s)
+  ✓   6 [chromium] › tests/browser/network-native-profile.spec.ts:220:5 › a changed native generation blocks apply and rebases only the generation after review (3.7s)
+  ✓   7 [chromium] › tests/browser/network-native-profile.spec.ts:258:5 › an initial profile for a different device is refused before draft creation (1.8s)
+  ✓   8 [chromium] › tests/browser/network-native-profile.spec.ts:268:5 › new native VRF routes inherit the observed table in both families on a phone (2.2s)
+  ✓   9 [chromium] › tests/browser/network-native-profile.spec.ts:287:5 › read accounts open a device without requesting its private native profile (1.7s)
+  ✓  10 [chromium] › tests/browser/network-native-profile.spec.ts:305:5 › confirmed native cleanup remains a warning until an explicit retry succeeds (961ms)
+  ✓  11 [chromium] › tests/browser/network-native-profile.spec.ts:352:5 › a malformed native route is a retained read failure and never replaces the typed draft (3.7s)
+  ✓  12 [chromium] › tests/browser/network-native-profile.spec.ts:378:7 › an already-open native confirmation refuses a changed generation without sending a write (3.6s)
+  ✓  13 [chromium] › tests/browser/network-native-profile.spec.ts:378:7 › an already-open native confirmation refuses a changed owner without sending a write (3.5s)
+  ✓  14 [chromium] › tests/browser/network-native-profile.spec.ts:378:7 › an already-open native confirmation refuses a changed read failure without sending a write (3.5s)
+
+  14 passed (45.8s)

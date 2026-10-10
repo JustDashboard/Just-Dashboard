@@ -43,3 +43,33 @@ export type RouteResolution = {
   steps: RouteStep[]
   certain: boolean
 }
+
+/** One place access is decided, in the order nginx runs them. */
+export type AccessLayer = {
+  id:
+    | "outside"
+    | "firewall"
+    | "maintenance"
+    | "edge"
+    | "crawlers"
+    | "server-if"
+    | "addresses"
+    | "credentials"
+    | "rate-limit"
+    | "client-certificate"
+  title: string
+  owner: string
+  ownerPath?: string
+  verdict: "admits" | "refuses" | "requires" | "unknown" | "skipped"
+  detail: string
+  rules?: RouteDirective[]
+}
+
+/** GET /proxy/resolve/access?url=&source= — who may reach a URL from one address. */
+export type AccessExplanation = {
+  route: RouteResolution
+  source: string
+  verdict: "admitted" | "refused" | "credentials" | "unknown" | "no-route"
+  summary: string
+  layers: AccessLayer[]
+}

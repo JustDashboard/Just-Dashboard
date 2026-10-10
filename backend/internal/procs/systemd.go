@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
@@ -32,9 +33,27 @@ type Unit struct {
 	Fragment    string `json:"fragmentPath,omitempty"`
 	Result      string `json:"result,omitempty"`
 	Restarts    int    `json:"restarts,omitempty"`
+
+	// The fields below are the list's live readings (see Inventory) and the
+	// detail route's; the other callers of List leave them empty.
+	Type string `json:"type,omitempty"`
+	// ChangedAt is when the unit last changed between active, inactive and
+	// failed: when it started, stopped, finished or failed.
+	ChangedAt int64 `json:"changedAt,omitempty"`
+	// CPUPercent is a share of one core over the last measured window, so a
+	// service using two cores reads 200.
+	CPUPercent float64 `json:"cpuPercent,omitempty"`
+	CPUReady   bool    `json:"cpuReady,omitempty"`
+	// ExitCode is how the main process last ended — exited, killed or
+	// dumped — and ExitStatus its status or the signal's number.
+	ExitCode   string      `json:"exitCode,omitempty"`
+	ExitStatus int         `json:"exitStatus,omitempty"`
+	History    []UnitPoint `json:"history,omitempty"`
 }
 
-type Systemd struct{}
+type Systemd struct {
+	state readings
+}
 
 func NewSystemd() *Systemd { return &Systemd{} }
 
@@ -44,13 +63,27 @@ func (s *Systemd) Available() bool { return binaryExists("systemctl") }
 // inactive unit is exactly what an operator opens this page to find, and the
 // default listing hides them.
 func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
+	units, _, err := s.ListInstalled(ctx)
+	return units, err
+}
+
+// ListInstalled is List, with every installed service unit file and its state
+// beside it: enabled, disabled, static, masked, alias and the rest.
+//
+// The listing cannot stand in for the files. `list-units --all` shows what the
+// manager has loaded, and a unit that is both stopped and disabled is
+// unloaded: it is installed, it can be started, and it is in no listing of
+// units. The file is the only thing that says it is there. Both come from the
+// one reading List already makes, because listing the unit files is the slow
+// half of it.
+func (s *Systemd) ListInstalled(ctx context.Context) ([]Unit, map[string]string, error) {
 	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+		return nil, nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
 	}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-units", "--type=service", "--all", "--no-pager", "--no-legend", "--output=json")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var raw []struct {
 		Unit        string `json:"unit"`
@@ -70,10 +103,10 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 		if detail == "" {
 			detail = "no output"
 		}
-		return nil, fmt.Errorf("systemctl returned no unit list: %s", detail)
+		return nil, nil, fmt.Errorf("systemctl returned no unit list: %s", detail)
 	}
 	if err := json.Unmarshal([]byte(res.Stdout), &raw); err != nil {
-		return nil, fmt.Errorf("parse systemctl output: %w", err)
+		return nil, nil, fmt.Errorf("parse systemctl output: %w", err)
 	}
 	enabled := s.enabledStates(ctx)
 	out := make([]Unit, 0, len(raw))
@@ -107,10 +140,21 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, enabled, nil
 }
 
+// enabledStates is every service unit file's state, kept for unitFilesFor:
+// listing the unit files is the slow half of a list read — most of a second
+// on a host with two hundred of them — and the Services page reads the list
+// every few seconds. Each caller gets its own copy.
 func (s *Systemd) enabledStates(ctx context.Context) map[string]string {
+	s.state.mu.Lock()
+	if s.state.files != nil && time.Since(s.state.filesAt) < unitFilesFor {
+		states := maps.Clone(s.state.files)
+		s.state.mu.Unlock()
+		return states
+	}
+	s.state.mu.Unlock()
 	states := map[string]string{}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-unit-files", "--type=service", "--no-pager", "--no-legend", "--output=json")
@@ -127,7 +171,18 @@ func (s *Systemd) enabledStates(ctx context.Context) map[string]string {
 	for _, r := range raw {
 		states[r.UnitFile] = r.State
 	}
+	s.state.mu.Lock()
+	s.state.files, s.state.filesAt = maps.Clone(states), time.Now()
+	s.state.mu.Unlock()
 	return states
+}
+
+// forgetUnitFiles drops the cached unit-file states after a command that
+// changes them.
+func (s *Systemd) forgetUnitFiles() {
+	s.state.mu.Lock()
+	s.state.files = nil
+	s.state.mu.Unlock()
 }
 
 // Show pulls the detailed properties for one unit. `systemctl show` emits
@@ -235,6 +290,9 @@ func (s *Systemd) Control(ctx context.Context, name string, action UnitAction) (
 	default:
 		return nil, fmt.Errorf("unknown systemd action %q", action)
 	}
+	if action == UnitEnable || action == UnitDisable {
+		defer s.forgetUnitFiles()
+	}
 	return run(ctx, 90*time.Second, "systemctl", string(action), name)
 }
 
@@ -245,6 +303,7 @@ func (s *Systemd) DaemonReload(ctx context.Context) (*CommandResult, error) {
 	if !s.Available() {
 		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
 	}
+	defer s.forgetUnitFiles()
 	return run(ctx, 90*time.Second, "systemctl", "daemon-reload")
 }
 

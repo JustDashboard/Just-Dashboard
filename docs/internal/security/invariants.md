@@ -15,12 +15,54 @@ A change that weakens any of these has to say so explicitly.
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
-   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.authoriseSpec` for a
-   container spec that is privileged or mounts a host path, `api.logTargetFor` for a log source that is
-   login and sudo records (auth data needs `system.admin` on every `/logs` route that reads a source —
-   except the whole journal (`journal:`), which stays `read` as it was before the gate; those lines are in
-   it unfiltered, a known gap rather than the boundary
-   ([observability-security](../backend/observability-security.md))).
+   request, the handler checks by hand and fails closed, and each such check has one owner:
+   - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+   - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
+     rows needs the destructive capability;
+   - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
+     an index predicate, a USING conversion, a function default) calls anything `dbx` does not vouch
+     for — either needs the destructive capability on a route that otherwise asks for
+     `service.control`, for a preview as much as for a run;
+   - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
+     application or can lose rows, and the body of the power route, where `stop` and `restart` are
+     what make the request destructive;
+   - `dbx.RedisClassify` for a Redis console command, and the body of the Redis bulk, rename and copy
+     routes, where `action: delete|expire` and `overwrite` are what make the request destructive;
+   - `dbx.MongoClassifyPipeline` and `dbx.MongoClassifyCommand` for a MongoDB pipeline and console
+     command, and `mongoNeedsDestructive` for the one option an update, rename, index or `collMod`
+     route has that removes data;
+   - the options of an import, where replacing a table's contents is destructive, and the target of
+     a restore, where a database to be created needs `system.admin`;
+   - `api.authoriseSpec` for a container spec that is privileged or mounts a host path;
+   - `api.authoriseNetworkSpec` for manual Docker network creation: custom drivers and driver options
+     require `system.admin`, reserved ownership labels are refused, and explicit pools may not contain
+     the observed dashboard client address;
+   - the Docker network connect, disconnect, removal and prune handlers, by the conflicts
+     `dockerx.PreviewConnect`, `PreviewDisconnect`, `PreviewRemove` and `PruneCandidates` read from the
+     network's dependents: the dashboard's own containers, the shared ingress and database-link members
+     are never detached, nothing joins the dashboard's own network, a live deployment's network is not
+     removed by hand, and an unreadable dependency reading refuses the change;
+   - the generic job handlers for `network.diagnostic.*` jobs: lists filter them and get/stream/cancel
+     require `system.admin`, matching the saved-artifact routes;
+   - `api.boundaryGate` for a fail2ban ban, a CrowdSec decision and an SSH settings change: one that
+     cuts this session's own way in is refused, and one that touches the dashboard's access boundary
+     for anybody else (an allowlisted network, the tailnet's previews, the SSH tunnel) needs an
+     explicit `acknowledgeBoundary` (`netsec.BoundaryImpacts`,
+     [observability-security](../backend/observability-security.md#the-access-boundary));
+   - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
+     `system.admin` on every `/logs` route that reads a source — except the whole journal
+     (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
+     known gap rather than the boundary
+     ([observability-security](../backend/observability-security.md))).
+
+   A database connection marked read-only adds one rule in front of all of these, and it fails closed
+   the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
+   is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until
+   somebody decides it belongs there. The routes on the list that are a read or a write by what they
+   carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
+   not a sandbox around the server. Each check and the rule are stated in
+   [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
 5. Every state-changing request lands in the audit log.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
@@ -31,7 +73,9 @@ A change that weakens any of these has to say so explicitly.
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
-   explicitly.
+   explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
+   connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
+   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
@@ -44,6 +88,10 @@ A change that weakens any of these has to say so explicitly.
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
    [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
+   on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
+   serves anything but a loopback upstream is a broken boundary on the Security overview — but the
+   report is evidence, not the enforcement.
 8. Store schema changes are additive and tolerate an existing database. `CREATE TABLE IF NOT EXISTS` is a
    no-op against a table that exists, so a **column** added later also goes in `store.addedColumns`, which
    `applyAddedColumns` ALTERs in at open. Every entry needs a `DEFAULT` (SQLite refuses a NOT NULL column
@@ -98,7 +146,7 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for four deletion operations:
+Typed confirmation is reserved for five deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -108,6 +156,12 @@ Typed confirmation is reserved for four deletion operations:
 - Removing a managed Compose stack from an archived deployment's removal plan requires that stack's
   name. The same plan presents volumes, paths, containers, and other managed resources with ordinary
   confirmation.
+- Deleting a Git checkout from the server (`POST /git/repository/delete`) requires the checkout's
+  directory name, because the uncommitted files, stashes and unpushed branches it holds exist nowhere
+  else. Its preview (`GET /git/removal`) counts them first, and a root, the dashboard's own install,
+  a repository with worktrees or other checkouts inside it, and a locked worktree are refused before
+  the phrase is asked for. Removing a clean linked worktree through `/git/worktree/remove`, deleting a
+  branch, and every other Git deletion keep ordinary confirmation.
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
@@ -116,7 +170,16 @@ revocation, and self-update, use an ordinary confirmation in the UI. Read-only a
 mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
 `destrLim` rate budget, audit entries, path containment, or host command rules.
 
-The server enforces the four phrases inside their handlers. The browser sends an
+Dropping a Redis logical database is the same drop route, where it is a `FLUSHDB`. The Redis bulk route
+(`POST /databases/{id}/keys/bulk`) will not stand in for it: `delete` or `expire` with a pattern that is
+every key (`*` and no `type`) is refused with `400 whole_database` and a pointer to the drop route, so a
+pattern box left at its default is not a database emptied on an ordinary confirmation. A narrower pattern
+that happens to match everything is not caught; the dry run that precedes a bulk action reports `matched`
+beside `total`, which is what its confirmation has to show. The Redis console's `FLUSHDB` and `FLUSHALL`,
+like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
+is where an operator types the statement itself.
+
+The server enforces the five phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

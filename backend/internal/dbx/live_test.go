@@ -69,7 +69,7 @@ type engineFixture struct {
 }
 
 func sqlFixtures() []engineFixture {
-	return []engineFixture{
+	return inDSNSchema([]engineFixture{
 		{
 			driver: DriverPostgres, env: "JD_TEST_POSTGRES_DSN",
 			dsn:    "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable",
@@ -208,7 +208,7 @@ func sqlFixtures() []engineFixture {
 				`INSERT INTO jd_posts(id,title,author_id) VALUES (1,'Hello',1),(2,'World',2)`,
 			},
 		},
-	}
+	})
 }
 
 func setupFixture(t *testing.T, db *sql.DB, f engineFixture) {
@@ -381,8 +381,8 @@ func TestLiveSQLEngines(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Outline: %v", err)
 				}
-				if cols, ok := outline.Tables["jd_users"]; !ok || !contains(cols, "email") {
-					t.Errorf("outline for jd_users = %v", outline.Tables["jd_users"])
+				if cols, ok := outlineColumns(outline, "jd_users"); !ok || !contains(cols, "email") {
+					t.Errorf("outline for jd_users = %v in %v", cols, outline.Tables)
 				}
 
 				// Generate ORM schemas from genuinely introspected structure.
@@ -396,19 +396,25 @@ func TestLiveSQLEngines(t *testing.T) {
 						details[tb.Name] = d
 					}
 				}
-				prisma, err := GenerateORM(ORMPrisma, f.driver, tables, details)
-				if err != nil {
-					t.Fatalf("GenerateORM prisma: %v", err)
-				}
-				if !strings.Contains(prisma, "model jd_users") {
-					t.Errorf("prisma schema missing jd_users:\n%s", prisma)
-				}
-				drizzle, err := GenerateORM(ORMDrizzle, f.driver, tables, details)
-				if err != nil {
-					t.Fatalf("GenerateORM drizzle: %v", err)
-				}
-				if !strings.Contains(drizzle, "jd_users") {
-					t.Errorf("drizzle schema missing jd_users:\n%s", drizzle)
+				for _, c := range []struct {
+					target ORMTarget
+					want   string
+				}{{ORMPrisma, "model jd_users"}, {ORMDrizzle, "jd_users"}} {
+					out, err := GenerateORM(c.target, f.driver, tables, details)
+					// A target with no connector for the engine refuses with its
+					// reason; it used to answer with a PostgreSQL schema.
+					if reason := ORMUnsupported(c.target, f.driver); reason != "" {
+						if err == nil || err.Error() != reason {
+							t.Errorf("GenerateORM %s = %v, want the refusal %q", c.target, err, reason)
+						}
+						continue
+					}
+					if err != nil {
+						t.Fatalf("GenerateORM %s: %v", c.target, err)
+					}
+					if !strings.Contains(out, c.want) {
+						t.Errorf("%s schema missing jd_users:\n%s", c.target, out)
+					}
 				}
 			})
 

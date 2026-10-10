@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { useRevealOnWheel } from "@/hooks/use-reveal-on-wheel"
 import { cn } from "@/lib/utils"
 
 /**
@@ -24,8 +25,13 @@ function Table({
    */
   containerClassName?: string
 }) {
+  // A capped table is sized to fit the screen under the page's header, so the
+  // wheel over one that is half below the fold brings the whole of it up first.
+  const container = React.useRef<HTMLDivElement>(null)
+  useRevealOnWheel(container)
   return (
     <div
+      ref={container}
       data-slot="table-container"
       className={cn("scroll-affordance relative w-full overflow-auto", containerClassName)}
     >

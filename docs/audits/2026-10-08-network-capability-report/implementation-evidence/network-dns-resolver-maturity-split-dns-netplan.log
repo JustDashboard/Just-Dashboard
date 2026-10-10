@@ -1,0 +1,21 @@
+=== RUN   TestNativeManagerOwnerLive
+    native_manager_live_test.go:224: native owner acceptance:
+        === RUN   TestNativeManagerOwnerLive
+        === RUN   TestNativeManagerOwnerLive/transport-epoch
+            native_manager_live_test.go:322: Authenticated transport GUID is pinned; mismatched and actual prior-bus epochs refuse before RequestName effects
+        === RUN   TestNativeManagerOwnerLive/netplan
+            native_manager_live_test.go:534: netplan unchanged-profile actual bound helper SHA256=c65fb18aa5cbd55bd5c016fd280b6ffe9acbbcb45a6b67505831f16bbdb0278c
+            native_manager_live_test.go:534: netplan canonical unchanged-intent path=/etc/netplan/20-fixture.yaml SHA256=76585ae3c707d79f0018a852703d4e8166328262bc5e10e1601f99cae576c04d beforeInode=15 candidateInode=17 retainedAuthoredInode=15
+            native_manager_live_test.go:534: netplan canonical unchanged-intent path=/run/systemd/network/10-netplan-d0.network SHA256=a1377c13575e4ca54d60d23093662243b1182bb29e19933f6ddf7d707ce21282 beforeInode=109 candidateInode=150 retainedAuthoredInode=109
+            native_manager_live_test.go:534: netplan canonical unchanged-intent path=/etc/netplan/20-fixture.yaml SHA256=76585ae3c707d79f0018a852703d4e8166328262bc5e10e1601f99cae576c04d beforeInode=15 candidateInode=19 retainedAuthoredInode=15
+            native_manager_live_test.go:534: netplan canonical unchanged-intent path=/run/systemd/network/10-netplan-d0.network SHA256=a1377c13575e4ca54d60d23093662243b1182bb29e19933f6ddf7d707ce21282 beforeInode=109 candidateInode=195 retainedAuthoredInode=109
+            native_manager_live_test.go:534: netplan shipped helper v10 equal-byte candidate rollback restored exact authored inodes; unchanged-intent confirmation and terminal fresh-helper retry retained exact candidate inodes and full configured/runtime/boot agreement
+            native_manager_live_test.go:620: netplan split-DNS routing/search domains and per-family servers applied temporarily, confirmed and verified against native runtime
+            native_manager_live_test.go:621: netplan actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed
+        --- PASS: TestNativeManagerOwnerLive (15.34s)
+            --- PASS: TestNativeManagerOwnerLive/transport-epoch (0.13s)
+            --- PASS: TestNativeManagerOwnerLive/netplan (15.20s)
+        PASS
+--- PASS: TestNativeManagerOwnerLive (20.80s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	20.823s

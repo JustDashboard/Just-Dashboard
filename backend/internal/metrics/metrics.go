@@ -89,6 +89,17 @@ type Sample struct {
 	Load15      float64 `json:"load15"`
 	MemAvail    uint64  `json:"memAvailable"`
 	Procs       int     `json:"procs"`
+
+	// TCP rates per second, and the median and 90th-percentile RTT of
+	// established connections to external peers. Nil where the kernel did
+	// not answer or, for the RTT, no such connection existed.
+	TCPOutSegs      *float64 `json:"tcpOutSegs,omitempty"`
+	TCPRetrans      *float64 `json:"tcpRetrans,omitempty"`
+	TCPAttemptFails *float64 `json:"tcpAttemptFails,omitempty"`
+	TCPEstabResets  *float64 `json:"tcpEstabResets,omitempty"`
+	TCPListenDrops  *float64 `json:"tcpListenDrops,omitempty"`
+	TCPRTT          *float64 `json:"tcpRttMs,omitempty"`
+	TCPRTTP90       *float64 `json:"tcpRttP90Ms,omitempty"`
 }
 
 // Point is one bucket of the aggregated series.
@@ -166,6 +177,21 @@ type Point struct {
 	MemAvail  uint64  `json:"memAvailable"`
 	Procs     float64 `json:"procs"`
 	ProcsPeak float64 `json:"procsPeak"`
+
+	// How connections fared. Null for a bucket with no measurement, so an
+	// hour from before these were sampled is drawn as a gap, not a calm.
+	// RetransPct is the bucket's resent share of segments sent; its peak is
+	// the worst single sample's. RTT is the mean of the samples' medians and
+	// RTTPeak the highest 90th percentile.
+	RetransPct       *float64 `json:"retransPct"`
+	RetransPctPeak   *float64 `json:"retransPctPeak"`
+	AttemptFails     *float64 `json:"attemptFails"`
+	AttemptFailsPeak *float64 `json:"attemptFailsPeak"`
+	Resets           *float64 `json:"resets"`
+	ListenDrops      *float64 `json:"listenDrops"`
+	ListenDropsPeak  *float64 `json:"listenDropsPeak"`
+	RTT              *float64 `json:"rtt"`
+	RTTPeak          *float64 `json:"rttPeak"`
 }
 
 // Window is the frame around any recorded series: the facts a client needs to
@@ -196,8 +222,10 @@ type ContainerPoint struct {
 	TS      time.Time `json:"ts"`
 	Samples int       `json:"samples"`
 
-	CPU     float64 `json:"cpu"`
-	CPUPeak float64 `json:"cpuPeak"`
+	// Null means no sample in the bucket measured an interval, as for the
+	// first sample after a container starts. Zero is a measured idle.
+	CPU     *float64 `json:"cpu"`
+	CPUPeak *float64 `json:"cpuPeak"`
 
 	Mem     float64 `json:"mem"`
 	MemPeak float64 `json:"memPeak"`
@@ -211,7 +239,8 @@ type ContainerPoint struct {
 	// growth and an average across an hour blunts exactly that.
 	SizeRw uint64 `json:"sizeRw"`
 
-	PIDs float64 `json:"pids"`
+	PIDs     float64 `json:"pids"`
+	PIDsPeak uint64  `json:"pidsPeak"`
 
 	// Bytes per second, differenced before bucketing and weighted by elapsed
 	// time. Null means no valid interval, including first samples and resets.
@@ -647,6 +676,14 @@ func Reduce(snap *sysinfo.Snapshot) Sample {
 		MemAvail:    snap.Memory.Available,
 		Procs:       snap.Procs.Total,
 	}
+	if snap.TCP.Supported {
+		s.TCPOutSegs, s.TCPRetrans = ptrf(snap.TCP.OutSegsRate), ptrf(snap.TCP.RetransRate)
+		s.TCPAttemptFails, s.TCPEstabResets = ptrf(snap.TCP.AttemptFailsRate), ptrf(snap.TCP.EstabResetsRate)
+		s.TCPListenDrops = ptrf(snap.TCP.ListenDropsRate)
+	}
+	if snap.TCP.Latency.Sockets > 0 {
+		s.TCPRTT, s.TCPRTTP90 = ptrf(snap.TCP.Latency.MedianMs), ptrf(snap.TCP.Latency.P90Ms)
+	}
 	for _, n := range snap.Net {
 		s.NetRx += n.RecvRate
 		s.NetTx += n.SendRate
@@ -690,8 +727,10 @@ func (r *Recorder) record(ctx context.Context, s Sample) error {
 		   cpu_user, cpu_system, cpu_iowait, cpu_steal,
 		   psi_cpu, psi_mem, psi_io,
 		   disk_reads, disk_writes, disk_await, disk_busy,
-		   tcp_conns, tcp_timewait, load5, load15, mem_available, procs)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		   tcp_conns, tcp_timewait, load5, load15, mem_available, procs,
+		   tcp_out_segs, tcp_retrans, tcp_attempt_fails, tcp_estab_resets, tcp_listen_drops,
+		   tcp_rtt_ms, tcp_rtt_p90_ms)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(ts) DO UPDATE SET
 		  cpu_percent    = excluded.cpu_percent,
 		  load1          = excluded.load1,
@@ -721,15 +760,26 @@ func (r *Recorder) record(ctx context.Context, s Sample) error {
 		  load5          = excluded.load5,
 		  load15         = excluded.load15,
 		  mem_available  = excluded.mem_available,
-		  procs          = excluded.procs`,
+		  procs          = excluded.procs,
+		  tcp_out_segs      = excluded.tcp_out_segs,
+		  tcp_retrans       = excluded.tcp_retrans,
+		  tcp_attempt_fails = excluded.tcp_attempt_fails,
+		  tcp_estab_resets  = excluded.tcp_estab_resets,
+		  tcp_listen_drops  = excluded.tcp_listen_drops,
+		  tcp_rtt_ms        = excluded.tcp_rtt_ms,
+		  tcp_rtt_p90_ms    = excluded.tcp_rtt_p90_ms`,
 		ts.Unix(), s.CPUPercent, s.Load1, s.MemPercent, int64(s.MemUsed), int64(s.MemTotal),
 		s.SwapPercent, s.NetRx, s.NetTx, s.DiskRead, s.DiskWrite, s.DiskPercent, int64(s.Uptime),
 		s.CPUUser, s.CPUSystem, s.CPUIOWait, s.CPUSteal,
 		s.PSICPU, s.PSIMem, s.PSIIO,
 		s.DiskReads, s.DiskWrites, s.DiskAwait, s.DiskBusy,
-		s.TCPConns, s.TCPTimeWait, s.Load5, s.Load15, int64(s.MemAvail), s.Procs)
+		s.TCPConns, s.TCPTimeWait, s.Load5, s.Load15, int64(s.MemAvail), s.Procs,
+		s.TCPOutSegs, s.TCPRetrans, s.TCPAttemptFails, s.TCPEstabResets, s.TCPListenDrops,
+		s.TCPRTT, s.TCPRTTP90)
 	return err
 }
+
+func ptrf(v float64) *float64 { return &v }
 
 func (r *Recorder) prune(ctx context.Context) error {
 	if !r.Enabled() {
@@ -789,7 +839,13 @@ func (r *Recorder) Range(ctx context.Context, from, to time.Time, maxPoints int)
 		       AVG(disk_busy),   MAX(disk_busy),
 		       AVG(tcp_conns),   MAX(tcp_conns), AVG(tcp_timewait),
 		       AVG(load5),       AVG(load15), AVG(mem_available),
-		       AVG(procs),       MAX(procs)
+		       AVG(procs),       MAX(procs),
+		       CASE WHEN AVG(tcp_out_segs) > 0 THEN AVG(tcp_retrans) * 100.0 / AVG(tcp_out_segs) END,
+		       MAX(CASE WHEN tcp_out_segs > 0 THEN tcp_retrans * 100.0 / tcp_out_segs END),
+		       AVG(tcp_attempt_fails), MAX(tcp_attempt_fails),
+		       AVG(tcp_estab_resets),
+		       AVG(tcp_listen_drops),  MAX(tcp_listen_drops),
+		       AVG(tcp_rtt_ms),        MAX(tcp_rtt_p90_ms)
 		  FROM metric_samples
 		 WHERE ts >= ? AND ts <= ?
 		 GROUP BY bucket
@@ -824,7 +880,12 @@ func (r *Recorder) Range(ctx context.Context, from, to time.Time, maxPoints int)
 			&p.DiskBusy, &p.DiskBusyPeak,
 			&p.TCPConns, &p.TCPConnsPeak, &p.TCPTimeWait,
 			&p.Load5, &p.Load15, &memAvail,
-			&p.Procs, &p.ProcsPeak); err != nil {
+			&p.Procs, &p.ProcsPeak,
+			&p.RetransPct, &p.RetransPctPeak,
+			&p.AttemptFails, &p.AttemptFailsPeak,
+			&p.Resets,
+			&p.ListenDrops, &p.ListenDropsPeak,
+			&p.RTT, &p.RTTPeak); err != nil {
 			return nil, err
 		}
 		p.TS = time.Unix(bucket, 0).UTC()
@@ -1003,6 +1064,12 @@ func round(p *Point) {
 	p.TCPConns, p.TCPConnsPeak = round1(p.TCPConns), round1(p.TCPConnsPeak)
 	p.TCPTimeWait = round1(p.TCPTimeWait)
 	p.Procs, p.ProcsPeak = round1(p.Procs), round1(p.ProcsPeak)
+	for _, v := range []*float64{p.RetransPct, p.RetransPctPeak, p.AttemptFails, p.AttemptFailsPeak, p.Resets,
+		p.ListenDrops, p.ListenDropsPeak, p.RTT, p.RTTPeak} {
+		if v != nil {
+			*v = round2(*v)
+		}
+	}
 }
 
 func maxf(a, b float64) float64 {

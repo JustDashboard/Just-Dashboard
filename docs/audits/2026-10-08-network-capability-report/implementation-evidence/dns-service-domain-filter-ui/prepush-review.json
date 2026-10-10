@@ -1,0 +1,50 @@
+{
+  "head": "5ad74d42e3c9f25f6d8e1afe133acd40958432ab",
+  "active_pr_base": "7be11ba08c63252fd94fd1d7f86b0ee6683d837e",
+  "previous_push": "dc18084316313a978873b499ba8f80f7623814b5",
+  "full_diff_file_count": 885,
+  "incremental_diff_file_count": 107,
+  "markdown_files_reviewed": 63,
+  "local_links_checked": 649,
+  "missing_or_untracked_links": [],
+  "protected_automation_dependency_lock_release_changes": [],
+  "ledger": {
+    "total": 187,
+    "unique": 187,
+    "statuses": {
+      "in progress": 53,
+      "verified": 6,
+      "pending": 128
+    }
+  },
+  "frozen_product_source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+  "frozen_product_hash_changes": [],
+  "documents_reviewed": [
+    "docs/internal/",
+    "AGENTS.md",
+    "README.md",
+    "CONTRIBUTING.md"
+  ],
+  "affected_documents_updated": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/internal/backend/network-dns-services.md",
+    "docs/internal/backend/evidence/dns-service-domain-filters-2026-10-09.md",
+    "docs/internal/frontend/feature-map.md",
+    "docs/internal/frontend/data-theming.md",
+    "docs/internal/repo-map.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-status.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-evidence/README.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui-acceptance.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md"
+  ],
+  "no_additional_update_needed": [
+    "AGENTS.md",
+    "docs/internal/README.md",
+    "docs/internal/security/invariants.md"
+  ],
+  "assessment": "The initial complete-PR review is retained; the assembled native and mounted guide qualifications and focused race evidence were also reviewed. All affected behavior/command/test/frontend/evidence/ledger documents are current. No additional AGENTS.md, docs/internal/README.md or security invariant update is needed. Full187 criteria remain open. The final review and subsequent docs-only gate add no product source changes.",
+  "frozen_input_count": 3403,
+  "required_gate_record": "required-final.result.json",
+  "race_record": "race-final.result.json"
+}

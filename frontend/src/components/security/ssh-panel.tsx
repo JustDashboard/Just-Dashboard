@@ -4,21 +4,29 @@ import { useEffect, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/components/icons"
+import { plural } from "@/lib/format"
 import { get, post } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import { lensFor } from "@/lib/log-lenses"
-import type { Job, Posture, SecurityFinding, SSHDConfig, SSHSetting } from "@/lib/types"
+import type {
+  Job,
+  NetworkConfirmationView,
+  Posture,
+  SecurityFinding,
+  SSHDConfig,
+  SSHSetting,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { FormSection, FormSections, InfoTip } from "@/components/form"
+import { FormSection, InfoTip } from "@/components/form"
 import { PageContext } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { InitialsMark } from "@/components/account/user-avatar"
-import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { StatGrid } from "@/components/stat-tile"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AUTH_LOG } from "@/components/security/host-logs"
@@ -29,10 +37,15 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
+import { BASTION_PROFILE, JUMP_KEYS, JumpHost } from "@/components/security/bastion"
+import { SSHPicture } from "@/components/security/ssh-picture"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -56,7 +69,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * The page opens on the server itself — sshd, where it listens, what it was
  * read from and what holds the listener, in the identity line every page
  * that describes a thing opens on, with its verdict at the right end — then
- * on those three and the port as readings; the settings follow as rows, and
+ * on those three and the port drawn as the doors a login can take
+ * (`ssh-picture.tsx`), which follow the draft as it is edited; the settings
+ * follow as two columns of sections, and
  * changes are staged and applied together: sshd is tested
  * with its own parser before the daemon is asked to reload, and the file is
  * put back if the test fails. The one refusal that is not about syntax is the
@@ -65,10 +80,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  *
  * Last is what those settings let happen: the auth log, read through its
  * lens — who signed in and how, who tried and failed, the addresses behind
- * the failures, every sudo — with the day's counts as a second row of the
- * readings, so "passwords on" sits above "412 failed attempts" rather than
- * a page away from it. An attacker's address in it is blocked from the line
- * it is on.
+ * the failures, every sudo — with the day's counts as the page's readings
+ * under the doors, so "passwords on" sits above "412 failed attempts" rather
+ * than a page away from it. An attacker's address in it is blocked from the
+ * line it is on.
  */
 export function SSHPanel({
   posture,
@@ -87,8 +102,23 @@ export function SSHPanel({
     { enabled: admin },
   )
   const [pending, setPending] = useState<Record<string, string>>({})
-  const [only, setOnly] = useSessionState<"all" | "attention">("security.ssh.only", "all")
+  const [only, setOnly] = useSessionState<"all" | "attention" | "edited">(
+    "security.ssh.only",
+    "all",
+  )
   const [busy, setBusy] = useState(false)
+  // The network journal's temporary apply covers sshd too: where the host can
+  // run the independent watchdog, a change is kept only once this session
+  // returns a fresh dashboard response, and restored by the host otherwise.
+  const recovery = usePoll<NetworkConfirmationView>(
+    (signal) => get("/network/changes/current", undefined, signal),
+    0,
+    [],
+    { enabled: admin },
+  )
+  const recoverable = recovery.data?.available === true
+  const [confirmAfter, setConfirmAfter] = useState(true)
+  const pendingApply = recoverable && confirmAfter
   const console_ = useJobConsole()
   // Asked beside the config, not after it: the grid's second row waits on it.
   const authLog = useHostLog(AUTH_LOG, admin)
@@ -119,6 +149,10 @@ export function SSHPanel({
     [pending, data],
   )
   const dirty = Object.keys(changes).length > 0
+  // Port, forwarding and AllowUsers decide who can still open a tunnel to the
+  // dashboard; the staged change is judged against the boundary as it is made.
+  const boundary = useBoundaryCheck(dirty ? { kind: "ssh", settings: changes } : undefined)
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
 
   const header = <PageContext eyebrow="Security" title="SSH" />
 
@@ -169,11 +203,26 @@ export function SSHPanel({
     pending[setting.key] !== undefined && pending[setting.key] !== setting.value
   const setting = (key: string) => data.settings.find((s) => s.key === key)
 
+  // The jump host's directives are drawn in their own section, so the list
+  // below holds the rest — unless the server did not send them, in which case
+  // there is no section and nothing may go missing.
+  const jumpRows = JUMP_KEYS.map(setting).filter((s) => s !== undefined)
+  const jumpable = setting("allowtcpforwarding") !== undefined
+  const general = jumpable ? data.settings.filter((s) => !JUMP_KEYS.includes(s.key)) : data.settings
+  const generalInsecure = general.filter((s) => !s.secure).length
+  const generalEdited = general.filter(changed).length
   const noKeys = data.keyedAccounts.length === 0
-  const passwords = setting("passwordauthentication")
-  const root = setting("permitrootlogin")
   const shown =
-    only === "attention" ? data.settings.filter((s) => !s.secure || changed(s)) : data.settings
+    only === "attention"
+      ? general.filter((s) => !s.secure || changed(s))
+      : only === "edited"
+        ? general.filter(changed)
+        : general
+  const draft = (key: string) => {
+    const s = setting(key)
+    return s ? valueOf(s) : undefined
+  }
+  const figure = (id: string) => readings.tiles.find((t) => t.reading.id === id)?.figure?.value
 
   const apply = () =>
     confirm({
@@ -187,10 +236,19 @@ export function SSHPanel({
             parser and put back if the test fails. Existing sessions are not disconnected by a
             reload.
           </p>
-          <p className="text-destructive">
-            Keep this session open and confirm you can still log in from a second terminal before
-            closing it.
-          </p>
+          <BoundaryImpacts impacts={boundary.impacts} />
+          {pendingApply ? (
+            <p>
+              The previous files are kept by the host. Unless you verify a new dashboard response
+              and confirm within 90 seconds, the host restores them and reloads sshd — even if this
+              dashboard can no longer be reached.
+            </p>
+          ) : (
+            <p className="text-destructive">
+              Keep this session open and confirm you can still log in from a second terminal before
+              closing it.
+            </p>
+          )}
         </div>
       ),
       action: async (c) => {
@@ -201,7 +259,14 @@ export function SSHPanel({
           // a job for the write, the sshd -t and the reload, which is the part
           // worth watching: this is the one operation where "it said it
           // worked" is not the same as knowing the daemon came back.
-          const job = await post<Job>("/ssh/config", { settings: changes }, { confirm: c })
+          const job = await post<Job>(
+            "/ssh/config",
+            {
+              settings: changes,
+              ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
+            },
+            { confirm: c, networkApply: pendingApply ? "pending" : undefined },
+          )
           console_.attach(job)
           setPending({})
         } finally {
@@ -219,8 +284,8 @@ export function SSHPanel({
         title={
           <>
             sshd{" "}
-            <span className="font-mono text-body font-normal text-muted-foreground">
-              port {data.ports.join(", ") || "22"}
+            <span className="numeric font-mono text-body font-normal text-muted-foreground">
+              port <span className="text-[var(--tag-pink)]">{data.ports.join(", ") || "22"}</span>
             </span>
           </>
         }
@@ -279,64 +344,41 @@ export function SSHPanel({
         onCancel={console_.cancel}
       />
 
-      {/* The four facts an attacker cares about, before the twelve settings
-          that produce them — and under them, from the auth log, what the
-          last day made of those facts. One grid: the log's counts are
-          readings of the same server, not a second block of figures, drawn
-          while the log is still being found so the row does not arrive after
-          the page has settled. Two-up on a phone: eight figures one-up are a
-          screen and a half before the finding they explain. */}
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Port"
-          value={data.ports.join(", ") || "22"}
-          hint={
-            data.ports.length > 1
-              ? "listening on more than one"
-              : (data.ports[0] ?? "22") === "22"
-                ? "the default, which every scanner tries first"
-                : "not the default, so most scanners walk past"
-          }
-        />
-        <StatTile
-          label="Passwords"
-          value={passwords ? (passwords.value === "no" ? "Off" : "On") : "—"}
-          tone={passwords && passwords.value !== "no" ? "warning" : "default"}
-          hint={
-            passwords && passwords.value !== "no"
-              ? "a guessed password is a shell"
-              : "keys are the only way in"
-          }
-        />
-        <StatTile
-          label="Root login"
-          value={root?.value === "prohibit-password" ? "Keys only" : (root?.value ?? "—")}
-          tone={root?.value === "yes" ? "danger" : "default"}
-          hint={
-            root?.value === "yes"
-              ? "direct root access permitted"
-              : "effective root authentication policy"
-          }
-        />
-        <StatTile
-          label="Keyed accounts"
-          value={data.keyedAccounts.length}
-          tone={noKeys ? "warning" : "default"}
-          hint={
-            noKeys
-              ? "every login depends on a password"
-              : `${data.keyedAccounts.reduce((n, a) => n + a.keys, 0)} authorized keys in total`
-          }
-        />
-        {readings.tiles.map((tile) => (
-          <ReadingTile
-            key={tile.reading.id}
-            tile={tile}
-            window={readings.window}
-            onPick={() => press(tile.reading)}
+      {/* The four facts an attacker cares about — the port, passwords, root
+          and who holds a key — as the doors a login can take, before the
+          settings that open and shut them. They were four tiles; drawn as a
+          path they are read as one answer, and they follow the draft. */}
+      <Panel plain>
+        <PanelHeader title="Ways in" />
+        <PanelBody>
+          <SSHPicture
+            config={data}
+            value={draft}
+            traffic={{
+              accepted: figure("accepted"),
+              failed: figure("failed"),
+              attackers: figure("attackers"),
+            }}
           />
-        ))}
-      </StatGrid>
+        </PanelBody>
+      </Panel>
+
+      {/* What the last day made of those doors, from the auth log: the page's
+          readings, each a press away from the lines it counts. Drawn while
+          the log is still being found so the row does not arrive after the
+          page has settled. Two-up on a phone. */}
+      {readings.tiles.length > 0 && (
+        <StatGrid columns={4} dense>
+          {readings.tiles.map((tile) => (
+            <ReadingTile
+              key={tile.reading.id}
+              tile={tile}
+              window={readings.window}
+              onPick={() => press(tile.reading)}
+            />
+          ))}
+        </StatGrid>
+      )}
 
       <AreaFindings posture={posture} area="ssh" onFix={onFix} />
 
@@ -356,49 +398,52 @@ export function SSHPanel({
           title="Settings"
           actions={
             <span className="numeric text-hint text-muted-foreground">
-              {data.settings.length} directives
+              {general.length} directives · staged here, applied together
             </span>
           }
         />
         <PanelToolbar>
-          <ToggleGroup
-            type="single"
-            value={only}
-            onValueChange={(next) => next && setOnly(next as "all" | "attention")}
-            variant="outline"
-            size="sm"
-            aria-label="Which settings to show"
-          >
-            <ToggleGroupItem value="all" className="px-2.5 text-hint">
-              All {data.settings.length}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="attention" className="px-2.5 text-hint">
-              Below recommendation {insecure}
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <span className="flex-1" />
-          <span className="text-hint text-muted-foreground">
-            Changes are staged here and applied together.
-          </span>
+          <ChipStrip aria-label="Which settings to show">
+            <FilterChip selected={only === "all"} onClick={() => setOnly("all")}>
+              All <ChipCount>{general.length}</ChipCount>
+            </FilterChip>
+            <FilterChip selected={only === "attention"} onClick={() => setOnly("attention")}>
+              <StatusDot tone={generalInsecure ? "warning" : "running"} />
+              Below recommendation <ChipCount>{generalInsecure}</ChipCount>
+            </FilterChip>
+            {generalEdited > 0 && (
+              <FilterChip selected={only === "edited"} onClick={() => setOnly("edited")}>
+                <span style={{ color: "var(--git-modified)" }}>Edited</span>
+                <ChipCount>{generalEdited}</ChipCount>
+              </FilterChip>
+            )}
+          </ChipStrip>
         </PanelToolbar>
         <PanelBody flush>
-          <FormSections railFrom="xl" className="pt-5">
+          {/* Two columns from `xl`, as the Configuration page lays its
+              settings out: a 48rem column of twelve directives left most of
+              a wide screen to nothing, and two heads on a line read as two
+              parts of one server. */}
+          <div className="grid min-w-0 gap-x-12 gap-y-12 pt-6 xl:grid-cols-2">
             {SSH_GROUPS.map((group) => {
               const settings = shown.filter((setting) => sshGroup(setting.key) === group.title)
               if (settings.length === 0) return null
               const warnings = settings.filter((setting) => !setting.secure).length
+              const edited = settings.some(changed)
               return (
                 <FormSection
                   aside
                   key={group.title}
                   title={group.title}
+                  className="max-w-none py-0 first:pt-0 last:pb-0"
+                  actions={edited && <Tag style={{ color: "var(--git-modified)" }}>Edited</Tag>}
                   hint={
-                    <span className="space-y-3">
-                      <span className="numeric block">{settings.length} directives</span>
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <Status
                         verdict={warnings ? "warning" : "ok"}
                         label={warnings ? `${warnings} below recommendation` : "At recommendation"}
                       />
+                      <span className="numeric">{plural(settings.length, "directive")}</span>
                     </span>
                   }
                 >
@@ -423,26 +468,44 @@ export function SSHPanel({
                 </FormSection>
               )
             })}
-            {shown.length === 0 && (
-              <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
-            )}
-          </FormSections>
+          </div>
+          {shown.length === 0 && (
+            <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
+          )}
         </PanelBody>
-        {dirty && (
-          <PanelFooter className="sticky bottom-0 z-10 bg-background">
-            <span className="text-hint text-muted-foreground">
-              {Object.keys(changes).length} unsaved changes
-            </span>
-            <span className="flex-1" />
-            <Button size="sm" variant="outline" onClick={() => setPending({})} disabled={busy}>
-              Discard
-            </Button>
-            <Button size="sm" onClick={apply} disabled={busy}>
-              Test and apply
-            </Button>
-          </PanelFooter>
-        )}
       </Panel>
+
+      {jumpable && (
+        <Panel plain>
+          <PanelHeader
+            title="Jump host"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(jumpRows.length, "directive")} · staged with the rest
+              </span>
+            }
+          />
+          <PanelBody flush>
+            <JumpHost
+              value={draft}
+              saved={setting("allowtcpforwarding")?.value}
+              edited={jumpRows.some(changed)}
+              port={data.ports[0] ?? "22"}
+              user={data.keyedAccounts[0]?.user ?? "user"}
+              onPreset={() => setPending((previous) => ({ ...previous, ...BASTION_PROFILE }))}
+              rows={jumpRows.map((s) => (
+                <SettingRow
+                  key={s.key}
+                  setting={s}
+                  value={valueOf(s)}
+                  changed={changed(s)}
+                  onChange={(value) => setPending((previous) => ({ ...previous, [s.key]: value }))}
+                />
+              ))}
+            />
+          </PanelBody>
+        </Panel>
+      )}
 
       <Panel plain>
         <PanelHeader
@@ -489,6 +552,49 @@ export function SSHPanel({
         ask={ask}
         readings={readings}
       />
+
+      {/* The apply bar follows the reader, as the Configuration page's does:
+          a change may be staged at the top of the settings and the log is a
+          screen under them. It names what changed in git's modified hue. */}
+      {dirty && (
+        <div className="sticky bottom-0 z-20 -mx-5 mt-auto animate-rise border-t border-hairline bg-background/85 px-5 py-3 backdrop-blur md:-mx-8 md:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-body">
+              <span className="font-medium">
+                {plural(Object.keys(changes).length, "unsaved change")}
+              </span>
+              <span className="hidden min-w-0 truncate font-mono text-hint text-[var(--git-modified)] sm:inline">
+                {Object.keys(changes)
+                  .map((key) => setting(key)?.label ?? key)
+                  .join(" · ")}
+              </span>
+              <span className="text-muted-foreground">— tested with sshd -t before it reloads</span>
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {recoverable && (
+                <label className="flex min-h-9 items-center gap-2 text-hint text-muted-foreground">
+                  <Switch
+                    checked={confirmAfter}
+                    onCheckedChange={setConfirmAfter}
+                    aria-label="Restore unless confirmed after reconnecting"
+                  />
+                  Restore unless confirmed (90 s)
+                </label>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setPending({})} disabled={busy}>
+                Discard
+              </Button>
+              <Button
+                size="sm"
+                onClick={apply}
+                disabled={busy || boundary.checking || crossing === "refused"}
+              >
+                Test and apply
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {dialog}
     </>
@@ -543,7 +649,6 @@ const SSH_GROUPS = [
       "logingracetime",
       "clientaliveinterval",
       "clientalivecountmax",
-      "maxsessions",
       "maxstartups",
     ],
   },
@@ -576,12 +681,15 @@ function SettingRow({
     setting.kind === "choice" && setting.options?.length === 2 && setting.options.includes(value)
 
   return (
-    <div
-      className={cn(
-        "grid min-w-0 items-center gap-x-6 gap-y-3 py-5 first:pt-0 sm:grid-cols-[minmax(0,1fr)_12rem]",
-        changed && "bg-wash-primary",
+    <div className="relative grid min-w-0 items-center gap-x-6 gap-y-3 py-5 first:pt-0 sm:grid-cols-[minmax(0,1fr)_12rem]">
+      {/* A staged change is marked down the row's edge in git's modified
+          hue, the colour §3 gives a change that is not applied yet. */}
+      {changed && (
+        <span
+          aria-hidden
+          className="absolute inset-y-5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+        />
       )}
-    >
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <label htmlFor={`ssh-${setting.key}`} className="text-body font-medium">
@@ -592,7 +700,7 @@ function SettingRow({
             {note && ` ${note}`}
           </InfoTip>
           {changed ? (
-            <Tag className="text-primary">pending</Tag>
+            <Tag style={{ color: "var(--git-modified)" }}>edited</Tag>
           ) : (
             below && <Status verdict="warning" label="below recommendation" />
           )}
@@ -600,7 +708,7 @@ function SettingRow({
         <code className="block font-mono text-hint text-muted-foreground">{setting.key}</code>
         {below && (
           <p className="max-w-md text-hint leading-relaxed text-warning">
-            Recommended {setting.recommended}.
+            Recommended <span className="font-mono">{setting.recommended}</span>.
             {setting.risk && <span className="text-muted-foreground"> {setting.risk}</span>}
           </p>
         )}

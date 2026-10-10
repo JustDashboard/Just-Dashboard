@@ -20,7 +20,7 @@ const WORD: Record<UpstreamState, string> = {
 }
 
 /** "up 2 ms", "refused", "dynamic, not checked". */
-export function upstreamLabel(target: UpstreamTarget): string {
+export function upstreamLabel(target: Pick<UpstreamTarget, "state" | "ms">): string {
   if (target.state !== "up") return WORD[target.state]
   return `up ${target.ms ?? 0} ms`
 }
@@ -47,6 +47,11 @@ const RANK: Record<UpstreamState, number> = {
   error: 3,
   dynamic: 1,
   up: 0,
+}
+
+/** How bad a state is, for picking the worse of two: a refusal outranks a timeout. */
+export function upstreamRank(state: UpstreamState): number {
+  return RANK[state]
 }
 
 /** The targets of one site file, worst first. */

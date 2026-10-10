@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"net/http"
 	"net/http/httptest"
@@ -179,11 +180,25 @@ func TestORMTargetCatalogueCoversEveryGenerator(t *testing.T) {
 		t.Fatalf("GET /databases/orm/targets = %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
+	var res struct {
+		Targets []struct {
+			ID       string `json:"id"`
+			Filename string `json:"filename"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v: %s", err, body)
+	}
+	filenames := map[string]string{}
+	for _, tg := range res.Targets {
+		filenames[tg.ID] = tg.Filename
+	}
 	for _, tg := range dbx.ORMTargets() {
-		if !strings.Contains(body, `"id":"`+string(tg)+`"`) {
+		f, listed := filenames[string(tg)]
+		if !listed {
 			t.Errorf("target %q missing from the catalogue: %s", tg, body)
 		}
-		if f := ormFilename(tg); f == "schema.txt" {
+		if f == "" || f == "schema.txt" {
 			t.Errorf("target %q has no filename of its own", tg)
 		}
 	}
@@ -282,44 +297,53 @@ func TestProvisionTemplatesAreCoherent(t *testing.T) {
 		if tmpl.image == "" || tmpl.port == 0 || tmpl.dataPath == "" {
 			t.Errorf("%s: incomplete template %+v", engine, tmpl)
 		}
-		// The image this starts must be one dbx.Detect recognises, or the
-		// server it creates cannot be adopted afterwards — which is the whole
-		// point of creating it from here.
-		cand, password := dbx.Detect("probe", tmpl.image, envPairs(tmpl.env("s3cret", "app")),
-			[]dbx.PublishedPort{{ContainerPort: tmpl.port, HostIP: "127.0.0.1", HostPort: tmpl.port}}, nil)
-		if cand == nil {
-			t.Errorf("%s: image %q is not recognised by dbx.Detect", engine, tmpl.image)
-			continue
-		}
-		if cand.Driver != tmpl.driver {
-			t.Errorf("%s: template says %q, detection says %q", engine, tmpl.driver, cand.Driver)
-		}
-		if !cand.Connectable() {
-			t.Errorf("%s: not connectable — %s", engine, cand.Reason)
-		}
-		if password != "s3cret" {
-			t.Errorf("%s: the generated password is not the one detection reads back: %q", engine, password)
-		}
-		if dsn := dbx.BuildDSN(*cand, password); dsn == "" {
-			t.Errorf("%s: no DSN could be built", engine)
+		// Every release a template offers has to be recognised and adoptable,
+		// not only the default: the list is what the operator chooses from.
+		for _, version := range tmpl.versions {
+			// The image this starts must be one dbx.Detect recognises, or the
+			// server it creates cannot be adopted afterwards — which is the whole
+			// point of creating it from here.
+			cand, password := dbx.Detect("probe", version.image, envPairs(tmpl.env("owner", "s3cret", "app")),
+				[]dbx.PublishedPort{{ContainerPort: tmpl.port, HostIP: "127.0.0.1", HostPort: tmpl.port}}, nil)
+			if cand == nil {
+				t.Errorf("%s: image %q is not recognised by dbx.Detect", engine, version.image)
+				continue
+			}
+			if cand.Driver != tmpl.driver {
+				t.Errorf("%s: template says %q, detection says %q", engine, tmpl.driver, cand.Driver)
+			}
+			if !cand.Connectable() {
+				t.Errorf("%s: not connectable — %s", engine, cand.Reason)
+			}
+			if password != "s3cret" {
+				t.Errorf("%s: the password given to the container is not the one detection reads back: %q", engine, password)
+			}
+			// The account too, where the engine has one: a custom user the
+			// adopt could not find would be saved as a connection that signs
+			// in as somebody else.
+			if tmpl.user != "" && cand.User != "owner" {
+				t.Errorf("%s: the account given to the container is not the one detection reads back: %q", engine, cand.User)
+			}
+			if dsn := dbx.BuildDSN(*cand, password); dsn == "" {
+				t.Errorf("%s: no DSN could be built", engine)
+			}
 		}
 	}
 }
 
-// A provisioned server is published on every interface unless the request
-// asks for this server only: a database made to be shared has to work from
-// another machine without a second trip through Maintenance, and deployment
-// quick setup, which reaches its database over the deployment network, says
-// "local" in so many words.
-func TestProvisionBindingDefaultsToPublic(t *testing.T) {
+// A provisioned server is published on this server only unless the request
+// asks for every interface. The default used to be the other way round, and a
+// default is what happens to everybody who does not read the switch: a new
+// database on 0.0.0.0 with the firewall opened for it.
+func TestProvisionBindingDefaultsToLocal(t *testing.T) {
 	cases := []struct {
 		in       dbExposure
 		exposure dbExposure
 		hostIP   string
 	}{
-		{"", exposurePublic, "0.0.0.0"},
-		{exposurePublic, exposurePublic, "0.0.0.0"},
+		{"", exposureLocal, "127.0.0.1"},
 		{exposureLocal, exposureLocal, "127.0.0.1"},
+		{exposurePublic, exposurePublic, "0.0.0.0"},
 	}
 	for _, c := range cases {
 		exposure, hostIP, err := provisionBinding(c.in)

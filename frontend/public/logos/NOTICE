@@ -90,8 +90,11 @@ drawn; and solid.svg in its #2C4F7C lifted to #81a7da, the L 0.72 rung.
 
 mysql.svg is devicon's mysql-original.svg (https://github.com/devicons/devicon),
 recoloured from #00618A to #57afe0 so it reads on a dark ground; sqlite.svg is
-devicon's sqlite-original.svg and sqlserver.svg its microsoftsqlserver-plain.svg,
-both unchanged. All three are used under the MIT License:
+devicon's sqlite-original.svg, unchanged; and sqlserver.svg is its
+microsoftsqlserver-original.svg as of v2.17.0, the silver and red mark rather
+than the single-colour outline, with the darker red of its gradient, #a91d22,
+lifted to #ff726a, the same hue at the L 0.72 rung. All three are used under
+the MIT License:
 
   Copyright (c) 2015 konpa
 
@@ -129,9 +132,69 @@ charcoal #4c4c4c lifted to #a4a4a4, the same grey at the L 0.72 rung, for the
 tile a package manager is drawn on; pnpm.svg stays as it was for the file
 manager's paper page.
 
+The database engines the Databases pages draw — the products a driver talks
+to under another name, and the servers found on a machine that the dashboard
+cannot open — come from the same three collections.
+
+From homarr-labs/dashboard-icons, under the Apache License 2.0: etcd.svg and
+couchdb.svg keep their names and are unchanged. cassandra.svg is its
+apache-cassandra.svg with the charcoal #373535 of the eye's lids and lashes
+lifted to #a6a4a4; opensearch.svg had both of its blues lifted, #003b5c to
+#77abd2 and #005eb8 to #60a7ff; and ferretdb.svg had its navy #092032 lifted
+to #8ea8c0, and the drawing program's ids, class and style element folded into
+one fill attribute — each the same hue at the L 0.72 rung, so the mark reads
+on a dark ground. kafka.svg is its kafka-dark.svg, the white mark it draws for
+a dark theme, without the XML declaration, title, role and fixed size that
+file carries.
+
+From devicon v2.17.0, under the MIT License above: nats.svg and yugabytedb.svg
+are its nats-original.svg and yugabytedb-original.svg, and memcached.svg its
+memcached-plain.svg, unchanged. elasticsearch.svg is its
+elasticsearch-original.svg, the engine's own three bands — the file
+dashboard-icons ships under that name is its elastic.svg, the company's mark —
+with the charcoal #343741 of the middle band lifted to #a0a4b0, the same hue
+at the L 0.72 rung, and the file's indentation removed.
+
+From Simple Icons 16.33.0 (https://simpleicons.org), CC0 1.0, without the title
+and role its files carry and filled because Simple Icons ships the path alone:
+timescaledb.svg (its timescale.svg), tidb.svg, scylladb.svg and duckdb.svg in
+their brand colour (#FDB515, #DC150B, #6CD5E7, #FFF000); cockroachdb.svg (its
+cockroachlabs.svg) in its #6933FF lifted to #9b95ff; and neo4j.svg, the mark
+Neo4j uses now where dashboard-icons draws the disc it retired, in its #4581C3
+lifted to #6ba8ed — both the same hue at the L 0.72 rung. scylladb.svg is a
+hairline outline, the only rendition any of the three collections has, and is
+faint as the smallest glyph on a screen of ordinary density; it is left as the
+collection draws it rather than thickened by hand.
+
+Azure SQL Edge has no file: none of the three collections draws it a mark of
+its own, and it is drawn with sqlserver.svg, the engine it is. Percona Server,
+KeyDB and Dragonfly are in none of the three either and have no logo here; the
+pages draw them with a plain database glyph rather than another product's mark.
+
 mono/ holds the single-colour marks pressed into a folder's face. Every file
 there is from Simple Icons (https://simpleicons.org), CC0 1.0, unchanged, renamed
 after the product key the folders use: nodedotjs.svg is nodejs.svg,
 nextdotjs.svg nextjs.svg, letsencrypt.svg lets-encrypt.svg, rubygems.svg
 ruby.svg, openjdk.svg java.svg, visualstudiocode.svg vscode.svg and gnubash.svg
 bash.svg.
+
+The Network pages draw the tunnels, resolvers and intrusion tools a server
+runs. From homarr-labs/dashboard-icons, under the Apache License 2.0:
+adguard-home.svg, pi-hole.svg and zerotier.svg are unchanged. wireguard.svg had
+its near-black #231f20 lifted to #a8a3a4, crowdsec.svg its purples #3e3978 and
+#4e4a99 to #9c9ce4 and #999af1, headscale.svg its #303030 to #a4a4a4,
+mullvad.svg its navy #192e45 to #8ea7c4, unbound.svg its #2d2e83 to #8e9bfb and
+openvpn.svg its #1a3967 to #82a6dc — each the same hue at the L 0.72 rung, so
+the mark reads on a dark ground. quad9.svg is Simple Icons' path (CC0) filled
+with the brand's #DC205E.
+
+The drift page draws where the saved network configuration is written, and
+none of the three collections has those marks, so each is the project's own
+artwork from its own site. systemd.svg is the systemd logomark from
+https://brand.systemd.io (designed by Tobias Bernard, CC BY-SA 4.0) with its
+white ground removed and its #201a26 brackets drawn white, as the project's own
+dark variant draws them. netfilter.webp is the flame disc cut from
+https://www.netfilter.org/images/netfilter-logo3.png, resized to 96px WebP.
+spamhaus.svg is the mark from the Spamhaus Project's site logo
+(https://www.spamhaus.org), its wordmark removed. firehol.webp is FireHOL's
+web-shield-128.png from https://firehol.org, resized to 96px WebP.

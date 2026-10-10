@@ -433,7 +433,16 @@ func (o listenerOwners) of(address string) string {
 type UpstreamReport struct {
 	CheckedAt time.Time        `json:"checkedAt"`
 	Targets   []UpstreamTarget `json:"targets"`
+	// Pools are the same destinations grouped as nginx spreads requests
+	// across them, with what its error logs said of each server over the
+	// last hour (Evidence says which logs and how far back).
+	Pools    []UpstreamPool `json:"pools"`
+	Evidence *PoolEvidence  `json:"evidence,omitempty"`
 }
+
+// passiveWindow is how far back nginx's own record of failed connections is
+// read for each pool.
+const passiveWindow = time.Hour
 
 // upstreamTTL bounds how often the page's polling makes the dashboard dial
 // out: every signed-in account can read the report, so a read serves the
@@ -449,8 +458,9 @@ type upstreamRun struct {
 // UpstreamMonitor serves UpstreamReports, checking at most once per
 // upstreamTTL, and readers that arrive during a check share it.
 type UpstreamMonitor struct {
-	svc  *Service
-	dial DialFunc
+	svc     *Service
+	dial    DialFunc
+	resolve Resolver
 
 	mu      sync.Mutex
 	last    *UpstreamReport
@@ -458,7 +468,7 @@ type UpstreamMonitor struct {
 }
 
 func NewUpstreamMonitor(svc *Service) *UpstreamMonitor {
-	return &UpstreamMonitor{svc: svc, dial: (&net.Dialer{}).DialContext}
+	return &UpstreamMonitor{svc: svc, dial: (&net.Dialer{}).DialContext, resolve: net.DefaultResolver.LookupHost}
 }
 
 // Report answers the last check while it is fresh, or runs one. fresh
@@ -511,7 +521,15 @@ func (m *UpstreamMonitor) check(run *upstreamRun) {
 				}
 			}
 			checked := CheckUpstreams(ctx, targets, m.dial)
-			run.report = &UpstreamReport{CheckedAt: time.Now(), Targets: checked}
+			now := time.Now()
+			evidence := &PoolEvidence{Since: now.Add(-passiveWindow), Logs: requestErrorLogs(tree)}
+			failures, complete := readPassive(evidence.Logs, evidence.Since)
+			evidence.Complete = complete
+			if len(evidence.Logs) == 0 {
+				evidence.Note = "nginx writes its errors outside " + nginxLogRoot + ", which the dashboard does not read."
+			}
+			run.report = &UpstreamReport{CheckedAt: now, Targets: checked, Evidence: evidence,
+				Pools: UpstreamPools(ctx, tree, checked, failures, m.resolve)}
 		}
 	}
 	run.err = err

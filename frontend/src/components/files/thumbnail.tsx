@@ -42,12 +42,12 @@ export function Thumbnail({
     size === "row"
       ? "size-7 rounded-sm"
       : size === "sm"
-        ? "h-16 w-full rounded-md"
+        ? "h-12 w-full rounded-md"
         : size === "lg"
-          ? "h-32 w-full rounded-md"
-          : "h-24 w-full rounded-md"
+          ? "h-24 w-full rounded-md"
+          : "h-16 w-full rounded-md"
   const glyph =
-    size === "row" ? "size-6" : size === "sm" ? "size-12" : size === "lg" ? "size-22" : "size-16"
+    size === "row" ? "size-6" : size === "sm" ? "size-10" : size === "lg" ? "size-20" : "size-14"
 
   return (
     <span

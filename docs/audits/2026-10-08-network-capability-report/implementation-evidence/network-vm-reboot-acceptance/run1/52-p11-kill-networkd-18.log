@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-10T01:13:27Z",
+  "bootId": "13ce0464-94e8-4db5-9e1c-a2a2dcf9e6ac",
+  "evidence": {
+    "candidateFile": {
+      "inode": 16293,
+      "mode": "0o644",
+      "path": "/etc/systemd/network/30-jdvm-direct.network",
+      "sha256": "c68346e0f613a0f30e47f3473adf4fb16d99b074b31fb3f6ec13bb822896a951"
+    },
+    "journalAtKill": {
+      "appliedAt": "2026-10-10T01:13:26.939588752Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "pending",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:14:56.831612191Z",
+      "files": [],
+      "generation": "dbf4b009910fd7efc173b0f813292e937bbce9566006f0bceea2363c60e4e61e",
+      "id": "b0fd92150f0d61a54476eff097651d00",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:13:27.159800644Z",
+      "watchdog": "armed"
+    },
+    "networkdSettled": true
+  },
+  "failures": [],
+  "phase": "p11-kill networkd 18",
+  "result": "pass",
+  "seconds": 6.8
+}

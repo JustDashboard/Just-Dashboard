@@ -1,0 +1,20 @@
+=== RUN   TestNativeManagerOwnerLive
+    native_manager_live_test.go:224: native owner acceptance:
+        === RUN   TestNativeManagerOwnerLive
+        === RUN   TestNativeManagerOwnerLive/transport-epoch
+            native_manager_live_test.go:322: Authenticated transport GUID is pinned; mismatched and actual prior-bus epochs refuse before RequestName effects
+        === RUN   TestNativeManagerOwnerLive/netplan-NetworkManager
+            native_manager_live_test.go:534: netplan-NetworkManager unchanged-profile actual bound helper SHA256=f1cf8427ca23c86353fe19914f13476988235c5cdaba036ba69e3b514976ec9a
+            native_manager_live_test.go:534: netplan-NetworkManager canonical unchanged-intent path=/etc/netplan/20-fixture.yaml SHA256=e6f6a52366457394173e3b152f9b6623fa45d1ffe7427f598cf525de772e1b8f beforeInode=17 candidateInode=19 retainedAuthoredInode=17
+            native_manager_live_test.go:534: netplan-NetworkManager canonical unchanged-intent path=/run/NetworkManager/system-connections/netplan-d0.nmconnection SHA256=49147f4c4af91451f21fdf9e8bd7dc67f5e84b43dc5ff2b73785b34685ca714e beforeInode=101 candidateInode=137 retainedAuthoredInode=101
+            native_manager_live_test.go:534: netplan-NetworkManager canonical unchanged-intent path=/etc/netplan/20-fixture.yaml SHA256=e6f6a52366457394173e3b152f9b6623fa45d1ffe7427f598cf525de772e1b8f beforeInode=17 candidateInode=21 retainedAuthoredInode=17
+            native_manager_live_test.go:534: netplan-NetworkManager canonical unchanged-intent path=/run/NetworkManager/system-connections/netplan-d0.nmconnection SHA256=49147f4c4af91451f21fdf9e8bd7dc67f5e84b43dc5ff2b73785b34685ca714e beforeInode=101 candidateInode=179 retainedAuthoredInode=101
+            native_manager_live_test.go:534: netplan-NetworkManager shipped helper v10 equal-byte candidate rollback restored exact authored inodes; unchanged-intent confirmation and terminal fresh-helper retry retained exact candidate inodes and full configured/runtime/boot agreement
+            native_manager_live_test.go:583: Native confirmation save failure, process death after durable confirmation, and lost terminal cleanup outcome recovered through fresh helpers
+            native_manager_live_test.go:585: netplan-NetworkManager actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed
+        --- PASS: TestNativeManagerOwnerLive (25.29s)
+            --- PASS: TestNativeManagerOwnerLive/transport-epoch (0.04s)
+            --- PASS: TestNativeManagerOwnerLive/netplan-NetworkManager (25.23s)
+        PASS
+--- PASS: TestNativeManagerOwnerLive (30.63s)
+PASS

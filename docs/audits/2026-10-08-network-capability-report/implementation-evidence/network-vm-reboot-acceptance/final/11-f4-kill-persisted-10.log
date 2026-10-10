@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-10T01:21:41Z",
+  "bootId": "47775ab0-e4ff-47e3-82e9-693ad6ad4f0d",
+  "evidence": {
+    "backendAfterKill": {
+      "active": "failed",
+      "pid": "0",
+      "startedThisBoot": true,
+      "sub": "failed"
+    },
+    "fired": "2026-10-10T01:21:41.275281817Z systemctl is-enabled just-dashboard-network.service journal=persisted",
+    "journalAtKill": {
+      "appliedAt": "2026-10-10T01:21:41.166488073Z",
+      "boot": "not_verified",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "42e7e249f699d446ee76424892fd6f56c90b8df091ce92419e445e05a9107c3c",
+      "id": "7ef9e25b741c52c50a4fef26cef9eb06",
+      "persistence": "written",
+      "phase": "persisted",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:21:41.254337331Z",
+      "watchdog": "armed"
+    },
+    "requestError": "RemoteDisconnected('Remote end closed connection without response')",
+    "timer": {
+      "ActiveState": "active",
+      "LoadState": "loaded",
+      "NextElapseUSecMonotonic": "5min 4.633595s"
+    }
+  },
+  "failures": [],
+  "phase": "f4-kill persisted 10",
+  "result": "pass",
+  "seconds": 1.5
+}

@@ -156,6 +156,9 @@ type streamLogLine struct {
 	sent     int64
 	received int64
 	seconds  float64
+	// upstream is every server nginx tried, comma-separated, the one the
+	// session ended on last; empty for one it never forwarded.
+	upstream string
 }
 
 // parseStreamLogLine reads one line of streamLogFormat.
@@ -185,6 +188,11 @@ func parseStreamLogLine(line string) (streamLogLine, bool) {
 	}
 	if out.seconds, err = strconv.ParseFloat(head[6], 64); err != nil {
 		return out, false
+	}
+	if end := strings.IndexByte(line[quote+1:], '"'); end >= 0 {
+		if upstream := line[quote+1 : quote+1+end]; upstream != "-" {
+			out.upstream = upstream
+		}
 	}
 	return out, true
 }

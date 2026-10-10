@@ -1,171 +1,57 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { del, get, put } from "@/lib/api"
+import { API_BASE, del, get, mutationHeaders, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { DbDiagramLayoutResponse } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import {
+  DEFAULT_DOCUMENT,
+  chooseDocument,
+  decodeDocument,
+  type DiagramDocument,
+  type Mirror,
+} from "@/components/database/diagram/document"
+import type { DbDiagramLayoutResponse } from "@/components/database/diagram/types"
 
 /**
- * What the diagram remembers, and where.
+ * Where the diagram's document is kept, and how it gets there.
  *
- * Every decision the operator makes about the picture — where a table sits,
- * which are hidden, a note, a colour, how much of each table is drawn — is one
- * document, kept per connection and schema. It is saved on the server beside
- * the connection's saved queries, so it comes back on the next visit, in the
- * next browser and for the next operator; and it is mirrored in this browser's
- * storage, so a role that may read the schema but not write to the dashboard
- * still keeps its own arrangement, and a server that is briefly away does not
- * lose a drag.
+ * It is saved on the server beside the connection's saved queries, so an
+ * arrangement comes back on the next visit, in the next browser and for the
+ * next operator. And it is mirrored in this browser, so a role that may read
+ * the schema but not write to the dashboard still keeps its own arrangement,
+ * and a server that is briefly away does not lose a drag.
+ *
+ * The mirror is the page's furniture and is kept where the rest of it is
+ * (`useViewState`, under the section's own key), with the moment of any change
+ * the server has not confirmed. That moment is what decides, on the next
+ * visit, whether the browser's copy or the server's is the newer.
  *
  * Saving is debounced and reported, because a diagram that silently forgets
  * is worse than one that never remembered: the toolbar says "Saved", "Saving…"
- * or "Kept in this browser", and a failed save says so once.
+ * or "Kept in this browser", and a failed save says so once. A change still
+ * waiting for its debounce when the page goes is sent on the way out, on a
+ * request the browser keeps alive past the page.
  */
-
-export type DiagramDirection = "LR" | "TB"
-/** How much of each table is drawn: every column, only the keys, or the name alone. */
-export type DiagramDetail = "all" | "keys" | "names"
-export type DiagramSpacing = "compact" | "comfortable"
-export const DIAGRAM_COLORS = [
-  "slate",
-  "red",
-  "amber",
-  "green",
-  "cyan",
-  "blue",
-  "violet",
-  "pink",
-] as const
-export type DiagramColor = (typeof DIAGRAM_COLORS)[number]
-
-export type DiagramDocument = {
-  version: 1
-  direction: DiagramDirection
-  detail: DiagramDetail
-  spacing: DiagramSpacing
-  /** Only the tables the operator placed (or a Tidy placed for them). */
-  positions: Record<string, { x: number; y: number }>
-  hidden: string[]
-  notes: Record<string, string>
-  colors: Record<string, DiagramColor>
-  viewport?: { x: number; y: number; zoom: number }
-  grid: boolean
-  snap: boolean
-  minimap: boolean
-  /** Cardinality labels on every edge, rather than only on the focused ones. */
-  labels: boolean
-  /** Tables cannot be dragged — for a diagram that is finished. */
-  locked: boolean
-}
-
-export const DEFAULT_DOCUMENT: DiagramDocument = {
-  version: 1,
-  direction: "LR",
-  detail: "all",
-  spacing: "comfortable",
-  positions: {},
-  hidden: [],
-  notes: {},
-  colors: {},
-  grid: true,
-  snap: false,
-  minimap: true,
-  labels: false,
-  locked: false,
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v)
-
-/**
- * A stored document, checked field by field and filled in with the defaults.
- * Keys outlive the code that wrote them, and a value of the wrong shape would
- * otherwise reach the canvas as if it were fine — a position of `null` is a
- * table that never renders.
- */
-export function decodeDocument(raw: unknown): DiagramDocument | null {
-  if (!isRecord(raw)) return null
-  const doc: DiagramDocument = {
-    ...DEFAULT_DOCUMENT,
-    positions: {},
-    hidden: [],
-    notes: {},
-    colors: {},
-  }
-  if (raw.direction === "LR" || raw.direction === "TB") doc.direction = raw.direction
-  if (raw.detail === "all" || raw.detail === "keys" || raw.detail === "names")
-    doc.detail = raw.detail
-  if (raw.spacing === "compact" || raw.spacing === "comfortable") doc.spacing = raw.spacing
-  if (isRecord(raw.positions)) {
-    for (const [name, p] of Object.entries(raw.positions)) {
-      if (isRecord(p) && finite(p.x) && finite(p.y)) doc.positions[name] = { x: p.x, y: p.y }
-    }
-  }
-  if (Array.isArray(raw.hidden))
-    doc.hidden = raw.hidden.filter((h): h is string => typeof h === "string")
-  if (isRecord(raw.notes)) {
-    for (const [name, n] of Object.entries(raw.notes))
-      if (typeof n === "string" && n) doc.notes[name] = n
-  }
-  if (isRecord(raw.colors)) {
-    for (const [name, c] of Object.entries(raw.colors)) {
-      if (typeof c === "string" && (DIAGRAM_COLORS as readonly string[]).includes(c)) {
-        doc.colors[name] = c as DiagramColor
-      }
-    }
-  }
-  if (
-    isRecord(raw.viewport) &&
-    finite(raw.viewport.x) &&
-    finite(raw.viewport.y) &&
-    finite(raw.viewport.zoom)
-  ) {
-    doc.viewport = { x: raw.viewport.x, y: raw.viewport.y, zoom: raw.viewport.zoom }
-  }
-  for (const flag of ["grid", "snap", "minimap", "labels", "locked"] as const) {
-    if (typeof raw[flag] === "boolean") doc[flag] = raw[flag]
-  }
-  return doc
-}
-
-/** Whether the operator has changed anything from a fresh diagram. */
-export function isArranged(doc: DiagramDocument): boolean {
-  return (
-    Object.keys(doc.positions).length > 0 ||
-    doc.hidden.length > 0 ||
-    Object.keys(doc.notes).length > 0 ||
-    Object.keys(doc.colors).length > 0 ||
-    doc.direction !== DEFAULT_DOCUMENT.direction ||
-    doc.detail !== DEFAULT_DOCUMENT.detail ||
-    doc.spacing !== DEFAULT_DOCUMENT.spacing ||
-    doc.locked
-  )
-}
-
 export type MemoryStatus = "loading" | "saved" | "saving" | "unsaved" | "failed" | "local"
 
-const localKey = (connId: number, schema: string) => `jd.db.diagram.${connId}.${schema}`
+type Held = DiagramDocument & { legacy?: true }
 
-function readLocal(key: string): DiagramDocument | null {
+const SAVE_DELAY = 900
+
+/** The key the diagram wrote straight to localStorage before it kept to the view store. */
+const legacyKey = (connId: number, schema: string) => `jd.db.diagram.${connId}.${schema}`
+
+function takeLegacy(key: string): Mirror | null {
   try {
     const raw = window.localStorage.getItem(key)
-    return raw ? decodeDocument(JSON.parse(raw)) : null
+    if (!raw) return null
+    window.localStorage.removeItem(key)
+    return { doc: JSON.parse(raw) }
   } catch {
     return null
   }
 }
-
-function writeLocal(key: string, doc: DiagramDocument | null) {
-  try {
-    if (doc) window.localStorage.setItem(key, JSON.stringify(doc))
-    else window.localStorage.removeItem(key)
-  } catch {
-    // Private browsing or a full quota: the server copy still holds it.
-  }
-}
-
-const SAVE_DELAY = 900
 
 export function useDiagramMemory({
   connId,
@@ -173,58 +59,77 @@ export function useDiagramMemory({
   canSave,
 }: {
   connId: number
+  /** "" is the picture of every schema, which has an arrangement of its own. */
   schema: string
   /** Whether this role may write dashboard state. Without it the browser keeps the copy. */
   canSave: boolean
 }) {
-  const key = localKey(connId, schema)
+  const key = `${connId}:${schema}`
+  const [mirror, setMirror] = useViewState<Mirror | null>(
+    `databases.${connId}.diagram.${schema || "*"}`,
+    null,
+  )
+  const mirrored = useRef(mirror)
+  useEffect(() => {
+    mirrored.current = mirror
+  })
+
   // The state carries the key it was loaded for, so a switch of connection
   // or schema reads as "loading" until its own fetch lands rather than as the
   // previous diagram's arrangement — the same bargain `usePoll` makes.
   const [state, setState] = useState<{
     key: string
-    document: DiagramDocument | null
+    document: Held | null
     status: MemoryStatus
     updatedAt?: string
   }>({ key, document: null, status: "loading" })
   const current =
     state.key === key ? state : { key, document: null, status: "loading" as MemoryStatus }
   const pending = useRef<DiagramDocument | null>(null)
+  // The document a save now on its way is carrying: if the page goes before
+  // the server answers, that request goes with it and this is what is owed.
+  const flying = useRef<DiagramDocument | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const failed = useRef(false)
 
   useEffect(() => {
     let cancelled = false
-    const local = readLocal(key)
+    const local = mirrored.current ?? takeLegacy(legacyKey(connId, schema))
     get<DbDiagramLayoutResponse>(`/databases/${connId}/diagram`, { schema })
       .then((res) => {
         if (cancelled) return
-        const remote = res.layout ? decodeDocument(res.layout) : null
-        if (remote) {
-          writeLocal(key, remote)
-          setState({ key, document: remote, status: "saved", updatedAt: res.updatedAt })
-        } else if (local) {
-          // Arranged in this browser before the server kept layouts, or by a
-          // role that could not save: adopt it, and push it up on the next
-          // change if this role can.
-          setState({ key, document: local, status: canSave ? "unsaved" : "local" })
-        } else {
-          setState({ key, document: DEFAULT_DOCUMENT, status: canSave ? "saved" : "local" })
+        const chosen = chooseDocument(local, res ?? { layout: null })
+        if (chosen.saved) {
+          // Mirrored only where there is an arrangement to mirror: a visit
+          // to a diagram nobody has arranged leaves nothing in the browser.
+          // A document still keyed by bare names is mirrored once the canvas
+          // has re-keyed it — written back as it is, it would read as one
+          // that needs no re-keying.
+          if (res?.layout && !chosen.document.legacy) setMirror({ doc: chosen.document })
+          setState({ key, document: chosen.document, status: "saved", updatedAt: res?.updatedAt })
+          return
         }
+        // This browser's copy is the newer one, or the only one: it is owed
+        // to the server and goes up now, where this role can save. One still
+        // keyed by bare names goes up once the canvas has re-keyed it.
+        if (canSave && !chosen.document.legacy) pending.current = chosen.document
+        setState({ key, document: chosen.document, status: canSave ? "unsaved" : "local" })
       })
       .catch(() => {
         if (cancelled) return
-        setState({ key, document: local ?? DEFAULT_DOCUMENT, status: "local" })
+        const mine = local ? decodeDocument(local.doc) : null
+        setState({ key, document: mine ?? DEFAULT_DOCUMENT, status: "local" })
       })
     return () => {
       cancelled = true
     }
-  }, [connId, schema, key, canSave])
+  }, [connId, schema, key, canSave, setMirror])
 
   const flush = useCallback(async () => {
     const doc = pending.current
     if (!doc || !canSave) return
     pending.current = null
+    flying.current = doc
     setState((s) => (s.key === key ? { ...s, status: "saving" } : s))
     try {
       const res = await put<DbDiagramLayoutResponse>(
@@ -232,32 +137,31 @@ export function useDiagramMemory({
         { layout: doc },
         { query: { schema } },
       )
+      flying.current = null
       failed.current = false
       // A change that landed while this one was in flight is still pending
-      // and keeps the status honest.
+      // and keeps the status — and the mirror's unconfirmed mark — honest.
+      if (!pending.current) setMirror({ doc })
       setState((s) =>
         s.key === key
           ? { ...s, status: pending.current ? "unsaved" : "saved", updatedAt: res.updatedAt }
           : s,
       )
     } catch (err) {
+      flying.current = null
       setState((s) => (s.key === key ? { ...s, status: "failed" } : s))
       if (!failed.current) notify.error("The diagram's layout could not be saved", err)
       failed.current = true
     }
-  }, [connId, schema, key, canSave])
+  }, [connId, schema, key, canSave, setMirror])
 
   const update = useCallback(
     (next: Partial<DiagramDocument> | ((doc: DiagramDocument) => DiagramDocument)) => {
       setState((s) => {
-        const base = (s.key === key ? s.document : null) ?? DEFAULT_DOCUMENT
-        const resolved = typeof next === "function" ? next(base) : { ...base, ...next }
-        writeLocal(key, resolved)
-        if (canSave) {
-          pending.current = resolved
-          clearTimeout(timer.current)
-          timer.current = setTimeout(() => void flush(), SAVE_DELAY)
-        }
+        const base: DiagramDocument = (s.key === key ? s.document : null) ?? DEFAULT_DOCUMENT
+        const resolved: DiagramDocument =
+          typeof next === "function" ? next(base) : { ...base, ...next }
+        pending.current = canSave ? resolved : null
         return {
           key,
           document: resolved,
@@ -266,27 +170,52 @@ export function useDiagramMemory({
         }
       })
     },
-    [key, canSave, flush],
+    [key, canSave],
   )
 
-  // A drag followed by a click on another tab must not be the one change that
-  // is forgotten: whatever is waiting for its debounce goes now.
+  // The mirror and the debounce follow the document rather than being written
+  // inside the state update: an updater may run twice, and a write to another
+  // store from inside one would be made twice with it.
+  const document = current.document
+  const status = current.status
   useEffect(() => {
-    const now = () => {
+    if (!document || document.legacy || (status !== "unsaved" && status !== "local")) return
+    setMirror({ doc: document, dirtyAt: new Date().toISOString() })
+    if (!canSave || !pending.current) return
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => void flush(), SAVE_DELAY)
+  }, [document, status, canSave, flush, setMirror])
+
+  // A drag followed by a closed tab must not be the one change that is
+  // forgotten. A request made as the page goes is cancelled with it unless
+  // the browser is told to keep it alive, so the last save is sent that way.
+  useEffect(() => {
+    const leave = () => {
+      clearTimeout(timer.current)
+      const doc = pending.current ?? flying.current
+      if (!doc || !canSave) return
+      pending.current = null
+      void fetch(`${API_BASE}/databases/${connId}/diagram?schema=${encodeURIComponent(schema)}`, {
+        method: "PUT",
+        keepalive: true,
+        credentials: "include",
+        headers: { ...mutationHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ layout: doc }),
+      }).catch(() => undefined)
+    }
+    window.addEventListener("pagehide", leave)
+    return () => {
+      window.removeEventListener("pagehide", leave)
+      // Leaving the page inside the dashboard: the ordinary save, now.
       clearTimeout(timer.current)
       if (pending.current) void flush()
     }
-    window.addEventListener("beforeunload", now)
-    return () => {
-      window.removeEventListener("beforeunload", now)
-      now()
-    }
-  }, [flush])
+  }, [connId, schema, canSave, flush])
 
   const reset = useCallback(async () => {
     clearTimeout(timer.current)
     pending.current = null
-    writeLocal(key, null)
+    setMirror(null)
     setState({ key, document: DEFAULT_DOCUMENT, status: canSave ? "saved" : "local" })
     if (!canSave) return
     try {
@@ -295,7 +224,7 @@ export function useDiagramMemory({
       setState((s) => (s.key === key ? { ...s, status: "failed" } : s))
       notify.error("Could not reset the saved layout", err)
     }
-  }, [connId, schema, key, canSave])
+  }, [connId, schema, key, canSave, setMirror])
 
   return {
     document: current.document,

@@ -1,0 +1,6 @@
+=== RUN   TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit
+--- PASS: TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit (2.94s)
+=== RUN   TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken
+--- PASS: TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken (0.34s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	4.500s

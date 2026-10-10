@@ -29,7 +29,6 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -62,18 +61,13 @@ import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
 import { failingTone } from "@/components/deploy/fleet"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { WrapDot } from "@/components/deploy/request-marks"
-import {
-  EventStrip,
-  MinuteStrip,
-  isCleanExit,
-  isTickEvent,
-} from "@/components/deploy/traffic-strip"
+import { MinuteStrip, isCleanExit } from "@/components/deploy/traffic-strip"
 
 /**
- * The container's own disruptions — what the Container reading counts and
- * names, and the Events tab counts in amber. An exit is one only when it was
- * not clean: every routine stop and every release swap ends a container with
- * status 0, and the server already calls that a notice, not an error.
+ * The container's own disruptions — what the Events tab counts in amber. An
+ * exit is one only when it was not clean: every routine stop and every
+ * release swap ends a container with status 0, and the server already calls
+ * that a notice, not an error.
  */
 function isDisruption(event: DockerEvent) {
   return (
@@ -122,12 +116,11 @@ function isDisruption(event: DockerEvent) {
  *
  * The readings above the pane come from all of it at once, because the first
  * thing a reader wants is not a view, it is whether anything is wrong. Each
- * carries its hour where a meter would be (§15): the request rate and the p95
- * as lines, the failures as a strip of minutes, the container's exits and
- * restarts as ticks on a rail — so "0.9% failing" says whether that was one
- * bad minute or the whole hour. On a phone they sit two-up, so the pane and
- * its first request are on the first screen rather than under five stacked
- * figures.
+ * carries its hour where a meter would be (§15): the request rate, the p95
+ * and the bytes as lines, the failures as a strip of minutes — so "0.9%
+ * failing" says whether that was one bad minute or the whole hour. On a phone
+ * they sit two-up, so the pane and its first request are on the first screen
+ * rather than under four stacked figures.
  *
  * The alerts line under them says whether anyone will be told, and who: the
  * rules' state, and the channels they tell drawn as the services they are.
@@ -229,32 +222,21 @@ export function ProjectLogs() {
     30000,
     [project.projectId],
   )
-  // One read of the container's record serves the tile, its strip, the Events
-  // tab's count and the chart's marks. The hour is worked out in the fetcher,
-  // which runs in an effect — where reading a clock belongs — rather than in
-  // render, and it travels with the events so the strip is drawn against the
-  // same hour they were cut by.
-  const lifecycle = usePoll<{
-    feed: DeploymentLifecycle
-    hour: DockerEvent[]
-    recent: DockerEvent[]
-    from: number
-    to: number
-  }>(
+  // One read of the container's record serves the Events tab's count and the
+  // chart's marks. The hour is worked out in the fetcher, which runs in an
+  // effect — where reading a clock belongs — rather than in render.
+  const lifecycle = usePoll<{ feed: DeploymentLifecycle; recent: DockerEvent[] }>(
     async (signal) => {
       const feed = await get<DeploymentLifecycle>(
         `/deploy/${project.projectId}/lifecycle`,
         { limit: 200 },
         signal,
       )
-      const to = Date.now()
-      const from = to - 3_600_000
-      // Newest first, whatever order the buffer hands them over in: the
-      // reading names the newest.
-      const hour = feed.events
-        .filter((event) => Date.parse(event.time) > from)
-        .sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
-      return { feed, hour, recent: hour.filter(isDisruption), from, to }
+      const from = Date.now() - 3_600_000
+      const recent = feed.events.filter(
+        (event) => Date.parse(event.time) > from && isDisruption(event),
+      )
+      return { feed, recent }
     },
     30000,
     [project.projectId],
@@ -338,11 +320,7 @@ export function ProjectLogs() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
-      <TrafficReadings
-        requests={requests.data}
-        lifecycle={lifecycle.data}
-        alerts={alerts.data?.alerts}
-      />
+      <TrafficReadings requests={requests.data} alerts={alerts.data?.alerts} />
       <AlertsLine
         projectId={project.projectId}
         alerts={alerts.data}
@@ -512,15 +490,15 @@ function arrivalOf(search: URLSearchParams, now: number) {
 }
 
 /**
- * The page's shape before it has anything in it — five readings, the alerts
+ * The page's shape before it has anything in it — four readings, the alerts
  * line and the pane — so the Suspense fallback gives way to the page rather
  * than a framed block giving way to tiles and a pane.
  */
 export function LogsSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
-      <StatGrid columns={5} dense>
-        {Array.from({ length: 5 }, (_, i) => (
+      <StatGrid columns={4} dense>
+        {Array.from({ length: 4 }, (_, i) => (
           <div key={i} data-slot="stat-tile" className="flex flex-col gap-2.5 px-5 py-4">
             <Skeleton className="h-2.5 w-16" />
             <Skeleton className="h-7 w-24" />
@@ -558,18 +536,8 @@ function ViewTab({
   )
 }
 
-/** How the newest disruption is named in the Container reading, and its tone. */
-const NEWEST: Record<string, { word: string; tone: "danger" | "warning" }> = {
-  die: { word: "Exited", tone: "danger" },
-  oom: { word: "OOM-killed", tone: "danger" },
-  restart: { word: "Restarted", tone: "warning" },
-}
-
-/** What a clean exit that nothing started after says: a stop, in no tone. */
-const STOPPED = { word: "Stopped", tone: "default" } as const
-
 /**
- * What is happening right now, in five figures.
+ * What is happening right now, in four figures.
  *
  * Taken over the last hour rather than the view's own window, so they keep
  * meaning the same thing while the reader narrows the rows beneath them. Each
@@ -582,23 +550,17 @@ const STOPPED = { word: "Stopped", tone: "default" } as const
  * scaled against the latency alert's line when there is one, so its height is
  * read against where somebody would be told. Failing is a strip of the hour's
  * minutes, red where one had a server error, because "0.9%" is either one bad
- * minute or a whole bad hour and a line of a share cannot say which. The
- * container is its newest disruption in words with its exit code at the
- * figure's side, and the hour's exits, restarts and starts as ticks on a rail
- * under it. A clean exit is none of these: a stop reads "Stopped" in no tone
- * when nothing started after it, and a release swap — the old container
- * stopping, the new one starting — leaves the reading "Steady".
+ * minute or a whole bad hour and a line of a share cannot say which. What
+ * the container did is the Events tab's, which counts its disruptions.
  *
  * The figures count up on arrival (`NumberTicker`), which is the product's
  * way of saying a reading landed — the Overview's live usage does the same.
  */
 function TrafficReadings({
   requests,
-  lifecycle,
   alerts,
 }: {
   requests?: DeploymentRequests
-  lifecycle?: { hour: DockerEvent[]; recent: DockerEvent[]; from: number; to: number }
   alerts?: TrafficAlert[]
 }) {
   const summary = requests?.summary
@@ -623,31 +585,9 @@ function TrafficReadings({
   // p95, and drawing it at 0ms invents a fast minute the chart beside it
   // draws as the gap it is.
   const p95s = buckets.flatMap((bucket) => (bucket.p95 === undefined ? [] : [bucket.p95]))
-  const hour = lifecycle?.hour ?? []
-  const recent = lifecycle?.recent ?? []
-  const lastTick = hour.find(isTickEvent)
-  const newest = recent[0]
-    ? NEWEST[recent[0].action]
-    : lastTick && isCleanExit(lastTick)
-      ? STOPPED
-      : undefined
-  const exitCode =
-    recent[0]?.exitCode && recent[0].exitCode !== "0" ? recent[0].exitCode : undefined
-  const exits = recent.filter((event) => event.action !== "restart").length
-  const stops = hour.filter(isCleanExit).length
-  const restarts = recent.length - exits
-  const starts = hour.filter(
-    (event) => event.type === "container" && event.action === "start",
-  ).length
-  const lives = [
-    exits > 0 && plural(exits, "exit"),
-    stops > 0 && plural(stops, "stop"),
-    restarts > 0 && plural(restarts, "restart"),
-    starts > 0 && plural(starts, "start"),
-  ].filter(Boolean)
 
   return (
-    <StatGrid columns={5} dense>
+    <StatGrid columns={4} dense>
       <StatTile
         label={
           <span className="flex items-center justify-between gap-2">
@@ -742,31 +682,6 @@ function TrafficReadings({
           ) : undefined
         }
         hint={served && summary ? "sent in the last hour" : undefined}
-      />
-      <StatTile
-        label="Container"
-        key={`restarts:${recent.length}:${recent[0]?.time ?? ""}`}
-        value={newest?.word ?? "Steady"}
-        tone={newest?.tone ?? "default"}
-        trailing={
-          exitCode ? (
-            <Tag tone="danger" mono>
-              exit {exitCode}
-            </Tag>
-          ) : undefined
-        }
-        trend={
-          lifecycle && hour.some(isTickEvent) ? (
-            <EventStrip events={hour} from={lifecycle.from} to={lifecycle.to} />
-          ) : undefined
-        }
-        hint={
-          recent.length > 0
-            ? [...lives, `newest ${relativeTime(recent[0].time)}`].join(" · ")
-            : lives.length > 0
-              ? [...lives, "none failed"].join(" · ")
-              : "No exit or restart in the last hour"
-        }
       />
     </StatGrid>
   )

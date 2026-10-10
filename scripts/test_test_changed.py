@@ -1,4 +1,4 @@
-"""Which browser specs test-changed.sh picks for a changed test fixture."""
+"""Which browser specs test-changed.sh picks for a changed fixture or module."""
 import pathlib
 import subprocess
 import tempfile
@@ -59,6 +59,92 @@ class SpecSelectionTest(unittest.TestCase):
 
     def test_a_module_no_spec_imports_picks_nothing(self):
         self.assertEqual(self.specs("lonely.ts"), [])
+
+
+# What the script does with a module that reaches more than one section: the
+# pages it reaches, and those of them it keeps the specs of.
+SECTION_PROBE = (
+    'eval "$(sed -n "/^pages_of() {/,/^}/p; /^address_of() {/,/^}/p; '
+    '/^home_section() {/,/^}/p; /^pages_under() {/,/^}/p; /^normalise() {/,/^}/p" "$1")"\n'
+    'mapfile -t reached < <(pages_of "$2")\n'
+    'home=$(home_section "$2")\n'
+    'if [ -n "$home" ]; then pages_under "$home" "${reached[@]}"; fi\n'
+)
+
+# The engine registry as the rail reads it: a module of the Databases section
+# that the dashboard's own layout reaches, and so every page with it.
+SOURCES = {
+    "components/database/engine.ts": "export const engine = 1\n",
+    "components/database/fleet/index.tsx": 'import { engine } from "@/components/database/engine"\n',
+    "components/app-sidebar.tsx": 'import { engine } from "@/components/database/engine"\n',
+    "components/choice-card.tsx": "export const card = 1\n",
+    "app/(dashboard)/layout.tsx": 'import { rail } from "@/components/app-sidebar"\n',
+    "app/(dashboard)/logs/page.tsx": 'import { engine } from "@/components/database/engine"\n',
+    "app/(dashboard)/databases/page.tsx": 'import { list } from "@/components/database/fleet"\n',
+    "app/(dashboard)/databases/[id]/layout.tsx": (
+        'import { engine } from "@/components/database/engine"\n'
+    ),
+    "app/(dashboard)/databases/new/page.tsx": 'import { card } from "@/components/choice-card"\n',
+    "app/(dashboard)/deploy/new/page.tsx": 'import { card } from "@/components/choice-card"\n',
+    # The data grid, whose parts import each other relative to themselves, and
+    # a module one directory up that names one of them the same way.
+    "components/database/grid/values.ts": "export const format = 1\n",
+    "components/database/grid/grid-row.tsx": 'import { format } from "./values"\n',
+    "components/database/grid/data-grid.tsx": 'import { Row } from "./grid-row"\n',
+    "components/database/grid/index.ts": 'export { DataGrid } from "./data-grid"\n',
+    "components/database/grid/unused.ts": "export const values = 1\n",
+    "components/database/kit/values.ts": 'import { format } from "../grid/values"\n',
+    "components/database/kit/index.ts": (
+        'export { kind } from "@/components/database/kit/values"\n'
+    ),
+    "app/(dashboard)/databases/[id]/data/page.tsx": (
+        'import { DataGrid } from "@/components/database/grid"\n'
+    ),
+    "app/(dashboard)/databases/[id]/query/page.tsx": (
+        'import { kind } from "@/components/database/kit"\n'
+    ),
+}
+
+
+class SectionSelectionTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = pathlib.Path(directory.name)
+        for name, content in SOURCES.items():
+            path = self.root / "frontend/src" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
+    def kept(self, module):
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\n" + SECTION_PROBE, "probe", str(SCRIPT),
+             "frontend/src/" + module],
+            cwd=self.root, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return sorted(result.stdout.splitlines())
+
+    def test_a_section_module_the_shell_reads_keeps_its_own_pages(self):
+        self.assertEqual(
+            self.kept("components/database/engine.ts"),
+            [
+                "frontend/src/app/(dashboard)/databases/[id]/layout.tsx",
+                "frontend/src/app/(dashboard)/databases/page.tsx",
+            ],
+        )
+
+    def test_a_module_of_no_one_section_keeps_none(self):
+        self.assertEqual(self.kept("components/choice-card.tsx"), [])
+
+    def test_a_part_imported_relative_to_its_importer_reaches_the_pages_that_mount_it(self):
+        data = "frontend/src/app/(dashboard)/databases/[id]/data/page.tsx"
+        query = "frontend/src/app/(dashboard)/databases/[id]/query/page.tsx"
+        self.assertEqual(self.kept("components/database/grid/values.ts"), [data, query])
+        self.assertEqual(self.kept("components/database/grid/grid-row.tsx"), [data])
+        # A file of the same name in another directory is another module.
+        self.assertEqual(self.kept("components/database/kit/values.ts"), [query])
+        self.assertEqual(self.kept("components/database/grid/unused.ts"), [])
 
 
 if __name__ == "__main__":

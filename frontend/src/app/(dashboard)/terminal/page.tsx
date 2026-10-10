@@ -4,6 +4,20 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   Plus,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Copy,
+  Cross,
+  Download,
+  External,
+  Command,
+  FolderOpen,
+  Fullscreen,
+  FullscreenClose,
+  MoreHorizontal,
+  Trash,
   ShieldOff,
   SidebarLeftClose,
   SidebarLeftOpen,
@@ -28,7 +42,39 @@ import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { Page } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
-import { XtermPane } from "@/components/xterm-pane"
+import { XtermPane, type XtermActions } from "@/components/xterm-pane"
+import { SplitDivider } from "@/components/terminal/split-divider"
+import { SplitDropOverlay } from "@/components/terminal/split-drop-overlay"
+import { ProgramMark, ActivityMark } from "@/components/terminal/activity-mark"
+import { ProductGlyph } from "@/components/product-logo"
+import { windowLabel, windowProgram, windowActivity } from "@/lib/terminal-activity"
+import {
+  canSplit,
+  detachWindow,
+  dockLayout,
+  dropDirection,
+  layoutGeometry,
+  layoutTab,
+  leaves,
+  neighbour,
+  reconcileLayouts,
+  resizeLayout,
+  splitLayout,
+  TERMINAL_WINDOW_DRAG,
+  type TerminalLayout,
+  type SplitDirection,
+} from "@/lib/terminal-layout"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { SessionRail } from "@/components/terminal/session-rail"
 import { WindowStrip } from "@/components/terminal/window-strip"
 import { WorkspaceTools } from "@/components/terminal/workspace-tools"
@@ -39,11 +85,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 type TerminalList = {
   enabled: boolean
-  /** Whether a session outlives the dashboard, held on the host, or ends when it restarts. */
+  /** Whether new sessions can be protected across dashboard restarts. */
   persistent: boolean
+  persistenceError?: string
   login: { user: string; home: string; shell: string; error?: string }
   sessions: TerminalWorkspace[]
 }
+
+const AGENTS = {
+  codex: { name: "Codex", command: "codex --yolo", logo: "openai" },
+  claude: { name: "Claude", command: "claude --dangerously-skip-permissions", logo: "claude" },
+} as const
 
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
@@ -73,8 +125,27 @@ export default function TerminalPage() {
   // server sends a window's state the moment a socket attaches, so the first
   // activity from a reattached socket is what clears it.
   const [dropped, setDropped] = useState<Record<string, boolean>>({})
+  const windowRevisionRef = useRef<Record<string, number>>({})
   const [windowLists, setWindowLists] = useState<Record<string, Window[]>>({})
   const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
+  const [storedLayouts, setLayouts] = useViewState<Record<string, TerminalLayout[]>>(
+    "terminal.layouts",
+    {},
+  )
+  const layouts = storedLayouts ?? {}
+  const draftLayoutsRef = useRef<Record<string, TerminalLayout[]>>({})
+  const [draftLayouts, setDraftLayouts] = useState<Record<string, TerminalLayout[]>>({})
+  const [creating, setCreating] = useState(false)
+  const [draggedWindow, setDraggedWindow] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    window: string
+    direction: SplitDirection
+    blocked: boolean
+  } | null>(null)
+  const creatingRef = useRef(false)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const actionsRef = useRef<XtermActions | null>(null)
+  const [gridSize, setGridSize] = useState({ width: 0, height: 0 })
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
   const [showTools, setShowTools] = useViewState("terminal.tools", true)
   // Below `lg` the rail and the tools column cover the emulator instead of
@@ -101,6 +172,11 @@ export default function TerminalPage() {
     const list = await get<TerminalList>("/terminal/", undefined, signal)
     if (!signal.aborted) {
       const live = new Set(list.sessions.map((session) => session.id))
+      if (Object.keys(layouts).some((id) => !live.has(id))) {
+        setLayouts((groups) =>
+          Object.fromEntries(Object.entries(groups).filter(([id]) => live.has(id))),
+        )
+      }
       if (Object.keys(rememberedWindows).some((id) => !live.has(id))) {
         setRememberedWindows((windows) =>
           Object.fromEntries(Object.entries(windows).filter(([id]) => live.has(id))),
@@ -168,12 +244,16 @@ export default function TerminalPage() {
   const activeSession = sessions.find((session) => session.id === active)
   const windows = usePoll<Window[]>(
     async (signal) => {
+      const sessionId = active ?? ""
+      const revision = windowRevisionRef.current[sessionId] ?? 0
       const list = await get<Window[]>(
         `/terminal/${encodeURIComponent(active ?? "")}/windows`,
         undefined,
         signal,
       )
-      if (!signal.aborted) {
+      if (!signal.aborted && revision === (windowRevisionRef.current[sessionId] ?? 0)) {
+        // A listing begun before creation/closure cannot overwrite the new
+        // window set and unmount a terminal that is already running.
         // Keep each result with its session. usePoll retains its previous data
         // during a fetch, which otherwise shows the old session's windows.
         setWindowLists((previous) =>
@@ -205,6 +285,34 @@ export default function TerminalPage() {
   if (active && activeWindow && !openWindows.some((window) => window.id === activeWindow.id)) {
     openWindows.push({ id: activeWindow.id, sessionId: active })
   }
+  const groups = reconcileLayouts(
+    draftLayouts[active ?? ""] ?? layouts[active ?? ""],
+    windowList.map((item) => item.id),
+  )
+  const activeLayout = groups.find((tree) => leaves(tree).includes(activeWindow?.id ?? ""))
+  const visibleWindows = activeLayout ? leaves(activeLayout) : []
+  const tabIds = new Set(groups.map(layoutTab))
+  const tabWindows = windowList.filter((window) => tabIds.has(window.id))
+  const activeTab = activeLayout ? layoutTab(activeLayout) : null
+  const draggedLayout = groups.find((tree) => layoutTab(tree) === draggedWindow)
+  for (const id of visibleWindows) {
+    if (active && !openWindows.some((item) => item.id === id))
+      openWindows.push({ id, sessionId: active })
+  }
+  const geometry = activeLayout
+    ? layoutGeometry(activeLayout, gridSize.width, gridSize.height)
+    : { panes: {}, dividers: [] }
+  const workspaceReady = Boolean(data?.enabled) && !loading
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const measure = () => setGridSize({ width: grid.clientWidth, height: grid.clientHeight })
+    const observer = new ResizeObserver(measure)
+    observer.observe(grid)
+    measure()
+    return () => observer.disconnect()
+  }, [workspaceReady])
+
   const droppedWindows = openWindows.filter((window) => dropped[window.id])
   const disconnectedWindows = new Set(droppedWindows.map((window) => window.id))
   const disconnectedSessions = new Set(droppedWindows.map((window) => window.sessionId))
@@ -253,6 +361,57 @@ export default function TerminalPage() {
   const showWindow = (id: string) => {
     if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
   }
+  const clearWindowDrag = () => {
+    setDraggedWindow(null)
+    setDropTarget(null)
+  }
+  useEffect(() => {
+    const clear = () => {
+      setDraggedWindow(null)
+      setDropTarget(null)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clear()
+    }
+    window.addEventListener("dragend", clear)
+    window.addEventListener("drop", clear)
+    window.addEventListener("keydown", onKey)
+    window.addEventListener("blur", clear)
+    return () => {
+      window.removeEventListener("dragend", clear)
+      window.removeEventListener("drop", clear)
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("blur", clear)
+    }
+  }, [active])
+  const updateLayouts = (change: (current: TerminalLayout[]) => TerminalLayout[]) => {
+    if (!active) return
+    const next = change(draftLayoutsRef.current[active] ?? groups)
+    setLayouts((previous) => ({ ...previous, [active]: next }))
+    // A divider may still hold a pointer while a menu moves a pane. Its final
+    // release must commit the updated membership as well as the ratio.
+    if (draftLayoutsRef.current[active]) {
+      draftLayoutsRef.current = { ...draftLayoutsRef.current, [active]: next }
+      setDraftLayouts(draftLayoutsRef.current)
+    }
+  }
+  const detachPane = (id: string) => {
+    updateLayouts((current) => detachWindow(current, id))
+    showWindow(id)
+    focusPaneRef.current?.()
+  }
+  const dockWindow = (source: string, target: string, direction: SplitDirection) => {
+    const added = groups.find((tree) => layoutTab(tree) === source)
+    if (
+      !added ||
+      leaves(added).includes(target) ||
+      !canSplit(geometry.panes[target], direction, added)
+    )
+      return
+    updateLayouts((current) => dockLayout(current, source, target, direction, crypto.randomUUID()))
+    showWindow(source)
+    focusPaneRef.current?.()
+  }
 
   // Closing a shell asks nothing first, for the same reason the API route
   // carries no typed phrase: it is an everyday act, and a dialog in front of
@@ -263,36 +422,90 @@ export default function TerminalPage() {
       if (active === session.id) setRemembered("")
     }, "Could not close that session")
 
-  // A new window opens beside the one you were looking at, so it starts where
-  // that shell currently is. The polled list carries a cwd up to five seconds
-  // old, which is exactly long enough to miss the `cd` that prompted the new
-  // window, so the live value is read first and the polled one is the
-  // fallback. Both are only a request: the backend validates the directory on
-  // the host and drops back to home if it has since gone.
-  const openWindow = async () => {
-    if (!active) return
-    let cwd = activeWindow?.cwd
-    if (activeWindow) {
-      try {
-        cwd = (await get<{ cwd: string }>(`/terminal/${encodeURIComponent(activeWindow.id)}/cwd`))
-          .cwd
-      } catch {
-        // Tmux sessions and shells whose directory cannot be read answer with
-        // an error here; the polled value, or nothing, still opens a window.
-      }
-    }
+  const openWindow = async (direction?: SplitDirection, agent?: "codex" | "claude") => {
+    if (!active || !activeWindow || !data?.persistent || creatingRef.current) return
+    if (direction && !canSplit(geometry.panes[activeWindow.id], direction)) return
+    creatingRef.current = true
+    setCreating(true)
     try {
-      const created = await post<{ id: string }>(
+      const created = await post<{ id: string; name: string }>(
         `/terminal/${encodeURIComponent(active)}/windows`,
-        { cwd },
+        { sourceWindowId: activeWindow.id, agent },
       )
-      await windows.refresh()
-      await refresh()
-      showWindow(created.id)
-      focusPaneRef.current?.()
+      const revision = (windowRevisionRef.current[active] ?? 0) + 1
+      windowRevisionRef.current[active] = revision
+      // Creation succeeded even if the next listing loses the network. Apply
+      // its id immediately so a retry cannot create a second agent or lose the
+      // requested split while that already-running PTY waits for a poll.
+      setWindowLists((previous) => ({
+        ...previous,
+        [active]: [
+          ...(previous[active] ?? windowList).filter((item) => item.id !== created.id),
+          { id: created.id, name: created.name ?? "Terminal", index: windowList.length },
+        ],
+      }))
+      setLayouts((previous) => {
+        const current = reconcileLayouts(
+          draftLayoutsRef.current[active] ?? previous?.[active],
+          windowList.map((item) => item.id),
+        )
+        const next = direction
+          ? current.map((tree) =>
+              splitLayout(tree, activeWindow.id, created.id, direction, crypto.randomUUID()),
+            )
+          : [...current, { window: created.id }]
+        const updated = reconcileLayouts(next, [...windowList.map((item) => item.id), created.id])
+        if (draftLayoutsRef.current[active]) {
+          draftLayoutsRef.current = { ...draftLayoutsRef.current, [active]: updated }
+          setDraftLayouts(draftLayoutsRef.current)
+        }
+        return { ...previous, [active]: updated }
+      })
+      setRemembered(active)
+      setRememberedWindows((previous) => ({ ...previous, [active]: created.id }))
+      refresh()
+      void get<Window[]>(`/terminal/${encodeURIComponent(active)}/windows`)
+        .then((list) => {
+          if (revision === windowRevisionRef.current[active])
+            setWindowLists((previous) => ({ ...previous, [active]: list }))
+        })
+        .catch(() => {
+          /* The poll retries without removing the created pane. */
+        })
     } catch (err) {
-      notify.error("Could not open a window", err)
+      notify.error(
+        agent
+          ? `Could not open ${agent === "codex" ? "Codex" : "Claude"}`
+          : "Could not open a window",
+        err,
+      )
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
     }
+  }
+  // An agent starts in the shell you are looking at, as if you had typed it
+  // there. Only a terminal already holding a program gets a window of its own:
+  // typed into an editor or another agent, the command would be its input.
+  const launchAgent = (agent: keyof typeof AGENTS) => {
+    if (!activeWindow) return
+    if (windowActivity(activeWindow, activity[activeWindow.id]).busy) {
+      void openWindow(undefined, agent)
+      return
+    }
+    actionsRef.current?.run(AGENTS[agent].command)
+  }
+  const changeSplit = (id: string, ratio: number, commit: boolean) => {
+    if (!active) return
+    const current = draftLayoutsRef.current[active] ?? groups
+    const next = current.map((tree) => resizeLayout(tree, id, ratio))
+    if (commit) {
+      setLayouts((previous) => ({ ...previous, [active]: next }))
+      const copy = { ...draftLayoutsRef.current }
+      delete copy[active]
+      draftLayoutsRef.current = copy
+    } else draftLayoutsRef.current = { ...draftLayoutsRef.current, [active]: next }
+    setDraftLayouts(draftLayoutsRef.current)
   }
   const updateWindow = (id: string, next: Record<string, unknown>, failure: string) => {
     if (!active) return
@@ -313,8 +526,15 @@ export default function TerminalPage() {
     void act(
       async () => {
         await del(`/terminal/${encodeURIComponent(active)}/windows/${encodeURIComponent(id)}`)
+        windowRevisionRef.current[active] = (windowRevisionRef.current[active] ?? 0) + 1
+        setWindowLists((previous) => ({
+          ...previous,
+          [active]: (previous[active] ?? []).filter((item) => item.id !== id),
+        }))
         if (activeWindow?.id === id) {
-          const sibling = windowList.find((item) => item.id !== id)
+          const sibling =
+            windowList.find((item) => item.id !== id && visibleWindows.includes(item.id)) ??
+            windowList.find((item) => item.id !== id)
           if (sibling) showWindow(sibling.id)
         }
       },
@@ -358,27 +578,38 @@ export default function TerminalPage() {
     "window.new": () => void openWindow(),
     "window.next": () => {
       const next = step(
-        windowList,
-        windowList.findIndex((item) => item.id === activeWindow?.id),
+        tabWindows,
+        tabWindows.findIndex((item) => item.id === activeTab),
         1,
       )
       if (next) showWindow(next.id)
     },
     "window.prev": () => {
       const previous = step(
-        windowList,
-        windowList.findIndex((item) => item.id === activeWindow?.id),
+        tabWindows,
+        tabWindows.findIndex((item) => item.id === activeTab),
         -1,
       )
       if (previous) showWindow(previous.id)
     },
     "window.close": () => activeWindow && closeWindow(activeWindow.id),
+    "pane.next": () => {
+      const next = step(visibleWindows, visibleWindows.indexOf(activeWindow?.id ?? ""), 1)
+      if (next) showWindow(next)
+    },
     "workspace.rail": toggleRail,
     "workspace.tools": toggleTools,
   }
+  for (const direction of ["left", "right", "up", "down"] as const) {
+    navigation[`pane.split.${direction}`] = () => void openWindow(direction)
+    navigation[`pane.focus.${direction}`] = () => {
+      const next = neighbour(geometry.panes, activeWindow?.id ?? "", direction)
+      if (next) showWindow(next)
+    }
+  }
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
     navigation[`session.${n}`] = () => sessions[n - 1] && select(sessions[n - 1])
-    navigation[`window.${n}`] = () => windowList[n - 1] && showWindow(windowList[n - 1].id)
+    navigation[`window.${n}`] = () => tabWindows[n - 1] && showWindow(tabWindows[n - 1].id)
   }
   useEffect(() => {
     navigationRef.current = navigation
@@ -445,23 +676,165 @@ export default function TerminalPage() {
       />
       {active ? (
         <WindowStrip
-          windows={windowList}
-          activeId={activeWindow?.id ?? null}
+          windows={tabWindows}
+          activeId={activeTab}
           activity={activity}
           disconnected={disconnectedWindows}
           onSelect={(id) => {
-            showWindow(id)
+            if (id !== activeTab) showWindow(id)
             focusPaneRef.current?.()
           }}
           onReorder={(id, position) => updateWindow(id, { position }, "Could not move that window")}
           onNew={() => void openWindow()}
+          newDisabled={creating || !data.persistent}
           onClose={closeWindow}
+          onDragStart={setDraggedWindow}
+          onDragEnd={clearWindowDrag}
         />
       ) : (
         <span className="min-w-0 flex-1 truncate px-2 text-xs font-medium text-muted-foreground">
           Terminal
         </span>
       )}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((agent) => (
+          <Tooltip key={agent}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={AGENTS[agent].name}
+                disabled={!activeWindow || creating}
+                onClick={() => launchAgent(agent)}
+              >
+                <ProductGlyph id={AGENTS[agent].logo} className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Run <span className="font-mono">{AGENTS[agent].command}</span> in this terminal
+            </TooltipContent>
+          </Tooltip>
+        ))}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Split terminal"
+              title="Split terminal"
+              disabled={!activeWindow || creating || !data.persistent}
+            >
+              <Plus className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              focusPaneRef.current?.()
+            }}
+          >
+            <DropdownMenuLabel>Split focused terminal</DropdownMenuLabel>
+            {(
+              [
+                ["left", ArrowLeft],
+                ["right", ArrowRight],
+                ["up", ArrowUp],
+                ["down", ArrowDown],
+              ] as const
+            ).map(([direction, Icon]) => (
+              <DropdownMenuItem
+                key={direction}
+                disabled={!canSplit(geometry.panes[activeWindow?.id ?? ""], direction)}
+                onSelect={() => void openWindow(direction)}
+              >
+                <Icon className="size-4" /> Split {direction}
+              </DropdownMenuItem>
+            ))}
+            {tabWindows.some((window) => window.id !== activeTab) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Move window into split</DropdownMenuLabel>
+                {tabWindows
+                  .filter((window) => window.id !== activeTab)
+                  .map((window) => (
+                    <DropdownMenuSub key={window.id}>
+                      <DropdownMenuSubTrigger>
+                        {windowLabel(window, activity[window.id])}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {(["left", "right", "up", "down"] as const).map((direction) => (
+                          <DropdownMenuItem
+                            key={direction}
+                            disabled={
+                              !canSplit(
+                                geometry.panes[activeWindow?.id ?? ""],
+                                direction,
+                                groups.find((tree) => layoutTab(tree) === window.id),
+                              )
+                            }
+                            onSelect={() =>
+                              activeWindow && dockWindow(window.id, activeWindow.id, direction)
+                            }
+                          >
+                            Split {direction}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ))}
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Terminal actions"
+              disabled={!activeWindow}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => actionsRef.current?.copy()}>
+              <Copy className="size-4" /> Copy selection
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => actionsRef.current?.save()}>
+              <Download className="size-4" /> Save scrollback
+            </DropdownMenuItem>
+            {currentDir && (
+              <DropdownMenuItem
+                onSelect={() => router.push(`/files?path=${encodeURIComponent(currentDir)}`)}
+              >
+                <FolderOpen className="size-4" /> Open working folder
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => actionsRef.current?.shortcuts()}>
+              <Command className="size-4" /> Keyboard shortcuts
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => actionsRef.current?.clear()}>
+              <Trash className="size-4" /> Clear screen
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={immersive ? "Leave fullscreen (Esc)" : "Fullscreen"}
+          onClick={toggleImmersive}
+        >
+          {immersive ? (
+            <FullscreenClose className="size-3.5" />
+          ) : (
+            <Fullscreen className="size-3.5" />
+          )}
+        </Button>
+      </div>
       <WorkspaceToggle
         active={showTools}
         onClick={toggleTools}
@@ -474,6 +847,13 @@ export default function TerminalPage() {
 
   return (
     <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      {data.persistenceError && (
+        <div role="alert">
+          <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">
+            {data.persistenceError}. Existing sessions keep running on the server.
+          </Notice>
+        </div>
+      )}
       {data.login.error && (
         <Notice icon={ShieldOff} tone="danger" title="No account to log in as">
           {data.login.error} Set <code className="font-mono">JD_TERMINAL_USER</code> to an account
@@ -523,59 +903,211 @@ export default function TerminalPage() {
         )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {openWindows.map((window) => (
-            <XtermPane
-              key={window.id}
-              flush
-              path={`/terminal/${window.id}/attach`}
-              terminalSessionId={window.id}
-              active={window.id === activeWindow?.id}
-              headerContent={window.id === activeWindow?.id ? terminalHeader : undefined}
-              cwd={window.id === activeWindow?.id ? currentDir : undefined}
-              onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-              focusRef={focusPaneRef}
-              className="min-h-0 flex-1"
-              onActivity={(state) => {
-                setActivity((prev) => ({ ...prev, [window.id]: state }))
-                setDropped((prev) => (prev[window.id] ? { ...prev, [window.id]: false } : prev))
-              }}
-              onExit={() => {
-                setDropped((prev) => ({ ...prev, [window.id]: true }))
-                setActivity((prev) => {
-                  if (!(window.id in prev)) return prev
-                  const next = { ...prev }
-                  delete next[window.id]
-                  return next
-                })
-                void windows.refresh()
-                void refresh()
-              }}
-              onToggleFullscreen={toggleImmersive}
-              fullscreenActive={immersive}
-            />
-          ))}
-          {!activeWindow && active && <LoadingPanel rows={4} />}
-          {!activeWindow && !active && (
-            <Pane flush className="flex-1">
-              <PaneHeader className="h-10 gap-1 py-0">{terminalHeader}</PaneHeader>
-              <EmptyState
-                className="flex-1"
-                icon={TerminalWindow}
-                title="No sessions yet"
-                description={
-                  data.persistent
-                    ? "Sessions keep running on the server until you close them, even with this page closed or the dashboard restarting."
-                    : "Sessions keep running with this page closed, but end when the dashboard restarts."
-                }
-                action={
-                  <Button size="sm" onClick={() => void openSession()}>
-                    <Plus className="size-4" />
-                    Open session
-                  </Button>
-                }
+          <PaneHeader className="min-h-10 shrink-0 flex-wrap gap-1 py-0.5">
+            {terminalHeader}
+          </PaneHeader>
+          <div
+            ref={gridRef}
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
+            aria-label="Terminal panes"
+          >
+            {openWindows.map((window) => {
+              const rect = window.sessionId === active ? geometry.panes[window.id] : undefined
+              const focused = window.id === activeWindow?.id
+              const item = windowList.find((item) => item.id === window.id)
+              const label = item ? windowLabel(item, activity[window.id]) : "Terminal"
+              const state = item ? windowActivity(item, activity[window.id]) : undefined
+              return (
+                <div
+                  key={window.id}
+                  data-terminal-window={window.id}
+                  data-focused={focused}
+                  className={cn(
+                    "absolute flex min-h-0 min-w-0 overflow-hidden",
+                    !rect && "hidden",
+                    visibleWindows.length > 1 && focused && "ring-1 ring-primary/60 ring-inset",
+                  )}
+                  style={
+                    rect
+                      ? { left: rect.x, top: rect.y, width: rect.width, height: rect.height }
+                      : undefined
+                  }
+                  onPointerDownCapture={() => {
+                    if (!focused && rect) showWindow(window.id)
+                  }}
+                  onFocusCapture={() => {
+                    if (!focused && rect) showWindow(window.id)
+                  }}
+                  onDragOverCapture={(event) => {
+                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (!rect || !draggedLayout || leaves(draggedLayout).includes(window.id)) {
+                      event.dataTransfer.dropEffect = "none"
+                      setDropTarget(null)
+                      return
+                    }
+                    const box = event.currentTarget.getBoundingClientRect()
+                    const direction = dropDirection(
+                      { x: box.x, y: box.y, width: box.width, height: box.height },
+                      event.clientX,
+                      event.clientY,
+                    )
+                    if (!direction) return
+                    const blocked = !canSplit(rect, direction, draggedLayout)
+                    event.dataTransfer.dropEffect = blocked ? "none" : "move"
+                    setDropTarget((previous) =>
+                      previous?.window === window.id &&
+                      previous.direction === direction &&
+                      previous.blocked === blocked
+                        ? previous
+                        : { window: window.id, direction, blocked },
+                    )
+                  }}
+                  onDragLeaveCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                      setDropTarget((previous) =>
+                        previous?.window === window.id ? null : previous,
+                      )
+                  }}
+                  onDropCapture={(event) => {
+                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    const source = event.dataTransfer.getData(TERMINAL_WINDOW_DRAG)
+                    const box = event.currentTarget.getBoundingClientRect()
+                    const direction = dropDirection(
+                      { x: box.x, y: box.y, width: box.width, height: box.height },
+                      event.clientX,
+                      event.clientY,
+                    )
+                    if (source === draggedWindow && direction)
+                      dockWindow(source, window.id, direction)
+                    clearWindowDrag()
+                  }}
+                >
+                  <XtermPane
+                    flush
+                    hideToolbar
+                    actionsRef={actionsRef}
+                    path={`/terminal/${window.id}/attach`}
+                    terminalSessionId={window.id}
+                    active={focused}
+                    visible={Boolean(rect)}
+                    layoutSize={rect}
+                    headerContent={
+                      rect && visibleWindows.length > 1 ? (
+                        <>
+                          <button
+                            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs focus-ring-inset"
+                            onClick={() => {
+                              showWindow(window.id)
+                              focusPaneRef.current?.()
+                            }}
+                            aria-label={`Focus terminal ${label}`}
+                            aria-pressed={focused}
+                          >
+                            <ProgramMark
+                              process={item ? windowProgram(item, activity[window.id]) : undefined}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{label}</span>
+                            <ActivityMark
+                              working={Boolean(state?.working)}
+                              disconnected={disconnectedWindows.has(window.id)}
+                            />
+                          </button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Open pane ${label} as separate window`}
+                            title="Open as separate window"
+                            onClick={() => detachPane(window.id)}
+                          >
+                            <External className="size-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Close pane ${label}`}
+                            onClick={() => closeWindow(window.id)}
+                          >
+                            <Cross className="size-3" />
+                          </Button>
+                        </>
+                      ) : undefined
+                    }
+                    cwd={focused ? currentDir : undefined}
+                    onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
+                    focusRef={focusPaneRef}
+                    className="min-h-0 min-w-0 flex-1"
+                    onActivity={(state) => {
+                      setActivity((prev) => ({ ...prev, [window.id]: state }))
+                      setDropped((prev) =>
+                        prev[window.id] ? { ...prev, [window.id]: false } : prev,
+                      )
+                    }}
+                    onExit={() => {
+                      setDropped((prev) => ({ ...prev, [window.id]: true }))
+                      setActivity((prev) => {
+                        if (!(window.id in prev)) return prev
+                        const next = { ...prev }
+                        delete next[window.id]
+                        return next
+                      })
+                      void windows.refresh()
+                      void refresh()
+                    }}
+                    onToggleFullscreen={toggleImmersive}
+                    fullscreenActive={immersive}
+                  />
+                  {rect && visibleWindows.length > 1 && focused && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 z-20 ring-1 ring-ring ring-inset"
+                    />
+                  )}
+                  {rect && dropTarget?.window === window.id && (
+                    <SplitDropOverlay
+                      direction={dropTarget.direction}
+                      blocked={dropTarget.blocked}
+                    />
+                  )}
+                </div>
+              )
+            })}
+            {geometry.dividers.map((divider) => (
+              <SplitDivider
+                key={divider.id}
+                divider={divider}
+                onChange={(ratio, commit) => changeSplit(divider.id, ratio, commit)}
               />
-            </Pane>
-          )}
+            ))}
+            {!activeWindow && active && <LoadingPanel rows={4} />}
+            {!activeWindow && !active && (
+              <Pane flush className="flex-1">
+                <EmptyState
+                  className="flex-1"
+                  icon={TerminalWindow}
+                  title="No sessions yet"
+                  description={
+                    data.persistent
+                      ? "Sessions keep running on the server until you close them, even with nobody connected or the dashboard restarting or rebuilding."
+                      : "Restore restart protection before opening a terminal."
+                  }
+                  action={
+                    <Button
+                      size="sm"
+                      disabled={!data.persistent}
+                      onClick={() => void openSession()}
+                    >
+                      <Plus className="size-4" />
+                      Open session
+                    </Button>
+                  }
+                />
+              </Pane>
+            )}
+          </div>
         </div>
 
         {showTools && (

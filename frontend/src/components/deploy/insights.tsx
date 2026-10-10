@@ -81,17 +81,28 @@ function dayLabel(date: string) {
  *
  * `onFailureClick` lets a page that lists the runs narrow to the failed ones
  * from a reason's row.
+ *
+ * History puts each pair of readings over the chart it explains, rather than
+ * in a second row of tiles above the deployment records (§15 pass 2): success
+ * and frequency over the releases per day, duration and recovery over the
+ * release time per day. The two charts share their days, so the day a release
+ * failed and the day one ran long are found at the same place in each. Why
+ * the releases failed runs under both, since it explains the first chart's
+ * red and the second's recovery.
  */
 export function Insights({
   projectId,
   onFailureClick,
   children,
+  presentation = "tiles",
 }: {
   projectId: number
   onFailureClick?: (code: string) => void
   /** Overview records placed between the delivery figures and their history. */
   children?: React.ReactNode
+  presentation?: "tiles" | "history"
 }) {
+  const history = presentation === "history"
   const [range, setRange] = useViewState<(typeof WINDOWS)[number][0]>("deploy.insights.range", "30")
   const insights = usePoll(
     (signal) => get<DeploymentInsights>(`/deploy/${projectId}/insights`, { days: range }, signal),
@@ -102,22 +113,110 @@ export function Insights({
   const decided = (data?.succeeded ?? 0) + (data?.failed ?? 0)
   const daily = data?.daily ?? []
   const durationValues = daily.map((day) => day.medianDurationSeconds).filter((value) => value > 0)
+  // The window's median is drawn across the days, so it has to be on their scale.
+  const slowest = Math.max(data?.medianDurationSeconds ?? 0, ...durationValues)
   const total = (day: DeploymentInsights["daily"][number]) =>
     day.succeeded + day.failed + day.cancelled
   const peak = Math.max(1, ...daily.map(total))
-  const topFailure = Math.max(1, ...(data?.topFailures ?? []).map((failure) => failure.count))
+  const reading = "space-y-1"
+  const figure = "numeric text-2xl font-semibold tracking-tight"
+  const axis = daily.length > 0 && (
+    <p className="numeric flex justify-between gap-3 text-micro text-muted-foreground">
+      <span>{dayLabel(daily[0].date)}</span>
+      <span>today</span>
+    </p>
+  )
+  // One cause has nothing to be compared with, so it is a line and no bar.
+  const OnlyFailure = onFailureClick ? "button" : "p"
+  const failureColumns = history ? "grid gap-x-10 sm:grid-cols-2 xl:grid-cols-3" : undefined
+
+  const failures = data && data.topFailures.length > 0 && (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h3 className="text-title font-medium">Why releases failed</h3>
+        <span className="text-hint text-muted-foreground">
+          {data.failed} failed release{data.failed === 1 ? "" : "s"}
+          {data.lastFailureAt && ` · last ${relativeTime(data.lastFailureAt)}`}
+        </span>
+      </div>
+      {data.topFailures.length === 1 ? (
+        <div className={cn("-ml-2", failureColumns)}>
+          <OnlyFailure
+            type={onFailureClick ? "button" : undefined}
+            onClick={onFailureClick && (() => onFailureClick(data.topFailures[0].code))}
+            title={onFailureClick ? "Show the failed deployments" : undefined}
+            aria-label={onFailureClick ? "Show the failed deployments" : undefined}
+            className={cn(
+              "flex min-w-0 items-baseline gap-2 rounded-sm px-2 py-1.5 text-left text-body",
+              onFailureClick && "focus-ring-inset transition-colors hover:bg-row-hover",
+            )}
+          >
+            <span className="truncate font-medium">{causeTitle(data.topFailures[0].code)}</span>
+            <span className="numeric shrink-0 text-hint text-destructive">
+              ×{data.topFailures[0].count}
+            </span>
+          </OnlyFailure>
+        </div>
+      ) : (
+        <BarList
+          className={cn("-ml-2", failureColumns)}
+          items={data.topFailures.map((failure) => ({
+            key: failure.code,
+            label: causeTitle(failure.code),
+            mono: false,
+            value: `×${failure.count}`,
+            // Of every failed release, not of the commonest cause: the bars
+            // then read as shares, whichever columns they land in.
+            share: failure.count / data.failed,
+            signal: 1,
+            tone: "danger",
+            title: onFailureClick ? "Show the failed deployments" : undefined,
+            onClick: onFailureClick && (() => onFailureClick(failure.code)),
+          }))}
+        />
+      )}
+    </div>
+  )
 
   const charts = data && data.runs > 0 && (
     <div
       className={cn(
-        "grid min-w-0 gap-x-10 gap-y-6",
-        data.topFailures.length > 0 &&
+        "grid min-w-0 gap-x-10",
+        history ? "gap-y-8" : "gap-y-6",
+        (history || failures) &&
           (children
             ? "2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]"
             : "lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"),
       )}
     >
       <div className="min-w-0 space-y-2">
+        {history && (
+          <dl className="mb-5 grid grid-cols-2 gap-x-8">
+            <div className={reading}>
+              <dt className="text-hint text-muted-foreground">Success rate</dt>
+              <dd className={cn(figure, data.failureStreak > 0 && "text-warning")}>
+                {decided ? `${Math.round(data.successRate * 100)}%` : "—"}
+              </dd>
+              <dd className="text-hint text-muted-foreground">
+                <span>
+                  {data.succeeded} of {decided} decided release{decided === 1 ? "" : "s"}
+                </span>
+                {data.failureStreak > 0 && (
+                  <span className="ml-2 text-destructive">
+                    {data.failureStreak} failed in a row
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div className={reading}>
+              <dt className="text-hint text-muted-foreground">Deploys per week</dt>
+              <dd className={figure}>{data.deploysPerWeek.toFixed(1)}</dd>
+              <dd className="text-hint text-muted-foreground">
+                {data.succeeded} successful over {data.windowDays} days
+              </dd>
+            </div>
+          </dl>
+        )}
         <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h3 className="text-title font-medium">Releases per day</h3>
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
@@ -133,7 +232,10 @@ export function Insights({
           // Keyed by the window so a new range arrives rather than
           // the old bars stretching into it.
           key={range}
-          className="flex h-20 animate-rise items-end gap-px border-b border-hairline"
+          className={cn(
+            "flex animate-rise items-end gap-px border-b border-hairline",
+            history ? "h-28" : "h-20",
+          )}
           aria-label="Releases per day"
           data-testid="insights-daily"
         >
@@ -178,48 +280,104 @@ export function Insights({
             )
           })}
         </ol>
-        {daily.length > 0 && (
-          <p className="numeric flex justify-between gap-3 text-micro text-muted-foreground">
-            <span>{dayLabel(daily[0].date)}</span>
-            <span>today</span>
-          </p>
-        )}
+        {axis}
       </div>
 
-      {data.topFailures.length > 0 && (
+      {history && (
         <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <h3 className="text-title font-medium">Why releases failed</h3>
-            {data.lastFailureAt && (
-              <span className="text-hint text-muted-foreground">
-                last failure {relativeTime(data.lastFailureAt)}
-              </span>
-            )}
-          </div>
-          {data.topFailures.length === 1 && !onFailureClick ? (
-            <p className="flex min-w-0 items-baseline justify-between gap-3 px-2 py-1.5 text-body">
-              <span className="truncate">{causeTitle(data.topFailures[0].code)}</span>
-              <span className="numeric shrink-0 text-destructive">
-                ×{data.topFailures[0].count}
-              </span>
-            </p>
-          ) : (
-            <BarList
-              items={data.topFailures.map((failure) => ({
-                key: failure.code,
-                label: causeTitle(failure.code),
-                mono: false,
-                value: `×${failure.count}`,
-                share: failure.count / topFailure,
-                signal: 1,
-                tone: "danger",
-                title: onFailureClick ? "Show the failed deployments" : undefined,
-                onClick: onFailureClick && (() => onFailureClick(failure.code)),
-              }))}
-            />
+          <dl className="mb-5 grid grid-cols-2 gap-x-8">
+            <div className={reading}>
+              <dt className="text-hint text-muted-foreground">Median release</dt>
+              <dd className={figure}>{seconds(data.medianDurationSeconds)}</dd>
+              <dd className="text-hint text-muted-foreground">
+                {data.medianDurationSeconds
+                  ? `p95 ${seconds(data.p95DurationSeconds)} · claim to finish`
+                  : "no release succeeded in this window"}
+              </dd>
+            </div>
+            <div className={reading}>
+              <dt className="text-hint text-muted-foreground">Recovery time</dt>
+              <dd className={figure}>
+                {data.recoveredFailures ? seconds(data.meanRecoverySeconds) : "—"}
+              </dd>
+              <dd className="text-hint text-muted-foreground">
+                {data.recoveredFailures
+                  ? `mean over ${data.recoveredFailures} recovered failure${data.recoveredFailures === 1 ? "" : "s"}`
+                  : data.failed
+                    ? "no failure followed by a success yet"
+                    : "no failures in this window"}
+              </dd>
+            </div>
+          </dl>
+          {/* A window nothing succeeded in has no release time, and a row of
+              empty days would draw one as zero (§10). */}
+          {durationValues.length > 0 && (
+            <>
+              <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h3 className="text-title font-medium">Release time per day</h3>
+                <p className="inline-flex items-center gap-1.5 text-hint text-muted-foreground">
+                  <span
+                    aria-hidden
+                    className="w-3 border-t border-dashed border-muted-foreground"
+                  />
+                  median {seconds(data.medianDurationSeconds)}
+                </p>
+              </div>
+              {/* The same days at the same height as the releases beside it,
+                  which a line through the days that shipped was not: it
+                  joined four releases a week apart into one slope with no
+                  scale. The first line of the plot is kept for the scale's
+                  top, so the slowest day never runs under its own label. */}
+              <div key={range} className="relative animate-rise">
+                <ol
+                  className="flex h-28 items-end gap-px border-b border-hairline pt-4"
+                  aria-label="Median release time per day"
+                  data-testid="insights-durations"
+                >
+                  {daily.map((day, index) => (
+                    <li
+                      key={`${day.date}-${index}`}
+                      className="flex h-full min-w-0 flex-1 flex-col items-center justify-end"
+                      title={
+                        day.medianDurationSeconds
+                          ? `${day.date}: ${seconds(day.medianDurationSeconds)}, median of ${day.succeeded} successful release${day.succeeded === 1 ? "" : "s"}`
+                          : `${day.date}: no successful release`
+                      }
+                    >
+                      {day.medianDurationSeconds ? (
+                        <span
+                          className="block w-full max-w-3 rounded-t-sm bg-chart-2"
+                          style={{
+                            height: `${Math.max(4, (day.medianDurationSeconds / slowest) * 100)}%`,
+                          }}
+                        />
+                      ) : (
+                        <span className="block h-0.5 w-full max-w-3 bg-meter-track" />
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <span className="numeric absolute top-0 left-0 text-micro leading-4 text-muted-foreground">
+                  {seconds(slowest)}
+                </span>
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 top-4 border-t border-hairline"
+                />
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted-foreground"
+                  style={{
+                    bottom: `calc(1px + (100% - 1rem - 1px) * ${data.medianDurationSeconds / slowest})`,
+                  }}
+                />
+              </div>
+              {axis}
+            </>
           )}
         </div>
       )}
+      {failures && <div className={cn("min-w-0", history && "lg:col-span-2")}>{failures}</div>}
     </div>
   )
 
@@ -251,7 +409,7 @@ export function Insights({
               No release finished in this window. Figures appear after the first deployment ends.
             </EmptyNote>
           )}
-          {data && data.runs > 0 && (
+          {!history && data && data.runs > 0 && (
             <>
               <StatGrid
                 columns={4}

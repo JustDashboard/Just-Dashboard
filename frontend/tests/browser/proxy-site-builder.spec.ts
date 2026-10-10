@@ -1039,7 +1039,7 @@ test("a read-only account following the link gets no form", async ({ page }) => 
   await page.goto("/proxy/sites?new=1&upstream=http%3A%2F%2F127.0.0.1%3A8081")
   // Taken off the address once the account is known, and nothing opened.
   await expect(page).toHaveURL(/\/proxy\/sites$/)
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.locator("[data-slot='host-identity']")).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
@@ -1380,4 +1380,55 @@ test("Ctrl+S saves the way the footer's own command does", async ({ page }) => {
   await page.keyboard.press("Meta+s")
   await expect(legacy).toBeHidden()
   expect(saved[1]).toMatchObject({ reload: false, enable: "keep" })
+})
+
+test("a save is live only when nginx's master was seen loading it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await appOnDisk(page, { digest: "d1" })
+  const proofs = [
+    { state: "loaded", workers: 2, listens: ["port 80/tcp"], listening: true },
+    {
+      state: "unconfirmed",
+      note: "nginx had not taken the reload up 3s after it was sent, and logged nothing about it.",
+    },
+  ]
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route, _body, index) =>
+    index < proofs.length
+      ? json(route, siteResult({ loadProof: proofs[index] }))
+      : route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "load_refused",
+              message:
+                "nginx did not take app.example.com up when it reloaded: bind() to 0.0.0.0:8443 failed (98: Address already in use) — the port is held by java (pid 900); the site was put back as it was, and nginx goes on serving what it served before",
+            },
+          }),
+        }),
+  )
+
+  let sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4000")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com is live")).toBeVisible()
+  await expect(
+    page.getByText("nginx loaded it on 2 new workers, holding port 80/tcp."),
+  ).toBeVisible()
+
+  sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4001")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com saved and reloaded", { exact: true })).toBeVisible()
+  await expect(page.getByText(proofs[1].note!)).toBeVisible()
+
+  // The master refused the port: the site was put back and the draft stays.
+  sheet = await openApp(page)
+  await sheet.getByLabel("Send it to").fill("http://127.0.0.1:4002")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("Not applied: nginx could not take it up")).toBeVisible()
+  await expect(page.getByText(/held by java \(pid 900\); the site was put back/)).toBeVisible()
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByLabel("Send it to")).toHaveValue("http://127.0.0.1:4002")
+  expect(saved).toHaveLength(3)
 })

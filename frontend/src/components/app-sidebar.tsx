@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowUpDown, ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
+import { ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
+import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNotice } from "@/components/update/update-notice"
 import { Status } from "@/components/status-dot"
@@ -28,6 +30,15 @@ import {
   type NavScope,
   type NavScopeEntry,
 } from "@/components/nav-scope"
+import { engineFor, sectionHref } from "@/components/database/engine"
+import { EngineGlyph } from "@/components/database/kit/engine-mark"
+import {
+  KNOWN_DATABASES_KEY,
+  databaseNavGroups,
+  knownDatabase,
+  type KnownDatabase,
+} from "@/components/database/shell/nav-groups"
+import { databaseIdFrom } from "@/components/database/shell/routes"
 import {
   Sidebar,
   SidebarContent,
@@ -170,10 +181,43 @@ function projectIdFrom(pathname: string): number | null {
 }
 
 /**
+ * A database's pages drawn from the route, for the paint before its layout
+ * has read the connection and registered the real panel.
+ *
+ * Which pages a database has depends on what it is, and the route does not
+ * say. The tab remembers: the name from the last list of connections, and
+ * what the server said it is and can do from the last time its pages were
+ * open. So a database opened before in this tab is drawn at once as itself —
+ * its name, its mark, its own pages in its own words — and the panel that
+ * registers is the one already on screen.
+ *
+ * Anything less gets no panel from here. An id the list did not hold may be
+ * a database made a moment ago, or an address that names nothing; one the
+ * list holds and nobody has opened is known only by its driver, and a
+ * MariaDB server drawn with the pages of MySQL would lose two of them when
+ * it registered. The section's own panel standing a moment longer is better
+ * than either.
+ */
+function databasePlaceholder(id: number, known: KnownDatabase): Panel {
+  const engine = engineFor(known)
+  return {
+    key: `scope:${sectionHref(id)}`,
+    named: true,
+    title: known.name,
+    mark: <EngineGlyph engine={engine} className="size-4" />,
+    groups: databaseNavGroups(engine.sections, (section) => sectionHref(id, section)),
+  }
+}
+
+/**
  * Every panel between the top-level list and where you are, outermost first.
  * The last of them is what the rail draws unless you are looking elsewhere.
  */
-function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
+function levelsFor(
+  pathname: string,
+  scope: NavScope | null,
+  knownDatabases: Record<string, KnownDatabase>,
+): Panel[] {
   const levels: Panel[] = [ROOT, ...sectionsFor(pathname).map(fromSection)]
 
   const live = scope && navMatches(scope.path, pathname) ? scope : null
@@ -181,7 +225,12 @@ function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
   else if (live) levels.push(fromScope(live))
   else {
     const project = projectIdFrom(pathname)
+    const database = databaseIdFrom(pathname)
     if (project !== null) levels.push(projectPlaceholder(project))
+    else if (database !== null) {
+      const known = knownDatabase(knownDatabases, database)
+      if (known?.flavor) levels.push(databasePlaceholder(database, known))
+    }
   }
   return levels
 }
@@ -195,7 +244,9 @@ export function AppSidebar() {
   const scope = useNavScopeValue()
   const marks = useNavMarksValue()
 
-  const levels = levelsFor(pathname, scope)
+  const [knownDatabases] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
+
+  const levels = levelsFor(pathname, scope, knownDatabases)
   const chain = sectionsFor(pathname)
 
   // Looking elsewhere — back out a level, or into a group — is the one thing
@@ -261,29 +312,10 @@ export function AppSidebar() {
             <Logo className="group-data-[collapsible=icon]:hidden" />
             <LogoMark className="hidden group-data-[collapsible=icon]:block" />
           </Link>
-          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
-        {/* The palette is the fastest route to any of fifty pages, and the one
-            thing that still sees them all at once now that the rail shows one
-            section at a time, so it gets a permanent affordance rather than
-            only a shortcut nobody discovers. Collapsed, it keeps its place in
-            the rail as an icon. */}
-        <button
-          type="button"
-          onClick={palette.open}
-          // A row in the rail, not a box in it: the rail is a list of places
-          // and the palette is the fastest way to any of them, so it is drawn
-          // like the entries under it rather than as an input sitting above
-          // them.
-          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        >
-          <MagnifyingGlass className="size-3.5 shrink-0" />
-          <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search</span>
-          <kbd className="pointer-events-none rounded-sm border border-sidebar-border bg-sidebar px-1 font-mono text-micro group-data-[collapsible=icon]:hidden">
-            ⌘K
-          </kbd>
-        </button>
+        <SearchButton onOpen={palette.open} />
       </SidebarHeader>
 
       {/* `overflow-x-hidden` is what makes the slide a slide: the panel arrives
@@ -369,11 +401,46 @@ export function AppSidebar() {
 }
 
 /**
+ * The palette's permanent affordance. It is the fastest route to any of fifty
+ * pages and every container, site and database on the box, and the one thing
+ * that still sees them all at once now that the rail shows one section at a
+ * time — so it is drawn as the search field it opens rather than as one more
+ * grey row: a framed well with the mark's blue glass and the shortcut in caps,
+ * which is what the eye looks for when it wants to type. Collapsed, it keeps
+ * its place in the icon rail as the glass alone.
+ */
+function SearchButton({ onOpen }: { onOpen: () => void }) {
+  const keys = useLauncherKeys()
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="Search"
+      aria-keyshortcuts={keys.replace("⌘", "Meta")}
+      className="group/search flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-card pr-1.5 pl-2.5 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:border-rule-brand hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    >
+      <MagnifyingGlass className="size-4 shrink-0 text-brand" />
+      <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search…</span>
+      <span className="flex gap-0.5 group-data-[collapsible=icon]:hidden">
+        {keys.split("+").map((key) => (
+          <kbd key={key} className={cn(KEYCAP, "group-hover/search:text-foreground")}>
+            {key}
+          </kbd>
+        ))}
+      </span>
+    </button>
+  )
+}
+
+/**
  * Whether a row inside a section panel is the page being looked at.
  *
- * An exact match, with one exception: a row whose href carries the section's
- * own state in the query string (the databases panel puts the connection
- * there) is the same page whatever that state says.
+ * An exact match of the path, with one exception: a row whose href carries
+ * the reader's place in its query string (a database's panel keeps the
+ * schema and the table there, so Schema opens on the table Data was showing)
+ * is the same page whatever that place is. A database's Home is
+ * `/databases/<id>` and its other pages hang off that path, which is why
+ * this is not a prefix match: Home is current on Home alone.
  */
 function isCurrent(item: NavScopeEntry, pathname: string) {
   const path = item.href.split("?")[0]
@@ -542,11 +609,17 @@ function NavRow({
  * does for any other section, so the menu is how you get in and not how you
  * move around.
  *
- * The menu opens with the same picture and name as the card, larger, with the
- * sign-in name and role under them: the one place in the product that says
+ * The menu opens with the same picture and name as the card, with the sign-in
+ * name beneath and role at the edge: the one place in the product that says
  * plainly which account this is. What used to be a caption there — "two-factor
  * not enrolled" — is now a `Status` on the Security row, where it is a reading
  * beside the page that changes it.
+ *
+ * Above the card the menu is exactly the card's width, so the two read as one
+ * object that opened rather than a wider panel overhanging the rail. It grows
+ * out of the card, and its rows `rise` one after another starting from the row
+ * nearest the card, which is what says the list came from the card rather than
+ * appearing over it.
  */
 function UserCard({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname()
@@ -555,6 +628,10 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
   const name = user ? displayNameOf(user) : "not signed in"
   const twoFactor = Boolean(user?.totpEnabled)
   const entries = PERSONAL_NAV.filter((item) => !item.capability || can(item.capability))
+  // Reduced motion collapses durations but not delays, so the stagger is motion-safe only.
+  const stagger = "animate-rise motion-safe:[animation-delay:var(--rise-at)]"
+  const lastRow = entries.length + 1
+  const riseAt = (row: number) => ({ "--rise-at": `${(lastRow - row) * 18}ms` }) as CSSProperties
 
   return (
     <DropdownMenu>
@@ -562,71 +639,94 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
         <button
           type="button"
           aria-label={`Account menu for ${name}`}
-          className="flex w-full min-w-0 items-center gap-2.5 rounded-md p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
+          className="group/account flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:min-h-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent active:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
           {user ? (
-            <UserAvatar user={user} size="sm" />
+            <UserAvatar user={user} size="md" className="group-data-[collapsible=icon]:size-7" />
           ) : (
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-hint font-semibold text-brand">
+            <span
+              data-slot="user-avatar"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-plot-brand text-xs font-semibold text-brand group-data-[collapsible=icon]:size-7"
+            >
               ?
             </span>
           )}
-          <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-body leading-tight font-medium">{name}</span>
+          <span className="grid min-w-0 flex-1 gap-0.5 group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-body leading-tight font-semibold">{name}</span>
             <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
           </span>
-          <ArrowUpDown className="size-3.5 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side={collapsed ? "right" : "top"}
-        align="start"
-        className="w-64 p-0"
-        sideOffset={8}
+        align={collapsed ? "end" : "start"}
+        aria-label="Account"
+        aria-labelledby={undefined}
+        className={cn(
+          "max-w-[calc(100vw-1rem)] rounded-lg p-1 data-[state=closed]:duration-100 data-[state=open]:duration-200 data-[state=open]:ease-[cubic-bezier(0.16,1,0.3,1)]",
+          collapsed ? "w-60" : "w-(--radix-dropdown-menu-trigger-width)",
+        )}
+        sideOffset={6}
+        collisionPadding={8}
       >
         {user && (
-          <div className="flex min-w-0 items-center gap-3 px-3 py-3">
-            <UserAvatar user={user} size="md" />
+          <div
+            style={riseAt(0)}
+            className={cn("flex min-w-0 items-center gap-2.5 px-2 py-1.5", stagger)}
+          >
+            <UserAvatar user={user} size="sm" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-body leading-tight font-medium">{name}</p>
-              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint leading-tight text-muted-foreground">
-                <span className="truncate">@{user.username}</span>
-                <Tag>{user.role}</Tag>
+              <p className="truncate text-body leading-tight font-semibold">{name}</p>
+              <p className="mt-0.5 truncate text-hint leading-tight text-muted-foreground">
+                @{user.username}
               </p>
             </div>
+            <Tag className="shrink-0">{user.role}</Tag>
           </div>
         )}
-        <DropdownMenuSeparator className="my-0" />
-        <div className="p-1">
-          {entries.map((item) => (
-            <DropdownMenuItem key={item.href} asChild>
-              <Link
-                href={item.href}
-                data-active={item.href === pathname || undefined}
-                className="data-[active]:bg-accent"
-              >
-                <item.icon className="size-4" />
-                <span className="flex-1">{item.title}</span>
-                {item.href === "/account/security" && (
-                  <Status
-                    tone={twoFactor ? "running" : "notice"}
-                    label={twoFactor ? "2FA on" : "2FA off"}
-                    className="text-hint"
-                  />
-                )}
-              </Link>
-            </DropdownMenuItem>
-          ))}
-        </div>
-        <DropdownMenuSeparator className="my-0" />
-        <div className="p-1">
-          <DropdownMenuItem variant="destructive" onSelect={() => logout()}>
-            <Logout className="size-4" />
-            Sign out
+        <DropdownMenuSeparator className="mx-2 bg-hairline" />
+        {entries.map((item, index) => (
+          <DropdownMenuItem
+            key={item.href}
+            asChild
+            style={riseAt(index + 1)}
+            className={cn(
+              "group/account-link min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
+              stagger,
+            )}
+          >
+            <Link
+              href={item.href}
+              data-active={item.href === pathname || undefined}
+              aria-current={item.href === pathname ? "page" : undefined}
+              className="data-[active]:bg-accent data-[active]:font-medium"
+            >
+              <item.icon className="size-4 text-muted-foreground group-data-[active]/account-link:text-brand" />
+              <span className="flex-1">{item.title}</span>
+              {item.href === "/account/security" && (
+                <Status
+                  tone={twoFactor ? "running" : "notice"}
+                  label={twoFactor ? "2FA on" : "2FA off"}
+                  className="text-hint"
+                />
+              )}
+            </Link>
           </DropdownMenuItem>
-        </div>
+        ))}
+        <DropdownMenuSeparator className="mx-2 bg-hairline" />
+        <DropdownMenuItem
+          onSelect={() => logout()}
+          style={riseAt(entries.length + 1)}
+          className={cn(
+            "min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
+            stagger,
+          )}
+        >
+          <Logout className="size-4" />
+          Sign out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

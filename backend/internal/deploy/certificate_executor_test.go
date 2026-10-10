@@ -127,12 +127,24 @@ func TestCertificateFailureStopsTheRunBeforeAnythingStarts(t *testing.T) {
 		},
 	}}
 	engine := NewEngine(fixture.runs, executor, fixedReconciler{}, EngineConfig{
-		WorkerID: "certificate-fixture", PollEvery: 5 * time.Millisecond,
+		WorkerID: "certificate-fixture",
 	}, nil)
-	if err := engine.Start(context.Background()); err != nil {
+	lease, err := fixture.runs.ClaimNext(t.Context(), "certificate-fixture", QueueBudget{}, time.Minute)
+	if err != nil || lease == nil || lease.RunID != run.ID {
+		t.Fatalf("claim = %#v, %v", lease, err)
+	}
+	// Step order has no latency requirement. Execute the claimed pipeline
+	// inline so scheduler load and race instrumentation cannot time it out.
+	if err := engine.execute(t.Context(), *lease); err != nil {
 		t.Fatal(err)
 	}
-	got := waitForRunState(t, fixture.runs, run.ID, RunFailed)
+	got, err := fixture.runs.Run(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != RunFailed {
+		t.Fatalf("run state = %s, want failed", got.State)
+	}
 	if got.TerminalCode != "certificate_issue_failed" {
 		t.Fatalf("terminal code = %q", got.TerminalCode)
 	}

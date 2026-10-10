@@ -1,0 +1,14 @@
+# Session transcript (verbatim command output), exploratory guest, 2026-10-10T00:42Z.
+# `ip -6 -o route get 2606:4700:4700::1111` sampled every 10 ms during the first
+# netplan/networkd edit after a boot (counts of identical consecutive lines).
+    162 2606:4700:4700::1111 from :: via fe80::2 dev enp0s3 proto ra src fd00:4::15 metric 100 hop
+     24 RTNETLINK answers: Network is unreachable
+     31 2606:4700:4700::1111 from :: via fe80::2 dev enp0s3 proto ra src fd00:5::15 metric 100 hop
+# networkd at the same moment:
+Oct 10 00:42:58.490393 systemd-networkd[418]: enp0s4: Reconfiguring with /run/systemd/network/10-netplan-enp0s4.network.
+Oct 10 00:42:58.499907 systemd-networkd[418]: enp0s3: Reconfiguring with /run/systemd/network/10-netplan-uplink.network.
+Oct 10 00:42:58.500919 systemd-networkd[418]: enp0s3: DHCP lease lost
+Oct 10 00:42:58.501842 systemd-networkd[418]: enp0s3: DHCPv6 lease lost
+Oct 10 00:42:58.523798 systemd-networkd[418]: enp0s3: DHCPv4 address 10.0.2.15/24, gateway 10.0.2.2 acquired from 10.0.2.2
+# Boot of that guest: networkd loaded at 00:42:39; "Reloading requested from client PID 563
+# ('systemctl') (unit NetworkManager.service)" at 00:42:43; Netplan artifacts rewritten 00:42:43.217.

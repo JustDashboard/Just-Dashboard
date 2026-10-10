@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, GitHubMark, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
-import { assignPulls, byUrgency, shelve, type RepoShelf } from "@/lib/git-repos"
+import { assignPulls, byUrgency, shelve, splitWorktrees, type RepoShelf } from "@/lib/git-repos"
 import type { GitPullRequest, GitPullRequestSummary, GitRepo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -20,11 +21,13 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { ForgeFace } from "@/components/git/marks"
 import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
+import { useCheckoutRemoval } from "@/components/git/remove-checkout"
+import { WorktreeSection } from "@/components/git/worktree-list"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
-type Filter = "all" | "dirty" | "behind" | "ahead" | "detached" | "pulls"
+type Filter = "all" | "dirty" | "behind" | "ahead" | "detached" | "pulls" | "worktrees"
 
 const FILTER_LABEL: Record<Filter, string> = {
   all: "All",
@@ -33,6 +36,7 @@ const FILTER_LABEL: Record<Filter, string> = {
   ahead: "Unpushed",
   detached: "Detached",
   pulls: "Pull requests",
+  worktrees: "Worktrees",
 }
 
 /** The search box matches a pull request by its number ("#12", "12") or by a word of its title. */
@@ -83,6 +87,16 @@ function ShelfMark({ shelf }: { shelf: RepoShelf }) {
  * each pull request is drawn once, on the checkout that is on its branch.
  * The shelves stay under a filter: they say *where*, which a chip does not.
  *
+ * Linked worktrees are not shelf-mates of the checkout they belong to, nor
+ * rows inside its card: they are one section under the shelves
+ * (`splitWorktrees`, `worktree-list.tsx`), each naming its repository, and a
+ * card counts its own. Inside the card a long list made every card in the
+ * row as tall as the one with the most worktrees. The filters and the search
+ * narrow the section as they narrow the shelves, and the Worktrees chip shows
+ * it alone. Taking a checkout off the server — a worktree, or a
+ * repository's folder for good — goes through `remove-checkout.tsx`, whose
+ * one dialog the page holds.
+ *
  * The cards are choices, not readings — every one is a checkout to enter —
  * so they carry the lit edge §16 gives to things you pick.
  *
@@ -118,6 +132,9 @@ export default function GitPage() {
   )
 
   const list = useMemo(() => repos.data?.repos ?? [], [repos.data])
+  // Linked worktrees are listed in a section of their own, not as cards.
+  const { cards, worktrees, counts: worktreeCounts } = useMemo(() => splitWorktrees(list), [list])
+  const mains = useMemo(() => Object.fromEntries(cards.map((r) => [r.path, r])), [cards])
   // What each card draws: the summary with every request on one card only.
   const pullsByPath = useMemo(() => assignPulls(list, summary.data?.repos), [list, summary.data])
   const counts = useMemo(
@@ -128,31 +145,41 @@ export default function GitPage() {
       ahead: list.filter((r) => r.ahead > 0).length,
       detached: list.filter((r) => r.detached).length,
       pulls: list.filter((r) => (pullsByPath[r.path]?.pulls.length ?? 0) > 0).length,
+      worktrees: list.filter((r) => r.worktree).length,
     }),
     [list, pullsByPath],
   )
+  const removal = useCheckoutRemoval(() => {
+    repos.refresh()
+    summary.refresh()
+  })
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     const openPulls = (r: GitRepo) => pullsByPath[r.path]?.pulls ?? []
-    return list
-      .filter((r) => {
-        if (state === "dirty" && !r.dirty) return false
-        if (state === "behind" && r.behind === 0) return false
-        if (state === "ahead" && r.ahead === 0) return false
-        if (state === "detached" && !r.detached) return false
-        if (state === "pulls" && openPulls(r).length === 0) return false
-        if (!needle) return true
-        return (
-          r.name.toLowerCase().includes(needle) ||
-          r.path.toLowerCase().includes(needle) ||
-          r.branch.toLowerCase().includes(needle) ||
-          openPulls(r).some((p) => matchesPull(p, needle))
-        )
-      })
-      .sort(byUrgency)
-  }, [list, filter, state, pullsByPath])
-  const shelves = useMemo(() => shelve(visible), [visible])
+    const matches = (r: GitRepo) => {
+      if (state === "dirty" && !r.dirty) return false
+      if (state === "behind" && r.behind === 0) return false
+      if (state === "ahead" && r.ahead === 0) return false
+      if (state === "detached" && !r.detached) return false
+      if (state === "pulls" && openPulls(r).length === 0) return false
+      if (state === "worktrees" && !r.worktree) return false
+      if (!needle) return true
+      return (
+        r.name.toLowerCase().includes(needle) ||
+        r.path.toLowerCase().includes(needle) ||
+        r.branch.toLowerCase().includes(needle) ||
+        openPulls(r).some((p) => matchesPull(p, needle))
+      )
+    }
+    // The worktrees chip is the one state no repository card is in: it shows
+    // the worktree section alone.
+    return {
+      cards: state === "worktrees" ? [] : cards.filter(matches).sort(byUrgency),
+      worktrees: worktrees.filter(matches),
+    }
+  }, [cards, worktrees, filter, state, pullsByPath])
+  const shelves = useMemo(() => shelve(visible.cards), [visible])
 
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
@@ -171,6 +198,11 @@ export default function GitPage() {
         repo={active}
         onBack={closeRepo}
         onRepoChanged={() => {
+          repos.refresh()
+          summary.refresh()
+        }}
+        onRepoRemoved={() => {
+          closeRepo()
           repos.refresh()
           summary.refresh()
         }}
@@ -204,138 +236,167 @@ export default function GitPage() {
   )
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Workspace" title="Git" />
+    <Workspace
+      name="Repositories"
+      refresh={() => {
+        repos.refresh()
+        summary.refresh()
+      }}
+      escape={() => {
+        if (!filter && state === "all") return false
+        setFilter("")
+        setState("all")
+        return true
+      }}
+    >
+      <Page className="animate-rise">
+        <PageContext eyebrow="Workspace" title="Git" actions={<WorkspaceHelp />} />
 
-      {selected && repos.data && !active && (
-        <ErrorState
-          error={
-            new Error(
-              `${selected} is not a repository the dashboard can see. It may be outside the configured git roots, or it may have been removed.`,
-            )
-          }
-        />
-      )}
-      {repos.error && <ErrorState error={repos.error} onRetry={repos.refresh} />}
-      {repos.loading && !repos.data && <LoadingPanel />}
+        {selected && repos.data && !active && (
+          <ErrorState
+            error={
+              new Error(
+                `${selected} is not a repository the dashboard can see. It may be outside the configured git roots, or it may have been removed.`,
+              )
+            }
+          />
+        )}
+        {repos.error && <ErrorState error={repos.error} onRetry={repos.refresh} />}
+        {repos.loading && !repos.data && <LoadingPanel />}
 
-      {repos.data && !repos.data.available && (
-        <EmptyState
-          icon={GitHubMark}
-          title="git is not installed on this host"
-          description="Install git to manage repositories from here."
-          action={controls}
-        />
-      )}
-
-      {repos.data?.available &&
-        (list.length === 0 ? (
+        {repos.data && !repos.data.available && (
           <EmptyState
             icon={GitHubMark}
-            title="No repositories found"
-            description="Nothing under the configured git roots. Clone one here, or set JD_GIT_ROOTS to point at where your projects live."
+            title="git is not installed on this host"
+            description="Install git to manage repositories from here."
             action={controls}
           />
-        ) : (
-          <div className="flex min-w-0 flex-col gap-5">
-            {/* The filters stand on the page rather than inside a panel
+        )}
+
+        {repos.data?.available &&
+          (list.length === 0 ? (
+            <EmptyState
+              icon={GitHubMark}
+              title="No repositories found"
+              description="Nothing under the configured git roots. Clone one here, or set JD_GIT_ROOTS to point at where your projects live."
+              action={controls}
+            />
+          ) : (
+            <div className="flex min-w-0 flex-col gap-5">
+              {/* The filters stand on the page rather than inside a panel
                 header: with the readings gone there is no block above the
                 shelves for them to belong to, and the shelves are the whole
                 page. */}
-            <Toolbar className="justify-between gap-x-4">
-              <SearchInput
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter by name, path, branch or pull request"
-              />
-              {/* A state nothing is in does not get a chip: a filter that can
+              <Toolbar className="justify-between gap-x-4">
+                <SearchInput
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter by name, path, branch or pull request"
+                />
+                {/* A state nothing is in does not get a chip: a filter that can
                   only ever return nothing is furniture. The counts on them are
                   what the four tiles used to say. */}
-              <div className="flex min-w-0 flex-wrap items-center gap-1">
-                {(["all", "dirty", "behind", "ahead", "detached", "pulls"] as const).map((key) =>
-                  key === "all" || counts[key] > 0 ? (
-                    <FilterChip
-                      key={key}
-                      selected={state === key}
-                      onClick={() => setState(key)}
-                      className={
-                        key === "detached" && counts.detached > 0
-                          ? "text-destructive hover:text-destructive"
+                <div className="flex min-w-0 flex-wrap items-center gap-1">
+                  {(
+                    ["all", "dirty", "behind", "ahead", "detached", "pulls", "worktrees"] as const
+                  ).map((key) =>
+                    key === "all" || counts[key] > 0 ? (
+                      <FilterChip
+                        key={key}
+                        selected={state === key}
+                        onClick={() => setState(key)}
+                        className={
+                          key === "detached" && counts.detached > 0
+                            ? "text-destructive hover:text-destructive"
+                            : undefined
+                        }
+                      >
+                        {FILTER_LABEL[key]}
+                        <ChipCount>{counts[key]}</ChipCount>
+                      </FilterChip>
+                    ) : null,
+                  )}
+                </div>
+                {controls}
+              </Toolbar>
+
+              {visible.cards.length === 0 && visible.worktrees.length === 0 ? (
+                <EmptyState
+                  icon={GitHubMark}
+                  title="No repository matches"
+                  description={narrowed ? "Clear the filter, or pick another state." : undefined}
+                  action={
+                    narrowed && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setFilter("")
+                          setState("all")
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    )
+                  }
+                />
+              ) : (
+                shelves.map((shelf) => (
+                  <section key={shelf.key || "local"} className="flex min-w-0 flex-col gap-2.5">
+                    <GroupRule
+                      label={shelf.label}
+                      count={shelf.repos.length}
+                      leading={<ShelfMark shelf={shelf} />}
+                      // The host is said once: by the picture or the mark
+                      // where it is a product's, in words where it is not.
+                      detail={
+                        shelf.owner && shelf.host && !hostProduct(shelf.host)
+                          ? shelf.host
                           : undefined
                       }
-                    >
-                      {FILTER_LABEL[key]}
-                      <ChipCount>{counts[key]}</ChipCount>
-                    </FilterChip>
-                  ) : null,
-                )}
-              </div>
-              {controls}
-            </Toolbar>
+                    />
+                    <ul aria-label={shelf.label} className={REPO_GRID}>
+                      {shelf.repos.map((repo, index) => (
+                        <RepoCard
+                          key={repo.path}
+                          index={index}
+                          repo={repo}
+                          pulls={pullsByPath[repo.path]}
+                          worktrees={worktreeCounts[repo.path]}
+                          onOpen={select}
+                          onOpenPull={openRepoPull}
+                          onPullsChanged={summary.refresh}
+                          onDelete={removal.deleteCheckout}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                ))
+              )}
+              {visible.worktrees.length > 0 && (
+                <WorktreeSection
+                  worktrees={visible.worktrees}
+                  mains={mains}
+                  pulls={pullsByPath}
+                  onOpen={select}
+                  onOpenPull={openRepoPull}
+                  onRemove={removal.removeWorktree}
+                />
+              )}
+            </div>
+          ))}
 
-            {visible.length === 0 ? (
-              <EmptyState
-                icon={GitHubMark}
-                title="No repository matches"
-                description={narrowed ? "Clear the filter, or pick another state." : undefined}
-                action={
-                  narrowed && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setFilter("")
-                        setState("all")
-                      }}
-                    >
-                      Clear filters
-                    </Button>
-                  )
-                }
-              />
-            ) : (
-              shelves.map((shelf) => (
-                <section key={shelf.key || "local"} className="flex min-w-0 flex-col gap-2.5">
-                  <GroupRule
-                    label={shelf.label}
-                    count={shelf.repos.length}
-                    leading={<ShelfMark shelf={shelf} />}
-                    // The host is said once: by the picture or the mark
-                    // where it is a product's, in words where it is not.
-                    detail={
-                      shelf.owner && shelf.host && !hostProduct(shelf.host)
-                        ? shelf.host
-                        : undefined
-                    }
-                  />
-                  <ul aria-label={shelf.label} className={REPO_GRID}>
-                    {shelf.repos.map((repo, index) => (
-                      <RepoCard
-                        key={repo.path}
-                        index={index}
-                        repo={repo}
-                        pulls={pullsByPath[repo.path]}
-                        onOpen={() => select(repo.path)}
-                        onOpenPull={(number) => openRepoPull(repo.path, number)}
-                        onPullsChanged={summary.refresh}
-                      />
-                    ))}
-                  </ul>
-                </section>
-              ))
-            )}
-          </div>
-        ))}
-
-      <CloneDialog
-        open={cloning}
-        onOpenChange={setCloning}
-        github={github.data}
-        onDone={(path) => {
-          repos.refresh()
-          select(path)
-        }}
-      />
-    </Page>
+        {removal.dialog}
+        <CloneDialog
+          open={cloning}
+          onOpenChange={setCloning}
+          github={github.data}
+          onDone={(path) => {
+            repos.refresh()
+            select(path)
+          }}
+        />
+      </Page>
+    </Workspace>
   )
 }

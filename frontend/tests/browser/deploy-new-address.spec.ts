@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { gotoStep, json, mockNewProject } from "./deploy-fixture"
+import { TEMPLATES } from "./database-fleet-fixture"
 
 test("hostname and HTTPS edits preserve visitor password protection", async ({ page }) => {
   const journey = await mockNewProject(page)
@@ -91,8 +92,7 @@ test("standalone database setup resumes its container after switching sources", 
   let failAddress = true
   await page.route("**/api/v1/databases/**", (route) => {
     const path = new URL(route.request().url()).pathname
-    if (path.endsWith("/provision/options"))
-      return json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+    if (path.endsWith("/provision/options")) return json(route, [TEMPLATES[0]])
     if (path.endsWith("/provision")) {
       provisions++
       return json(route, { container: "standalone-db" })
@@ -111,8 +111,8 @@ test("standalone database setup resumes its container after switching sources", 
     return json(route, [])
   })
   await page.goto("/deploy/new?source=database")
-  await page.getByText("PostgreSQL", { exact: true }).click()
-  await page.getByRole("button", { name: "Create database", exact: true }).click()
+  await page.getByRole("button", { name: /^PostgreSQL/ }).click()
+  await page.getByRole("button", { name: "Create", exact: true }).click()
   await expect(page.getByText("Database container already created")).toBeVisible()
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
   failAddress = false
@@ -123,7 +123,8 @@ test("standalone database setup resumes its container after switching sources", 
   await page.getByRole("button", { name: "Create another", exact: true }).click()
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
   await page.getByRole("button", { name: "Database", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Create database", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Engines" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Retry connection setup" })).toHaveCount(0)
 })
 
 test("database engine loading can be retried after an API failure", async ({ page }) => {
@@ -134,7 +135,7 @@ test("database engine loading can be retried after an API failure", async ({ pag
   let recovered = false
   await page.route("**/api/v1/databases/provision/options", (route) =>
     recovered
-      ? json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+      ? json(route, [TEMPLATES[0]])
       : route.fulfill({
           status: 503,
           contentType: "application/json",

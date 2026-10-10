@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:1533882) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › tests/browser/network-dns-services.spec.ts:163:5 › upstream draft becomes a retained review before any native apply (3.8s)
+
+  1 passed (5.5s)

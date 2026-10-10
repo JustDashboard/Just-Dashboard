@@ -1,0 +1,229 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/go-chi/chi/v5"
+)
+
+// CrowdSec and Suricata, the intrusion tools beside fail2ban on the Security
+// section's Intrusion page. Mounted from mountSecurityRoutes.
+//
+// An absent tool is information, as fail2ban's is: both readings answer 200
+// with installed false, and the page draws the placeholder.
+func (s *Server) mountSecurityIntrusionRoutes(r chi.Router) {
+	r.Route("/security/crowdsec", func(r chi.Router) {
+		// The decisions are the addresses currently banned and why, which
+		// fail2ban's status shows to every role that can read it.
+		r.Method(http.MethodGet, "/", s.handle(s.handleCrowdSec))
+		r.Group(func(r chi.Router) {
+			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+			r.Method(http.MethodPost, "/decisions", s.handle(s.handleCrowdSecAdd))
+			// Releasing a ban re-admits whatever earned it. Recoverable —
+			// the engine bans it again on its next offence — but it is
+			// the one action here that lowers a defence, so it is
+			// marked like the other releases that do.
+			s.destructive(r, func(r chi.Router) {
+				r.Method(http.MethodDelete, "/decisions/{id}", s.handle(s.handleCrowdSecDelete))
+			})
+		})
+	})
+	// Every engine's refused addresses folded by address. Each list is
+	// readable on its own page by any role, so the merge is too.
+	r.Method(http.MethodGet, "/security/blocks", s.handle(s.handleSecurityBlocks))
+	// An alert names the internal hosts it was raised about and the ports they
+	// were reached on, so Suricata is system.admin for the reason the failed
+	// logins are.
+	r.Route("/security/suricata", func(r chi.Router) {
+		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodGet, "/", s.handle(s.handleSuricata))
+		// The setup after installing, each a job worth watching: fetching
+		// rules, moving the capture onto another interface (tested with
+		// `suricata -T`, put back if Suricata does not come back), and
+		// starting the service. The inline queue rules are read, never set.
+		r.Method(http.MethodPost, "/rules/update", s.handle(s.handleSuricataRulesUpdate))
+		r.Method(http.MethodPost, "/interface", s.handle(s.handleSuricataInterface))
+		r.Method(http.MethodPost, "/start", s.handle(s.handleSuricataStart))
+	})
+}
+
+// handleSecurityBlocks reads the three engines concurrently and merges them.
+// An engine that could not be read is reported as such, never as empty.
+func (s *Server) handleSecurityBlocks(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 40*time.Second)
+	defer cancel()
+	var (
+		wg        sync.WaitGroup
+		f2b       *netsec.Fail2banStatus
+		fw        *netsec.FirewallStatus
+		decisions []netsec.CrowdSecDecision
+		csRead    bool
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if st, err := s.modules.netsec.Fail2banStatus(ctx); err == nil {
+			f2b = st
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if st, err := s.modules.netsec.Status(ctx); err == nil {
+			fw = st
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		list, installed, err := s.modules.netsec.CrowdSecDecisions(ctx)
+		decisions, csRead = list, installed && err == nil
+	}()
+	wg.Wait()
+	httpx.JSON(w, http.StatusOK, netsec.MergeBlocks(f2b, decisions, csRead, fw))
+	return nil
+}
+
+func (s *Server) handleCrowdSec(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 40*time.Second)
+	defer cancel()
+	view, err := s.modules.netsec.CrowdSec(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
+	return nil
+}
+
+type crowdSecDecisionRequest struct {
+	Value    string `json:"value"`
+	Duration string `json:"duration"`
+	Reason   string `json:"reason"`
+	// AcknowledgeBoundary is the operator having seen what the decision does
+	// to the dashboard's boundary.
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
+}
+
+func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error {
+	var req crowdSecDecisionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if err := netsec.ValidateDecision(req.Value, req.Duration, req.Reason); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if err := s.boundaryGate(r, "crowdsec.decision.add", netsec.BoundaryProposal{Kind: "ban", Target: req.Value}, req.AcknowledgeBoundary); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	// The caller's own address goes down with the request for the reason it
+	// does on the fail2ban ban: a decision is a drop at the bouncer, and
+	// banning the address you are connected from ends this session.
+	out, err := s.modules.netsec.AddDecision(ctx, req.Value, req.Duration, req.Reason, s.networkClient(r))
+	if err != nil {
+		switch {
+		case errors.Is(err, netsec.ErrLockout):
+			httpx.SetAudit(r, "crowdsec.decision.add", req.Value, map[string]any{"result": "refused_lockout"})
+			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
+		case errors.Is(err, netsec.ErrCrowdSecMissing):
+			return httpx.Err(http.StatusServiceUnavailable, "crowdsec_unavailable", err.Error())
+		}
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "crowdsec.decision.add", req.Value, map[string]any{"duration": req.Duration, "reason": req.Reason})
+	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
+	return nil
+}
+
+func (s *Server) handleCrowdSecDelete(w http.ResponseWriter, r *http.Request) error {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id < 1 {
+		return httpx.BadRequest("invalid decision id")
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	out, err := s.modules.netsec.DeleteDecision(ctx, id)
+	if err != nil {
+		if errors.Is(err, netsec.ErrCrowdSecMissing) {
+			return httpx.Err(http.StatusServiceUnavailable, "crowdsec_unavailable", err.Error())
+		}
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "crowdsec.decision.delete", strconv.Itoa(id), nil)
+	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
+	return nil
+}
+
+func (s *Server) handleSuricata(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	// eve.json is a log, so it is read as every log is: only inside JD_LOG_ROOTS,
+	// by the check the log viewer uses. The path handed back is the one the
+	// check resolved, so a link swapped in between is not what gets opened.
+	allow := func(path string) (string, error) {
+		if err := s.modules.logs.Allow(path); err != nil {
+			return "", err
+		}
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			return resolved, nil
+		}
+		return path, nil
+	}
+	view, err := s.modules.netsec.Suricata(ctx, allow)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
+	return nil
+}
+
+func (s *Server) handleSuricataRulesUpdate(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "suricata.rules.update", "", nil)
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.rules", Title: "Updating Suricata's rules", Timeout: 12 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.UpdateSuricataRules(ctx, out)
+		})
+	return nil
+}
+
+type suricataInterfaceRequest struct {
+	Interface string `json:"interface"`
+}
+
+func (s *Server) handleSuricataInterface(w http.ResponseWriter, r *http.Request) error {
+	var req suricataInterfaceRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	plan, err := s.modules.netsec.PlanSuricataInterface(ctx, req.Interface)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "suricata.interface", plan.Interface, map[string]any{"previous": plan.Previous})
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.interface", Title: "Moving Suricata's capture to " + plan.Interface,
+		Target: plan.Interface, Timeout: 6 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.ApplySuricataInterface(ctx, plan, out)
+		})
+	return nil
+}
+
+func (s *Server) handleSuricataStart(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "suricata.start", "", nil)
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.start", Title: "Starting Suricata", Timeout: 3 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.StartSuricata(ctx, out)
+		})
+	return nil
+}

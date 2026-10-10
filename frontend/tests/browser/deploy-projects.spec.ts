@@ -41,12 +41,10 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
     "aria-pressed",
     "true",
   )
-  // The fleet's four readings sit over the cards; the per-state counts are
-  // the chips', and a state nothing is in draws no chip. Health nobody has
-  // observed is not a reason for attention.
-  for (const reading of ["Live", "Requests", "Failing requests", "Build slots"]) {
-    await expect(page.getByText(reading, { exact: true })).toBeVisible()
-  }
+  // No row of figures over the cards: each card carries its own traffic, the
+  // per-state counts are the chips', and a state nothing is in draws no chip.
+  // Health nobody has observed is not a reason for attention.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Changes pending/ })).toContainText("6")
   await expect(page.getByRole("button", { name: /^Deploying/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Attention/ })).toHaveCount(0)
@@ -595,7 +593,11 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await page.getByRole("switch", { name: "Started" }).click()
   await page.getByRole("dialog").getByRole("button", { name: "Add channel", exact: true }).click()
 
-  const row = page.getByRole("listitem").filter({ hasText: "Ops room" })
+  // The channel's card, not the messages beside it, which name the channel too.
+  const row = page
+    .getByRole("list", { name: "Notification channels" })
+    .getByRole("listitem")
+    .filter({ hasText: "Ops room" })
   await expect(row).toBeVisible()
   await testInfo.attach("notifications-list-1280", {
     body: await page.screenshot({
@@ -634,8 +636,9 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await row.getByRole("button", { name: "Actions for Ops room" }).click()
   await page.getByRole("menuitem", { name: "Delivery history" }).click()
   await expect(page.getByRole("heading", { name: "Deliveries · Ops room" })).toBeVisible()
-  await expect(page.getByText(/run\.failed/)).toBeVisible()
-  await expect(page.getByText("Delivered", { exact: true })).toBeVisible()
+  const sheet = page.getByRole("dialog", { name: "Deliveries · Ops room" })
+  await expect(sheet.getByText(/run\.failed/)).toBeVisible()
+  await expect(sheet.getByText("Delivered", { exact: true })).toBeVisible()
   await page.keyboard.press("Escape")
 
   await row.getByRole("button", { name: "Actions for Ops room" }).click()

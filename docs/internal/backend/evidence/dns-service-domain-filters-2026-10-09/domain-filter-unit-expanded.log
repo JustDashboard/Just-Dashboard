@@ -1,0 +1,96 @@
+=== RUN   TestDNSDomainFilterClosedEngineSemantics
+--- PASS: TestDNSDomainFilterClosedEngineSemantics (0.00s)
+=== RUN   TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy
+=== RUN   TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/adguard/allow
+=== RUN   TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/adguard/deny
+=== RUN   TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/pihole/allow
+=== RUN   TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/pihole/deny
+--- PASS: TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy (1.09s)
+    --- PASS: TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/adguard/allow (0.29s)
+    --- PASS: TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/adguard/deny (0.24s)
+    --- PASS: TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/pihole/allow (0.28s)
+    --- PASS: TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy/pihole/deny (0.27s)
+=== RUN   TestDNSDomainFilterFreshRawDriftAndLastReadRefusal
+=== RUN   TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/adguard/last=false
+=== RUN   TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/adguard/last=true
+=== RUN   TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/pihole/last=false
+=== RUN   TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/pihole/last=true
+--- PASS: TestDNSDomainFilterFreshRawDriftAndLastReadRefusal (1.03s)
+    --- PASS: TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/adguard/last=false (0.26s)
+    --- PASS: TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/adguard/last=true (0.27s)
+    --- PASS: TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/pihole/last=false (0.25s)
+    --- PASS: TestDNSDomainFilterFreshRawDriftAndLastReadRefusal/pihole/last=true (0.25s)
+=== RUN   TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse
+=== RUN   TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse/adguard
+=== RUN   TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse/pihole
+--- PASS: TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse (0.72s)
+    --- PASS: TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse/adguard (0.23s)
+    --- PASS: TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse/pihole (0.22s)
+=== RUN   TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay
+=== RUN   TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/adguard/uncertain=false
+=== RUN   TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/adguard/uncertain=true
+=== RUN   TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/pihole/uncertain=false
+=== RUN   TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/pihole/uncertain=true
+--- PASS: TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay (0.99s)
+    --- PASS: TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/adguard/uncertain=false (0.28s)
+    --- PASS: TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/adguard/uncertain=true (0.23s)
+    --- PASS: TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/pihole/uncertain=false (0.22s)
+    --- PASS: TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay/pihole/uncertain=true (0.25s)
+=== RUN   TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse
+=== RUN   TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/unknown-intent
+=== RUN   TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/generation
+=== RUN   TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/expired
+--- PASS: TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse (0.74s)
+    --- PASS: TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/unknown-intent (0.26s)
+    --- PASS: TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/generation (0.23s)
+    --- PASS: TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse/expired (0.25s)
+=== RUN   TestDNSDomainFilterGroupBoundsAndUnsupportedSelectedShapeRefuse
+--- PASS: TestDNSDomainFilterGroupBoundsAndUnsupportedSelectedShapeRefuse (0.23s)
+=== RUN   TestDNSDomainFilterAdGuardPreservesBlankCommentsAndRefusesModifiedTarget
+--- PASS: TestDNSDomainFilterAdGuardPreservesBlankCommentsAndRefusesModifiedTarget (0.23s)
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-null-id
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-missing-id
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-null-enabled
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/rule-null-group
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/source-null-group
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/rule-null-date
+=== RUN   TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/adguard-null-rule
+--- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero (1.59s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-null-id (0.23s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-missing-id (0.23s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/group-null-enabled (0.23s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/rule-null-group (0.25s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/source-null-group (0.24s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/rule-null-date (0.21s)
+    --- PASS: TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero/adguard-null-rule (0.20s)
+=== RUN   TestDNSDomainFilterJSONGroupsRejectNullAndKeepExplicitEmpty
+--- PASS: TestDNSDomainFilterJSONGroupsRejectNullAndKeepExplicitEmpty (0.00s)
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/version-drift
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/unsupported-version
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/rule-count
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/entry-bytes
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/cancelled-read
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/version-drift
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/unsupported-version
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/rule-count
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/entry-bytes
+=== RUN   TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/cancelled-read
+--- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects (2.53s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/version-drift (0.24s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/unsupported-version (0.21s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/rule-count (0.23s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/entry-bytes (0.25s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/adguard/cancelled-read (0.33s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/version-drift (0.23s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/unsupported-version (0.24s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/rule-count (0.24s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/entry-bytes (0.23s)
+    --- PASS: TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects/pihole/cancelled-read (0.33s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	9.153s
+=== RUN   TestDNSDomainFilterAPIPrivateRetainedCurrentAndDestructiveApply
+--- PASS: TestDNSDomainFilterAPIPrivateRetainedCurrentAndDestructiveApply (0.33s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.403s

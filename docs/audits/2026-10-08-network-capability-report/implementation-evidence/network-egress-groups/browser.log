@@ -1,0 +1,22 @@
+# 2026-10-09T23:43:27Z commit 3d951306 (+ working tree)
+# build ok
+# server pid 4096219
+
+Running 13 tests using 1 worker
+
+  ✓   1 [chromium] › tests/browser/network-egress.spec.ts:272:5 › a read user sees groups, live members, decisions and the simulation without commands (1.1s)
+  ✓   2 [chromium] › tests/browser/network-egress.spec.ts:293:5 › the decision record opens on its evidence: routes, measurements and connections (889ms)
+  ✓   3 [chromium] › tests/browser/network-egress.spec.ts:308:5 › fail over now is confirmed and sends the bounded switch (1.3s)
+  ✓   4 [chromium] › tests/browser/network-egress.spec.ts:348:5 › a dead member leaves nothing to fail over to (776ms)
+  ✓   5 [chromium] › tests/browser/network-egress.spec.ts:355:5 › automation waits for a carrying group and a passed simulation of its configuration (996ms)
+  ✓   6 [chromium] › tests/browser/network-egress.spec.ts:388:5 › turning automation on is confirmed and turning it off is not (1.3s)
+  ✓   7 [chromium] › tests/browser/network-egress.spec.ts:405:5 › a running simulation shows its progress (878ms)
+  ✓   8 [chromium] › tests/browser/network-egress.spec.ts:415:5 › a new group sends exactly its draft and keeps it after a refusal (2.0s)
+  ✓   9 [chromium] › tests/browser/network-egress.spec.ts:481:5 › a draft the server would refuse is checked before anything is sent (1.3s)
+  ✓  10 [chromium] › tests/browser/network-egress.spec.ts:492:5 › the page fits a phone without sideways scrolling (549ms)
+  ✓  11 [chromium] › tests/browser/network-egress.spec.ts:505:9 › screenshots › egress at 390 (1.4s)
+  ✓  12 [chromium] › tests/browser/network-egress.spec.ts:505:9 › screenshots › egress at 1280 (1.5s)
+  ✓  13 [chromium] › tests/browser/network-egress.spec.ts:505:9 › screenshots › egress at 1720 (1.6s)
+
+  13 passed (16.9s)
+# playwright exit 0

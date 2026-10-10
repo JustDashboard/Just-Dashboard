@@ -71,6 +71,8 @@ func mapTermError(err error) error {
 	switch {
 	case errors.Is(err, term.ErrDisabled):
 		return httpx.Err(http.StatusServiceUnavailable, "terminal_disabled", err.Error())
+	case errors.Is(err, term.ErrPersistenceUnavailable):
+		return httpx.Err(http.StatusServiceUnavailable, "terminal_persistence_unavailable", err.Error())
 	case errors.Is(err, term.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, term.ErrTooMany):
@@ -79,6 +81,14 @@ func mapTermError(err error) error {
 		return httpx.Err(http.StatusConflict, "not_persistent", err.Error())
 	case errors.Is(err, term.ErrSessionOwner):
 		return httpx.Err(http.StatusForbidden, "terminal_session_owner", err.Error())
+	case errors.Is(err, term.ErrUnknownAgent):
+		return httpx.Err(http.StatusBadRequest, "invalid_terminal_agent", err.Error())
+	case errors.Is(err, term.ErrAgentShellUnavailable):
+		return httpx.Err(http.StatusBadRequest, "terminal_agent_shell_unavailable", err.Error())
+	case errors.Is(err, term.ErrInvalidSourceWindow):
+		return httpx.Err(http.StatusBadRequest, "invalid_terminal_source", err.Error())
+	case errors.Is(err, term.ErrCWDUnavailable):
+		return httpx.Err(http.StatusServiceUnavailable, "cwd_unavailable", err.Error())
 	case errors.Is(err, term.ErrClipboardType):
 		return httpx.Err(http.StatusUnsupportedMediaType, "unsupported_image_type",
 			"only PNG, JPEG and WebP clipboard images are supported")
@@ -194,12 +204,18 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 	if accountErr != nil {
 		login["error"] = accountErr.Error()
 	}
+	var persistenceError string
+	if s.modules.term.Enabled() {
+		if err := s.modules.term.PersistenceError(); err != nil {
+			persistenceError = err.Error()
+		}
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"enabled": s.modules.term.Enabled(),
-		// Whether a session outlives the dashboard — held on the host — or
-		// ends when it restarts, which the page says before you rely on it.
-		"persistent": s.modules.term.Holding(),
-		"login":      login,
+		// Existing holders can still be reached when setup for new ones fails.
+		"persistent":       s.modules.term.Holding(),
+		"persistenceError": persistenceError,
+		"login":            login,
 		// The folders come with the listing rather than from a second
 		// request, because the rail cannot be drawn without both and two
 		// polls would render a session in a folder that has not arrived yet
@@ -607,8 +623,10 @@ func (s *Server) handleTerminalWindows(w http.ResponseWriter, r *http.Request) e
 
 func (s *Server) handleTerminalWindowCreate(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
-		Name string `json:"name"`
-		CWD  string `json:"cwd"`
+		Name           string `json:"name"`
+		CWD            string `json:"cwd"`
+		SourceWindowID string `json:"sourceWindowId"`
+		Agent          string `json:"agent"`
 	}
 	if r.ContentLength > 0 {
 		if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -616,11 +634,17 @@ func (s *Server) handleTerminalWindowCreate(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	id := chi.URLParam(r, "id")
-	sess, err := s.modules.term.NewDirectWindow(r.Context(), id, req.Name, req.CWD, 30, 110)
+	sess, err := s.modules.term.NewDirectWindowWithOptions(r.Context(), id, term.DirectWindowOptions{
+		Name: req.Name, CWD: req.CWD, SourceWindowID: req.SourceWindowID, Agent: req.Agent,
+		Rows: 30, Cols: 110,
+	})
 	if err != nil {
 		return mapTermError(err)
 	}
-	httpx.SetAudit(r, "terminal.window.create", id, map[string]any{"name": sess.WindowName})
+	httpx.SetAudit(r, "terminal.window.create", id, map[string]any{
+		"name": sess.WindowName, "sourceWindowId": req.SourceWindowID, "agent": req.Agent,
+		"cwd": sess.CWDHint,
+	})
 	httpx.JSON(w, http.StatusCreated, map[string]any{"id": sess.ID, "name": sess.WindowName})
 	return nil
 }

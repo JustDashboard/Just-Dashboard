@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo } from "react"
-import { useSessionState } from "@/lib/view-state"
 import { relativeTime } from "@/lib/format"
 import type {
   BackupResource,
@@ -10,57 +9,68 @@ import type {
   Container,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
-import { FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
+import { ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyNote, LoadingRows } from "@/components/state"
 import { FormNote } from "@/components/form"
-import { Button } from "@/components/ui/button"
-import { RESOURCE_KIND_LABEL } from "@/components/backups/shared"
+import {
+  RESOURCE_KIND_GROUP,
+  RESOURCE_KIND_LABEL,
+  RESOURCE_KIND_ORDER,
+} from "@/components/backups/shared"
 import { ResourceMark, resourceProducts } from "@/components/backups/marks"
 
-type Filter = "unprotected" | "all"
+export type CoverageFilter = "unprotected" | "all"
 
 /**
  * What this server has and whether a backup covers it: every Docker volume,
  * compose stack, deployment, repository, saved database, the proxy's
- * configuration and the dashboard itself, each with the job that protects
- * it or a button that writes one. Unprotected first, because that is the
- * list this block exists to empty.
+ * configuration and the dashboard itself. Unprotected first, because that is
+ * the list this block exists to empty.
+ *
+ * Every one of them is taken rather than read (§16): a thing a job covers
+ * opens that job, and a thing nothing covers opens the form already filled in
+ * for it — its paths, its SQLite file, its native dump, the containers to
+ * pause. So they are lit cards, two to a row where there is the width, rather
+ * than rows with an outline "Back up" at their far end that was the only part
+ * of a 1,100px row that did anything.
+ *
+ * The filter and the kind live on the page, because the protection picture
+ * above narrows the list to a kind when its column is pressed.
  */
 export function CoveragePanel({
   report,
   containers,
   loading,
   canCreate,
+  filter,
+  onFilter,
+  kind,
+  onKind,
   onProtect,
-  onOpenJob,
 }: {
   report: BackupResourceReport | undefined
   /** For the marks: a volume or a stack is drawn as the images its containers run. */
   containers: Container[]
   loading: boolean
   canCreate: boolean
+  filter: CoverageFilter
+  onFilter: (filter: CoverageFilter) => void
+  kind: BackupResourceKind | "all"
+  onKind: (kind: BackupResourceKind | "all") => void
   onProtect: (resource: BackupResource) => void
-  onOpenJob: (jobId: number) => void
 }) {
   const resources = useMemo(() => report?.resources ?? [], [report])
   const unprotected = resources.filter((r) => !r.protected)
   const paused = unprotected.filter((r) => r.coveredBy.some((c) => !c.enabled)).length
-  const [filter, setFilter] = useSessionState<Filter>("backups.coverage.filter", "unprotected")
-  const [kind, setKind] = useSessionState<BackupResourceKind | "all">(
-    "backups.coverage.kind",
-    "all",
-  )
-  const kinds = useMemo(() => [...new Set(resources.map((r) => r.kind))].sort(), [resources])
-  const visible = resources.filter(
-    (r) => (filter === "all" || !r.protected) && (kind === "all" || r.kind === kind),
-  )
+  const kinds = RESOURCE_KIND_ORDER.filter((k) => resources.some((r) => r.kind === k))
+  const inFilter = (r: BackupResource) => filter === "all" || !r.protected
+  const visible = resources.filter((r) => inFilter(r) && (kind === "all" || r.kind === kind))
   const unavailable = Object.entries(report?.unavailable ?? {})
 
   return (
-    <Panel plain>
+    <Panel plain id="coverage" className="scroll-mt-6">
       <PanelHeader
         title="Coverage"
         actions={
@@ -75,30 +85,35 @@ export function CoveragePanel({
       />
       {resources.length > 0 && (
         <PanelToolbar>
-          <FilterChip selected={filter === "unprotected"} onClick={() => setFilter("unprotected")}>
-            Not backed up
-            <span className="numeric text-muted-foreground">{unprotected.length}</span>
-          </FilterChip>
-          <FilterChip selected={filter === "all"} onClick={() => setFilter("all")}>
-            Everything
-            <span className="numeric text-muted-foreground">{resources.length}</span>
-          </FilterChip>
-          {kinds.length > 1 && (
-            <>
-              <span className="mx-1 h-4 border-l border-hairline" aria-hidden />
-              <FilterChip selected={kind === "all"} onClick={() => setKind("all")}>
-                All kinds
-              </FilterChip>
-              {kinds.map((k) => (
-                <FilterChip key={k} selected={kind === k} onClick={() => setKind(k)}>
-                  {RESOURCE_KIND_LABEL[k]}
+          <ChipStrip>
+            <FilterChip selected={filter === "unprotected"} onClick={() => onFilter("unprotected")}>
+              Not backed up
+              <span className="numeric text-warning">{unprotected.length}</span>
+            </FilterChip>
+            <FilterChip selected={filter === "all"} onClick={() => onFilter("all")}>
+              Everything
+              <span className="numeric text-muted-foreground">{resources.length}</span>
+            </FilterChip>
+            {kinds.length > 1 && (
+              <>
+                <span className="mx-1 h-4 shrink-0 border-l border-hairline" aria-hidden />
+                <FilterChip selected={kind === "all"} onClick={() => onKind("all")}>
+                  All kinds
                 </FilterChip>
-              ))}
-            </>
-          )}
+                {kinds.map((k) => (
+                  <FilterChip key={k} selected={kind === k} onClick={() => onKind(k)}>
+                    {RESOURCE_KIND_GROUP[k]}
+                    <span className="numeric text-muted-foreground">
+                      {resources.filter((r) => r.kind === k && inFilter(r)).length}
+                    </span>
+                  </FilterChip>
+                ))}
+              </>
+            )}
+          </ChipStrip>
         </PanelToolbar>
       )}
-      <PanelBody flush className="py-1">
+      <PanelBody flush className="pt-3">
         {loading && !report && <LoadingRows rows={4} />}
         {report && visible.length === 0 && (
           <EmptyNote>
@@ -108,74 +123,83 @@ export function CoveragePanel({
           </EmptyNote>
         )}
         {visible.length > 0 && (
-          <RowList className="animate-rise">
-            {visible.map((res) => {
-              const covering = res.coveredBy.filter((c) => c.enabled)
-              const paused = res.coveredBy.filter((c) => !c.enabled)
-              return (
-                <Row
-                  key={`${res.kind}:${res.id}`}
-                  leading={
-                    <ResourceMark
-                      kind={res.kind}
-                      ids={resourceProducts(res, containers, resources)}
-                    />
-                  }
-                  title={
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate">{res.name}</span>
-                      <Tag>{RESOURCE_KIND_LABEL[res.kind]}</Tag>
-                    </span>
-                  }
-                  subtitle={res.paths?.[0] ?? res.detail}
-                  mono={Boolean(res.paths?.[0])}
-                  trailing={
-                    <>
-                      {res.protected ? (
-                        <button
-                          type="button"
-                          className="flex items-center gap-1.5 text-xs hover:underline"
-                          onClick={() => onOpenJob(covering[0].jobId)}
-                        >
-                          <Status
-                            state="success"
-                            label={
-                              res.lastBackupAt
-                                ? `${covering[0].jobName} · ${relativeTime(res.lastBackupAt)}`
-                                : `${covering[0].jobName} · no run yet`
-                            }
-                          />
-                        </button>
-                      ) : paused.length > 0 ? (
-                        <button
-                          type="button"
-                          className="flex items-center gap-1.5 text-xs hover:underline"
-                          onClick={() => onOpenJob(paused[0].jobId)}
-                        >
-                          <Status tone="warning" label={`${paused[0].jobName} is paused`} />
-                        </button>
-                      ) : (
-                        <Status tone="warning" label="not backed up" />
-                      )}
-                      {canCreate && !res.protected && paused.length === 0 && (
-                        <Button size="xs" variant="outline" onClick={() => onProtect(res)}>
-                          Back up
-                        </Button>
-                      )}
-                    </>
-                  }
-                />
-              )
-            })}
-          </RowList>
+          <ChoiceList className="grid gap-2 space-y-0 xl:grid-cols-2">
+            {visible.map((res, index) => (
+              <CoverageCard
+                key={`${res.kind}:${res.id}`}
+                resource={res}
+                index={index}
+                ids={resourceProducts(res, containers, resources)}
+                canCreate={canCreate}
+                onProtect={() => onProtect(res)}
+              />
+            ))}
+          </ChoiceList>
         )}
         {unavailable.length > 0 && (
-          <FormNote className="pt-2">
+          <FormNote className="pt-3">
             {unavailable.map(([owner, reason]) => `${owner}: ${reason}`).join(" · ")}
           </FormNote>
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+/**
+ * One thing on the server, drawn as its product, with the job that covers it
+ * — named, with when it last took it — or the word for nothing covering it.
+ */
+function CoverageCard({
+  resource,
+  ids,
+  index,
+  canCreate,
+  onProtect,
+}: {
+  resource: BackupResource
+  ids: string[]
+  index: number
+  canCreate: boolean
+  onProtect: () => void
+}) {
+  const covering = resource.coveredBy.find((c) => c.enabled)
+  const paused = resource.coveredBy.find((c) => !c.enabled)
+  const job = covering ?? paused
+  const path = resource.paths?.[0]
+  return (
+    <ChoiceRow
+      index={index}
+      leading={<ResourceMark kind={resource.kind} ids={ids} ring="ring-choice-surface" />}
+      title={resource.name}
+      verb={job ? `${resource.name}: open ${job.jobName}` : `Back up ${resource.name}`}
+      href={job ? `/backups/${job.jobId}` : undefined}
+      onSelect={job ? undefined : onProtect}
+      disabled={!job && !canCreate}
+      description={
+        <>
+          {RESOURCE_KIND_LABEL[resource.kind]}
+          {(path ?? resource.detail) && (
+            <>
+              {" · "}
+              <span className={path ? "font-mono" : undefined}>{path ?? resource.detail}</span>
+            </>
+          )}
+        </>
+      }
+      trailing={
+        covering ? (
+          <Status
+            state="success"
+            label={`${covering.jobName} · ${resource.lastBackupAt ? relativeTime(resource.lastBackupAt) : "no run yet"}`}
+          />
+        ) : paused ? (
+          <Status tone="warning" label={`${paused.jobName} is paused`} />
+        ) : (
+          <Status tone="warning" label="not backed up" />
+        )
+      }
+    />
   )
 }
 
@@ -199,8 +223,14 @@ function CoverageMeter({
         aria-hidden
         className="flex h-1.5 w-32 overflow-hidden rounded-full bg-meter-track sm:w-48"
       >
-        <span className="bg-success" style={{ width: `${(protectedCount / total) * 100}%` }} />
-        <span className="bg-warning" style={{ width: `${(paused / total) * 100}%` }} />
+        <span
+          className="bg-success transition-[width] duration-500"
+          style={{ width: `${(protectedCount / total) * 100}%` }}
+        />
+        <span
+          className="bg-warning transition-[width] duration-500"
+          style={{ width: `${(paused / total) * 100}%` }}
+        />
       </span>
       <span className="numeric text-hint text-muted-foreground">
         <span className="font-medium text-foreground">{protectedCount}</span> of {total} protected

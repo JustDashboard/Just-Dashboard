@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -754,7 +756,7 @@ func (s *Service) Open(path string) (*os.File, os.FileInfo, error) {
 // Upload writes r to path: a new file, or a replacement for an existing
 // regular file when overwrite is set.
 //
-// The bytes land in a temporary sibling and are renamed into place, the same
+// The bytes land in a temporary sibling and are published atomically, the same
 // way Write works, and for the same reason with the stakes higher: an upload
 // is the one write that arrives over a network at the browser's pace, so a
 // transfer that is cancelled, times out or trips the request size limit
@@ -809,6 +811,19 @@ func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error
 	}
 	if uid >= 0 {
 		os.Chown(tmpName, uid, gid)
+	}
+	if !overwrite {
+		// A network transfer leaves time for another writer to claim the
+		// destination. Publish only if the name is still free; a hard link
+		// keeps this atomic on filesystems without no-replace rename support.
+		err := unix.Renameat2(unix.AT_FDCWD, tmpName, unix.AT_FDCWD, full, unix.RENAME_NOREPLACE)
+		if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EOPNOTSUPP) {
+			return n, os.Link(tmpName, full)
+		}
+		if err != nil {
+			return n, &os.LinkError{Op: "rename", Old: tmpName, New: full, Err: err}
+		}
+		return n, nil
 	}
 	return n, os.Rename(tmpName, full)
 }

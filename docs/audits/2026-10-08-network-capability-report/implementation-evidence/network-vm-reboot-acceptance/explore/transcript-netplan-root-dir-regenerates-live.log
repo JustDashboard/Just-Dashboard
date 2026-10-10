@@ -1,0 +1,13 @@
+# Session transcript (verbatim command output), exploratory guest, 2026-10-10T00:27Z.
+# Live Netplan artifacts before and after a private-root generate.
+$ stat -c "%i %y %n" /run/systemd/network/10-netplan-enp0s4.network /run/NetworkManager/system-connections/netplan-jdnm0.nmconnection
+1652 2026-10-10 00:21:53.572720052 +0000 /run/systemd/network/10-netplan-enp0s4.network
+1654 2026-10-10 00:21:53.582720029 +0000 /run/NetworkManager/system-connections/netplan-jdnm0.nmconnection
+$ sudo netplan generate --root-dir /run/jd-test-root      (copies of /etc/netplan under the root)
+rc=0
+$ stat -c "%i %y %n" ...   # same two live files afterwards: new inodes
+1891 2026-10-10 00:27:31.469128965 +0000 /run/systemd/network/10-netplan-enp0s4.network
+1893 2026-10-10 00:27:31.469128965 +0000 /run/NetworkManager/system-connections/netplan-jdnm0.nmconnection
+# /usr/share/netplan/netplan_cli/cli/commands/generate.py (netplan 1.1.2) after running the
+# generator: subprocess.check_call(['udevadm', 'control', '--reload']) and, unless --mapping,
+# utils.systemctl_daemon_reload(), with no --root-dir condition.

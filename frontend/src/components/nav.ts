@@ -1,11 +1,11 @@
 import {
   Archive,
+  Connection,
   Bell,
   Box,
   ChartActivity,
   Clock,
   CloudUpload,
-  CodeBracket,
   Cpu,
   Database,
   DesktopDevice,
@@ -20,13 +20,12 @@ import {
   Inspect,
   Key,
   Layers,
-  Layout,
+  Lifebuoy,
+  Rocket,
   LineChart,
-  Linked,
   ListOrdered,
   LockClosed,
   Logs,
-  MagnifyingGlass,
   Monitoring,
   NetworkDevice,
   Notes,
@@ -40,16 +39,17 @@ import {
   SettingsGear,
   SettingsSliders,
   Shield,
+  ShieldCheck,
   ShieldOff,
   SignIn,
-  Sparkles,
-  Table,
   Terminal,
+  Topology,
   UserSettings,
   Users,
   Warning,
   Wrench,
   ArrowLeftRight,
+  Plus,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
 
@@ -116,8 +116,10 @@ export type NavEntry = NavItem | NavGroup
  *
  * The top-level list is twelve rows, not seventeen. Metrics, Processes and Logs
  * are one question — how is the machine doing — and sit behind Monitoring; the
- * proxy, packages, system accounts and audit trail are the pages you open to
- * change the server rather than to use it, and sit behind Server configuration.
+ * packages, system accounts and audit trail are the pages you open to change
+ * the server rather than to use it, and sit behind Server configuration. The
+ * network — its devices, routes, gateway, tunnels and resolver, and the proxy
+ * in front of the sites — is a group of its own before Protection.
  */
 export const NAV: { label: string; items: NavEntry[] }[] = [
   {
@@ -151,7 +153,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       {
         title: "Deployments",
         href: "/deploy",
-        icon: CloudUpload,
+        icon: Rocket,
         children: [
           { title: "Projects", href: "/deploy", icon: GridMasonry },
           // Reading the credential list needs system.admin — the backend seals
@@ -170,22 +172,19 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Databases",
         href: "/databases",
         icon: Database,
+        // The pages about every database at once. One database's own pages
+        // are not here: which of them it has depends on its engine, so its
+        // layout hands the rail that panel, a level below this one
+        // (`components/database/shell/nav-scope.tsx`).
         children: [
-          { title: "All databases", href: "/databases", icon: Layers },
-          { title: "Overview", href: "/databases/overview", icon: Home },
-          { title: "Browse", href: "/databases/browse", icon: GridSquare },
-          { title: "Structure", href: "/databases/structure", icon: Table },
-          { title: "Diagram", href: "/databases/diagram", icon: Layout },
-          { title: "Query", href: "/databases/query", icon: CodeBracket },
-          { title: "Find", href: "/databases/find", icon: MagnifyingGlass },
-          { title: "Monitor", href: "/databases/monitor", icon: ChartActivity },
-          { title: "Advisor", href: "/databases/advisor", icon: Shield },
-          { title: "Topology", href: "/databases/topology", icon: Route },
-          { title: "Server", href: "/databases/server", icon: Servers },
-          { title: "Backups", href: "/databases/backups", icon: Archive },
-          { title: "Logs", href: "/databases/logs", icon: Logs },
-          { title: "Generate", href: "/databases/generate", icon: Sparkles },
-          { title: "Connection", href: "/databases/connection", icon: Linked },
+          { title: "Control center", href: "/databases", icon: Layers },
+          { title: "Map", href: "/databases/map", icon: Route },
+          {
+            title: "Add a database",
+            href: "/databases/new",
+            icon: Plus,
+            capability: "system.admin",
+          },
         ],
       },
       {
@@ -214,6 +213,90 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     ],
   },
   {
+    label: "Network",
+    items: [
+      {
+        // The server as a router: its devices, routes, firewall, gateway,
+        // tunnels, resolver and traffic. These were four pages of Security
+        // until 0.7.1; Security kept what is about who may get in, and the
+        // network became a section that can change the network as well as
+        // read it.
+        title: "Network",
+        href: "/network",
+        icon: Topology,
+        children: [
+          { title: "Overview", href: "/network", icon: GridSquare },
+          { title: "Drift", href: "/network/drift", icon: Monitoring },
+          {
+            title: "Address planning",
+            href: "/network/ipam",
+            icon: NetworkDevice,
+            capability: "system.admin",
+          },
+          {
+            title: "External checks",
+            href: "/network/external",
+            icon: Globe,
+            capability: "system.admin",
+          },
+          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
+          { title: "Routing", href: "/network/routing", icon: Route },
+          { title: "Egress groups", href: "/network/egress", icon: Lifebuoy },
+          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },
+          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight },
+          { title: "Protection", href: "/network/protection", icon: ShieldCheck },
+          { title: "VPN", href: "/network/vpn", icon: LockClosed },
+          { title: "DNS", href: "/network/dns", icon: Globe },
+          { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
+          {
+            title: "Socket history",
+            href: "/network/flows",
+            icon: ChartActivity,
+            capability: "system.admin",
+          },
+          { title: "Connections", href: "/network/connections", icon: Connection },
+          {
+            title: "Connection path",
+            href: "/network/investigate",
+            icon: Inspect,
+            capability: "system.admin",
+          },
+          { title: "Tools", href: "/network/tools", icon: Wrench },
+          {
+            title: "Packet captures",
+            href: "/network/captures",
+            icon: Inspect,
+            capability: "system.admin",
+          },
+          {
+            title: "Saved runs",
+            href: "/network/runs",
+            icon: Notes,
+            capability: "system.admin",
+          },
+        ],
+      },
+      // The reverse proxy, its certificates, the TCP/UDP streams and the load
+      // balancing in a site's upstreams are the gateway's other half, so the
+      // section sits beside Network rather than under Server configuration.
+      {
+        title: "Proxy & TLS",
+        href: "/proxy",
+        icon: Globe,
+        children: [
+          { title: "Overview", href: "/proxy", icon: GridSquare },
+          { title: "Sites", href: "/proxy/sites", icon: Globe },
+          { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
+          { title: "TLS report", href: "/proxy/tls", icon: Inspect },
+          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
+          { title: "Ports", href: "/proxy/ports", icon: Router },
+          { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
+          { title: "Configuration", href: "/proxy/config", icon: FileText },
+        ],
+      },
+    ],
+  },
+  {
     label: "Protection",
     items: [
       {
@@ -222,13 +305,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Shield,
         children: [
           { title: "Overview", href: "/security", icon: GridSquare },
-          { title: "Firewall", href: "/security/firewall", icon: FirewallCheck },
           { title: "SSH", href: "/security/ssh", icon: SecureConnection },
           { title: "Intrusion", href: "/security/intrusion", icon: ShieldOff },
-          { title: "Connections", href: "/security/connections", icon: NetworkDevice },
           { title: "Logins", href: "/security/logins", icon: SignIn },
-          { title: "Network", href: "/security/network", icon: Route },
-          { title: "Tools", href: "/security/tools", icon: Wrench },
         ],
       },
       { title: "Backups", href: "/backups", icon: Archive },
@@ -241,21 +320,6 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Server configuration",
         icon: SettingsSliders,
         children: [
-          {
-            title: "Proxy & TLS",
-            href: "/proxy",
-            icon: Globe,
-            children: [
-              { title: "Overview", href: "/proxy", icon: GridSquare },
-              { title: "Sites", href: "/proxy/sites", icon: Globe },
-              { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
-              { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-              { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
-              { title: "Ports", href: "/proxy/ports", icon: Router },
-              { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
-              { title: "Configuration", href: "/proxy/config", icon: FileText },
-            ],
-          },
           { title: "Packages", href: "/packages", icon: Puzzle },
           {
             title: "System users",

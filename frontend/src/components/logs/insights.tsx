@@ -26,7 +26,6 @@ import { LatencyLadder } from "@/components/deploy/latency-ladder"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
 import { LevelChips } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
-import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import {
   Table,
@@ -71,8 +70,6 @@ type InsightsProps = {
    * typed window are asked only then, as History asks them.
    */
   ask: number
-  /** The lens's readings at the top — the logs page; a service page draws its own. */
-  readings?: boolean
   onZoom: (since: Date, until: Date) => void
   /** The overview's answer, for the lens row's counts. */
   onOverview?: (result: LogSearchResult | null) => void
@@ -87,8 +84,7 @@ type Answer = {
 /**
  * What the log adds up to over the window and the filter on screen.
  *
- * The request log's Insights, for any log a lens reads: the lens's readings,
- * the events over time, each of the lens's keys ranked (a press narrows to
+ * The request log's Insights, for any log a lens reads: the events over time, each of the lens's keys ranked (a press narrows to
  * the value and stays here, as the request lists do), the measure's
  * distribution where there is one, each of the lens's groups as a ranked
  * table — the slow statements by their shape, the attackers by address —
@@ -102,12 +98,6 @@ type Answer = {
 export function Insights(props: InsightsProps) {
   const { lens, lensId, filter, onFilterChange } = props
   const { answer, error, loading, runId } = useInsights(props)
-  const readings = useLensReadings(props.sourceId, lens, {
-    forcedLens: props.forcedLens,
-    enabled: Boolean(props.readings),
-    range: { range: props.range, since: props.since, until: props.until },
-  })
-
   const overview = answer?.overview
   const levelCounts = useMemo(
     () =>
@@ -154,12 +144,6 @@ export function Insights(props: InsightsProps) {
               : null}
         </span>
       </div>
-
-      {props.readings && readings.tiles.length > 0 && (
-        <div className="shrink-0 border-b border-hairline px-5">
-          <LensReadings readings={readings} filter={filter} onFilterChange={onFilterChange} />
-        </div>
-      )}
 
       {error ? (
         <div className="flex flex-1 items-center justify-center p-6">

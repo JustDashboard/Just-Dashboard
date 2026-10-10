@@ -1,0 +1,1 @@
+Django ships no SQL Server backend of its own: these models need the mssql-django package to connect.

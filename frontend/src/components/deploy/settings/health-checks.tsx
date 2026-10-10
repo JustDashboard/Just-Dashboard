@@ -2,11 +2,13 @@
 
 import { useId } from "react"
 import { Plus, Trash } from "@/components/icons"
+import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
 import { GroupRule } from "@/components/flow"
 import { Field, FieldRow, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Group } from "@/components/panel"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -158,7 +160,12 @@ function givesUpAfter(check: Check) {
  * Each check says what it does in one line above its fields, and how long it
  * keeps trying, because "20 attempts, 5 s timeout, 3 s interval" is three
  * numbers a reader otherwise multiplies in their head to find out how long a
- * bad release is left running.
+ * bad release is left running. That line is the check's reading, so it is set
+ * a rung above the field hints rather than at their size.
+ *
+ * A check rises as it is added, and again as it moves into the other phase's
+ * group; a kind's own fields rise as the kind is chosen, because they replace
+ * the last kind's rather than being edited in place.
  */
 export function HealthChecks({
   checks,
@@ -247,6 +254,7 @@ function CheckEditor({
   const id = (field: string) => `check-${index}-${field}`
   const updateConfig = (patch: Partial<Config>) =>
     onChange({ config: { ...config, ...patch } as Record<string, unknown> })
+  const program = programProduct(argvOf(config.command ?? [])[0])
   const number = (value: string) => (value === "" ? 0 : Number(value))
   const portPlaceholder = port ? String(port) : "app port"
 
@@ -255,7 +263,7 @@ function CheckEditor({
       role="group"
       aria-labelledby={nameId}
       tone={error ? "danger" : "default"}
-      className="space-y-3"
+      className="animate-rise space-y-3"
     >
       <span id={nameId} className="sr-only">
         {check.name || `Health check ${n}`}
@@ -302,13 +310,13 @@ function CheckEditor({
         />
       </div>
 
-      <p className="min-w-0 font-mono text-hint break-words text-muted-foreground">
+      <p className="min-w-0 font-mono text-xs break-words text-muted-foreground">
         <span className="text-foreground/80">{checkSummary(check, port)}</span> · gives up after{" "}
         <span className="whitespace-nowrap">~{formatDuration(givesUpAfter(check))}</span>
       </p>
 
       {kind === "http" && (
-        <>
+        <div className="animate-rise space-y-3">
           <FieldRow className={ADDRESS}>
             <Field label="Path" htmlFor={id("path")}>
               <Input
@@ -382,9 +390,11 @@ function CheckEditor({
               />
             </Field>
           </FieldRow>
+          {/* What passes while it is off is the Expected status placeholder's
+              to say, which is where the reader is looking when it matters. */}
           <OptionRow
             title="Any answer counts"
-            hint="Anything below 500 except 400 and 421 passes, for an API with no page at this path. Off, only the statuses listed, or any 2xx, pass."
+            hint="Anything below 500 except 400 and 421 passes — for an API with no page at this path."
             checked={Boolean(config.acceptAnyAnswer)}
             disabled={disabled}
             onCheckedChange={(acceptAnyAnswer) =>
@@ -395,11 +405,11 @@ function CheckEditor({
               )
             }
           />
-        </>
+        </div>
       )}
 
       {kind === "tcp" && (
-        <FieldRow className={ADDRESS}>
+        <FieldRow className={cn(ADDRESS, "animate-rise")}>
           <Field label="Host" htmlFor={id("host")}>
             <Input
               id={id("host")}
@@ -431,11 +441,16 @@ function CheckEditor({
         </FieldRow>
       )}
 
+      {/* The placeholder shows one argument per line; the rest is behind ⓘ. */}
       {kind === "command" && (
         <Field
           label="Command argv"
           htmlFor={id("command")}
-          hint="One argument per line, run inside the candidate container."
+          // A textarea has no addon to carry the program's mark, so it rides
+          // the label's edge, where it cannot move the words.
+          trailing={program && <ProductGlyph id={program} />}
+          info="One argument per line, run inside the new release's container; it passes when the command exits 0."
+          className="animate-rise"
         >
           <Textarea
             id={id("command")}
@@ -485,13 +500,14 @@ function CheckEditor({
       </FieldRow>
 
       <OptionRow
-        title="Required — a failing check blocks activation"
+        title="Required"
+        hint="A failing check blocks activation."
         checked={check.required}
         onCheckedChange={(required) => onChange({ required })}
         disabled={disabled}
       />
       {error && (
-        <p role="alert" className="text-hint text-destructive">
+        <p role="alert" className="animate-rise text-hint text-destructive">
           {error}
         </p>
       )}

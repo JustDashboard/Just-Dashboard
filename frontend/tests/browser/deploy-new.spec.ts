@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { blueprintCatalogue, gotoStep, json, mockNewProject, now } from "./deploy-fixture"
 
 /**
@@ -13,10 +13,12 @@ test("the source strip switches the active source and is the only way in", async
   await mockNewProject(page)
   await page.goto("/deploy/new")
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
-  // Five toggles for one answer, so a group of pressed buttons: a tablist
-  // has to own tabs, and these were never tabs.
+  // Four toggles for one answer, so a group of pressed buttons: a tablist
+  // has to own tabs, and these were never tabs. Compose is not one of them:
+  // a stack is deployed from the repository that holds its file.
   const strip = page.getByRole("group", { name: "Project source" })
-  await expect(strip.getByRole("button")).toHaveCount(5)
+  await expect(strip.getByRole("button")).toHaveCount(4)
+  await expect(strip.getByRole("button", { name: "Compose", exact: true })).toHaveCount(0)
   await expect(page.getByRole("tablist")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Git repository", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -35,13 +37,10 @@ test("the source strip switches the active source and is the only way in", async
   )
 
   await page.getByRole("button", { name: "Database", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Start a database" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Engines" })).toBeVisible()
 
-  await page.getByRole("button", { name: "Docker image", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Choose an image" })).toBeVisible()
-
-  await page.getByRole("button", { name: "Compose", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Compose stack" })).toBeVisible()
+  await page.getByRole("button", { name: "Docker", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Choose from this server" })).toBeVisible()
 
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
@@ -57,14 +56,14 @@ test("every source and every configure step fits the window without the page scr
   await page.goto("/deploy/new")
   const overflow = () =>
     page.locator("[data-slot='page']").evaluate((element) => {
-      const shell = element.parentElement!
+      const shell = element.closest<HTMLElement>("[data-workspace-shell-scroll]")!
       return {
         down: shell.scrollHeight - shell.clientHeight,
         across: shell.scrollWidth - shell.clientWidth,
       }
     })
 
-  for (const source of ["Git repository", "Docker image", "Template", "Database", "Compose"]) {
+  for (const source of ["Git repository", "Docker", "Template", "Database"]) {
     await page.getByRole("button", { name: source, exact: true }).click()
     await expect.poll(overflow, { message: source }).toEqual({ down: 0, across: 0 })
   }
@@ -606,56 +605,149 @@ test("a private image reference sends the chosen registry credential", async ({ 
   })
 })
 
-test("a Compose stack in a Git repository signs in with a saved credential picked by name", async ({
-  page,
-}) => {
-  await mockNewProject(page)
-  await page.route("**/api/v1/deploy/credentials", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback()
-    await json(route, [
-      {
-        id: 4,
-        name: "GitHub PAT",
-        kind: "git_bearer",
-        target: "github.com",
-        createdAt: now,
-        updatedAt: now,
-        usedBy: 1,
-      },
-    ])
+/** Two containers of one Compose project, the images they run, and a third image no one runs. */
+async function mockServerDocker(page: Page) {
+  const tracker = (service: string, imageId: string) => ({
+    id: service,
+    names: [service],
+    name: service,
+    image: `bet-bot-${service}:latest`,
+    imageId,
+    command: "python main.py",
+    state: "running",
+    status: "Up 2 hours",
+    createdAt: now,
+    uptimeSeconds: 7200,
+    ports: [],
+    labels: {
+      "com.docker.compose.project": "bet-bot",
+      "com.docker.compose.service": service,
+    },
+    networks: ["host"],
+    composeStack: "bet-bot",
+    composeService: service,
+    exposure: [],
+    hasHealthcheck: false,
+    inspected: true,
   })
-  let selectedSource: unknown
+  const image = (tag: string, id: string, containers: number) => ({
+    id,
+    repoTags: [tag],
+    repoDigests: [],
+    size: 210_000_000,
+    created: now,
+    containers,
+    labels: {},
+    dangling: false,
+  })
+  await page.route("**/api/v1/docker/images", (route) =>
+    json(route, [
+      image("bet-bot-high-market-tracker:latest", "sha256:high", 1),
+      image("bet-bot-doubles-games-tracker:latest", "sha256:doubles", 1),
+      image("postgres:16-alpine", "sha256:postgres", 0),
+    ]),
+  )
+  await page.route("**/api/v1/docker/containers/", (route) =>
+    json(route, [
+      tracker("high-market-tracker", "sha256:high"),
+      tracker("doubles-games-tracker", "sha256:doubles"),
+    ]),
+  )
+  await page.route("**/api/v1/docker/stacks/", (route) =>
+    json(route, [
+      {
+        name: "bet-bot",
+        workingDir: "/home/ubuntu/bet-bot",
+        configFiles: ["/home/ubuntu/bet-bot/docker-compose.yml"],
+        services: [],
+        running: 2,
+        total: 2,
+        managed: true,
+        declared: ["high-market-tracker", "doubles-games-tracker"],
+        containers: 2,
+        deployed: true,
+        orphans: [],
+        state: "running",
+        summary: "Running · 2/2 services",
+      },
+    ]),
+  )
+}
+
+function savedSource(page: Page) {
+  let source: unknown
   page.on("request", (request) => {
     if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
       return
     const body = request.postDataJSON()
-    if (body.step === "source") selectedSource = body.source
+    if (body.step === "source") source = body.source
   })
+  return () => source
+}
 
-  await page.goto("/deploy/new?source=compose")
-  await page
-    .getByRole("group", { name: "Where the files are" })
-    .getByRole("button", { name: /In a Git repository/ })
+test("a Compose stack running here is deployed from its own file", async ({ page }) => {
+  await mockNewProject(page)
+  await mockServerDocker(page)
+  const source = savedSource(page)
+
+  await page.goto("/deploy/new?source=image")
+  const stacks = page.getByRole("list", { name: "Compose stacks on this server" })
+  await expect(stacks.getByText("/home/ubuntu/bet-bot/docker-compose.yml")).toBeVisible()
+  // Each image says which container runs it — the name the reader knows it by.
+  await expect(page.getByText("Used by high-market-tracker", { exact: true })).toBeVisible()
+  await stacks.getByRole("button", { name: "Deploy the bet-bot stack" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
+
+  expect(source()).toEqual({
+    kind: "compose",
+    mode: "compose_local",
+    localPath: "/home/ubuntu/bet-bot",
+    composeFiles: [{ path: "docker-compose.yml", content: "", order: 0 }],
+  })
+})
+
+test("images ticked together are deployed as one stack", async ({ page }) => {
+  const journey = await mockNewProject(page)
+  await mockServerDocker(page)
+  const source = savedSource(page)
+
+  await page.goto("/deploy/new?source=image")
+  const images = page.getByRole("list", { name: "Images on this server" })
+  await expect(images.getByRole("listitem")).toHaveCount(3)
+  // Nothing ticked, nothing to command: the rows are the advance.
+  await expect(page.getByRole("button", { name: /images together/ })).toHaveCount(0)
+
+  await images.getByRole("checkbox", { name: "Select bet-bot-high-market-tracker:latest" }).click()
+  await expect(page.getByRole("button", { name: "Deploy this image" })).toBeVisible()
+  await images
+    .getByRole("checkbox", { name: "Select bet-bot-doubles-games-tracker:latest" })
     .click()
-  const url = page.getByRole("textbox", { name: "Git URL", exact: true })
-  await url.fill("https://github.com/acme/stack.git")
-  await expect(page.getByRole("group").filter({ has: url }).locator("img")).toHaveAttribute(
-    "src",
-    "/logos/github.svg",
-  )
-  // A credential is chosen by its name, as on the Git tab — this used to be a
-  // number field asking for an id nothing on the page showed.
-  await page.getByRole("combobox", { name: "Credential" }).click()
-  await page.getByRole("option", { name: "GitHub PAT" }).click()
-  await page.getByRole("button", { name: "Inspect", exact: true }).click()
-  await expect
-    .poll(() => selectedSource)
-    .toMatchObject({
-      kind: "compose",
-      mode: "compose_git",
-      url: "https://github.com/acme/stack.git",
-      credentialId: 4,
-    })
+  // Ticking is not choosing: no draft was started by either box.
+  expect(journey.started()).toBe(0)
+  await page.getByRole("button", { name: "Deploy 2 images together" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
+
+  expect(journey.intent()).toMatchObject({ name: "bet-bot", profile: "compose" })
+  expect(source()).toEqual({
+    kind: "compose",
+    mode: "compose_paste",
+    composeFiles: [
+      {
+        path: "compose.yaml",
+        order: 0,
+        content: [
+          "services:",
+          "  high-market-tracker:",
+          '    image: "bet-bot-high-market-tracker:latest"',
+          "    restart: unless-stopped",
+          "  doubles-games-tracker:",
+          '    image: "bet-bot-doubles-games-tracker:latest"',
+          "    restart: unless-stopped",
+          "",
+        ].join("\n"),
+      },
+    ],
+  })
 })
 
 test("resuming a duplicated draft shows its copied variable needing a value, and Save works", async ({
@@ -864,7 +956,10 @@ test("a template that needs its own public URL arrives with one this server can 
   await expect(page.getByRole("heading", { name: "Checked against this server" })).toBeVisible()
   await expect(page.getByText("Runtime plan is valid")).toBeVisible()
   await expect(page.getByRole("heading", { name: "Data it keeps" })).toBeVisible()
-  await expect(page.getByText("/data", { exact: true })).toBeVisible()
+  // The rail reads the mount back too, so the path is looked for on Review's
+  // own surface.
+  const review = page.locator("[data-slot=flow-panel]")
+  await expect(review.getByText("/data", { exact: true })).toBeVisible()
   await expect(page.getByText(/Everything this vault holds/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Secrets made on this server" })).toBeVisible()
   await expect(page.getByText(/48 characters, made when this plan is saved/)).toBeVisible()
@@ -1122,74 +1217,79 @@ test("a Minecraft blueprint accepts the EULA in the open, offers versions, and p
   expect(journey.commits()).toBe(1)
 })
 
-test("pasting a Compose file surfaces its services, unsupported items and the effective plan", async ({
+test("a resumed Compose setup surfaces its services, unsupported items and the effective plan", async ({
   page,
 }) => {
   await mockNewProject(page)
-  await page.route("**/api/v1/deploy/drafts/journey-draft/detect", (route) =>
-    json(route, {
-      id: "journey-draft",
-      ownerUsername: "operator",
-      currentStep: "detection",
-      revision: 4,
-      data: {
-        intent: { name: "compose", profile: "compose" },
-        source: {
-          kind: "compose",
-          mode: "compose_paste",
-          composeFiles: [
-            {
-              path: "compose.yml",
-              content: "services:\n  web:\n    image: nginx:alpine\n",
-              order: 0,
+  // The Compose tab is gone, so a stack's setup is reached the way an
+  // unfinished one is: resumed, with the server's analysis already on it.
+  await page.route("**/api/v1/deploy/drafts/journey-draft", (route) =>
+    route.request().method() !== "GET"
+      ? route.fallback()
+      : json(route, {
+          id: "journey-draft",
+          ownerUsername: "operator",
+          currentStep: "detection",
+          revision: 4,
+          data: {
+            intent: { name: "compose", profile: "compose" },
+            source: {
+              kind: "compose",
+              mode: "compose_paste",
+              composeFiles: [
+                {
+                  path: "compose.yml",
+                  content: "services:\n  web:\n    image: nginx:alpine\n",
+                  order: 0,
+                },
+              ],
             },
-          ],
-        },
-        detection: {
-          source: { kind: "compose", composeFiles: ["compose.yml"], services: ["web", "worker"] },
-          candidates: [
-            {
-              id: "compose-candidate",
-              name: "Compose stack (2 services)",
-              root: "",
-              profile: "compose",
-              buildMethod: "compose",
-              confidence: "high",
-              evidence: [],
-              needsDecision: [],
+            detection: {
+              source: {
+                kind: "compose",
+                composeFiles: ["compose.yml"],
+                services: ["web", "worker"],
+              },
+              candidates: [
+                {
+                  id: "compose-candidate",
+                  name: "Compose stack (2 services)",
+                  root: "",
+                  profile: "compose",
+                  buildMethod: "compose",
+                  confidence: "high",
+                  evidence: [],
+                  needsDecision: [],
+                },
+              ],
+              compose: {
+                digest: "sha256:aa",
+                files: ["compose.yml"],
+                services: [
+                  { name: "web", image: "nginx:alpine", ports: [], mounts: [], advanced: [] },
+                  { name: "worker", buildContext: ".", ports: [], mounts: [], advanced: [] },
+                ],
+                variables: ["API_KEY"],
+                warnings: [
+                  "worker builds from a local Dockerfile; rebuilds are not tracked automatically.",
+                ],
+                unsupported: ["network mode host is not supported"],
+                preview: "services:\n  web:\n    image: nginx:alpine\n  worker:\n    build: .\n",
+              },
+              selectedId: "compose-candidate",
+              scannedFiles: 1,
+              scannedBytes: 64,
+              truncated: false,
+              gitRequirements: { submodules: false, lfs: false },
             },
-          ],
-          compose: {
-            digest: "sha256:aa",
-            files: ["compose.yml"],
-            services: [
-              { name: "web", image: "nginx:alpine", ports: [], mounts: [], advanced: [] },
-              { name: "worker", buildContext: ".", ports: [], mounts: [], advanced: [] },
-            ],
-            variables: ["API_KEY"],
-            warnings: [
-              "worker builds from a local Dockerfile; rebuilds are not tracked automatically.",
-            ],
-            unsupported: ["network mode host is not supported"],
-            preview: "services:\n  web:\n    image: nginx:alpine\n  worker:\n    build: .\n",
           },
-          selectedId: "compose-candidate",
-          scannedFiles: 1,
-          scannedBytes: 64,
-          truncated: false,
-          gitRequirements: { submodules: false, lfs: false },
-        },
-      },
-      findings: [],
-      planPreview: "",
-      updatedAt: now,
-      expiresAt: "2026-09-04T12:00:00Z",
-    }),
+          findings: [],
+          planPreview: "",
+          updatedAt: now,
+          expiresAt: "2026-09-04T12:00:00Z",
+        }),
   )
-  await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Compose", exact: true }).click()
-  await page.getByLabel("compose.yml content").fill("services:\n  web:\n    image: nginx:alpine\n")
-  await page.getByRole("button", { name: "Inspect", exact: true }).click()
+  await page.goto("/deploy/new?draft=journey-draft")
 
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
@@ -1628,4 +1728,30 @@ test("the public address can ask visitors for a password before the first deploy
       protection: { username: "client", hash: "fixture-sealed-password" },
     },
   ])
+})
+
+test("workspace: deployment Back and Forward restore each step and its in-progress fields", async ({
+  page,
+}) => {
+  await mockNewProject(page)
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "project")
+  await page.getByRole("textbox", { name: "Project name" }).fill("history-site")
+  await gotoStep(page, "runtime")
+  await expect(page).toHaveURL(/step=runtime/)
+  const port = page.getByRole("spinbutton", { name: "Port the app listens on" })
+  await port.fill("4088")
+  await gotoStep(page, "variables")
+  await expect(page).toHaveURL(/step=variables/)
+  await page.goBack()
+  await expect(page).toHaveURL(/step=runtime/)
+  await expect(page.getByRole("heading", { name: "How should it run?" })).toBeVisible()
+  await expect(port).toHaveValue("4088")
+  await expect(port).toBeFocused()
+  await page.goForward()
+  await expect(page).toHaveURL(/step=variables/)
+  await gotoStep(page, "project")
+  await expect(page.getByRole("textbox", { name: "Project name" })).toHaveValue("history-site")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
 })

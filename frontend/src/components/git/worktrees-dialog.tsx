@@ -15,6 +15,8 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Trash } from "@/components/icons"
+import { cn } from "@/lib/utils"
 
 export function WorktreesDialog({
   open,
@@ -25,6 +27,7 @@ export function WorktreesDialog({
   canTerminal,
   confirm,
   onChanged,
+  onDelete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -34,6 +37,8 @@ export function WorktreesDialog({
   canTerminal: boolean
   confirm: (request: ConfirmRequest) => void
   onChanged: () => void
+  /** Deletes a worktree with whatever is uncommitted in it, after saying what that loses. */
+  onDelete?: (tree: GitWorktree) => void
 }) {
   const [parent, setParent] = useState(repoPath.slice(0, repoPath.lastIndexOf("/")) || "/")
   const [name, setName] = useState("")
@@ -80,7 +85,8 @@ export function WorktreesDialog({
       description: (
         <p>
           The checkout at <span className="font-mono break-all">{tree.path}</span> is removed. The
-          branch and commits are kept. Git refuses if the checkout contains uncommitted work.
+          branch and commits are kept. Git refuses if the checkout contains uncommitted work — use
+          Delete for one whose changes you mean to throw away.
         </p>
       ),
       confirmLabel: "Remove worktree",
@@ -109,6 +115,17 @@ export function WorktreesDialog({
         <ul className="divide-y divide-hairline">
           {trees.data?.map((tree) => (
             <li key={tree.path} className="flex flex-wrap items-center gap-2 py-2">
+              <SourceBranch
+                aria-hidden
+                className={cn(
+                  "size-4 shrink-0",
+                  tree.main
+                    ? "text-brand"
+                    : tree.current
+                      ? "text-success"
+                      : "text-muted-foreground",
+                )}
+              />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-mono text-body">{tree.branch || "detached HEAD"}</p>
                 <p className="truncate font-mono text-hint text-muted-foreground" title={tree.path}>
@@ -136,15 +153,31 @@ export function WorktreesDialog({
                     </Button>
                   )}
                   {canDestruct && !tree.main && !tree.current && !tree.locked && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="text-destructive"
-                      disabled={busy}
-                      onClick={() => remove(tree)}
-                    >
-                      Remove
-                    </Button>
+                    <>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => remove(tree)}
+                      >
+                        <Trash />
+                        Remove
+                      </Button>
+                      {onDelete && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="text-destructive"
+                          disabled={busy}
+                          onClick={() => {
+                            onOpenChange(false)
+                            onDelete(tree)
+                          }}
+                        >
+                          Delete…
+                        </Button>
+                      )}
+                    </>
                   )}
                 </>
               ) : (

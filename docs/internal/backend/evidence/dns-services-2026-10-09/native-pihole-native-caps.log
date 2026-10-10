@@ -1,0 +1,4 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:224: read udp 127.0.0.1:45299->127.0.0.1:41939: i/o timeout
+--- FAIL: TestDNSServiceNativeOwnedEngine (25.86s)
+FAIL

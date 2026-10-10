@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   ChartActivity,
@@ -15,6 +15,7 @@ import {
   Play,
   Plus,
   RefreshClockwise,
+  Route,
   Slash,
   Trash,
   Warning,
@@ -76,6 +77,7 @@ import {
   type StreamFilter,
 } from "@/lib/streams"
 import { STREAM_PRESETS, applyPreset } from "@/lib/stream-presets"
+import { investigateHref } from "@/lib/network-investigator"
 import { bytes, duration } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -133,6 +135,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  */
 export function StreamsPage() {
   const { can } = useAuth()
+  const router = useRouter()
   const proxy = useProxy()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useSessionState<StreamEntry | null>("proxy.streams.editing", null)
@@ -496,6 +499,28 @@ export function StreamsPage() {
             run: () => setTraffic({ stream, open: true }),
           },
         ]
+  // The connection path a client takes through the stream, on the Network
+  // page: the forward joined with its sockets, backend legs and log, and a
+  // measured connection followed to the backend it reached. TCP only — the
+  // investigator's probe sends nothing over UDP.
+  const pathVerb = (stream: StreamEntry): Verb[] =>
+    stream.error || stream.protocol === "udp"
+      ? []
+      : [
+          {
+            key: "path",
+            label: "Trace in Network",
+            icon: Route,
+            run: () =>
+              router.push(
+                investigateHref({
+                  target: streamTarget(stream),
+                  port: stream.listen,
+                  measure: stream.state === "live",
+                }),
+              ),
+          },
+        ]
   const rawVerb = (stream: StreamEntry): Verb => ({
     key: "raw",
     label: "Raw file",
@@ -573,6 +598,7 @@ export function StreamsPage() {
             ...recheckVerb(stream),
             ...testVerb(stream),
             ...trafficVerb(stream),
+            ...pathVerb(stream),
             rawVerb(stream),
             ...duplicateVerb(stream),
             ...copyVerbs(stream),
@@ -856,6 +882,16 @@ export function StreamsPage() {
       {dialog}
     </Page>
   )
+}
+
+/**
+ * Where a client on this host reaches a stream: the address it binds, or
+ * loopback in its family for a wildcard.
+ */
+function streamTarget(stream: StreamEntry): string {
+  if (!stream.address || stream.address === "0.0.0.0") return "127.0.0.1"
+  if (stream.address === "::") return "::1"
+  return stream.address
 }
 
 /** The kind of forward, in the card's second line. */

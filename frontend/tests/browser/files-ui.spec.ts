@@ -1,12 +1,20 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+test.use({
+  video:
+    process.env.JD_FILES_SEARCH_VIDEO === "1" || process.env.JD_FILES_INTERACTIONS_VIDEO === "1"
+      ? { mode: "on", size: { width: 1280, height: 960 } }
+      : "off",
+})
+
 /**
  * The file manager as a person meets it, against a mocked API.
  *
  * The claims the redesign rests on, each of which a type check cannot make:
  *
- *   the sidebar is a fixed list of places, starred and recent folders that
- *   stays put while the listing walks into folders;
+ *   the sidebar is a fixed list of homes, starred folders, the server's own
+ *   places and recent folders — one line each, named for what they hold —
+ *   that stays put while the listing walks into folders;
  *
  *   there is no page header: the page's commands are in the workbench's
  *   strip, and a folder's colour is picked there and in the inspector, drawn
@@ -86,12 +94,31 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
 
+async function mockPicture(page: Page, width = 80, height = 40) {
+  const picture = await page.evaluate(
+    ({ width, height }) => {
+      const canvas = document.createElement("canvas")
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext("2d")!
+      ctx.fillStyle = "red"
+      ctx.fillRect(0, 0, width, height)
+      return canvas.toDataURL().split(",")[1]
+    },
+    { width, height },
+  )
+  await page.route("**/api/v1/files/raw**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(picture, "base64") }),
+  )
+}
+
 /** The labels the mocked server holds, which a test can change as the real one would. */
 async function mockFiles(
   page: Page,
   colours: Record<string, string> = { [`${home}/photos`]: "red" },
   palette: { defaultColour?: string } = {},
 ) {
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => socket.close())
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
@@ -104,8 +131,8 @@ async function mockFiles(
         places: [
           { name: "operator", path: home, kind: "home", hint: "Where this dashboard starts" },
           { name: "/", path: "/", kind: "root", hint: "Permitted root" },
-          { name: "/etc", path: "/etc", kind: "notable", hint: "System configuration" },
-          { name: "/var/log", path: "/var/log", kind: "notable", hint: "Log files" },
+          { name: "Configuration", path: "/etc", kind: "notable", hint: "System configuration" },
+          { name: "Logs", path: "/var/log", kind: "notable", hint: "Log files" },
         ],
         bookmarks: [{ path: `${home}/photos`, name: "photos" }],
         colours,
@@ -178,6 +205,32 @@ async function mockFiles(
     if (path === "/files/upload") {
       return json(route, { uploaded: ["x"], path: url.searchParams.get("path") }, 201)
     }
+    if (path === "/files/read")
+      return json(route, {
+        path: url.searchParams.get("path"),
+        content: "# Notes\nhello\n",
+        size: 14,
+        language: "markdown",
+        binary: false,
+        modeOctal: "0644",
+      })
+    if (path === "/files/write") return json(route, { ok: true })
+    if (path === "/files/find")
+      return json(route, {
+        root: home,
+        hits: [],
+        truncated: false,
+        visited: 5,
+        elapsedMs: 2,
+      })
+    if (path === "/files/search")
+      return json(route, {
+        hits: [],
+        truncated: false,
+        visited: 5,
+        unreadable: 0,
+        elapsedMs: 2,
+      })
     if (path === "/files/colours/default") {
       palette.defaultColour = route.request().postDataJSON().colour
       for (const target of Object.keys(colours)) delete colours[target]
@@ -199,7 +252,341 @@ async function openFiles(page: Page) {
   await page.locator("tr[data-entry-path]").first().waitFor()
 }
 
+test.describe("native Files interactions", () => {
+  const item = (page: Page, name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+  const folderPath = (page: Page) => new URL(page.url()).searchParams.get("path")
+
+  test("folder history ends at the prior page and deep links survive a fresh tab", async ({
+    page,
+    context,
+  }) => {
+    await mockFiles(page)
+    await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/notes.md`)}`)
+    await expect(page.getByText("notes.md", { exact: true }).first()).toBeVisible()
+    await page.goto(`/files?path=${encodeURIComponent(home)}`)
+    await expect(item(page, "photos")).toBeVisible()
+    await item(page, "photos").locator("[data-file-name]").dblclick()
+    const address = page.url()
+    await page.goBack()
+    await expect(item(page, "photos")).toBeVisible()
+    await page.goBack()
+    await expect(page).toHaveURL(/\/files\/editor\?/)
+    const fresh = await context.newPage()
+    await mockFiles(fresh)
+    await fresh.goto(address)
+    await expect(
+      fresh.getByRole("button", { name: "Folders in " + home + "/photos" }),
+    ).toBeVisible()
+    await expect(fresh.getByRole("button", { name: "Back to previous folder" })).toBeDisabled()
+    await fresh.close()
+  })
+
+  test("browser and toolbar history traverse folders, survive reload and branch after Back", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await expect(page.getByRole("button", { name: "Back to previous folder" })).toBeDisabled()
+    await item(page, "photos").locator("[data-file-name]").dblclick()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("button", { name: "Go to parent folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await page.goBack()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeEnabled()
+    await page.reload()
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeEnabled()
+    await page.getByRole("button", { name: "Forward to next folder" }).click()
+    // Retained rows can still describe the previous folder during native traversal.
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await expect(item(page, "site")).toBeVisible()
+    await page.keyboard.press("Alt+ArrowLeft")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Alt+ArrowRight")
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await expect(item(page, "site")).toBeVisible()
+    await page.keyboard.press("Meta+[")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Meta+]")
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await expect(item(page, "site")).toBeVisible()
+    await page.getByRole("button", { name: "Back to previous folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("navigation", { name: "Places" }).locator("button[title='/etc']").click()
+    await expect.poll(() => folderPath(page)).toBe("/etc")
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeDisabled()
+    const length = await page.evaluate(() => history.length)
+    await page
+      .getByRole("button", { name: "Folders in /etc" })
+      .locator("..")
+      .getByRole("button", { name: "etc", exact: true })
+      .click()
+    expect(await page.evaluate(() => history.length)).toBe(length)
+  })
+
+  test("Back restores selection, active item, scroll and keyboard focus", async ({ page }) => {
+    await mockFiles(page)
+    const many = [
+      ...entries,
+      ...Array.from({ length: 80 }, (_, i) => entry(`file-${String(i).padStart(3, "0")}.txt`)),
+    ]
+    await page.route("**/api/v1/files/list**", async (route) => {
+      const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+      await json(route, {
+        path: dir,
+        parent: home,
+        roots: ["/"],
+        entries: dir === home ? many : [],
+      })
+    })
+    await openFiles(page)
+    await item(page, "file-060.txt").getByRole("checkbox").click()
+    const scroll = page.locator("[data-file-listing] [data-slot='table-container']")
+    const before = await scroll.evaluate((el) => el.scrollTop)
+    expect(before).toBeGreaterThan(500)
+    await page
+      .getByRole("navigation", { name: "Places" })
+      .locator(`button[title='${home}/photos']`)
+      .click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.goBack()
+    await expect(item(page, "file-060.txt").getByRole("checkbox")).toBeChecked()
+    await expect(page.getByRole("heading", { name: "file-060.txt" })).toBeVisible()
+    await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(before)
+    await expect(item(page, "file-060.txt")).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await expect(item(page, "file-061.txt")).toBeFocused()
+  })
+
+  test("refresh, find, hidden files, new folder and Escape belong to Files", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    let reads = 0
+    page.on("request", (request) => {
+      if (request.url().includes("/files/list?")) reads++
+    })
+    await page.evaluate(() => {
+      document.documentElement.dataset.filesAlive = "yes"
+    })
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    for (const key of ["Control+r", "Meta+r", "F5"]) {
+      const before = reads
+      await page.keyboard.press(key)
+      await expect.poll(() => reads).toBeGreaterThan(before)
+      expect(await page.evaluate(() => document.documentElement.dataset.filesAlive)).toBe("yes")
+    }
+    await page.keyboard.press("Control+f")
+    await expect(page.getByRole("dialog", { name: "Find files" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    const hidden = page.waitForRequest(
+      (request) =>
+        request.url().includes("/files/list?") &&
+        new URL(request.url()).searchParams.get("hidden") === "true",
+    )
+    await page.keyboard.press("Control+Shift+.")
+    await hidden
+    await page.keyboard.press("Control+Shift+n")
+    await expect(page.getByRole("dialog", { name: "New folder" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await item(page, "notes.md").locator("[data-file-name]").click()
+    await page.keyboard.press("Control+x")
+    await expect(page.getByLabel("Forget the clipboard")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByLabel("Forget the clipboard")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByLabel("Forget the clipboard")).toHaveCount(0)
+  })
+
+  test("path inputs, menus, dialogs and the app rail keep their own keys", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("Control+l")
+    const input = page.getByRole("textbox", { name: "Folder path" })
+    await expect(input).toBeFocused()
+    await input.fill("/var/www/a b")
+    await page.keyboard.press("Backspace")
+    await expect(input).toHaveValue("/var/www/a ")
+    await page.keyboard.press("Control+a")
+    expect(
+      await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
+    ).toBe("/var/www/a ".length)
+    await page.keyboard.press("Escape")
+    expect(folderPath(page)).toBe(home)
+    await item(page, "photos").click({ button: "right" })
+    await page.keyboard.press("Control+l")
+    await expect(input).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Files shortcuts" }).click()
+    await page.keyboard.press("Backspace")
+    expect(folderPath(page)).toBe(home)
+    await expect(page.getByRole("dialog", { name: "Files shortcuts" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    const rail = page.locator("[data-sidebar='sidebar']").first()
+    const railButton = rail.getByRole("link").first()
+    await railButton.focus()
+    const prevented = await railButton.evaluate((el) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "a",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+      el.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+    expect(prevented).toBe(false)
+    await expect(item(page, "photos").getByRole("checkbox")).not.toBeChecked()
+  })
+
+  test("name typing and tile arrows work from the item name and wrapper", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.type("ph")
+    await expect(item(page, "photos")).toBeFocused()
+    await item(page, "photos").locator("[data-file-name]").focus()
+    await page.keyboard.press("Shift+ArrowDown")
+    await expect(item(page, "site")).toBeFocused()
+    await expect(item(page, "photos").getByRole("checkbox")).toBeChecked()
+    await expect(item(page, "site").getByRole("checkbox")).toBeChecked()
+    await page.keyboard.press("Escape")
+    await item(page, "notes.md").locator("[data-file-name]").focus()
+    await page.keyboard.press("ArrowUp")
+    await expect(item(page, "logo.png")).toBeFocused()
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("Home")
+    await expect(item(page, "photos")).toBeFocused()
+    await page.keyboard.press("ArrowRight")
+    await expect(item(page, "site")).toBeFocused()
+    await page.keyboard.press("Control+Space")
+    await expect(item(page, "site").getByRole("checkbox")).toBeChecked()
+    const columns = await page
+      .locator("[data-file-grid]")
+      .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length)
+    await page.keyboard.press("Home")
+    await page.keyboard.press("ArrowDown")
+    const ordered = await page
+      .locator("[data-entry-path]")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-entry-path")))
+    await expect(
+      page.locator(`[data-entry-path='${ordered[Math.min(columns, ordered.length - 1)]}']`),
+    ).toBeFocused()
+    await page.keyboard.press("Home")
+    await page.keyboard.press("Enter")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Backspace")
+    await expect(item(page, "photos")).toBeFocused()
+  })
+
+  test("restricted roots disable parent navigation and readonly shortcuts never write", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, { ...user, capabilities: ["read"] }),
+    )
+    await page.route("**/api/v1/files/list**", (route) =>
+      json(route, { path: home, parent: "/home", roots: [home], entries }),
+    )
+    const writes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "GET" && request.url().includes("/files/"))
+        writes.push(request.url())
+    })
+    await openFiles(page)
+    await expect(page.getByRole("button", { name: "Go to parent folder" })).toBeDisabled()
+    await item(page, "notes.md").locator("[data-file-name]").click()
+    for (const key of ["Backspace", "Alt+ArrowUp", "Control+Shift+n", "F2", "Delete", "Control+x"])
+      await page.keyboard.press(key)
+    expect(folderPath(page)).toBe(home)
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    expect(writes).toEqual([])
+  })
+
+  test("record the Files workflow at desktop and phone widths", async ({ page }) => {
+    const pause = async () => {
+      if (process.env.JD_FILES_INTERACTIONS_VIDEO === "1") await page.waitForTimeout(700)
+    }
+    await page.setViewportSize({ width: 1280, height: 960 })
+    await mockFiles(page)
+    await openFiles(page)
+    await pause()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.type("ph", { delay: 140 })
+    await page.keyboard.press("Enter")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await pause()
+    await page.keyboard.press("Alt+ArrowLeft")
+    await expect(item(page, "photos")).toBeFocused()
+    await pause()
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("ArrowRight")
+    await page.keyboard.press("Control+Space")
+    await expect(page.getByRole("toolbar", { name: "Selection actions" }).locator("..")).toHaveCSS(
+      "opacity",
+      "1",
+    )
+    await page.screenshot({ path: "test-results/files-native-desktop.png", animations: "disabled" })
+    await pause()
+    await page.keyboard.press("Control+f")
+    await expect(page.getByRole("dialog", { name: "Find files" })).toBeVisible()
+    await pause()
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Files shortcuts" }).click()
+    await expect(page.getByRole("dialog", { name: "Files shortcuts" })).toHaveCSS("opacity", "1")
+    await page.screenshot({
+      path: "test-results/files-native-shortcuts.png",
+      animations: "disabled",
+    })
+    await pause()
+    await page.keyboard.press("Escape")
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeVisible()
+    await page.getByRole("button", { name: "Forward to next folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await pause()
+    await page.getByRole("button", { name: "Back to previous folder" }).click()
+    await expect(item(page, "photos")).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: "test-results/files-native-phone.png", animations: "disabled" })
+    await pause()
+  })
+
+  test("navigation and shortcut help fit a small phone and landscape", async ({ page }) => {
+    await mockFiles(page)
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await openFiles(page)
+    for (const size of [
+      { width: 375, height: 667 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(size)
+      await expect(page.getByRole("button", { name: "Go to parent folder" })).toBeVisible()
+      await page.getByRole("button", { name: "Files shortcuts" }).click()
+      const dialog = page.getByRole("dialog", { name: "Files shortcuts" })
+      await expect(dialog).toBeVisible()
+      const box = await dialog.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.y).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(size.height)
+      await dialog.getByRole("button", { name: "Close", exact: true }).click()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      )
+    }
+  })
+})
+
 test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
+  test.setTimeout(90_000)
   await mockFiles(page)
   const many = Array.from({ length: 500 }, (_, i) =>
     entry(`large-${String(i).padStart(4, "0")}.txt`),
@@ -225,12 +612,12 @@ test("large listings retain find, selection and keyboard menu focus", async ({ p
     "aria-checked",
     "mixed",
   )
-  const more = last.getByRole("button", { name: "More actions", exact: true })
-  await more.focus()
-  await more.press("ArrowDown")
+  const name = last.getByRole("button", { name: "large-0499.txt", exact: true })
+  await name.focus()
+  await name.press("Shift+F10")
   await expect(page.getByRole("menuitem", { name: /Rename/ })).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(more).toBeFocused()
+  await expect(name).toBeFocused()
 })
 
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
@@ -240,8 +627,25 @@ test("the sidebar is a fixed list of places that stays put while browsing", asyn
   // The places, the starred folder and the system directories are all on the page.
   const sidebar = page.getByRole("navigation", { name: "Places" })
   const homeRow = sidebar.locator(`button[title='${home}']`)
-  await expect(homeRow).toContainText("Home")
+  await expect(homeRow).toHaveText("operator")
   await expect(homeRow).toHaveAttribute("aria-current", "location")
+  // One line a row, named for what it holds: no path or caption under it.
+  await expect(sidebar.locator("button[title='/etc']")).toHaveText("Configuration")
+  await expect(sidebar.locator("button[title='/']")).toHaveText("File system")
+  await expect(sidebar).not.toContainText("System configuration")
+  const heights = await sidebar
+    .locator("li")
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
+  expect(new Set(heights)).toEqual(new Set([32]))
+  // A section folds under its heading and stays folded.
+  await sidebar.getByRole("button", { name: "This server" }).click()
+  await expect(sidebar.locator("button[title='/etc']")).toHaveCount(0)
+  await page.reload()
+  await expect(sidebar.getByRole("button", { name: "This server" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  )
+  await sidebar.getByRole("button", { name: "This server" }).click()
   await expect(sidebar.locator(`button[title='${home}/photos']`)).toBeVisible()
   await expect(sidebar.locator("button[title='/var/log']")).toBeVisible()
   await expect(sidebar.locator("button[title='/etc']")).toBeVisible()
@@ -270,6 +674,568 @@ test("the commands sit in the workbench's strip, not in a page header", async ({
   const frame = await strip.boundingBox()
   const pageBox = await page.locator("[data-slot='page']").boundingBox()
   expect(frame!.y - pageBox!.y).toBeLessThan(20)
+})
+
+test("tiles stay compact and toolbar controls share a height", async ({ page }) => {
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const tile = page.locator('[data-entry-path="' + home + '/photos"]').first()
+  const box = await tile.boundingBox()
+  expect(box!.width).toBeLessThanOrEqual(104)
+  expect(box!.height).toBeLessThan(105)
+  // Every control in the strip has a face of one height, alone or in a group.
+  const strip = page.locator("[data-slot='pane-header']").first()
+  const controls = [
+    ...["New", "Upload", "Arrange", "Hide the sidebar"].map((name) =>
+      strip.getByRole("button", { name, exact: true }),
+    ),
+    ...["Folder navigation", "Search"].map((name) =>
+      strip.getByRole("group", { name, exact: true }),
+    ),
+    strip.getByRole("radiogroup", { name: "View", exact: true }),
+  ]
+  const heights = await Promise.all(
+    controls.map(async (control) => (await control.boundingBox())!.height),
+  )
+  expect(new Set(heights)).toEqual(new Set([32]))
+  for (const name of ["Back to previous folder", "Refresh"]) {
+    await expect(
+      strip
+        .getByRole("group", { name: "Folder navigation" })
+        .getByRole("button", { name, exact: true }),
+    ).toBeVisible()
+  }
+  expect(
+    await page
+      .getByRole("navigation", { name: "Places" })
+      .locator('[aria-current="location"] .rounded-full')
+      .count(),
+  ).toBe(0)
+})
+
+test("find responds from the current listing before a disk search and opens from the keyboard", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await json(route, { root: home, hits: [], truncated: false, visited: 5, elapsedMs: 500 })
+  })
+  await openFiles(page)
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Find by name" })
+  await input.fill("ntsmd")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await input.press("Enter")
+  await expect(page.getByRole("dialog", { name: "notes.md", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Find files", exact: true })).toBeHidden()
+  await expect(page.getByRole("button", { name: "Open full editor" })).toBeVisible()
+})
+
+test("content search highlights matches, opens at the line and rejects stale results", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/search**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q")
+    if (query === "old") await new Promise((resolve) => setTimeout(resolve, 700))
+    await json(route, {
+      hits: [
+        {
+          path: home + "/notes.md",
+          name: "notes.md",
+          isDir: false,
+          line: 2,
+          snippet: query + " hello",
+          ranges: [[0, query!.length]],
+        },
+      ],
+      truncated: false,
+      unreadable: 0,
+      visited: 4,
+      elapsedMs: 4,
+    })
+  })
+  await openFiles(page)
+  await page.getByRole("button", { name: "Search inside files", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Search file contents" })
+  await input.fill("old")
+  await page.waitForRequest(
+    (request) => request.url().includes("/files/search") && request.url().includes("q=old"),
+  )
+  await input.fill("new")
+  await expect(page.getByRole("option")).toContainText("new hello")
+  await expect(page.getByRole("option").locator("mark")).toHaveText("new")
+  await page.waitForTimeout(750)
+  await expect(page.getByRole("option")).not.toContainText("old hello")
+  await input.press("Enter")
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole("dialog", { name: "notes.md", exact: true })).toContainText("Ln 2")
+  await expect(page.getByRole("dialog", { name: "Find files", exact: true })).toBeHidden()
+})
+
+test.describe("fixed search palette", () => {
+  for (const viewport of [
+    { name: "desktop", width: 1280, height: 960 },
+    { name: "phone", width: 375, height: 812 },
+    { name: "landscape", width: 640, height: 375 },
+  ]) {
+    for (const mode of ["names", "content"] as const) {
+      test(`${mode} keeps its frame still through every result state on ${viewport.name}`, async ({
+        page,
+      }, testInfo) => {
+        test.setTimeout(60_000)
+        await page.setViewportSize(viewport)
+        await mockFiles(page)
+        await page.route(
+          `**/api/v1/files/${mode === "names" ? "find" : "search"}**`,
+          async (route) => {
+            const q = new URL(route.request().url()).searchParams.get("q")!
+            await new Promise((resolve) => setTimeout(resolve, 300))
+            if (q === "error")
+              return json(
+                route,
+                {
+                  error: { code: "internal", message: "Disk search unavailable", retryable: true },
+                },
+                500,
+              )
+            const count = q === "many" ? 30 : q === "single" ? 1 : q === "partial" ? 24 : 0
+            await json(route, {
+              hits: Array.from({ length: count }, (_, i) => ({
+                ...entry(`${q}-${String(i).padStart(2, "0")}.md`),
+                ...(mode === "content"
+                  ? { line: i + 1, snippet: `The ${q} matching line`, ranges: [[4, 4 + q.length]] }
+                  : {}),
+              })),
+              truncated: q === "partial",
+              unreadable: q === "partial" ? 37 : 0,
+              elapsedMs: 300,
+            })
+          },
+        )
+        await openFiles(page)
+        const trigger = page.getByRole("button", {
+          name: mode === "names" ? "Find" : "Search inside files",
+          exact: true,
+        })
+        await trigger.click()
+        const dialog = page.getByRole("dialog", { name: "Find files" })
+        const input = dialog.getByRole("combobox")
+        const results = dialog.getByRole("listbox", { name: "Search results" })
+        await expect(input).toBeFocused()
+        await dialog.evaluate(async (el) => {
+          await Promise.all(el.getAnimations().map((a) => a.finished))
+        })
+        await dialog.evaluate((el) => {
+          const samples: { bounds: number[]; entering: boolean; exiting: boolean }[] = []
+          Object.assign(el, { searchSamples: samples })
+          const sample = () => {
+            if (!el.isConnected) return
+            const rects = [
+              el,
+              el.querySelector("input")!,
+              el.querySelector('[role="listbox"]')!,
+              el.querySelector('[data-slot="pane-footer"]')!,
+            ]
+            const bounds = rects.flatMap((node) => {
+              const { x, y, width, height } = node.getBoundingClientRect()
+              return [x, y, width, height]
+            })
+            let entering = false
+            let exiting = false
+            for (const node of el.querySelectorAll("[data-search-result]")) {
+              const opacity = Number(getComputedStyle(node).opacity)
+              if (opacity > 0 && opacity < 1) {
+                if (node.hasAttribute("inert")) exiting = true
+                else entering = true
+              }
+            }
+            samples.push({ bounds, entering, exiting })
+            requestAnimationFrame(sample)
+          }
+          requestAnimationFrame(sample)
+        })
+        const border = await input.evaluate((el) => {
+          const style = getComputedStyle(el)
+          return { outline: style.outlineStyle, border: style.borderWidth }
+        })
+        expect(border).toEqual({ outline: "none", border: "0px" })
+        const frame = (await dialog.boundingBox())!
+        expect(frame.x).toBeGreaterThanOrEqual(15)
+        expect(frame.y).toBeGreaterThanOrEqual(15)
+        expect(frame.x + frame.width).toBeLessThanOrEqual(viewport.width - 15)
+        expect(frame.y + frame.height).toBeLessThanOrEqual(viewport.height - 15)
+        for (const [query, count] of [
+          ["many", 30],
+          ["single", 1],
+          ["missing", 0],
+          ["partial", 24],
+          ["error", 0],
+        ] as const) {
+          if (query === "many") await input.pressSequentially(query, { delay: 55 })
+          else await input.fill(query)
+          await expect(results).toHaveAttribute("aria-busy", "false")
+          await expect(results.getByRole("option")).toHaveCount(count)
+          if (count) {
+            const first = results.getByRole("option").first()
+            await expect(first.locator("..")).toHaveCSS("opacity", "1")
+            await expect(input).toHaveAttribute(
+              "aria-activedescendant",
+              (await first.getAttribute("id"))!,
+            )
+            if (mode === "content") await expect(first.locator("mark")).toHaveText(query)
+            if (query === "many") {
+              await input.press("ArrowUp")
+              await expect(results.getByRole("option").last()).toHaveAttribute(
+                "aria-selected",
+                "true",
+              )
+              await expect(results.getByRole("option").last()).toBeInViewport()
+              await input.press("ArrowDown")
+              await expect(first).toHaveAttribute("aria-selected", "true")
+            }
+          } else await expect(input).not.toHaveAttribute("aria-activedescendant")
+          if (query === "missing") await expect(results).toContainText("Try fewer words")
+          if (query === "partial") {
+            await expect(dialog.getByRole("status")).toContainText("Partial results")
+            await expect(dialog).toContainText("37 entries could not be read")
+          }
+          if (query === "error") await expect(results).toContainText("Disk search unavailable")
+          if (query === "many" || query === "single")
+            await page.screenshot({
+              path: `test-results/files-search-${mode}-${viewport.name}-${query}.png`,
+            })
+          await expect(input).toBeFocused()
+        }
+        await results.getByRole("button", { name: /Try again/ }).click()
+        await expect(results).toHaveAttribute("aria-busy", "false")
+        await input.fill("partial")
+        await expect(results.getByRole("option")).toHaveCount(24)
+        if (mode === "content") {
+          await dialog.getByRole("button", { name: "Match case", exact: true }).click()
+          await expect(results).toHaveAttribute("aria-busy", "false")
+          await dialog.getByRole("button", { name: "Regular expression", exact: true }).click()
+          await expect(results).toHaveAttribute("aria-busy", "false")
+        }
+        await dialog.getByText("Hidden files", { exact: true }).click()
+        await expect(results).toHaveAttribute("aria-busy", "false")
+        await dialog.getByRole("button", { name: "Clear search" }).click()
+        await expect(input).toHaveValue("")
+        await expect(input).toBeFocused()
+        await dialog
+          .getByRole("button", { name: mode === "names" ? "Contents" : "Names", exact: true })
+          .click()
+        await expect(input).toBeFocused()
+        const samples = await dialog.evaluate(
+          (el) =>
+            (
+              el as unknown as {
+                searchSamples: { bounds: number[]; entering: boolean; exiting: boolean }[]
+              }
+            ).searchSamples,
+        )
+        expect(samples.length).toBeGreaterThan(20)
+        for (let i = 0; i < samples[0].bounds.length; i++) {
+          const values = samples.map((sample) => sample.bounds[i])
+          expect(
+            Math.max(...values) - Math.min(...values),
+            `frame coordinate ${i} moved`,
+          ).toBeLessThan(0.6)
+        }
+        expect(
+          samples.some((sample) => sample.entering),
+          "results fade in",
+        ).toBe(true)
+        expect(
+          samples.some((sample) => sample.exiting),
+          "results fade out",
+        ).toBe(true)
+        await testInfo.attach("frame-measurements", {
+          body: JSON.stringify(
+            {
+              viewport,
+              mode,
+              frames: samples.length,
+              maximumMovement: Math.max(
+                ...samples[0].bounds.map((_, i) => {
+                  const values = samples.map((sample) => sample.bounds[i])
+                  return Math.max(...values) - Math.min(...values)
+                }),
+              ),
+              fadeIn: samples.some((sample) => sample.entering),
+              fadeOut: samples.some((sample) => sample.exiting),
+            },
+            null,
+            2,
+          ),
+          contentType: "application/json",
+        })
+        await page.keyboard.press("Escape")
+        await expect(dialog).toBeHidden()
+      })
+    }
+  }
+
+  test("reduced motion shows results immediately and scope controls remain reachable", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("navigation", { name: "Places" }).locator("button[title='/etc']").click()
+    await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.getByRole("button", { name: "Find", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Find files" })
+    const input = dialog.getByRole("combobox")
+    const frame = await dialog.boundingBox()
+    // Home is the home around the folder, or the dashboard's own when /etc is
+    // inside none: a choice of where to search, which stays chosen.
+    const scope = dialog.getByRole("radiogroup", { name: "Search in" })
+    await expect(scope).toBeInViewport()
+    await expect(scope.getByRole("radio", { name: "This folder" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    const footer = dialog.locator('[data-slot="pane-footer"]')
+    await expect(footer).toContainText("/etc")
+    await scope.getByRole("radio", { name: "Home" }).click()
+    await expect(scope.getByRole("radio", { name: "Home" })).toHaveAttribute("aria-checked", "true")
+    await expect(footer).toContainText(home)
+    await expect(scope.getByRole("radio", { name: "Everywhere" })).toBeInViewport()
+    await input.fill("missing")
+    await expect(dialog.getByRole("listbox")).toHaveAttribute("aria-busy", "false")
+    const result = dialog.locator("[data-search-result]")
+    await expect(result).toHaveCSS("opacity", "1")
+    await expect(result).toHaveCSS("transform", "none")
+    expect(await dialog.boundingBox()).toEqual(frame)
+    await page.screenshot({ path: "test-results/files-search-scope-phone.png" })
+    await page.keyboard.press("Escape")
+    await expect(dialog).toBeHidden()
+  })
+})
+
+test("the full editor preserves the sheet draft, saves it and navigates through a collapsible tree", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  let written: { content?: string } = {}
+  await page.route("**/api/v1/files/write", async (route) => {
+    written = route.request().postDataJSON()
+    await json(route, { ok: true })
+  })
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/notes.md"]').dblclick()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("unsaved draft")
+  await expect(page.getByRole("dialog")).toContainText("Unsaved changes")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toBeVisible()
+  await expect(page.locator(".monaco-editor")).toContainText("unsaved draft")
+  await page.getByRole("button", { name: "Hide file tree" }).click()
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Show file tree" }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => written.content).toContain("unsaved draft")
+  await page
+    .getByRole("complementary", { name: "File explorer" })
+    .getByRole("button", { name: /logo.png/ })
+    .click()
+  await expect(page.getByRole("button", { name: "Crop", exact: true })).toBeVisible()
+})
+
+test("unsaved full-page edits are guarded when changing files or leaving", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", (route) =>
+    json(route, { hits: [entry("notes.md")], truncated: false }),
+  )
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/notes.md"]').dblclick()
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("dirty")
+  await expect(page.getByRole("region", { name: "File editor" })).toContainText("Unsaved changes")
+  await page.keyboard.press("Control+p")
+  const finder = page.getByRole("combobox", { name: "Find by name" })
+  await finder.fill("notes")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await finder.press("Enter")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.locator(".monaco-editor")).toContainText("dirty")
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.locator(".monaco-editor")).toContainText("dirty")
+  await page.evaluate(() => history.back())
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
+  await expect(page).toHaveURL(/\/files\?path=/)
+})
+
+test("local name results remain usable when the disk search fails", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", (route) =>
+    json(
+      route,
+      { error: { code: "internal", message: "Disk search unavailable", retryable: true } },
+      500,
+    ),
+  )
+  await openFiles(page)
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Find by name" })
+  await input.fill("ntsmd")
+  await expect(page.getByText("Disk search unavailable")).toBeVisible()
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await input.press("Enter")
+  await expect(page.getByRole("button", { name: "Open full editor" })).toBeVisible()
+})
+
+test("a deep-linked file unfolds its ancestor folders in the full editor", async ({ page }) => {
+  await mockFiles(page)
+  const path = home + "/site/src/app.ts"
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path")
+    const listing =
+      dir === home
+        ? [entry("site", { isDir: true })]
+        : dir === home + "/site"
+          ? [entry("src", { path: home + "/site/src", isDir: true })]
+          : [entry("app.ts", { path })]
+    return json(route, { path: dir, entries: listing })
+  })
+  await page.goto(`/files/editor?path=${encodeURIComponent(path)}&root=${encodeURIComponent(home)}`)
+  await expect(
+    page
+      .getByRole("complementary", { name: "File explorer" })
+      .getByRole("button", { name: /app.ts/ }),
+  ).toBeVisible()
+})
+
+test("image edits have crop handles, redo and a full editor that keeps the edit", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/logo.png"]').click()
+  await page.getByRole("button", { name: "Crop, rotate, resize" }).click()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Undo", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "80")
+  await page.getByRole("button", { name: "Redo", exact: true }).click()
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Crop", exact: true }).click()
+  await expect(page.locator(".ReactCrop__drag-handle").first()).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Crop aspect ratio" })).toBeVisible()
+  await page.getByRole("button", { name: /^Apply \d/ }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "32")
+})
+
+test("full editors and the search palette fit desktop and phone widths", async ({ page }) => {
+  await mockFiles(page)
+  await mockPicture(page, 320, 180)
+  await openFiles(page)
+  for (const width of [1280, 1720]) {
+    await page.setViewportSize({ width, height: 960 })
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.screenshot({ path: `test-results/files-tiles-${width}.png` })
+  }
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  await page.getByRole("combobox", { name: "Find by name" }).fill("ntsmd")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  const resultBounds = await page.getByRole("listbox", { name: "Search results" }).boundingBox()
+  expect(resultBounds!.height).toBeGreaterThan(300)
+  await page.screenshot({ path: "test-results/files-find-1720.png" })
+  await page.keyboard.press("Enter")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  for (const width of [1280, 1720]) {
+    await page.setViewportSize({ width, height: 960 })
+    await page.screenshot({ path: `test-results/files-editor-${width}.png` })
+  }
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+  await page.screenshot({ path: "test-results/files-editor-phone.png" })
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toBeHidden()
+  await page.getByRole("button", { name: "Show file tree", exact: true }).click()
+  const tree = page.getByRole("complementary", { name: "File explorer" })
+  await expect(tree).toBeVisible()
+  await tree.getByRole("button", { name: /logo.png/ }).click()
+  await expect(tree).toBeHidden()
+  await expect(page.getByRole("button", { name: "Crop", exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+  await page.screenshot({ path: "test-results/files-image-editor-phone.png" })
+  await page.setViewportSize({ width: 640, height: 375 })
+  await expect(
+    page.getByRole("button", { name: "Save over original", exact: true }),
+  ).toBeInViewport()
+  await page.getByRole("slider", { name: "saturate", exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByRole("slider", { name: "saturate", exact: true })).toBeInViewport()
+  await page.setViewportSize({ width: 1720, height: 960 })
+  await page.screenshot({ path: "test-results/files-image-editor-1720.png" })
+})
+
+test("image export saves live adjustments and a copy keeps the source dirty", async ({ page }) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  let upload: { url: string; body: Buffer } | undefined
+  await page.route("**/api/v1/files/upload**", async (route) => {
+    upload = { url: route.request().url(), body: route.request().postDataBuffer()! }
+    await json(route, { ok: true })
+  })
+  await page.goto(
+    `/files/editor?path=${encodeURIComponent(home + "/logo.png")}&root=${encodeURIComponent(home)}`,
+  )
+  await expect(page.getByLabel("Image editing canvas")).toBeVisible()
+  const brightness = page.getByRole("slider", { name: "brightness", exact: true })
+  await brightness.focus()
+  await brightness.press("ArrowLeft")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("textbox", { name: "Save image as" }).fill("copy.png")
+  await page.getByRole("button", { name: "Save as", exact: true }).click()
+  await expect.poll(() => upload?.url).toContain("overwrite=false")
+  expect(upload!.body.toString("latin1")).toContain('filename="copy.png"')
+  const start = upload!.body.indexOf(Buffer.from("89504e470d0a1a0a", "hex"))
+  const end = upload!.body.indexOf(Buffer.from("0000000049454e44", "hex"), start) + 12
+  expect(start).toBeGreaterThan(0)
+  const encoded = upload!.body.subarray(start, end).toString("base64")
+  const red = await page.evaluate(async (encoded) => {
+    const data = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0))
+    const blob = new Blob([data], { type: "image/png" })
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement("canvas")
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext("2d")!
+    ctx.drawImage(bitmap, 0, 0)
+    const value = ctx.getImageData(0, 0, 1, 1).data[0]
+    bitmap.close()
+    return value
+  }, encoded)
+  expect(red).toBeGreaterThan(0)
+  expect(red).toBeLessThan(255)
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect.poll(() => upload?.url).toContain("overwrite=true")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
 })
 
 test("a folder's colour is drawn everywhere it is and saved on the server", async ({ page }) => {
@@ -491,4 +1457,321 @@ test.describe("with no hover available", () => {
     })
     expect(hidden).toEqual([])
   })
+})
+
+for (const view of ["list", "grid"] as const) {
+  test(`${view}: selection toggles from the whole entry without shifting the listing`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+    const site = page.locator(`[data-file-listing] [data-entry-path="${home}/site"]`)
+    // Selection geometry is measured after the listing's entrance has settled.
+    await photos.evaluate(async (el) => {
+      await Promise.all(
+        el
+          .closest(".animate-rise")
+          ?.getAnimations()
+          .map((a) => a.finished) ?? [],
+      )
+    })
+    const before = await photos.boundingBox()
+    await photos.getByRole("checkbox").click()
+    await expect(page.getByRole("toolbar", { name: "Selection actions" })).toBeVisible()
+    expect(await photos.boundingBox()).toEqual(before)
+    await site.getByRole("button", { name: "site", exact: true }).click()
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(page.getByRole("toolbar")).toContainText("2 items selected")
+    await site.click()
+    await expect(site).not.toHaveAttribute("data-state", "selected")
+    await page.getByRole("toolbar").getByRole("button", { name: "Copy", exact: true }).click()
+    await page.getByRole("button", { name: "Clear the selection" }).click()
+    await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeVisible()
+    expect(await photos.boundingBox()).toEqual(before)
+    await page.getByRole("button", { name: "Forget the clipboard" }).click()
+    await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeHidden()
+    expect(await photos.boundingBox()).toEqual(before)
+    await expect(page.locator('[data-file-listing] button[aria-label*="actions"]')).toHaveCount(0)
+    await photos.dblclick()
+    await expect(page.getByRole("button", { name: `Folders in ${home}/photos` })).toBeVisible()
+  })
+
+  test(`${view}: modifier selection, checkbox ranges and keyboard opening remain available`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    const notes = listing.locator(`[data-entry-path="${home}/notes.md"]`)
+    await photos.getByRole("checkbox").click()
+    await notes.click({ modifiers: ["Shift"] })
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(5)
+    await notes.click({ modifiers: ["Control"] })
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(4)
+    await page.keyboard.press("Escape")
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+    await photos.click({ modifiers: ["Meta"] })
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    const name = photos.getByRole("button", { name: "photos", exact: true })
+    await name.focus()
+    await name.press("Shift+F10")
+    await expect(page.getByRole("menuitem", { name: /^Rename/ })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(name).toBeFocused()
+    await name.press("Enter")
+    await expect(page.getByRole("button", { name: `Folders in ${home}/photos` })).toBeVisible()
+  })
+
+  test(`${view}: a marquee selects, shrinks, adds and cancels without opening entries`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    const site = listing.locator(`[data-entry-path="${home}/site"]`)
+    const first = (await photos.boundingBox())!
+    const second = (await site.boundingBox())!
+    const viewport = (await listing.boundingBox())!
+    const lastBottom = await listing
+      .locator("[data-entry-path]")
+      .evaluateAll((nodes) => Math.max(...nodes.map((node) => node.getBoundingClientRect().bottom)))
+    const bottom = lastBottom + 8
+    const start = { x: view === "grid" ? second.x + second.width + 3 : first.x + 6, y: bottom }
+    const end = { x: first.x + 4, y: first.y + 4 }
+    await page.mouse.move(start.x, start.y)
+    await page.mouse.down()
+    await page.mouse.move(end.x, end.y, { steps: 8 })
+    await expect(page.locator("[data-file-marquee]")).toBeVisible()
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    if (view === "grid") {
+      // Retracting past the first tile removes it from this gesture's result.
+      await page.mouse.move(second.x + second.width - 2, second.y + 4, { steps: 4 })
+      await expect(photos).not.toHaveAttribute("data-state", "selected")
+      await expect(site).toHaveAttribute("data-state", "selected")
+    }
+    await page.mouse.up()
+    await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await site.getByRole("checkbox").click()
+    await page.keyboard.down("Control")
+    await page.mouse.move(first.x + 3, bottom)
+    await page.mouse.down()
+    await page.mouse.move(first.x + first.width / 2, first.y + 4, { steps: 6 })
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.keyboard.press("Escape")
+    await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+    await expect(photos).not.toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.mouse.up()
+    await page.keyboard.up("Control")
+    // A plain click on empty space clears, while a right-click leaves selection intact.
+    await page.mouse.click(viewport.x + viewport.width - 5, viewport.y + viewport.height / 2, {
+      button: "right",
+    })
+    await page.keyboard.press("Escape")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.mouse.click(start.x, start.y)
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+  })
+
+  test(`${view}: native dragging moves the selected group and Alt copies`, async ({ page }) => {
+    await mockFiles(page)
+    const transfers: { mode: string; from: string; to: string; overwrite: boolean }[] = []
+    for (const mode of ["move", "copy"]) {
+      await page.route(`**/api/v1/files/${mode}`, (route) => {
+        transfers.push({ mode, ...route.request().postDataJSON() })
+        return json(route, { ok: true })
+      })
+    }
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const notes = listing.locator(`[data-entry-path="${home}/notes.md"]`)
+    const logo = listing.locator(`[data-entry-path="${home}/logo.png"]`)
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    await notes.getByRole("checkbox").click()
+    const companion = view === "list" ? "site" : "logo.png"
+    await listing.locator(`[data-entry-path="${home}/${companion}"]`).click()
+    await page.evaluate(() => {
+      window.addEventListener("dragstart", () => {
+        document.documentElement.dataset.fileDragPreview =
+          document.body.lastElementChild?.textContent ?? ""
+      })
+    })
+    await photos.evaluate((element) => {
+      element.addEventListener("dragover", () => {
+        element.setAttribute(
+          "data-drag-sources",
+          JSON.stringify(
+            Array.from(document.querySelectorAll<HTMLElement>('[data-dragging="true"]')).map(
+              (source) => source.dataset.entryPath,
+            ),
+          ),
+        )
+        element.setAttribute(
+          "data-drop-highlight",
+          String(element.classList.contains("bg-wash-brand")),
+        )
+      })
+    })
+    await notes.dragTo(photos)
+    await expect.poll(() => transfers.length).toBe(2)
+    expect(await page.locator("html").getAttribute("data-file-drag-preview")).toContain("2 items")
+    expect(JSON.parse((await photos.getAttribute("data-drag-sources"))!)).toEqual([
+      `${home}/${companion}`,
+      `${home}/notes.md`,
+    ])
+    await expect(photos).toHaveAttribute("data-drop-highlight", "true")
+    expect(transfers).toEqual([
+      { mode: "move", from: `${home}/notes.md`, to: `${home}/photos/notes.md`, overwrite: false },
+      {
+        mode: "move",
+        from: `${home}/${companion}`,
+        to: `${home}/photos/${companion}`,
+        overwrite: false,
+      },
+    ])
+    await expect(listing.locator('[data-dragging="true"]')).toHaveCount(0)
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+    await expect(page.getByRole("heading", { name: "operator", exact: true })).toBeVisible()
+    await page.keyboard.down("Alt")
+    await logo.dragTo(photos)
+    await page.keyboard.up("Alt")
+    await expect.poll(() => transfers.length).toBe(3)
+    expect(transfers[2]).toEqual({
+      mode: "copy",
+      from: `${home}/logo.png`,
+      to: `${home}/photos/logo.png`,
+      overwrite: false,
+    })
+    await expect(page.getByRole("heading", { name: "logo.png", exact: true })).toBeVisible()
+    // A selected folder cannot move into itself, including a drop on its sidebar alias.
+    await photos.getByRole("checkbox").click()
+    await photos.dragTo(
+      page.getByRole("navigation", { name: "Places" }).locator(`button[title="${home}/photos"]`),
+    )
+    expect(transfers).toHaveLength(3)
+    await expect(listing.locator('[data-dragging="true"]')).toHaveCount(0)
+  })
+}
+
+test("marquee autoscroll reaches off-screen entries and stops on release", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 100 }, (_, i) =>
+    entry(`item-${String(i).padStart(3, "0")}.txt`),
+  )
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const scroll = listing.locator("[data-file-scroll]")
+  const first = (await listing.locator("[data-entry-path]").first().boundingBox())!
+  const viewport = (await scroll.boundingBox())!
+  await page.mouse.move(first.x - 3, first.y + 3)
+  await page.mouse.down()
+  await page.mouse.move(viewport.x + viewport.width - 4, viewport.y + viewport.height - 2, {
+    steps: 8,
+  })
+  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(150)
+  await page.mouse.up()
+  await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+  const stopped = await scroll.evaluate((el) => el.scrollTop)
+  await page.waitForTimeout(150)
+  expect(await scroll.evaluate((el) => el.scrollTop)).toBe(stopped)
+  await expect(listing.locator('[data-state="selected"]')).not.toHaveCount(0)
+})
+
+test("selection actions fit a phone and respect reduced motion", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const first = listing.locator("[data-entry-path]").first()
+  const before = await first.boundingBox()
+  await first.getByRole("checkbox").click()
+  const toolbar = page.getByRole("toolbar", { name: "Selection actions" })
+  await expect(toolbar).toBeVisible()
+  const box = (await toolbar.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(390)
+  expect(await first.boundingBox()).toEqual(before)
+  const animation = await toolbar.locator("..").evaluate((el) => ({
+    opacity: getComputedStyle(el).opacity,
+    transform: getComputedStyle(el).transform,
+  }))
+  expect(animation.opacity).toBe("1")
+  expect(["none", "matrix(1, 0, 0, 1, 0, 0)"]).toContain(animation.transform)
+})
+
+test("touch long-press opens the entry's verbs and allows ordinary selection", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+  const box = (await photos.boundingBox())!
+  await photos.dispatchEvent("pointerdown", {
+    pointerType: "touch",
+    pointerId: 1,
+    clientX: box.x + 30,
+    clientY: box.y + 30,
+    button: 0,
+    bubbles: true,
+  })
+  await expect(page.getByRole("menuitem", { name: /^Rename/ })).toBeVisible()
+  await photos.dispatchEvent("pointerup", { pointerType: "touch", pointerId: 1 })
+  await page.keyboard.press("Escape")
+  await photos.getByRole("checkbox").click()
+  await listing.locator(`[data-entry-path="${home}/site"]`).click()
+  await expect(listing.locator('[data-state="selected"]')).toHaveCount(2)
+})
+
+test("desktop file drops still upload into the accepting folder", async ({ page }) => {
+  await mockFiles(page)
+  let uploadedTo = ""
+  await page.route("**/api/v1/files/upload**", (route) => {
+    uploadedTo = new URL(route.request().url()).searchParams.get("path") ?? ""
+    return json(route, { uploaded: ["desktop.txt"] }, 201)
+  })
+  await openFiles(page)
+  const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+  const transfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(["from desktop"], "desktop.txt", { type: "text/plain" }))
+    return data
+  })
+  await photos.dispatchEvent("dragenter", { dataTransfer: transfer })
+  await expect(photos).toHaveClass(/bg-wash-brand/)
+  await photos.dispatchEvent("drop", { dataTransfer: transfer })
+  await expect.poll(() => uploadedTo).toBe(`${home}/photos`)
+  await expect(photos).not.toHaveClass(/bg-wash-brand/)
+})
+
+test("a failed native move keeps its source preview available", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/move", (route) =>
+    json(route, { error: "Permission denied" }, 403),
+  )
+  await openFiles(page)
+  const notes = page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`)
+  const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+  await notes.getByRole("checkbox").click()
+  await notes.dragTo(photos)
+  await expect(page.getByText("Could not move notes.md", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "notes.md", exact: true })).toBeVisible()
+  await expect(page.locator('[data-dragging="true"]')).toHaveCount(0)
 })

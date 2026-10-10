@@ -1,0 +1,11 @@
+{
+  "base": "d427809d81492945396bd5386395dec4010b7916",
+  "argv": [
+    "scripts/test-changed.sh",
+    "d427809d81492945396bd5386395dec4010b7916"
+  ],
+  "elapsed_seconds": 70.06110919360071,
+  "exit_code": 0,
+  "raw_bytes": 176,
+  "raw_sha256": "29c00fe0d69989a17928de7876a8336eea5eab26ae6d5a0780bf96a1b2fbf147"
+}

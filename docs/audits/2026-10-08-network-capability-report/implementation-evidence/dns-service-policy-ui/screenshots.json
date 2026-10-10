@@ -1,0 +1,69 @@
+{
+  "production": "9d863a9f",
+  "spec": "1fe294f9",
+  "source": "mocked UI",
+  "count": 15,
+  "widthAssertions": "all document/sheet checks passed; record390/1280/1720, client390/1280",
+  "files": [
+    {
+      "file": "dns-record-inventory-390.png",
+      "sha256": "4437d901d69f8e5ab11c3067296740596dfe7be16d323679b3dfd66462fae60f"
+    },
+    {
+      "file": "dns-record-readback-390.png",
+      "sha256": "574aa08ef4e21729467ff450bc96be0c5cec503482f10f9291cca81b5f566e4d"
+    },
+    {
+      "file": "dns-record-review-390.png",
+      "sha256": "cc038b7757873a4467052b7c86bb695be3bc7e73ef309e5e31e201e1773bbd53"
+    },
+    {
+      "file": "dns-record-inventory-1280.png",
+      "sha256": "a6cd06f8d26dc7110d26ec79f86a790e3f2fdfa74af9424224971c4c20340f5f"
+    },
+    {
+      "file": "dns-record-readback-1280.png",
+      "sha256": "c8b8c0bba2687c501f8625f080cc8dc77655b551ba366490e5a25fc2cbca7cf7"
+    },
+    {
+      "file": "dns-record-review-1280.png",
+      "sha256": "40f1ec0c4299e9fc199501cf2303b852c3ee794fb439e27891cf787523af1869"
+    },
+    {
+      "file": "dns-client-groups-1280.png",
+      "sha256": "96563366b2a9702e481ff464f28c72ebc5a77eea4d78d0b867eb6e97a925619f"
+    },
+    {
+      "file": "dns-client-readback-1280.png",
+      "sha256": "4b18dcd4a968a5c3ae6d6667b9f8327189812f9defaf28d95aad501841af6a79"
+    },
+    {
+      "file": "dns-client-review-1280.png",
+      "sha256": "0f0d3ecec560e1c5362394162aa36a766554e4a2d0472b87844d719ce384ac95"
+    },
+    {
+      "file": "dns-client-groups-390.png",
+      "sha256": "bb214979014a6066eedbf1a7b294fa1f4eb749d3c3bb05c9eb46b4c4c558451a"
+    },
+    {
+      "file": "dns-client-readback-390.png",
+      "sha256": "3b505ebf0a45f8ba5f6937460ab0e32f08cce4c614a7a8f3f97192221caf785f"
+    },
+    {
+      "file": "dns-client-review-390.png",
+      "sha256": "03f990691356496ec4c193cd73c4c9f59c6f0bb727a829446ee9e94c8dfe7fb2"
+    },
+    {
+      "file": "dns-record-inventory-1720.png",
+      "sha256": "543ed772c77205340933b3e2bacc93ee8d49c874004dfc6736be9066a6af445a"
+    },
+    {
+      "file": "dns-record-readback-1720.png",
+      "sha256": "c7b9ce41969b090556eb9756d1bfba81f9cace95df6411ceffd9161c60356cd1"
+    },
+    {
+      "file": "dns-record-review-1720.png",
+      "sha256": "da61e6027cd88712cae72fee1a0b38cf4b64d767254bed6d1384125370a61772"
+    }
+  ]
+}

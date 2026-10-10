@@ -18,7 +18,6 @@ import { FindingList, type Finding } from "@/components/finding-list"
 import { ExplainIcon } from "@/components/docker/explain"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
  * Two questions that were being answered by one word.
@@ -76,7 +75,9 @@ const CLASS_LABEL: Record<FindingClass, string> = {
   lifecycle: "Lifecycle",
 }
 
-export type FindingAction = (finding: DockerFinding) => void
+export type FindingAction = ((finding: DockerFinding) => void) & {
+  label?: (finding: DockerFinding) => string
+}
 
 /**
  * How many rows are shown before the panel asks whether you want the rest.
@@ -176,15 +177,18 @@ function toFinding(group: FindingGroup, onAction?: FindingAction): Finding {
 
   if (group.findings.length === 1) {
     return {
-      id: first.id,
+      id: group.key,
       level,
       title: first.title,
       detail: first.detail,
       advice: first.advice,
       meta,
       action:
-        first.action && onAction
-          ? { label: first.actionLabel ?? "Fix this", onClick: () => onAction(first) }
+        (first.action || first.targetId) && onAction
+          ? {
+              label: onAction.label?.(first) ?? first.actionLabel ?? "Inspect",
+              onClick: () => onAction(first),
+            }
           : undefined,
     }
   }
@@ -230,7 +234,7 @@ function Targets({ group, onAction }: { group: FindingGroup; onAction?: FindingA
             <button
               type="button"
               onClick={() => onAction(finding)}
-              title={finding.actionLabel ?? `Open ${finding.target}`}
+              title={onAction.label?.(finding) ?? finding.actionLabel ?? `Open ${finding.target}`}
             >
               {finding.target}
             </button>
@@ -314,9 +318,14 @@ export function AttentionPanel({
       <Panel plain className={cn("animate-rise", className)}>
         <PanelHeader title={<PanelTitle />} />
         <PanelBody>
+          <DiagnosisSilences diagnosis={diagnosis} />
           <FindingList
             findings={[]}
-            emptyLabel="Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+            emptyLabel={
+              diagnosis.silences?.length
+                ? "No findings in completed checks"
+                : "Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+            }
           />
         </PanelBody>
       </Panel>
@@ -404,6 +413,7 @@ export function AttentionPanel({
         }
       />
       <PanelBody>
+        <DiagnosisSilences diagnosis={diagnosis} />
         <FindingList findings={rows} onDismiss={dismissOne} />
         {(rest > 0 || showAll) && (
           <Button
@@ -421,202 +431,26 @@ export function AttentionPanel({
   )
 }
 
+function DiagnosisSilences({ diagnosis }: { diagnosis: DockerDiagnosis }) {
+  if (!diagnosis.silences?.length) return null
+  return (
+    <div className="mb-3 text-hint text-muted-foreground">
+      <p className="font-medium">Not assessed</p>
+      <ul className="list-disc pl-4">
+        {diagnosis.silences.map((silence) => (
+          <li key={silence}>{silence}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function PanelTitle() {
   return (
     <span className="inline-flex items-center gap-1.5">
       Attention
       <ExplainIcon name="attention" />
     </span>
-  )
-}
-
-/**
- * Runtime health: one bar, and the numbers that make it honest.
- *
- * This was four figures in a 2×4 grid — a panel a hundred and forty pixels tall
- * saying "2 / 2, 1, 0, 1" above the containers it was describing, which on a
- * phone is most of a screen spent before the list the page is *for* begins.
- *
- * The counts matter as much as the status and none of them has been dropped:
- * a list of problems cannot say "eight healthy, four with no health check at
- * all", and that last number is what stops "all healthy" meaning "nothing is
- * being watched". What changed is that they are now read off one bar rather
- * than out of four boxes — which is also the only form in which the
- * relationship between them is visible at all. Four numbers in a row do not
- * show you that half the estate is unwatched; a bar that is half grey does.
- *
- * The track is the containers that are not running. That is not a decorative
- * choice: the bar answers "of everything on this server, how much is up and
- * actually being checked", and an unfilled track is exactly what "not up"
- * looks like.
- */
-const RUNTIME_SEGMENTS = [
-  {
-    key: "healthy",
-    label: "passing a health check",
-    fill: "bg-success",
-    swatch: "bg-success",
-    of: (r: RuntimeHealth) => r.healthy,
-    explain: "A check the image ships is running inside the container and answering.",
-  },
-  {
-    key: "starting",
-    label: "still starting",
-    fill: "bg-warning",
-    swatch: "bg-warning",
-    of: (r: RuntimeHealth) => r.starting,
-    explain: "Inside its health check's grace period. Not yet a verdict either way.",
-  },
-  {
-    key: "unhealthy",
-    label: "failing one",
-    fill: "bg-destructive",
-    swatch: "bg-destructive",
-    of: (r: RuntimeHealth) => r.unhealthy,
-    explain: "The container is up and its own health check says it is not working.",
-  },
-  {
-    key: "noHealthcheck",
-    label: "without one",
-    fill: "bg-muted-foreground",
-    swatch: "bg-muted-foreground",
-    of: (r: RuntimeHealth) => r.noHealthcheck,
-    explain:
-      "Docker reports these as up whenever their main process is alive — a wedged application answering nothing still counts.",
-  },
-] as const
-
-export function RuntimeHealthPanel({
-  runtime,
-  className,
-}: {
-  runtime: RuntimeHealth | undefined
-  className?: string
-}) {
-  if (!runtime) return null
-  const total = Math.max(runtime.total, 1)
-  const stopped = runtime.total - runtime.running
-  const segments = RUNTIME_SEGMENTS.map((s) => ({ ...s, count: s.of(runtime) }))
-
-  return (
-    // Plain: a bar and a legend are a reading, not a block of content, and
-    // framing them put a box above the box that holds the containers.
-    <Panel plain className={className}>
-      <PanelHeader
-        title={
-          <span className="inline-flex items-center gap-1.5">
-            Runtime health
-            <ExplainIcon name="runtimeHealth" />
-          </span>
-        }
-        actions={
-          <>
-            <Status
-              verdict={runtime.status === "ok" ? "ok" : runtime.status}
-              label={runtimeLabel(runtime)}
-            />
-            <span className="numeric text-hint text-muted-foreground">
-              {runtime.running} of {runtime.total} running
-            </span>
-          </>
-        }
-      />
-      <PanelBody className="space-y-2.5">
-        <div
-          className="flex h-2 w-full overflow-hidden rounded-full bg-meter-track"
-          role="img"
-          aria-label={`${runtime.running} of ${runtime.total} containers running; ${segments
-            .filter((s) => s.count > 0)
-            .map((s) => `${s.count} ${s.label}`)
-            .join(", ")}`}
-        >
-          {segments.map((segment) =>
-            segment.count > 0 ? (
-              <span
-                key={segment.key}
-                className={cn(
-                  "h-full transition-[width] first:rounded-l-full last:rounded-r-full",
-                  segment.fill,
-                )}
-                style={{ width: `${(segment.count / total) * 100}%` }}
-              />
-            ) : null,
-          )}
-        </div>
-
-        {/*
-          Every segment, including the empty ones. A count of zero failing
-          health checks is a fact worth printing — a legend that only listed
-          what happened to be non-zero would quietly stop mentioning the
-          category the moment it went right, which is the moment it becomes
-          reassuring.
-        */}
-        <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {segments.map((segment) => (
-            <RuntimeLegend
-              key={segment.key}
-              swatch={segment.swatch}
-              count={segment.count}
-              label={segment.label}
-              explain={segment.explain}
-            />
-          ))}
-          {stopped > 0 && (
-            <RuntimeLegend
-              swatch="bg-meter-track"
-              count={stopped}
-              label="not running"
-              explain="Stopped, exited or never started. Nothing is wrong with them — they are simply not up."
-            />
-          )}
-        </ul>
-      </PanelBody>
-    </Panel>
-  )
-}
-
-/**
- * One reading in the legend, with the sentence behind it one hover away.
- *
- * "Without one" is the label that most needs explaining and the one with least
- * room to do it, which is precisely the shape a hover card exists for.
- */
-function RuntimeLegend({
-  swatch,
-  count,
-  label,
-  explain,
-}: {
-  swatch: string
-  count: number
-  label: string
-  explain: string
-}) {
-  return (
-    <li className="min-w-0">
-      <HoverCard openDelay={200}>
-        <HoverCardTrigger asChild>
-          <button
-            type="button"
-            className="flex cursor-help items-center gap-1.5 rounded-sm focus-ring"
-          >
-            <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", swatch)} />
-            <span
-              className={cn(
-                "numeric text-body font-medium",
-                count === 0 && "text-muted-foreground",
-              )}
-            >
-              {count}
-            </span>
-            <span className="truncate text-hint text-muted-foreground">{label}</span>
-          </button>
-        </HoverCardTrigger>
-        <HoverCardContent className="w-72 text-xs leading-relaxed text-muted-foreground">
-          {explain}
-        </HoverCardContent>
-      </HoverCard>
-    </li>
   )
 }
 

@@ -1,0 +1,4 @@
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	25.355s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	1.060s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	10.832s
+go test ./internal/netx/ ./internal/netsec/ ./internal/store/ -count=1  24.00s user 8.35s system 120% cpu 26.903 total

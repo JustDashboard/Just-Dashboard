@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Box, type Icon } from "@/components/icons"
+import { Box } from "@/components/icons"
 import { hostOf, productOfHost, wordsProduct } from "@/lib/clients"
 import type { NotificationChannelKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -54,9 +54,32 @@ import { cn } from "@/lib/utils"
  * devicon's, drawn for paper, stay the file manager's, and the tile draws a
  * light one, because Rust's black gear and pnpm's charcoal squares vanish on
  * this ground.
+ *
+ * The Databases pages draw every server as the product that answered, so the
+ * flavours a driver talks to and the engines the inventory can see and not
+ * open have marks too, keyed by the ids the backend's product table uses
+ * (`timescaledb`, `cockroachdb`, `scylladb`): a CockroachDB cluster under the
+ * PostgreSQL elephant is the wrong product's name on the row. They come from
+ * the same three collections under the same rules — homarr's where it draws
+ * the product's own, current mark, devicon's for Memcached, NATS and
+ * YugabyteDB, Simple Icons' path in the brand's colour for the rest, a navy
+ * lifted to L 0.72. Two of homarr's are neither: its Elasticsearch file is
+ * Elastic's, the company's cluster, so the engine is devicon's three bands;
+ * and its Neo4j is the disc that product retired, so the mark is Simple
+ * Icons'. Percona Server, KeyDB and Dragonfly are in none of the three, so
+ * they have no key here and keep the database glyph: a mark is never drawn
+ * from memory.
+ *
+ * Network drift draws where the saved network configuration is written: the
+ * nftables files and admission chains as netfilter's flame, the boot units as
+ * systemd's brackets, the kernel's devices, routes and settings as Linux, and
+ * a blocklist as the project that publishes it — Spamhaus, FireHOL. None of
+ * the three collections has these four, so each is the project's own artwork,
+ * fetched from its own site; `public/logos/NOTICE` says from where.
  */
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
+  adguard: "adguard-home.svg",
   adminer: "adminer.svg",
   almalinux: "almalinux.svg",
   alpine: "alpine.svg",
@@ -64,6 +87,7 @@ const LOGOS: Record<string, string> = {
   android: "android.svg",
   angular: "angular.svg",
   ansible: "ansible.svg",
+  apache: "apache.svg",
   apple: "apple.svg",
   arch: "arch.svg",
   arm: "arm.svg",
@@ -71,20 +95,31 @@ const LOGOS: Record<string, string> = {
   audiobookshelf: "audiobookshelf.svg",
   aws: "aws.svg",
   azure: "azure.svg",
+  // No collection draws SQL Edge a mark of its own: it is the SQL Server
+  // engine built for small machines, and is drawn as the engine it is.
+  "azure-sql-edge": "sqlserver.svg",
   backblaze: "backblaze.svg",
   beszel: "beszel.svg",
   bing: "bing.svg",
   bitbucket: "bitbucket.svg",
   brave: "brave.svg",
   bun: "bun.svg",
+  c: "c.svg",
   caddy: "caddy.svg",
+  cassandra: "cassandra.svg",
   centos: "centos.svg",
   chrome: "chrome.svg",
   claude: "claude.svg",
   clickhouse: "clickhouse.svg",
   cloudflare: "cloudflare.svg",
+  cockroachdb: "cockroachdb.svg",
   "code-server": "code-server.webp",
   codeberg: "codeberg.svg",
+  couchdb: "couchdb.svg",
+  cplusplus: "cplusplus.svg",
+  crowdsec: "crowdsec.svg",
+  csharp: "csharp.svg",
+  css3: "css3.svg",
   curl: "curl.svg",
   cyberchef: "cyberchef.svg",
   dart: "dart.svg",
@@ -100,19 +135,24 @@ const LOGOS: Record<string, string> = {
   dotnet: "dotnet.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
+  duckdb: "duckdb.svg",
   duckduckgo: "duckduckgo.svg",
   edge: "edge.svg",
+  elasticsearch: "elasticsearch.svg",
   eleventy: "eleventy.svg",
   elixir: "elixir.svg",
   ember: "ember.svg",
+  etcd: "etcd.svg",
   express: "express.svg",
   facebook: "facebook.svg",
   fail2ban: "fail2ban.webp",
   fastapi: "fastapi.svg",
   fastify: "fastify.svg",
   fedora: "fedora.svg",
+  ferretdb: "ferretdb.svg",
   filebrowser: "filebrowser.svg",
   firefox: "firefox.svg",
+  firehol: "firehol.webp",
   flask: "flask.svg",
   forgejo: "forgejo.svg",
   freshrss: "freshrss.svg",
@@ -128,17 +168,22 @@ const LOGOS: Record<string, string> = {
   gradio: "gradio.svg",
   grafana: "grafana.svg",
   harbor: "harbor.svg",
+  haskell: "haskell.svg",
+  headscale: "headscale.svg",
   healthchecks: "healthchecks.svg",
   "home-assistant": "home-assistant.svg",
   homepage: "homepage.webp",
   hono: "hono.svg",
+  html5: "html5.svg",
   influxdb: "influxdb.svg",
   intel: "intel.svg",
   "it-tools": "it-tools.svg",
   java: "java.svg",
+  javascript: "javascript.svg",
   jellyfin: "jellyfin.svg",
   jenkins: "jenkins.svg",
   jupyter: "jupyter.svg",
+  kafka: "kafka.svg",
   kavita: "kavita.svg",
   koa: "koa.svg",
   kotlin: "kotlin.svg",
@@ -149,9 +194,11 @@ const LOGOS: Record<string, string> = {
   linkedin: "linkedin.svg",
   linux: "linux.svg",
   linuxmint: "linuxmint.svg",
+  lua: "lua.svg",
   mailgun: "mailgun.svg",
   mariadb: "mariadb.svg",
   meilisearch: "meilisearch.svg",
+  memcached: "memcached.svg",
   memos: "memos.webp",
   metabase: "metabase.svg",
   "minecraft-bedrock": "minecraft.webp",
@@ -159,11 +206,15 @@ const LOGOS: Record<string, string> = {
   minio: "minio.svg",
   "mongo-express": "mongodb.svg",
   mongodb: "mongodb.svg",
+  mullvad: "mullvad.svg",
   mysql: "mysql.svg",
   n8n: "n8n.svg",
+  nats: "nats.svg",
   navidrome: "navidrome.svg",
+  neo4j: "neo4j.svg",
   neovim: "neovim.svg",
   nestjs: "nestjs.svg",
+  netfilter: "netfilter.webp",
   nextcloud: "nextcloud.svg",
   nextjs: "nextjs.svg",
   nginx: "nginx.svg",
@@ -177,13 +228,17 @@ const LOGOS: Record<string, string> = {
   "open-webui": "open-webui.svg",
   openai: "openai.svg",
   opengist: "opengist.svg",
+  opensearch: "opensearch.svg",
   opensuse: "opensuse.svg",
+  openvpn: "openvpn.svg",
   opera: "opera.svg",
   oracle: "oracle.svg",
+  perl: "perl.svg",
   pgadmin: "pgadmin.svg",
   pgvector: "postgresql.svg",
   php: "php.svg",
   phpmyadmin: "phpmyadmin.svg",
+  pihole: "pi-hole.svg",
   pm2: "pm2.svg",
   pnpm: "pnpm-light.svg",
   portainer: "portainer.svg",
@@ -192,12 +247,15 @@ const LOGOS: Record<string, string> = {
   postgresql: "postgresql.svg",
   posthog: "posthog.svg",
   postman: "postman.svg",
+  powershell: "powershell.svg",
   prometheus: "prometheus.svg",
   python: "python.svg",
   qdrant: "qdrant.svg",
   qemu: "qemu.svg",
+  quad9: "quad9.svg",
   quarkus: "quarkus.svg",
   quay: "quay.svg",
+  r: "r.svg",
   rabbitmq: "rabbitmq.svg",
   react: "react.svg",
   "react-router": "react-router.svg",
@@ -208,14 +266,20 @@ const LOGOS: Record<string, string> = {
   ruby: "ruby.svg",
   rust: "rust-light.svg",
   safari: "safari.svg",
+  sass: "sass.svg",
   scala: "scala.svg",
+  scylladb: "scylladb.svg",
   searxng: "searxng.svg",
   seerr: "seerr.svg",
   sendgrid: "sendgrid.svg",
   sentry: "sentry.svg",
+  // The language, never a process: a shell at its prompt keeps its glyph
+  // in the process table and the terminal, where a logo would be a guess.
+  shellscript: "bash.svg",
   shlink: "shlink.svg",
   slack: "slack.svg",
   solid: "solid.svg",
+  spamhaus: "spamhaus.svg",
   "spring-boot": "spring-boot.svg",
   sqlite: "sqlite.svg",
   sqlserver: "sqlserver.svg",
@@ -224,8 +288,10 @@ const LOGOS: Record<string, string> = {
   stripe: "stripe.svg",
   supabase: "supabase.svg",
   svelte: "svelte.svg",
+  swift: "swift.svg",
   symfony: "symfony.svg",
   syncthing: "syncthing.svg",
+  systemd: "systemd.svg",
   tailscale: "tailscale.svg",
   tanstack: "tanstack.svg",
   telegram: "telegram.svg",
@@ -233,11 +299,14 @@ const LOGOS: Record<string, string> = {
   // with none, keyed so a command-line identity (the GitHub CLI) takes a tile.
   terminal: "terminal.svg",
   terraform: "terraform.svg",
+  tidb: "tidb.svg",
+  timescaledb: "timescaledb.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typescript: "typescript.svg",
   typesense: "typesense.svg",
   ubuntu: "ubuntu.svg",
+  unbound: "unbound.svg",
   "uptime-kuma": "uptime-kuma.svg",
   valkey: "valkey.svg",
   vaultwarden: "vaultwarden.svg",
@@ -250,9 +319,13 @@ const LOGOS: Record<string, string> = {
   webhook: "webhook.svg",
   whoami: "traefik.svg",
   windows: "windows.svg",
+  wireguard: "wireguard.svg",
   x: "x.svg",
   yarn: "yarn.svg",
   ycombinator: "ycombinator.svg",
+  yugabytedb: "yugabytedb.svg",
+  zerotier: "zerotier.svg",
+  zig: "zig.svg",
 }
 
 /**
@@ -261,7 +334,17 @@ const LOGOS: Record<string, string> = {
  * either, rather than finding out from an empty tile.
  */
 export function hasProductLogo(id: string | undefined): id is string {
-  return id !== undefined && id in LOGOS
+  return id !== undefined && Object.hasOwn(LOGOS, id)
+}
+
+/**
+ * A table's own entry. What these tables are asked for is a name from outside
+ * — an image, a process, a unit, an engine a server reported — and
+ * `constructor` is in every object: read plainly, a unit called
+ * `constructor.service` is answered with a function.
+ */
+function own(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
 }
 
 /**
@@ -270,6 +353,12 @@ export function hasProductLogo(id: string | undefined): id is string {
  * `node`, `golang`, Temurin and the Maven and Gradle builders, FrankenPHP and
  * Composer, .NET's `aspnet` runtime — so a project built by a recipe is drawn
  * as the same language on the Docker page.
+ *
+ * The database images are the repositories the inventory recognises
+ * (`imageRules` in the backend) whose last word is not the product's id —
+ * `cockroachdb/cockroach`, `scylladb/scylla`, Confluent's `cp-kafka` — so a
+ * container is the same product on the Docker page as on the Databases one.
+ * Redpanda speaks Kafka's protocol and is not Kafka: it has no mark here.
  */
 const IMAGE_ALIASES: Record<string, string> = {
   mongo: "mongodb",
@@ -278,6 +367,11 @@ const IMAGE_ALIASES: Record<string, string> = {
   "actual-server": "actual",
   "mssql-server": "sqlserver",
   "clickhouse-server": "clickhouse",
+  cockroach: "cockroachdb",
+  yugabyte: "yugabytedb",
+  scylla: "scylladb",
+  "timescaledb-ha": "timescaledb",
+  "cp-kafka": "kafka",
   node: "nodejs",
   golang: "go",
   "eclipse-temurin": "java",
@@ -296,8 +390,8 @@ const IMAGE_ALIASES: Record<string, string> = {
  */
 export function imageProduct(reference: string) {
   const name = (reference.split("@")[0].split("/").pop() ?? "").split(":")[0].toLowerCase()
-  const id = IMAGE_ALIASES[name] ?? name
-  return id in LOGOS ? id : "docker"
+  const id = own(IMAGE_ALIASES, name) ?? name
+  return hasProductLogo(id) ? id : "docker"
 }
 
 /**
@@ -372,6 +466,13 @@ const PROCESS_ALIASES: Record<string, string> = {
   "php-fpm": "php",
   influxd: "influxdb",
   "typesense-server": "typesense",
+  cockroach: "cockroachdb",
+  "tidb-server": "tidb",
+  scylla: "scylladb",
+  "nats-server": "nats",
+  yugabyted: "yugabytedb",
+  "yb-tserver": "yugabytedb",
+  "yb-master": "yugabytedb",
 }
 
 /**
@@ -382,11 +483,23 @@ const PROCESS_ALIASES: Record<string, string> = {
  */
 export function processProduct(name: string) {
   const bare = name.toLowerCase().replace(/[:\s].*$/, "")
-  const id = PROCESS_ALIASES[name.toLowerCase()] ?? PROCESS_ALIASES[bare] ?? bare
+  const id = own(PROCESS_ALIASES, name.toLowerCase()) ?? own(PROCESS_ALIASES, bare) ?? bare
   // Compose's mark is a stack's, not a program's, and a process called `X` is
-  // the X server rather than the site whose mark shares its key.
-  return id in LOGOS && id !== "docker-compose" && id !== "x" ? id : undefined
+  // the X server rather than the site whose mark shares its key. systemd's is
+  // every unit's: on a list of them it would sit beside `systemd-resolved`,
+  // `systemd-journald` and the rest and tell none of them apart.
+  return hasProductLogo(id) && !["docker-compose", "x", "systemd"].includes(id) ? id : undefined
 }
+
+/**
+ * What runs beside a server under its name and is not it: `kafka-ui`,
+ * `memcached-exporter`, `opensearch-dashboards`. Its first word is the server
+ * it sits beside rather than what the unit runs, so such a unit keeps its
+ * glyph, as `imageProduct` refuses the same names on a container.
+ * `prometheus-node-exporter` is longer than that and stays Prometheus's,
+ * which an exporter is.
+ */
+const COMPANION = /^[a-z0-9_]+-(exporter|ui|dashboards)$/
 
 /**
  * Which product a systemd unit runs, by its name: `postgresql.service` is
@@ -408,7 +521,7 @@ export function unitProduct(unit: string) {
   return (
     processProduct(base) ??
     programProduct(base) ??
-    (word ? (processProduct(word) ?? programProduct(word)) : undefined)
+    (word && !COMPANION.test(base) ? (processProduct(word) ?? programProduct(word)) : undefined)
   )
 }
 
@@ -428,6 +541,11 @@ export function pm2Product(interpreter: string | undefined) {
  * editions. A stream forwarding 5432 is drawn as Postgres for the reason the
  * finding calls it "PostgreSQL answers on every interface" — the port *is*
  * the reading. Nothing for a port outside this set: 8080 is anything.
+ *
+ * A port is more than one product's — 3306 is MariaDB's, 6379 Valkey's, 9200
+ * OpenSearch's — and the mark is the one the page's own word names: the
+ * catalogue calls 9200 "Elasticsearch" on the row this is drawn on. It has no
+ * word for 9042 or 9092, so Cassandra, ScyllaDB and Kafka have no port here.
  */
 const PORTS: Record<number, string> = {
   5432: "postgresql",
@@ -436,6 +554,8 @@ const PORTS: Record<number, string> = {
   27017: "mongodb",
   9000: "minio",
   8123: "clickhouse",
+  11211: "memcached",
+  9200: "elasticsearch",
   2375: "docker",
   2376: "docker",
   25565: "minecraft-java",
@@ -484,7 +604,14 @@ const PROGRAMS: Record<string, string> = {
   mongosh: "mongodb",
   mongo: "mongodb",
   sqlite3: "sqlite",
+  cockroach: "cockroachdb",
+  duckdb: "duckdb",
+  etcdctl: "etcd",
+  cqlsh: "cassandra",
+  "cypher-shell": "neo4j",
+  nats: "nats",
   claude: "claude",
+  codex: "openai",
   kubectl: "kubernetes",
   k9s: "kubernetes",
   helm: "kubernetes",
@@ -504,7 +631,7 @@ const PROGRAMS: Record<string, string> = {
 
 export function programProduct(command: string | undefined) {
   const name = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop()?.toLowerCase() ?? ""
-  return PROGRAMS[name]
+  return own(PROGRAMS, name)
 }
 
 /**
@@ -532,7 +659,7 @@ const PLATFORMS: Record<string, string> = {
 }
 
 export function platformProduct(platform: string | undefined) {
-  return PLATFORMS[(platform ?? "").toLowerCase()]
+  return own(PLATFORMS, (platform ?? "").toLowerCase())
 }
 
 export function cpuProduct(model: string | undefined, arch?: string) {
@@ -546,6 +673,31 @@ export function cpuProduct(model: string | undefined, arch?: string) {
 
 export function virtualizationProduct(virtualization: string | undefined) {
   return /\b(kvm|qemu)\b/i.test(virtualization ?? "") ? "qemu" : undefined
+}
+
+/**
+ * Whose a network interface is, by the name its owner gives it: Tailscale
+ * makes `tailscale0`, Docker makes `docker0`, a `br-` bridge per network and a
+ * `veth` pair per container. An `eth0` or an `ens3` is the machine's own and
+ * names no product.
+ */
+export function interfaceProduct(name: string) {
+  if (/^tailscale\d*$/.test(name)) return "tailscale"
+  if (name === "docker0" || /^(br-[0-9a-f]{12}|veth[0-9a-f]+)$/.test(name)) return "docker"
+  return undefined
+}
+
+/**
+ * The silicon a temperature is read from, by the hwmon driver that reports it:
+ * `coretemp` is Intel's package sensor, `k10temp` and `zenpower` AMD's, and
+ * `amdgpu` an AMD graphics card. An NVMe drive or an ACPI thermal zone is no
+ * vendor's mark.
+ */
+export function sensorProduct(name: string) {
+  const driver = name.toLowerCase().split(/[_\s]/)[0]
+  if (driver === "coretemp") return "intel"
+  if (driver === "k10temp" || driver === "zenpower" || driver === "amdgpu") return "amd"
+  return undefined
 }
 
 /**
@@ -603,7 +755,7 @@ export function hostProduct(hostOrUrl: string | undefined): string | undefined {
 }
 
 /** The forges a trigger or a source names by `provider`. */
-const GIT_PROVIDERS = new Set(["github", "gitlab", "bitbucket", "gitea"])
+const GIT_PROVIDERS = new Set(["github", "gitlab", "bitbucket", "gitea", "forgejo", "codeberg"])
 
 /**
  * The forge a webhook trigger or a Git source says it is. `generic_hook`,
@@ -924,7 +1076,7 @@ const VARIABLE_PREFIXES: Record<string, string> = {
  */
 export function variableProduct(name: string): string | undefined {
   const words = name.toLowerCase().split("_").filter(Boolean)
-  return wordsProduct(words, VARIABLE_SERVICES) ?? VARIABLE_PREFIXES[words[0]]
+  return wordsProduct(words, VARIABLE_SERVICES) ?? own(VARIABLE_PREFIXES, words[0])
 }
 
 /**
@@ -949,13 +1101,13 @@ export function ProductLogo({
    * The glyph for a thing that is no product — a volume, a network — so it
    * still takes the tile and lines up with the rows that have a logo.
    */
-  fallback?: Icon
+  fallback?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
   // Which file failed, rather than whether one did: the settings panel's mark
   // changes product under the same component, and the next one may load.
   const [failed, setFailed] = useState<string>()
-  const file = id ? LOGOS[id] : undefined
+  const file = id ? own(LOGOS, id) : undefined
   return (
     <span
       aria-hidden="true"
@@ -991,7 +1143,7 @@ export function ProductLogo({
  * this is the artwork alone at the line's own height.
  */
 export function ProductGlyph({ id, className }: { id: string; className?: string }) {
-  const file = LOGOS[id]
+  const file = own(LOGOS, id)
   if (!file) return null
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -1011,7 +1163,7 @@ export function ProductGlyph({ id, className }: { id: string; className?: string
  * than drawing a strip that outgrows its line.
  */
 export function ProductGlyphs({ ids, max = 5 }: { ids: string[]; max?: number }) {
-  const shown = ids.filter((id) => id in LOGOS).slice(0, max)
+  const shown = ids.filter(hasProductLogo).slice(0, max)
   if (shown.length === 0) return null
   const more = ids.length - shown.length
   return (

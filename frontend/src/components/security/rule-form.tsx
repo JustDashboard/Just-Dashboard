@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { rulePath } from "@/components/network/firewall-reading"
 
 /**
  * Opening a port, for somebody who does not already know the numbers.
@@ -53,11 +54,14 @@ export function AddRuleDialog({
   onDone,
   hasProfiles = true,
   arrival: given,
+  onStage,
 }: {
   onDone: () => void
   hasProfiles?: boolean
   /** A rule handed over by a link (`?add=1&port=…`): the dialog opens on it, unsent. */
   arrival?: RuleArrival
+  /** Offered where rule changes can be gathered into a plan instead of applied at once. */
+  onStage?: (rule: Record<string, unknown>, label: string) => void
 }) {
   // Used for the one opening the link asked for; the next "Add rule" is blank.
   const [arrival, setArrival] = useState(given)
@@ -87,6 +91,13 @@ export function AddRuleDialog({
           onOpenChange={(next) => !next && close()}
           hasProfiles={hasProfiles}
           arrival={arrival}
+          onStage={
+            onStage &&
+            ((rule, label) => {
+              onStage(rule, label)
+              close()
+            })
+          }
           onDone={() => {
             close()
             onDone()
@@ -241,6 +252,8 @@ function fieldsOf(rule?: FirewallRule) {
     protocol: rule?.protocol || "tcp",
     sourceKind: anywhere ? "anywhere" : "custom",
     from: anywhere ? "" : from,
+    // ufw prints a destination address in front of the port: "10.0.0.5 5432/tcp".
+    to: rule?.port && /\s/.test(to.trim()) ? to.trim().split(/\s+/)[0] : "",
     comment: rule?.comment ?? "",
   }
 }
@@ -252,6 +265,7 @@ function RuleForm({
   hasProfiles,
   edit,
   arrival,
+  onStage,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -259,6 +273,7 @@ function RuleForm({
   hasProfiles: boolean
   edit?: FirewallRule
   arrival?: RuleArrival
+  onStage?: (rule: Record<string, unknown>, label: string) => void
 }) {
   const initial = useMemo(() => fieldsOf(edit), [edit])
   // Kept for the tab while the dialog is open; whoever opened it forgets it on close.
@@ -281,6 +296,7 @@ function RuleForm({
     arrival?.sourceKind,
   )
   const [from, setFrom] = useSessionState(`${draft}.from`, initial.from, arrival?.from)
+  const [destination, setDestination] = useSessionState(`${draft}.to`, initial.to)
   const [comment, setComment] = useSessionState(
     `${draft}.comment`,
     initial.comment,
@@ -328,24 +344,34 @@ function RuleForm({
     }
   }
 
+  const body = {
+    action,
+    direction,
+    port: mode === "service" ? port : "",
+    protocol: mode === "service" ? protocol : "",
+    app: mode === "profile" ? profile : "",
+    from: source,
+    to: destination.trim(),
+    comment,
+    // An edit keeps the rule's place: the server inserts the replacement
+    // where the original was, which is the only way a firewall whose first
+    // match wins can be edited without changing what it does.
+    position: edit ? 0 : Number(position) || 0,
+  }
+  const summary = `${action} ${direction}${source ? ` from ${source}` : ""} to ${destination.trim() || "any"}${
+    mode === "service"
+      ? port
+        ? ` port ${port}${protocol ? ` proto ${protocol}` : ""}`
+        : ""
+      : ` app ${profile}`
+  }`
   const submit = async () => {
     setBusy(true)
-    const body = {
-      action,
-      direction,
-      port: mode === "service" ? port : "",
-      protocol: mode === "service" ? protocol : "",
-      app: mode === "profile" ? profile : "",
-      from: source,
-      comment,
-      // An edit keeps the rule's place: the server inserts the replacement
-      // where the original was, which is the only way a firewall whose first
-      // match wins can be edited without changing what it does.
-      position: edit ? 0 : Number(position) || 0,
-    }
     try {
       if (edit?.number !== undefined) {
-        await put(`/firewall/rules/${edit.number}`, body)
+        // The identity, where the rule has one, makes a renumbered list
+        // refuse the edit rather than replace whichever rule took the number.
+        await put(rulePath(edit), body)
         notify.success("Rule replaced")
       } else {
         await post("/firewall/rules", body)
@@ -385,16 +411,20 @@ function RuleForm({
             )}
           >
             {edit ? `Rule ${edit.number}: ` : position ? `Position ${position}: ` : ""}
-            {action} {direction}
-            {source && ` from ${source}`}
-            {" to any"}
-            {mode === "service"
-              ? port && ` port ${port}${protocol ? ` proto ${protocol}` : ""}`
-              : ` app ${profile}`}
+            {summary}
           </code>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
+          {onStage && !edit && (
+            <Button
+              variant="outline"
+              onClick={() => onStage(body, summary)}
+              disabled={!ready || busy}
+            >
+              Add to plan
+            </Button>
+          )}
           <Button onClick={submit} disabled={!ready || busy} pending={busy}>
             {edit ? "Save changes" : "Add rule"}
           </Button>
@@ -501,6 +531,19 @@ function RuleForm({
                 </Field>
               </FieldRow>
             </TabsContent>
+            <Field
+              label="Destination address"
+              htmlFor="rule-destination"
+              hint="Optional: only traffic to this address or network of the host"
+            >
+              <Input
+                id="rule-destination"
+                value={destination}
+                onChange={(event) => setDestination(event.target.value)}
+                placeholder="Any address of this host"
+                className="font-mono"
+              />
+            </Field>
             <TabsContent value="profile" className="pt-3">
               <Field
                 label="Application profile"

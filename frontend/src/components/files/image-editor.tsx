@@ -1,6 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop"
+import "react-image-crop/dist/ReactCrop.css"
 import {
   ArrowLeftRight,
   ArrowUpDown,
@@ -11,12 +14,17 @@ import {
   RotateCounterClockwise,
   SettingsSliders,
   Sparkles,
+  CornerUpRight,
+  External,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { API_BASE, mutationHeaders } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { SidePanel } from "@/components/side-panel"
+import { useConfirm } from "@/components/confirm-dialog"
+import { FileIcon } from "./file-icon"
+import { editorHref } from "./search"
 import { Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,17 +65,37 @@ export function ImageEditorSheet({
   modified,
   onOpenChange,
   onSaved,
+  root,
 }: {
   path: string | null
   /** The file's modification time, so the source is not read from a cache. */
   modified?: string
   onOpenChange: (open: boolean) => void
   onSaved: (savedPath: string) => void
+  root?: string
 }) {
+  const { confirm, dialog } = useConfirm()
+  const [edit, setEdit] = useState<{ path: string; dirty: boolean }>()
+  const reportDirty = useCallback(
+    (dirty: boolean) => {
+      if (path) setEdit({ path, dirty })
+    },
+    [path],
+  )
+  const dirty = edit?.path === path && edit.dirty
+  const requestClose = (open: boolean) => {
+    if (open || !dirty) return onOpenChange(open)
+    confirm({
+      title: "Close without saving?",
+      description: <p>Your image has unsaved edits.</p>,
+      confirmLabel: "Discard and close",
+      action: async () => onOpenChange(false),
+    })
+  }
   return (
     <SidePanel
       open={path !== null}
-      onOpenChange={onOpenChange}
+      onOpenChange={requestClose}
       width="xl"
       title={path?.split("/").pop() ?? "Image"}
       description={path ?? undefined}
@@ -80,36 +108,72 @@ export function ImageEditorSheet({
           key={path}
           path={path}
           modified={modified}
+          root={root}
+          onDirtyChange={reportDirty}
           onClose={() => onOpenChange(false)}
           onSaved={onSaved}
         />
       )}
+      {dialog}
     </SidePanel>
   )
 }
 
 type Rect = { x: number; y: number; w: number; h: number }
 
-function ImageEditor({
+type ImageDraft = {
+  history: HTMLCanvasElement[]
+  redo: HTMLCanvasElement[]
+  original: HTMLCanvasElement
+  savedCanvas: HTMLCanvasElement | null
+  format: string
+  quality: number
+  adjust: { brightness: number; contrast: number; saturate: number }
+}
+const imageDrafts = new Map<string, ImageDraft>()
+
+export function ImageEditor({
   path,
   modified,
   onClose,
   onSaved,
+  root,
+  destination,
+  onDirtyChange,
 }: {
   path: string
   modified?: string
   onClose: () => void
   onSaved: (savedPath: string) => void
+  root?: string
+  destination?: boolean
+  onDirtyChange?: (dirty: boolean) => void
 }) {
+  const router = useRouter()
+  const [handoff] = useState(() => {
+    const value = destination ? imageDrafts.get(path) : undefined
+    imageDrafts.delete(path)
+    return value
+  })
+  const [redo, setRedo] = useState<HTMLCanvasElement[]>(handoff?.redo ?? [])
+  const [original, setOriginal] = useState<HTMLCanvasElement | null>(handoff?.original ?? null)
+  const [savedCanvas, setSavedCanvas] = useState<HTMLCanvasElement | null>(
+    handoff?.savedCanvas ?? null,
+  )
+  const [compare, setCompare] = useState(false)
+  const [zoom, setZoom] = useState("fit")
+  const [aspect, setAspect] = useState("free")
   const [history, setHistory] = useState<HTMLCanvasElement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
   const [cropping, setCropping] = useState(false)
   const [crop, setCrop] = useState<Rect | null>(null)
-  const [format, setFormat] = useState(() => defaultFormat(path))
-  const [quality, setQuality] = useState(90)
-  const [adjust, setAdjust] = useState({ brightness: 100, contrast: 100, saturate: 100 })
+  const [format, setFormat] = useState(handoff?.format ?? defaultFormat(path))
+  const [quality, setQuality] = useState(handoff?.quality ?? 90)
+  const [adjust, setAdjust] = useState(
+    handoff?.adjust ?? { brightness: 100, contrast: 100, saturate: 100 },
+  )
   // The size fields default to whatever the canvas currently is, and hold a
   // draft only once somebody types in them. Copying the canvas dimensions into
   // state after every edit would be a render's worth of stale numbers each
@@ -119,10 +183,22 @@ function ImageEditor({
   const [saveAs, setSaveAs] = useState("")
 
   const viewRef = useRef<HTMLCanvasElement>(null)
-  const surfaceRef = useRef<HTMLDivElement>(null)
   const current = history[history.length - 1]
+  const dirty = !!current && (current !== (savedCanvas ?? original) || filterFor(adjust) !== "none")
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   useEffect(() => {
+    if (handoff) {
+      // A microtask keeps restored editor state on the same asynchronous load
+      // path as an image decoded from disk.
+      queueMicrotask(() => {
+        setHistory(handoff.history)
+        setLoading(false)
+      })
+      return
+    }
     const image = new Image()
     image.onload = () => {
       const canvas = document.createElement("canvas")
@@ -132,6 +208,7 @@ function ImageEditor({
       canvas.width = image.naturalWidth || 1024
       canvas.height = image.naturalHeight || 1024
       canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height)
+      setOriginal(canvas)
       setHistory([canvas])
       setLoading(false)
     }
@@ -144,7 +221,7 @@ function ImageEditor({
       image.onload = null
       image.onerror = null
     }
-  }, [path, modified])
+  }, [handoff, path, modified])
 
   // The visible canvas is repainted from the committed one plus the live
   // adjustment sliders, which are deliberately *not* committed until applied:
@@ -153,19 +230,22 @@ function ImageEditor({
   useEffect(() => {
     const view = viewRef.current
     if (!view || !current) return
-    view.width = current.width
-    view.height = current.height
+    const source = compare ? (original ?? current) : current
+    view.width = source.width
+    view.height = source.height
     const ctx = view.getContext("2d")
     if (!ctx) return
-    ctx.filter = filterFor(adjust)
-    ctx.drawImage(current, 0, 0)
+    ctx.filter = compare ? "none" : filterFor(adjust)
+    ctx.drawImage(source, 0, 0)
     ctx.filter = "none"
-  }, [current, adjust])
+  }, [current, adjust, compare, cropping, original])
 
   const push = useCallback((canvas: HTMLCanvasElement) => {
     // Ten steps of undo, which is more than anybody needs for a crop and a
     // rotate and far less memory than an unbounded stack of full bitmaps.
     setHistory((prev) => [...prev, canvas].slice(-10))
+    setRedo([])
+    setCompare(false)
     setCrop(null)
     setCropping(false)
     setResizeDraft(null)
@@ -198,7 +278,7 @@ function ImageEditor({
   }
 
   const applyCrop = () => {
-    if (!current || !crop || crop.w < 2 || crop.h < 2) return
+    if (!current || !crop || crop.w < 1 || crop.h < 1) return
     const out = document.createElement("canvas")
     out.width = Math.round(crop.w)
     out.height = Math.round(crop.h)
@@ -220,8 +300,12 @@ function ImageEditor({
 
   const applyResize = () => {
     if (!current) return
-    const w = Math.max(1, Math.round(Number(resizeDraft?.w) || current.width))
-    const h = Math.max(1, Math.round(Number(resizeDraft?.h) || current.height))
+    const w = Math.round(Number(resizeDraft?.w ?? current.width))
+    const h = Math.round(Number(resizeDraft?.h ?? current.height))
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1 || w * h > 32_000_000) {
+      notify.error("Choose positive dimensions up to 32 megapixels")
+      return
+    }
     if (w === current.width && h === current.height) return
     const out = document.createElement("canvas")
     out.width = w
@@ -247,25 +331,43 @@ function ImageEditor({
   }
 
   const save = async (asName?: string) => {
-    if (!current) return
+    if (!current || saving) return
     const name = (asName || path.split("/").pop() || "image").trim()
     const finalName = withExtension(name, format)
+    if (!finalName || finalName.includes("/") || finalName === "." || finalName === "..") {
+      notify.error("Choose a filename without a slash")
+      return
+    }
     const dir = path.slice(0, path.lastIndexOf("/")) || "/"
+    const target = (dir + "/" + finalName).replace(/\/{2,}/g, "/")
     setSaving(true)
     try {
-      const blob = await toBlob(current, format, quality / 100)
+      const output = document.createElement("canvas")
+      output.width = current.width
+      output.height = current.height
+      const ctx = output.getContext("2d")
+      if (!ctx) throw new Error("The browser could not create an image canvas")
+      ctx.filter = filterFor(adjust)
+      ctx.drawImage(current, 0, 0)
+      const blob = await toBlob(output, format, quality / 100)
       const form = new FormData()
       form.append("file", blob, finalName)
       const res = await fetch(
-        `${API_BASE}/files/upload?path=${encodeURIComponent(dir)}&overwrite=true`,
+        `${API_BASE}/files/upload?path=${encodeURIComponent(dir)}&overwrite=${target === path}`,
         { method: "POST", credentials: "include", headers: mutationHeaders(), body: form },
       )
       if (!res.ok) throw new Error((await res.json()).error?.message ?? res.statusText)
       notify.success(`Saved ${finalName}`, {
         description: `${bytes(blob.size)} · ${current.width}×${current.height}`,
       })
-      onSaved(`${dir}/${finalName}`.replace(/\/{2,}/g, "/"))
-      onClose()
+      if (target === path) {
+        setSavedCanvas(output)
+        setHistory([output])
+        setAdjust({ brightness: 100, contrast: 100, saturate: 100 })
+        setRedo([])
+      }
+      onSaved(target)
+      if (!destination) onClose()
     } catch (err) {
       notify.error("Could not save the image", err)
     } finally {
@@ -273,47 +375,39 @@ function ImageEditor({
     }
   }
 
-  const onSurfacePointerDown = (event: React.PointerEvent) => {
-    const view = viewRef.current
-    if (!cropping || !view) return
-    const rect = view.getBoundingClientRect()
-    const scaleX = view.width / rect.width
-    const scaleY = view.height / rect.height
-    const startX = (event.clientX - rect.left) * scaleX
-    const startY = (event.clientY - rect.top) * scaleY
-    event.currentTarget.setPointerCapture(event.pointerId)
+  const cropPercent = useMemo(
+    () =>
+      crop && current
+        ? {
+            unit: "%" as const,
+            x: (crop.x / current.width) * 100,
+            y: (crop.y / current.height) * 100,
+            width: (crop.w / current.width) * 100,
+            height: (crop.h / current.height) * 100,
+          }
+        : undefined,
+    [crop, current],
+  )
 
-    const move = (e: PointerEvent) => {
-      const x = clamp((e.clientX - rect.left) * scaleX, 0, view.width)
-      const y = clamp((e.clientY - rect.top) * scaleY, 0, view.height)
-      setCrop({
-        x: Math.min(startX, x),
-        y: Math.min(startY, y),
-        w: Math.abs(x - startX),
-        h: Math.abs(y - startY),
-      })
-    }
-    const up = () => {
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", up)
-    }
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", up)
+  const selectCrop = (value: string) => {
+    if (!current) return
+    const selection = centerCrop(
+      makeAspectCrop(
+        { unit: "%", width: 80 },
+        value === "free" ? current.width / current.height : Number(value),
+        current.width,
+        current.height,
+      ),
+      current.width,
+      current.height,
+    )
+    setCrop({
+      x: (selection.x / 100) * current.width,
+      y: (selection.y / 100) * current.height,
+      w: (selection.width / 100) * current.width,
+      h: (selection.height / 100) * current.height,
+    })
   }
-
-  // The crop rectangle is held in image pixels and drawn as a percentage of
-  // the picture, so it stays put when the panel is resized mid-gesture. The
-  // percentages come from the committed canvas rather than from the DOM node,
-  // which is the same number and one React can actually see.
-  const cropStyle = useMemo(() => {
-    if (!crop || !current) return undefined
-    return {
-      left: `${(crop.x / current.width) * 100}%`,
-      top: `${(crop.y / current.height) * 100}%`,
-      width: `${(crop.w / current.width) * 100}%`,
-      height: `${(crop.h / current.height) * 100}%`,
-    }
-  }, [crop, current])
 
   if (loading) {
     return (
@@ -328,159 +422,281 @@ function ImageEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <PaneHeader className="flex-wrap gap-2 px-3 py-2">
+        <FileIcon
+          entry={{ name: path.split("/").pop() ?? "", path, isDir: false, isSymlink: false }}
+          className="size-5"
+        />
+        {destination && <h1 className="text-title font-semibold">{path.split("/").pop()}</h1>}
+        <span className="numeric text-hint text-muted-foreground">
+          {current.width} × {current.height}
+        </span>
+        <span className="text-hint text-muted-foreground">
+          {dirty ? "Unsaved edits" : savedCanvas ? "Saved" : "Original"}
+        </span>
+        {!destination && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            onClick={() => {
+              if (!original) return
+              imageDrafts.set(path, {
+                history,
+                redo,
+                original,
+                savedCanvas,
+                format,
+                quality,
+                adjust,
+              })
+              router.push(editorHref(path, root))
+            }}
+          >
+            <External className="size-3.5" />
+            Open full editor
+          </Button>
+        )}
+      </PaneHeader>
       <PaneHeader className="flex-wrap gap-1.5 px-3">
-        <Button size="xs" variant="outline" onClick={() => rotate(-90)}>
+        <Button size="sm" variant="ghost" onClick={() => rotate(-90)}>
           <RotateCounterClockwise className="size-3" />
           Left
         </Button>
-        <Button size="xs" variant="outline" onClick={() => rotate(90)}>
+        <Button size="sm" variant="ghost" onClick={() => rotate(90)}>
           <RotateClockwise className="size-3" />
           Right
         </Button>
-        <Button size="xs" variant="outline" onClick={() => flip("h")}>
+        <Button size="sm" variant="ghost" aria-label="Flip horizontally" onClick={() => flip("h")}>
           <ArrowLeftRight className="size-3" />
-          Flip
+          Horizontal
         </Button>
-        <Button size="xs" variant="outline" onClick={() => flip("v")}>
+        <Button size="sm" variant="ghost" aria-label="Flip vertically" onClick={() => flip("v")}>
           <ArrowUpDown className="size-3" />
-          Flip
+          Vertical
         </Button>
         <Button
-          size="xs"
-          variant={cropping ? "default" : "outline"}
+          size="sm"
+          variant={cropping ? "secondary" : "ghost"}
+          aria-pressed={cropping}
           onClick={() => {
             setCropping((v) => !v)
-            setCrop(null)
+            setCompare(false)
+            if (cropping) setCrop(null)
+            else selectCrop(aspect)
           }}
         >
           <Crop className="size-3" />
-          {cropping ? "Drag a box" : "Crop"}
+          Crop
         </Button>
-        {cropping && crop && crop.w > 2 && (
-          <Button size="xs" onClick={applyCrop}>
+        {cropping && (
+          <>
+            <Select
+              value={aspect}
+              onValueChange={(value) => {
+                setAspect(value)
+                selectCrop(value)
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="Crop aspect ratio" className="h-8 w-28">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="free">Free crop</SelectItem>
+                <SelectItem value="1">Square</SelectItem>
+                <SelectItem value="1.7777777777777777">16:9</SelectItem>
+                <SelectItem value="1.3333333333333333">4:3</SelectItem>
+              </SelectContent>
+            </Select>
+          </>
+        )}
+        {cropping && crop && crop.w >= 1 && crop.h >= 1 && (
+          <Button size="sm" onClick={applyCrop}>
             Apply {Math.round(crop.w)}×{Math.round(crop.h)}
           </Button>
         )}
         <span className="flex-1" />
         <Button
-          size="xs"
+          size="sm"
           variant="ghost"
           disabled={history.length < 2}
-          onClick={() => setHistory((prev) => prev.slice(0, -1))}
+          onClick={() => {
+            setRedo((prev) => [...prev, current])
+            setHistory((prev) => prev.slice(0, -1))
+            setCrop(null)
+            setResizeDraft(null)
+          }}
         >
           <CornerUpLeft className="size-3" />
           Undo
         </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={redo.length === 0}
+          onClick={() => {
+            setHistory((prev) => [...prev, redo[redo.length - 1]])
+            setRedo((prev) => prev.slice(0, -1))
+            setCrop(null)
+            setResizeDraft(null)
+          }}
+        >
+          <CornerUpRight className="size-3" />
+          Redo
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!dirty}
+          onClick={() => {
+            if (original) push(original)
+            setAdjust({ brightness: 100, contrast: 100, saturate: 100 })
+          }}
+        >
+          Reset
+        </Button>
+        <Button
+          size="sm"
+          variant={compare ? "secondary" : "ghost"}
+          aria-pressed={compare}
+          onClick={() => {
+            setCompare((v) => !v)
+            setCropping(false)
+          }}
+        >
+          Original
+        </Button>
+        <Select value={zoom} onValueChange={setZoom}>
+          <SelectTrigger size="sm" aria-label="Image zoom" className="h-8 w-20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["fit", "50", "100", "200"].map((value) => (
+              <SelectItem value={value} key={value}>
+                {value === "fit" ? "Fit" : value + "%"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </PaneHeader>
 
-      <div
-        ref={surfaceRef}
-        className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto checkerboard p-4"
-      >
-        <div className="relative max-h-full">
-          <canvas
-            ref={viewRef}
-            onPointerDown={onSurfacePointerDown}
-            className={cn(
-              "max-h-[52vh] max-w-full object-contain shadow-sm",
-              cropping && "cursor-crosshair",
-            )}
-          />
-          {crop && cropStyle && (
-            <div
-              className="pointer-events-none absolute border-2 border-primary bg-plot-primary"
-              style={cropStyle}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="relative flex min-h-44 flex-1 items-center justify-center overflow-auto checkerboard p-4">
+          <ReactCrop
+            disabled={!cropping || compare}
+            crop={cropPercent}
+            aspect={aspect === "free" ? undefined : Number(aspect)}
+            ruleOfThirds
+            onChange={(_, percent) =>
+              setCrop({
+                x: (percent.x / 100) * current.width,
+                y: (percent.y / 100) * current.height,
+                w: (percent.width / 100) * current.width,
+                h: (percent.height / 100) * current.height,
+              })
+            }
+          >
+            <canvas
+              ref={viewRef}
+              aria-label="Image editing canvas"
+              className={cn(
+                "object-contain",
+                zoom === "fit" ? "max-h-[45vh] max-w-full" : "max-w-none",
+              )}
+              style={zoom === "fit" ? undefined : { width: (current.width * Number(zoom)) / 100 }}
             />
-          )}
-        </div>
-      </div>
-
-      <div className="grid shrink-0 gap-3 border-t border-hairline p-3 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Size</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              value={resizeDraft?.w ?? String(current.width)}
-              inputMode="numeric"
-              className="h-8 w-24 font-mono text-xs"
-              onChange={(e) => {
-                const w = e.target.value
-                setResizeDraft((prev) => ({
-                  w,
-                  h:
-                    lockRatio && Number(w) > 0
-                      ? String(Math.round((Number(w) / current.width) * current.height))
-                      : (prev?.h ?? String(current.height)),
-                }))
-              }}
-            />
-            <span className="text-xs text-muted-foreground">×</span>
-            <Input
-              value={resizeDraft?.h ?? String(current.height)}
-              inputMode="numeric"
-              className="h-8 w-24 font-mono text-xs"
-              onChange={(e) => {
-                const h = e.target.value
-                setResizeDraft((prev) => ({
-                  h,
-                  w:
-                    lockRatio && Number(h) > 0
-                      ? String(Math.round((Number(h) / current.height) * current.width))
-                      : (prev?.w ?? String(current.width)),
-                }))
-              }}
-            />
-            <label className="flex items-center gap-1.5 text-hint text-muted-foreground">
-              <Checkbox checked={lockRatio} onCheckedChange={(v) => setLockRatio(v === true)} />
-              Lock ratio
-            </label>
-            <Button size="xs" variant="outline" onClick={applyResize}>
-              Resize
-            </Button>
-          </div>
-          <p className="text-hint text-muted-foreground">
-            Now {current.width}×{current.height}
-          </p>
+          </ReactCrop>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs text-muted-foreground">
-              <SettingsSliders className="mr-1 inline size-3" />
-              Adjust
-            </Label>
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={filterFor(adjust) === "none"}
-              onClick={applyAdjust}
-            >
-              <Sparkles className="size-3" />
-              Apply
-            </Button>
-          </div>
-          {(["brightness", "contrast", "saturate"] as const).map((key) => (
-            <div key={key} className="flex items-center gap-2">
-              <span className="w-16 text-hint text-muted-foreground capitalize">{key}</span>
-              <Slider
-                value={[adjust[key]]}
-                min={0}
-                max={200}
-                step={1}
-                className="flex-1"
-                onValueChange={([v]) => setAdjust((prev) => ({ ...prev, [key]: v }))}
+        <div className="grid shrink-0 gap-3 border-t border-hairline p-3 lg:grid-cols-2">
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Size</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                value={resizeDraft?.w ?? String(current.width)}
+                aria-label="Image width"
+                inputMode="numeric"
+                className="h-8 w-24 font-mono text-xs"
+                onChange={(e) => {
+                  const w = e.target.value
+                  setResizeDraft((prev) => ({
+                    w,
+                    h:
+                      lockRatio && Number(w) > 0
+                        ? String(Math.round((Number(w) / current.width) * current.height))
+                        : (prev?.h ?? String(current.height)),
+                  }))
+                }}
               />
-              <span className="numeric w-9 text-right text-hint text-muted-foreground">
-                {adjust[key]}%
-              </span>
+              <span className="text-xs text-muted-foreground">×</span>
+              <Input
+                value={resizeDraft?.h ?? String(current.height)}
+                aria-label="Image height"
+                inputMode="numeric"
+                className="h-8 w-24 font-mono text-xs"
+                onChange={(e) => {
+                  const h = e.target.value
+                  setResizeDraft((prev) => ({
+                    h,
+                    w:
+                      lockRatio && Number(h) > 0
+                        ? String(Math.round((Number(h) / current.height) * current.width))
+                        : (prev?.w ?? String(current.width)),
+                  }))
+                }}
+              />
+              <label className="flex items-center gap-1.5 text-hint text-muted-foreground">
+                <Checkbox checked={lockRatio} onCheckedChange={(v) => setLockRatio(v === true)} />
+                Lock ratio
+              </label>
+              <Button size="xs" variant="outline" onClick={applyResize}>
+                Resize
+              </Button>
             </div>
-          ))}
+            <p className="text-hint text-muted-foreground">
+              Now {current.width}×{current.height}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">
+                <SettingsSliders className="mr-1 inline size-3" />
+                Adjust
+              </Label>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={filterFor(adjust) === "none"}
+                onClick={applyAdjust}
+              >
+                <Sparkles className="size-3" />
+                Apply
+              </Button>
+            </div>
+            {(["brightness", "contrast", "saturate"] as const).map((key) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="w-16 text-hint text-muted-foreground capitalize">{key}</span>
+                <Slider
+                  aria-label={key}
+                  value={[adjust[key]]}
+                  min={0}
+                  max={200}
+                  step={1}
+                  className="flex-1"
+                  onValueChange={([v]) => setAdjust((prev) => ({ ...prev, [key]: v }))}
+                />
+                <span className="numeric w-9 text-right text-hint text-muted-foreground">
+                  {adjust[key]}%
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
-
-      <PaneFooter className="gap-2 px-3">
+      <PaneFooter className="flex-wrap gap-2 px-3 py-2">
         <Select value={format} onValueChange={setFormat}>
-          <SelectTrigger size="sm" className="w-28">
+          <SelectTrigger size="sm" aria-label="Image format" className="w-24">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -493,6 +709,7 @@ function ImageEditor({
           <div className="flex items-center gap-2">
             <span className="text-hint text-muted-foreground">Quality</span>
             <Slider
+              aria-label="Export quality"
               value={[quality]}
               min={30}
               max={100}
@@ -505,6 +722,7 @@ function ImageEditor({
         )}
         <Input
           value={saveAs}
+          aria-label="Save image as"
           onChange={(e) => setSaveAs(e.target.value)}
           placeholder={path.split("/").pop()}
           className="h-8 w-44 font-mono text-xs"
@@ -513,21 +731,21 @@ function ImageEditor({
         <Button
           size="sm"
           variant="outline"
-          disabled={saving || !saveAs.trim()}
+          disabled={saving || !saveAs.trim() || saveAs.includes("/")}
           onClick={() => save(saveAs)}
         >
           Save as
         </Button>
-        <Button size="sm" onClick={() => save()} pending={saving}>
+        <Button size="sm" onClick={() => save()} pending={saving} disabled={cropping}>
           <FloppyDisk className="size-4" />
-          Save over original
+          {withExtension(path.split("/").pop() ?? "", format) === path.split("/").pop()
+            ? "Save over original"
+            : "Save converted copy"}
         </Button>
       </PaneFooter>
     </div>
   )
 }
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 function filterFor(adjust: { brightness: number; contrast: number; saturate: number }) {
   const parts: string[] = []
@@ -552,6 +770,13 @@ function defaultFormat(path: string) {
 }
 
 function withExtension(name: string, mime: string) {
+  const existing = name.split(".").pop()?.toLowerCase()
+  if (
+    (mime === "image/jpeg" && (existing === "jpg" || existing === "jpeg")) ||
+    (mime === "image/png" && existing === "png") ||
+    (mime === "image/webp" && existing === "webp")
+  )
+    return name
   const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png"
   const dot = name.lastIndexOf(".")
   const stem = dot > 0 ? name.slice(0, dot) : name

@@ -337,17 +337,9 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) error 
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	u, err := s.Auth.CreateUser(r.Context(), req.Username, req.Password, req.Role, true)
+	u, err := s.Auth.CreateUserWithDisplayName(r.Context(), req.Username, req.DisplayName, req.Password, req.Role, true)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
-	}
-	if req.DisplayName != "" {
-		if err := s.Auth.SetProfile(r.Context(), u.ID, auth.Profile{DisplayName: &req.DisplayName}); err != nil {
-			return httpx.BadRequest("%v", err)
-		}
-		if u, err = s.Auth.UserByID(r.Context(), u.ID); err != nil {
-			return httpx.Internal(err)
-		}
 	}
 	httpx.SetAudit(r, "dashboard.user.create", u.Username, map[string]any{"role": u.Role})
 	httpx.JSON(w, http.StatusCreated, u)
@@ -375,30 +367,11 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.ErrNotFound
 	}
-	if req.Username != nil || req.DisplayName != nil {
-		if err := s.Auth.SetProfile(r.Context(), id, auth.Profile{
-			Username: req.Username, DisplayName: req.DisplayName,
-		}); err != nil {
-			return httpx.BadRequest("%v", err)
-		}
-	}
-	if req.Role != nil {
-		if err := s.Auth.SetRole(r.Context(), id, *req.Role); err != nil {
-			return mapAuthError(err)
-		}
-	}
-	if req.Disabled != nil {
-		if err := s.Auth.SetDisabled(r.Context(), id, *req.Disabled); err != nil {
-			return mapAuthError(err)
-		}
-	}
-	if req.Password != nil {
-		if err := s.Auth.SetPassword(r.Context(), id, *req.Password); err != nil {
-			return httpx.BadRequest("%v", err)
-		}
-		if err := s.Auth.RevokeAllSessions(r.Context(), id); err != nil {
-			return httpx.Internal(err)
-		}
+	if err := s.Auth.UpdateUser(r.Context(), id, auth.UserUpdate{
+		Profile: auth.Profile{Username: req.Username, DisplayName: req.DisplayName},
+		Role:    req.Role, Disabled: req.Disabled, Password: req.Password,
+	}); err != nil {
+		return mapAuthError(err)
 	}
 	updated, err := s.Auth.UserByID(r.Context(), id)
 	if err != nil {

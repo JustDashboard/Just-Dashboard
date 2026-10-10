@@ -1,0 +1,11 @@
+# Session transcript (verbatim command output), exploratory guest, 2026-10-10T00:17Z.
+# The unfixed backend (ff3802c0, c31e9329) had left the SQM journal degraded on
+# "enp0s6 IFB has foreign classs" with its IFB behind. The fixed backend
+# (6ba0e141) was installed and started; its startup recovery read the journal.
+$ sudo python3 -c '...change.json...'   # before
+degraded recovered ['restore owned SQM: shaping differs from the saved configuration: enp0s6 IFB has foreign classs']
+jds2daf1b6c93d6  DOWN           02:ca:ce:0a:34:bf <BROADCAST,NOARP>
+$ sudo systemctl start jd-vm-backend ; ...   # after startup recovery
+recovered recovered None 2026-10-10T00:17:03.470459586Z
+$ ip -br link show type ifb ; tc qdisc show dev enp0s6 ingress
+(no output: the owned IFB and the created ingress hook were removed)

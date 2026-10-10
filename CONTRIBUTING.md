@@ -71,6 +71,98 @@ to the contribution terms above, including the additional licence grant to the p
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
   the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
+  Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
+  it to use the existing Playwright worker setting.
+- Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
+  locally, then run from `backend/`:
+  `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
+  It owns and removes its temporary fixtures and does not modify existing workloads.
+- Changes to `internal/netx` that apply devices, routes, the gateway table or shaping also run, from
+  `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
+  passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
+  host's own interfaces, firewall or tailscaled.
+- Persistent native profile changes also follow the bounded
+  [native-owner acceptance](docs/internal/backend/network-native-managers.md#local-acceptance).
+  The fixture requires verified native userland and uses private net/mount/PID namespaces, private
+  `/etc`, `/run` and `/var/lib`, and explicit private NetworkManager state paths. It builds the actual
+  standalone recovery executable with a workspace-local `TMPDIR`. Native-owner activation does not
+  substitute for the separate systemd timer, DHCP/SLAAC, boot or structural bond/VRF requirements.
+  Include a canonical unchanged-intent transaction: equal bytes with a distinct candidate inode must
+  restore the captured authored inode during fresh-helper recovery. Confirmation and terminal retry
+  must retain the exact candidate inode. Keep original failed runs separately attributed.
+  The [automatic addressing/deadline fixture](docs/internal/backend/evidence/native-manager-automatic-2026-10-09.md)
+  has explicit `JD_NATIVE_AUTO_CASE=networkd` or `NetworkManager` selections for its verified direct
+  owner slices. Its default all-owner opt-in also runs the still-open Netplan admission cases; those
+  known refusals remain failed acceptance rather than successful skips.
+  `JD_NATIVE_AUTO_CASE=netplan JD_NATIVE_NETPLAN_AUTO_POLICY=explicit` selects the separately verified
+  authored Netplan/networkd DHCPv4/SLAAC policy with DHCP MTU disabled and explicit DHCP/RA domains.
+  Follow its [v8 source/helper proof](docs/internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md);
+  this selection does not replace the default-policy, DHCPv6 or structural acceptance requirements.
+- The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
+  Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
+  to compile the narrow test binary and run it as root. It creates a network-none fixture with no
+  published ports, verifies private DNS/source/route/TCP and restart identity, then removes it.
+- Kernel flow observer changes also run the targeted `internal/netflows` race suite and the opted-in
+  disposable cgroup/network-namespace fixtures. Build a race binary and invoke it with
+  `JD_NETFLOWS_OBSERVER_LIVE=1` as root in the host cgroup namespace; see the exact command and evidence
+  limits in [the observer contract](docs/internal/backend/network-flow-observer.md). These fixtures
+  never attach a production cgroup, replace a foreign program or migrate an unrelated process.
+  Docker attribution acceptance also needs a reachable Docker socket and the already cached
+  `python:3.11-slim` image; the fixture never pulls an image and removes its bounded test containers.
+- Independent network recovery also has a real systemd timer fixture. On a host with a reachable
+  systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
+  the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for
+  disposable namespaces, then removes those exact fixtures. It does not install persistent host
+  units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
+  reboot acceptance.
+- Native resolver evidence changes also run from `backend/`:
+  the private race test binary as root using the commands in
+  [native DNS investigations](docs/internal/backend/network-dns-evidence.md#controlled-validation).
+  This requires root or passwordless sudo and installed resolved/busctl/dbus-daemon/ip. It uses only
+  owned network/mount namespaces, private bus/configuration and a controlled signed TLS DNS fixture;
+  it never changes the host resolver. See [native DNS investigations](docs/internal/backend/network-dns-evidence.md).
+- Native DNS service changes run the selected private API, sealing, HTTP/TLS and owned-resource races,
+  then each actual pinned engine serially with `JD_DNS_SERVICES_LIVE_ENGINE`. See
+  [native DNS service acceptance](docs/internal/backend/network-dns-services.md#acceptance-status)
+  for the selected test binary, required already-cached images and exact owned cleanup scope.
+  These fixtures publish explicit high loopback ports and never redirect the host resolver.
+  Filter-inventory changes also verify native source/custom-rule metadata and restart persistence;
+  subscription loading and effective client filtering remain unmeasured. Retain failed and
+  corrected source/binary/raw records separately.
+  Filter UI changes run `network-dns-filters.spec.ts` against the matching production build; width
+  assertions must check the settled sheet against the viewport before capturing it.
+  Reviewed custom-domain filters also prove native allow/deny configuration with AdGuard suffix
+  versus Pi-hole exact semantics, selected-current reads, explicit group membership, duplicate/replay
+  refusal, restart persistence and unselected rule/comment/group/source preservation after removal.
+  Record/client UI changes also run the selected DNS service browser spec against a fresh production
+  build. Its mocks must supply `/changes/{id}/current` for the exact retained selection; ordinary
+  connection inventory cannot stand in for selected record/client freshness. Browser mocks and
+  actual engine acceptance remain separately attributed.
+- Controlled probe-agent changes also run from `backend/`:
+  `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
+  This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor
+  account. It measures real signed DNS/TCP/TLS in both families and refuses out-of-scope/untrusted
+  outcomes. It proves a separate controlled namespace, not a real external host or region.
+- Opt-in socket collector changes also run from `backend/`:
+  build the private test binary and run its selected fixtures as root using the commands in
+  [native socket history](docs/internal/backend/network-flow-accounting.md#measured-acceptance-and-its-limits).
+  The fixtures own
+  their disposable namespace and exact Docker containers with no published ports; native command
+  deadlines remain fixed, and a deadline failure is recorded as unavailable evidence. See
+  [native socket history](docs/internal/backend/network-flow-accounting.md) for tools and scope.
+- Advanced Docker network changes also run from `backend/`:
+  `JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`.
+  The fixture needs the local Docker socket, `ip` and cached `python:3.11-slim`; it never pulls an
+  image or publishes a port. It chooses pools outside observed host routes/Docker allocations,
+  creates an internal uniquely labeled dual-stack bridge and one exact owned container, verifies
+  native fields/alias/allocation/overlap refusal, then removes only its verified IDs.
+- Private PCAP changes also run from `backend/`:
+  `JD_NETCAPTURE_LIVE=1 go test -race ./internal/netcapture -run Live -count=1 -v`. The fixture
+  needs root or passwordless sudo plus host `ip`, `tcpdump`, `timeout` and Python. It creates and
+  removes only a uniquely named disposable namespace, checks known IPv4/IPv6 loopback packets,
+  bounds, cancellation and independent timeout after killing its own applying process. It never
+  captures production interfaces or starts public listeners. See
+  [capture verification](docs/internal/backend/network-captures.md#verification).
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
@@ -83,34 +175,54 @@ to the contribution terms above, including the additional licence grant to the p
   machine fail the install intermittently. The emitted application is byte-for-byte identical
   either way. So a type error you do not catch with `bun run build` will not be caught anywhere
   later; it will ship.
-- `.github/workflows/verify.yml` runs for every push, and for pull requests from forks. A first job
-  reads which paths the push changed and starts only the gates they reach: `backend/` starts the
-  backend and race jobs, `frontend/` the frontend and browser jobs, and the deployment packages
-  (`internal/{deploy,api,proxysvc,dockerx,store,backups}`, `go.mod`) the live Docker job; a change to
-  the workflow or its scripts starts everything, as does a new branch or a manual run, and a
-  documentation-only push runs nothing past that first job. The backend, race, frontend and browser
-  jobs run on GitHub's hosted runners, in parallel — the repository is public, so they cost nothing —
-  and the two long suites are sharded: the race gate is nine jobs (`./internal/api` in five,
-  `./internal/deploy` in three, the rest in one, split by `scripts/go-test-shard.sh`) and the browser
-  suite six (`playwright test --shard`). The latency budgets are asserted in the plain test run and
-  skipped under the race detector, which multiplies a SQLite read ten- to twenty-five-fold and so
-  measures itself and the runner's load rather than the read. Go and Bun come from `go.mod` and
-  `package.json`; dependencies use the frozen Bun lockfile, and the module, Bun, Playwright and Next
-  caches are restored between runs.
+- `.github/workflows/verify.yml` runs for every pull request, as it would merge, and for every push to
+  `main` or a `patch/*` branch. A first job, `plan`, reads the change and starts only what it reaches;
+  `scripts/ci-plan.py` is the picking, and `python3 scripts/test_ci_plan.py` checks it. A Go package is
+  checked when it changed or imports one that did, so a change to one handler does not run the
+  deployment suite and a change to the store runs everything above it. `backend` builds, vets, and tests
+  those packages plainly; the six of the race gate (`internal/{api,deploy,proxysvc,backups,store,dockerx}`)
+  run under the race detector instead, in at most two jobs — `scripts/go-test-race.sh` splits
+  `./internal/api` across four processes to fill the runner's cores — and only their latency budgets
+  run plainly, because the detector multiplies a SQLite read ten- to twenty-five-fold and so measures
+  itself rather than the read. A package whose tests read the frontend's half of a contract
+  (`internal/version`, `internal/deploy`) runs when that file changes. `frontend` lints the changed
+  files (the whole tree when the rules or the dependencies change), type-checks, and runs the unit
+  tests. `browser` runs the specs `scripts/test-changed.sh` would pick, except that a change reaching
+  the dashboard's shell runs the whole suite rather than the two specs that open every page; the specs
+  are dealt into up to eight jobs of about two hundred tests each, in name order, so that a slow
+  section is spread over the jobs. A change to the workflow or its scripts runs everything,
+  as does a manual run, and a documentation-only change runs nothing past `plan`.
+  GitHub runs twenty jobs of a public repository's at once across every branch, so the suites are
+  split only as far as a runner's four cores are full: more jobs than that queue behind each other and
+  behind every other pull request. Go and Bun come from `go.mod` and `package.json`, and dependencies
+  use the frozen Bun lockfile. The module, build, Bun, Playwright, Next and `tsc` caches are saved only
+  by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
+  the caches of its base branch and never those of another task branch.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
-  directive; the other nginx tests still run.
-- The live Docker fixtures need a real Docker daemon, so they run on a **self-hosted runner** on the
-  release host (labels `self-hosted, linux, x64, just-dashboard`), a systemd service under
-  `~/actions-runner` running as `ubuntu`, one job at a time. It used to take every job, one after
-  another — about fifty-five minutes a push, on the machine that serves the dashboard — and now takes
-  only this one. The framework and artifact command has a 90-minute test timeout, and the live job
-  allows 150 minutes for its remaining fixture commands and evidence cleanup. Required live fixtures
-  fail CI if skipped or absent. Logs and browser failure traces are retained for 30 days, including
-  failed runs. The live job ends by pruning the BuildKit cache its fixtures fill back to two gigabytes,
-  because the runner shares the host's Docker daemon and a few unpruned runs fill the disk. Workflows
-  from outside contributors wait for approval before they
-  touch the runner. CI does not replace public TLS, clean-host installation, remote-host,
-  architecture or soak acceptance.
+  directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its
+  site for the build it finds — HTTP/2 in the listen before 1.25.1, a QUIC listen only with
+  `http_v3_module` — so it runs on the runners' nginx 1.24 too.
+- The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
+  they run there like the other jobs, each job on a fresh daemon, and only when one of the six
+  deployment packages (those of the race gate) or `go.mod` changed: `live (fixtures)` runs the
+  artifact, activation, preview, runtime-fault, database, Compose and cutover fixtures of whichever of
+  `internal/{deploy,api,dockerx,proxysvc}` the change reaches, and a change reaching `internal/deploy`
+  also builds the framework fixtures in four jobs. The lists are
+  in `scripts/ci-plan.py`; the last framework job runs every framework the others do not name, so a
+  new one is built without being added there. They used to run on a self-hosted runner on the release
+  host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
+  cache pruned after every run, and left every run waiting whenever that service was down. Each live
+  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. Logs and
+  browser failure traces are retained for 30 days, including failed runs. CI does not replace public
+  TLS, clean-host installation, remote-host, architecture or soak acceptance.
+- A test that wants the dashboard's store opens it with `storetest.Open` (`internal/store/storetest`),
+  which copies a database built once per test binary instead of running the schema again: under the
+  race detector the schema was nearly two seconds of every such test. `store.Open` itself stays for
+  the tests of the schema and its migrations. A test binary hashes passwords with parameters that
+  cost nothing (`auth.HashPassword` under `testing.Testing()`): the real ones were seventy percent of
+  what the API suite spent, and a hash carries its own parameters, so verification is unchanged. A
+  test that names a MongoDB nothing listens on puts `serverSelectionTimeoutMS` in the connection
+  string, or it waits eight seconds to find out.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run
@@ -195,7 +307,8 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
-  on a Docker host. It exercises all five quick-setup engines from separate application containers,
+  on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
+  MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
   verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
   integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
@@ -270,20 +383,72 @@ unit tests prove the generated SQL is the SQL intended; only a live server
 proves it is SQL that server accepts, and the catalogue queries are exactly
 where that gap bites — every engine spells its metadata differently.
 
-Each engine reads a DSN from an environment variable, defaulting to a local
-instance on the standard port:
+### The rule: no variable, no test — with six exceptions
 
-| Variable | Default |
+A live test names its engine by an environment variable and skips without it.
+Six variables are older than that rule and fall back to a local instance on
+the engine's standard port in the suites written before it — the fixtures of
+`dbx/live_test.go` and the tests built on them, the dump, drop, transfer and
+credential tests, and `api/handlers_db_live_test.go`:
+
+| Variable | Fallback |
 | --- | --- |
 | `JD_TEST_POSTGRES_DSN` | `postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable` |
-| `JD_TEST_MYSQL_DSN` | `jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest` |
+| `JD_TEST_MYSQL_DSN` | `jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest` (the MariaDB fixture) |
 | `JD_TEST_MSSQL_DSN` | `sqlserver://sa:…@127.0.0.1:1433?database=master` |
 | `JD_TEST_ORACLE_DSN` | `oracle://jdtest:jdtest@127.0.0.1:1521/FREEPDB1` |
 | `JD_TEST_CLICKHOUSE_DSN` | `clickhouse://default@127.0.0.1:9000/default` |
 | `JD_TEST_MONGO_DSN` | `mongodb://127.0.0.1:27017/jdtest` |
-| `JD_TEST_REDIS_DSN` | `redis://127.0.0.1:6379/0` |
 
-The quickest way to get all of them is containers:
+Those tests create, drop and restore. **On a machine where a standard port is a
+real database, set all six explicitly before running anything under
+`internal/dbx` or `internal/api`** — to a fixture, or to an address nothing
+listens on, which makes the test skip. The two administrator variables below
+fall back the same way in the tests that drop databases and read credential
+catalogues. SQLite needs no server: it is embedded, and its fixture is a file in
+the test's own temporary directory unless `JD_TEST_SQLITE_DSN` names another
+(`JD_TEST_SQLITE_DROP_DSN` for the file the drop test makes and unlinks). Leave
+both unset: set, they point tests that create and drop tables at that file.
+
+Every other variable has no fallback, on purpose: the tests behind it write,
+stop a server or change its configuration, and an address nobody chose is as
+likely to be somebody's data as a fixture.
+
+| Variable | What it must be | Used by |
+| --- | --- | --- |
+| `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
+| `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts |
+| `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop |
+| `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
+| `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
+| `JD_TEST_MONGO_RS_DSN` | a MongoDB replica set the run owns: accounts and views are made in `admin` | replication, accounts, the credential guards |
+| `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignInIsNotAPing` |
+| `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
+| `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
+| `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |
+| `JD_TEST_REDIS_CLUSTER_DSN` | a node started with `--cluster-enabled yes` | cluster notices |
+| `JD_TEST_REDIS_SENTINEL_DSN` | a Redis Sentinel | sentinel notices |
+| `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
+| `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
+| `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
+
+Some tests reach past a database to the machine and run only when asked:
+
+| Variable | What it does |
+| --- | --- |
+| `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventoryNeverCarriesAContainerSecret`); it only reads |
+| `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
+| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
+| `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
+| `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
+
+The ones that need Docker (the inventory, provisioning and power tests) read
+`JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
+
+### Fixtures
+
+The quickest way to get the engines is containers:
 
 ```bash
 docker run -d -p 5432:5432 -e POSTGRES_USER=jdtest -e POSTGRES_PASSWORD=jdtest -e POSTGRES_DB=jdtest postgres:16
@@ -294,10 +459,67 @@ docker run -d -p 27017:27017 mongo:8
 docker run -d -p 6379:6379 redis:7
 ```
 
-Then `go test ./internal/dbx/ ./internal/api/ -run Live -v` and watch which
-engines report rather than skip. SQLite needs nothing — it is embedded.
+Then, from `backend/`, with `JD_TEST_REDIS_DSN=redis://127.0.0.1:6379/0` set
+for the Redis one, `go test ./internal/dbx/ ./internal/api/ -run Live -count=1 -v`
+and watch which engines report rather than skip. Publish the containers on
+other ports and set the variables instead wherever 5432, 3306 or 6379 is
+already somebody's server.
+
+On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database of the
+run's own: the workbench tests name every table they make `jdwb_…`, the
+operations suite works in a database called `jd_b3`, and the dump tests make a
+database (SQL Server) or a user (Oracle) of their own, because a restore
+replaces every table where it lands.
 
 Oracle has unit coverage for statement guards, SQL rendering and adapter behavior. Live server
 coverage requires an available Oracle instance: set `JD_TEST_ORACLE_DSN` to run the existing Oracle
-fixture alongside the others. If no server was used, identify that validation limit in the pull request;
-unit results do not establish that the generated statements work against an Oracle server.
+fixture alongside the others. The cases that use the JSON and BOOLEAN types need 23ai. If no server
+was used, identify that validation limit in the pull request; unit results do not establish that the
+generated statements work against an Oracle server.
+
+
+### Two files a test holds to the code
+
+- **The capability table.** What `GET /databases/drivers` answers is kept as
+  `backend/internal/api/testdata/database-drivers.json`, which the frontend's
+  engine registry tests and the browser fixture read, since they run with no
+  server. `TestTheDriverCatalogueSnapshotIsCurrent` fails when the route and the
+  file differ. After giving an engine a capability or taking one away, write the
+  file again and run the frontend's tests against it:
+
+  ```bash
+  cd backend && go test ./internal/api -run TestTheDriverCatalogueSnapshotIsCurrent -update-drivers
+  cd ../frontend && bun test src/components/database
+  ```
+
+- **Generated code.** Each generator's output for each engine and option is a
+  golden file under `backend/internal/dbx/testdata/orm`. After a deliberate
+  change to a generator, rewrite them with
+  `go test ./internal/dbx -run TestORMGolden -update-orm` and read the diff.
+
+### The Databases pages
+
+Each area of the section has its own browser spec over one mocked server
+(`frontend/tests/browser/database-fixture.ts`, which answers with the driver
+catalogue above, and `database-fleet-fixture.ts` for a machine with and without
+Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
+`database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
+`database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-performance.spec.ts` and `database-logos.spec.ts`.
+`scripts/test-changed.sh` picks the ones a change can reach: it follows a
+changed file through its imports to the pages that use it and runs the specs
+that name those pages' addresses. A generator's file reaches the Generate page
+and runs the one spec that opens it; the engine registry and the shell, which
+every page reads, run every Databases spec. A changed component or stylesheet
+also runs `design-system.spec.ts`, which walks every Databases page at 1280 and
+at 390.
+Run one by hand against a production build:
+
+```bash
+cd frontend
+bun run build
+bunx playwright test tests/browser/database-data.spec.ts
+```
+
+Playwright serves that build on 127.0.0.1:43117 itself, or uses the server
+already listening there.

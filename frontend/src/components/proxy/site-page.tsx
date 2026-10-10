@@ -1,30 +1,38 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { ArrowLeft, Globe, Logs, Pencil } from "@/components/icons"
 import { get } from "@/lib/api"
-import { forgetSessionState } from "@/lib/view-state"
-import type { SiteSpec, VHost } from "@/lib/types"
+import { relativeTime } from "@/lib/format"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import type { DeploymentRequests, SiteSpec, UpstreamReport, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { VerbBar } from "@/components/verbs"
+import { EMPTY_REQUEST_QUERY, type RequestQuery } from "@/components/deploy/requests-workspace"
 import { siteProduct } from "@/components/proxy/marks"
-import { RoutePath } from "@/components/proxy/route-path"
-import { useProxy } from "@/components/proxy/proxy-context"
+import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { siteCert } from "@/components/proxy/site-filters"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
-import { SiteLogs } from "@/components/proxy/site-logs"
+import { SiteLogs, siteLogViews, type SiteLogView } from "@/components/proxy/site-logs"
+import { SiteRouteMap } from "@/components/proxy/site-route-map"
+import { siteVerdict, type SiteVerdict } from "@/components/proxy/site-overview"
 import { activeOwner } from "@/components/proxy/site-details"
 import { SiteForm } from "@/components/proxy/site-form"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
+import { SiteBalancing } from "@/components/proxy/site-balancing"
+import { SiteControls } from "@/components/proxy/site-controls-panel"
+import { poolsOfSite } from "@/components/proxy/upstream-pools"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
@@ -48,10 +56,21 @@ export function SitePage() {
 }
 
 /**
- * One site, as a place: what it is — the engine serving it, its names, where
- * they go, whose certificate — its verbs beside the way back, and its logs
- * read where it is rather than on the host Logs page it used to send the
- * reader to, which knew it only as a path.
+ * One site, as a place: what it is and whether it is well, on the identity
+ * line the section's other destinations open on, with its verbs beside the
+ * way back; the way a request reaches it, drawn as the visitors, the names,
+ * the engine and what answers behind it (`site-route-map.tsx`); and its logs
+ * in the pane a deployment's are read in, where it is rather than on the
+ * host Logs page it used to send the reader to, which knew it only as a path.
+ * How it spreads its requests and what limits it sets come last: they are
+ * how it is set up, read after whether it works.
+ *
+ * It opened on four figures over the logs — requests a minute, server
+ * errors, refused, upstream failures — and lost them at the operator's
+ * request. Each went where it is said better: the rate and the probes refused
+ * are the route's first node; the server errors are the identity line's
+ * verdict, a press of which narrows Requests to them as the tile's did; and
+ * the upstream failures are the Errors tab's count.
  *
  * Which logs those are is the site's own business (`site-log-plan.ts`): an
  * nginx site's two files, wherever its directives put them; a route on the
@@ -65,8 +84,19 @@ function SiteBody({ name }: { name: string }) {
   const { status, loading, refresh: refreshStatus } = useProxy()
   const [form, setForm] = useState({ open: false, session: 0 })
   const [raw, setRaw] = useState(false)
+  const [asked, setAsked] = useState<SiteLogView>()
+  const [query, setQuery] = useSessionState<RequestQuery>(
+    `proxy.site.${name}.requests`,
+    EMPTY_REQUEST_QUERY,
+  )
+  const logsRef = useRef<HTMLDivElement>(null)
 
-  const vhosts = usePoll((signal) => get<VHost[]>("/proxy/vhosts", undefined, signal), 30_000)
+  // The section's own read of the sites, which the rail's marks and the
+  // Sites page answer from: the page asking again on a timer of its own was
+  // a second read of the same list every thirty seconds.
+  const vhosts = useProxyRead("vhosts")
+  const certs = useProxyRead("certs")
+  const ports = useProxyRead("ports")
   const vhost = vhosts.data?.find((v) => v.name === name)
   const nginx = vhost?.kind === "nginx"
   const read = usePoll(
@@ -75,9 +105,35 @@ function SiteBody({ name }: { name: string }) {
     [name],
     { enabled: nginx },
   )
+  // How nginx spreads the site's requests, and what it logged meeting each
+  // server: read with every route's, which the server checks at most every
+  // fifteen seconds whoever asks.
+  const upstreams = usePoll(
+    (signal) => get<UpstreamReport>("/proxy/upstreams", undefined, signal),
+    30_000,
+    [],
+    { enabled: nginx },
+  )
+  const plan = vhost && siteLogPlan(vhost, read.data?.spec, status?.ingressContainer)
+  // The site's last hour, for the verdict and the route's first node: the
+  // record the server holds in memory, which the Requests view reads too. A
+  // limit of one caps the rows, not the hour's figures.
+  const hour = usePoll<DeploymentRequests>(
+    (signal) =>
+      get<DeploymentRequests>(
+        `/proxy/sites/${encodeURIComponent(name)}/requests`,
+        { since: new Date(Date.now() - 3_600_000).toISOString(), limit: 1 },
+        signal,
+      ),
+    30_000,
+    [name],
+    { enabled: Boolean(plan?.requests) },
+  )
   const refresh = () => {
     vhosts.refresh()
     read.refresh()
+    upstreams.refresh()
+    hour.refresh()
   }
   const openForm = () => setForm((f) => ({ open: true, session: f.session + 1 }))
 
@@ -102,7 +158,7 @@ function SiteBody({ name }: { name: string }) {
   if (!vhosts.data || (nginx && !read.data && !read.error) || (routed && !status && loading)) {
     return <PageState eyebrow={BACK} title={name} error={vhosts.error} onRetry={refresh} />
   }
-  if (!vhost) {
+  if (!vhost || !plan) {
     return (
       <Page>
         <PageContext eyebrow={BACK} title={name} />
@@ -121,15 +177,23 @@ function SiteBody({ name }: { name: string }) {
   }
 
   const spec = read.data?.spec
-  const plan = siteLogPlan(vhost, spec, status?.ingressContainer)
   const engine = nginx ? "nginx" : "Caddy"
-  const target = spec
-    ? spec.kind === "static"
-      ? spec.root
-      : spec.kind === "redirect"
-        ? spec.redirectTo
-        : spec.upstream
-    : vhost.upstreams[0]
+  const pools = nginx && upstreams.data ? poolsOfSite(upstreams.data, vhost.path) : []
+  const cert = siteCert(vhost, certs.data)
+  const summary = hour.data?.status === "available" ? hour.data.summary : undefined
+  const verdict = siteVerdict({ vhost, summary, pools, cert })
+
+  const views = siteLogViews(plan)
+  const view = asked && views.includes(asked) ? asked : views[0]
+  const failedOnly = view === "requests" && query.classes.length === 1 && query.classes[0] === "5xx"
+  // The verdict's figure is a question about the rows under it, as the tile
+  // it replaced was: pressed, Requests narrows to what it counts and comes
+  // into view; pressed again, it lets go.
+  const narrowToFailed = () => {
+    setQuery({ ...query, classes: failedOnly ? [] : ["5xx"] })
+    setAsked("requests")
+    logsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
 
   return (
     <Page className="animate-rise">
@@ -142,12 +206,9 @@ function SiteBody({ name }: { name: string }) {
       />
 
       {/* What the site is, as the facts the Sites card carries, laid out as
-          the line the section's other destinations open on; its two ends
-          under it in their own columns, as its card draws them, rather than
-          as two facts truncating each other. The route's own hairline is the
-          line's rule, so the line draws none of its own above it. */}
+          the line the section's other destinations open on, and at its end
+          whether it is well. */}
       <HostIdentity
-        className="border-b-0 pb-0"
         mark={siteProduct(vhost)}
         fallback={Globe}
         title={name}
@@ -162,15 +223,30 @@ function SiteBody({ name }: { name: string }) {
             )}
             <FactDot />
             <SiteTLS vhost={vhost} />
+            {vhost.modified && (
+              <>
+                <FactDot />
+                <span>edited {relativeTime(vhost.modified)}</span>
+              </>
+            )}
             <FactDot />
             <ServingStatus vhost={vhost} />
           </>
         }
+        aside={
+          verdict && <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />
+        }
       />
-      <RoutePath
-        source={vhost.serverNames.join(", ") || "Default host"}
-        destinationLabel={destinationLabel(spec)}
-        destination={target || "Served by configuration"}
+
+      <SiteRouteMap
+        vhost={vhost}
+        spec={spec}
+        engine={{ product: siteProduct(vhost), name: engine }}
+        summary={summary}
+        recorded={Boolean(plan.requests)}
+        cert={cert}
+        pools={pools}
+        listeners={ports.data}
       />
 
       {nginx && !spec && read.error ? (
@@ -206,13 +282,21 @@ function SiteBody({ name }: { name: string }) {
             </Notice>
           )}
 
-          {plan.sources.length > 0 ? (
-            <SiteLogs
-              key={plan.sources.map((s) => s.id).join("|")}
-              name={name}
-              plan={plan}
-              engine={engine}
-            />
+          {plan.sources.length > 0 && view ? (
+            // The pane leads with its strip when a verdict brings it into
+            // view, rather than tucking it under the sticky chrome.
+            <div ref={logsRef} data-slot="site-logs" className="scroll-mt-4">
+              <SiteLogs
+                key={plan.sources.map((s) => s.id).join("|")}
+                name={name}
+                plan={plan}
+                engine={engine}
+                view={view}
+                onViewChange={setAsked}
+                query={query}
+                onQueryChange={setQuery}
+              />
+            </div>
           ) : (
             <EmptyState
               icon={Logs}
@@ -233,6 +317,11 @@ function SiteBody({ name }: { name: string }) {
           )}
         </>
       )}
+
+      {nginx && upstreams.data && (
+        <SiteBalancing pools={pools} evidence={upstreams.data.evidence} />
+      )}
+      {nginx && <SiteControls name={name} admin={admin} />}
 
       <SiteForm
         open={form.open}
@@ -272,16 +361,38 @@ function SiteBody({ name }: { name: string }) {
   )
 }
 
-/** What the far end of the route is, in the form's words for each kind of site. */
-function destinationLabel(spec: SiteSpec | undefined) {
-  switch (spec?.kind) {
-    case "static":
-      return "Directory"
-    case "redirect":
-      return "Redirect to"
-    default:
-      return "Upstream"
-  }
+/**
+ * Whether the site is well, at the identity line's end. A verdict that
+ * counts failed requests is a press away from them; the others say what is
+ * wrong where nothing on the page narrows to it.
+ */
+function Verdict({
+  verdict,
+  pressed,
+  onPress,
+}: {
+  verdict: SiteVerdict
+  pressed: boolean
+  onPress: () => void
+}) {
+  const body = (
+    <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
+      <Status tone={verdict.tone} label={verdict.label} />
+      {verdict.hint && <span className="text-hint text-muted-foreground">{verdict.hint}</span>}
+    </span>
+  )
+  if (!verdict.narrows) return body
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      aria-label={pressed ? "Show every request again" : "Show the requests that failed"}
+      onClick={onPress}
+      className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover aria-pressed:bg-accent"
+    >
+      {body}
+    </button>
+  )
 }
 
 /** What the site does, in the form's words, or where a Caddy site lives. */

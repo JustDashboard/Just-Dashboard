@@ -343,6 +343,9 @@ func (e *Engine) execute(ctx context.Context, lease QueueLease) error {
 	if err != nil {
 		return err
 	}
+	if err := RequireSupportedProject(ctx, e.store.db, snapshot.Run.ProjectID); err != nil {
+		return e.failRun(ctx, lease, "import_removed", err.Error(), false)
+	}
 	latest := latestAttempts(snapshot.Steps)
 	for _, key := range orderedKeys(snapshot.Steps) {
 		run, err := e.store.Run(ctx, lease.RunID)

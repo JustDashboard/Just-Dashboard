@@ -1,0 +1,7 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:236: native reviewed policy preview record_add complete exact bounded native zone ownership and records are required
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/technitium-edd53f4410921afc3c0a6416c8b10a3f.log (261 bytes)
+--- FAIL: TestDNSServiceNativeOwnedEngine (6.97s)
+FAIL
+Command exited with non-zero status 1
+wrapper_elapsed=6.99 exit=1

@@ -1,0 +1,15 @@
+Global
+         Protocols: -LLMNR -mDNS +DNSOverTLS DNSSEC=allow-downgrade/supported
+  resolv.conf mode: stub
+Current DNS Server: 1.1.1.1#cloudflare-dns.com
+       DNS Servers: 1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
+                    2606:4700:4700::1111#cloudflare-dns.com
+                    2606:4700:4700::1001#cloudflare-dns.com
+Fallback DNS Servers: 9.9.9.9#dns.quad9.net
+        DNS Domain: ~.
+
+Link 2 (eth0)
+    Current Scopes: DNS
+         Protocols: +DefaultRoute -LLMNR -mDNS DNSOverTLS=opportunistic DNSSEC=no/unsupported
+       DNS Servers: 203.0.113.1
+        DNS Domain: example.internal

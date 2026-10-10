@@ -27,6 +27,8 @@ import {
   getCrosshair,
   getServerCrosshair,
   setCrosshair,
+  pinCrosshair,
+  unpinCrosshair,
   subscribeCrosshair,
 } from "@/lib/metrics-crosshair"
 import type { MouseHandlerDataParam } from "recharts"
@@ -201,17 +203,13 @@ export function MetricChart({
     [chartId],
   )
 
-  const handleDown = useCallback(
-    (state: MouseHandlerDataParam) => {
-      if (!onZoom) return
-      const ts = instantOf(state)
-      if (ts !== null) setDrag({ from: ts, to: ts })
-    },
-    [onZoom],
-  )
+  const handleDown = useCallback((state: MouseHandlerDataParam) => {
+    const ts = instantOf(state)
+    if (ts !== null) setDrag({ from: ts, to: ts })
+  }, [])
 
   const handleUp = useCallback(() => {
-    if (!drag || !onZoom) {
+    if (!drag) {
       setDrag(null)
       return
     }
@@ -219,8 +217,11 @@ export function MetricChart({
     setDrag(null)
     // A click is a drag of zero width. Zooming to an instant would produce an
     // empty chart with no way back, so a selection has to be worth making.
-    if (to - from < 1000) return
-    onZoom(from, to)
+    if (to - from < 1000) {
+      pinCrosshair(to)
+      return
+    }
+    onZoom?.(from, to)
   }, [drag, onZoom])
 
   const handleLeave = useCallback(() => {
@@ -228,7 +229,13 @@ export function MetricChart({
     setDrag(null)
   }, [])
 
+  const pinned = useSyncExternalStore(
+    subscribeCrosshair,
+    () => Boolean(getCrosshair().pinned),
+    () => false,
+  )
   const ticks = useMemo(() => tickFormatterFor(rows), [rows])
+  useEffect(() => () => unpinCrosshair(), [])
 
   return (
     // A floor, not a fixed height. Panels laid out side by side stretch to the
@@ -237,7 +244,53 @@ export function MetricChart({
     // carries a footer strip and its neighbour does not. The surplus goes to
     // the plot instead, so the space a row is already occupying is spent on the
     // data rather than on a gap.
-    <div ref={wrapper} className="relative w-full flex-1" style={{ minHeight: height }}>
+    <div
+      ref={wrapper}
+      tabIndex={0}
+      role="group"
+      aria-label={`${series.map((series) => series.label).join(", ")} chart. Click or press Enter to pin a moment; arrow keys inspect samples; Escape releases it.`}
+      className="relative w-full flex-1 focus-ring-inset"
+      style={{ minHeight: height }}
+      onKeyDown={(event) => {
+        if (
+          event.target !== event.currentTarget ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.altKey ||
+          !rows.length
+        )
+          return
+        const current = getCrosshair().ts
+        const at =
+          current === null
+            ? rows.length - 1
+            : rows.reduce(
+                (best, row, index) =>
+                  Math.abs(row.ts - current) < Math.abs(rows[best].ts - current) ? index : best,
+                0,
+              )
+        if (event.key === "Escape") {
+          event.preventDefault()
+          unpinCrosshair()
+        } else if (["ArrowLeft", "ArrowRight", "Home", "End", "Enter", " "].includes(event.key)) {
+          event.preventDefault()
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? rows.length - 1
+                : Math.max(
+                    0,
+                    Math.min(
+                      rows.length - 1,
+                      at + (event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0),
+                    ),
+                  )
+          pinCrosshair(rows[next].ts)
+        }
+      }}
+    >
+      <PinnedReading rows={rows} series={series} format={format} unit={unit} />
       <SyncedCrosshair chartId={chartId} bounds={bounds} plot={plot} />
       {/* Positioned rather than `h-full`, and that is what makes the floor
           above work. A percentage height resolves against a *definite* parent;
@@ -249,6 +302,7 @@ export function MetricChart({
       <ChartContainer config={config} className={cn("absolute inset-0 aspect-auto", className)}>
         <ComposedChart
           data={rows}
+          accessibilityLayer={false}
           margin={{ left: 4, right: 8, top: 6, bottom: 0 }}
           onMouseMove={handleMove}
           onMouseDown={handleDown}
@@ -270,25 +324,31 @@ export function MetricChart({
           <YAxis
             domain={domain}
             ticks={yTicks}
-            // Wide enough for "384 MB": recharts wraps a label it measures
-            // wider than the gutter, and at 56 a three-digit figure with a
-            // unit broke onto two lines beside one that did not.
-            width={unit === "%" ? 34 : 64}
+            // Fitted to the widest label. A fixed gutter had to be wide enough
+            // for "384 MB" — recharts wraps a label wider than it — and left
+            // "48 MB" and "59" a band of nothing between the scale and the
+            // plot, so charts in one row started at different distances from
+            // their own labels.
+            width="auto"
             tickLine={false}
             axisLine={false}
             fontSize={10}
-            // The gutter is the one place a whole number is right: recharts
-            // picks the ticks, and "25.0%" beside "50.0%" spends four
-            // characters saying nothing the scale did not already say.
+            // No trailing zeros in the gutter: "25.0%" beside "50.0%" spends
+            // four characters saying nothing the scale did not already say.
+            // Not rounded to whole numbers either — on a 0–1% scale every
+            // tick read "0%".
             tickFormatter={(v: number) =>
               unit === "%"
-                ? `${Math.round(v)}${unit}`
+                ? `${Number(v.toFixed(2))}${unit}`
                 : (axisFormat ?? seriesFormat(undefined, format, unit))(v)
             }
           />
 
           <Tooltip
-            cursor={{ stroke: "var(--foreground)", strokeOpacity: 0.28, strokeWidth: 1 }}
+            active={pinned ? false : undefined}
+            cursor={
+              pinned ? false : { stroke: "var(--foreground)", strokeOpacity: 0.28, strokeWidth: 1 }
+            }
             isAnimationActive={false}
             // Recharts positions the default tooltip under the pointer, where on
             // a dense page it covers the neighbouring chart the crosshair exists
@@ -481,9 +541,16 @@ function usePlotArea(
     const host = ref.current
     if (!host) return
 
+    let observed: Element | null = null
     const measure = () => {
       const grid = host.querySelector(".recharts-cartesian-grid")
       if (!grid) return
+      // The axis gutter fits its labels, so a scale that grows a digit moves
+      // the plot without resizing the box around it.
+      if (grid !== observed) {
+        observed = grid
+        observer.observe(grid)
+      }
       const g = grid.getBoundingClientRect()
       const h = host.getBoundingClientRect()
       if (g.width === 0 || g.height === 0) return
@@ -650,4 +717,40 @@ export function eventColor(event: MetricEvent): string {
 /** The full timestamp, which is what a tooltip heading has to say. */
 export function rowInstant(ts: number): string {
   return timestamp(new Date(ts).toISOString())
+}
+
+function PinnedReading({
+  rows,
+  series,
+  format,
+  unit,
+}: {
+  rows: ChartRowLike[]
+  series: Series[]
+  format?: (value: number) => string
+  unit?: string
+}) {
+  const moment = useSyncExternalStore(subscribeCrosshair, getCrosshair, getServerCrosshair)
+  if (!moment.pinned || moment.ts === null || !rows.length) return null
+  const row = rows.reduce((best, row) =>
+    Math.abs(row.ts - moment.ts!) < Math.abs(best.ts - moment.ts!) ? row : best,
+  )
+  return (
+    <div
+      data-pinned-reading
+      className="pointer-events-none absolute top-2 right-2 z-10 max-w-[85%] rounded-md border border-hairline bg-popover p-2 text-hint shadow-sm"
+    >
+      <p className="numeric text-muted-foreground">{timestamp(new Date(row.ts).toISOString())}</p>
+      {series
+        .filter((series) => typeof row[series.key] === "number")
+        .map((series) => (
+          <p key={series.key} className="flex justify-between gap-3">
+            <span>{series.label}</span>
+            <span className="numeric">
+              {seriesFormat(series.format, format, unit)(row[series.key] as number)}
+            </span>
+          </p>
+        ))}
+    </div>
+  )
 }

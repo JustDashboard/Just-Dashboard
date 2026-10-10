@@ -1,0 +1,15 @@
+{
+  "tool": "write_stdin",
+  "sessionId": 59736,
+  "terminationInput": "Ctrl-C",
+  "returnedExitCode": 130,
+  "returnedChunkId": "d06be8",
+  "rawLog": "required-interrupted.log",
+  "rawTimingWrapper": {
+    "reportedSignal": 2,
+    "elapsed": 39.49,
+    "reportedExit": 0
+  },
+  "reason": "Stop preliminary gate before final native-null/empty-comment UI correction and rebuild.",
+  "acceptance": "Interrupted; no completed passing-gate claim."
+}

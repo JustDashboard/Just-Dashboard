@@ -1,0 +1,4 @@
+These IP addresses/networks are ignored:
+|- 127.0.0.0/8
+|- ::1
+`- 100.110.34.9

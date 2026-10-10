@@ -1,0 +1,63 @@
+Fri Oct  9 18:47:05 UTC 2026
+e6a804d77741fe488ec7d61cb91f28b10e6cabe3
+sudo -n env JD_PUBLISHED_PATH_LIVE=1 JD_PORT_POLICY_LIVE=1 JD_POSTURE_LIVE=1 jd-api.test -test.run '^TestLive(PublishedPathOnThisHost|FreePortPolicyOnThisHost|PostureUnknownsOnThisHost)$' -test.v
+=== RUN   TestLivePublishedPathOnThisHost
+    docker_published_path_live_test.go:65: published port 0.0.0.0:80 of just-dashboard-ingress (euid 0)
+    docker_published_path_live_test.go:69: publication  observed  observed       Docker publishes TCP port 80 of just-dashboard-ingress on host port 80.
+    docker_published_path_live_test.go:71:     Container: just-dashboard-ingress
+    docker_published_path_live_test.go:71:     Host binding: 0.0.0.0:80
+    docker_published_path_live_test.go:71:     Container port: 80/tcp
+    docker_published_path_live_test.go:71:     Address on bridge: 10.0.0.3
+    docker_published_path_live_test.go:71:     Address on jd-e211-db-y23cyxysen3v: 10.0.4.4
+    docker_published_path_live_test.go:69: listener     observed  observed       docker-proxy holds the host socket for Docker's publication.
+    docker_published_path_live_test.go:71:     Address: 0.0.0.0:80
+    docker_published_path_live_test.go:71:     Holder: docker-proxy
+    docker_published_path_live_test.go:71:     Reach: all
+    docker_published_path_live_test.go:71:     Address: [::]:80
+    docker_published_path_live_test.go:71:     Holder: docker-proxy
+    docker_published_path_live_test.go:71:     Reach: all
+    docker_published_path_live_test.go:69: dnat         observed  observed       Docker's rule translates host port 80 to 10.0.0.3:80.
+    docker_published_path_live_test.go:71:     Translates to: 10.0.0.3:80
+    docker_published_path_live_test.go:71:     Matches address: every address
+    docker_published_path_live_test.go:71:     Except from: docker0
+    docker_published_path_live_test.go:71:     Rule: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.3:80
+    docker_published_path_live_test.go:69: docker-user  observed  empty          DOCKER-USER holds no rule of the operator's, so nothing there filters connections forwarded to containers.
+    docker_published_path_live_test.go:71:     FORWARD policy: DROP
+    docker_published_path_live_test.go:69: firewall     modeled   docker_admits_unless_earlier Docker's chains come before the firewall adapter's in FORWARD, and Docker's own rule admits this container's port, so the adapter's route rules and routed default are not reached for it. ts-forward come first and could still drop it; they are not evaluated.
+    docker_published_path_live_test.go:71:     Adapter: ufw
+    docker_published_path_live_test.go:71:     Direction: forwarded, to the container's address and port
+    docker_published_path_live_test.go:71:     Adapter prediction: deny
+    docker_published_path_live_test.go:71:     Inbound default: deny
+    docker_published_path_live_test.go:71:     FORWARD order: ts-forward → DOCKER-USER → DOCKER-FORWARD → ufw-before-logging-forward → ufw-before-forward → ufw-after-forward → ufw-after-logging-forward → ufw-reject-forward → ufw-track-forward
+    docker_published_path_live_test.go:71:     Docker's accept: -A DOCKER -d 10.0.0.3/32 ! -i docker0 -o docker0 -p tcp -m tcp --dport 80 -j ACCEPT
+    docker_published_path_live_test.go:69: gateway      observed  observed       The dashboard's gateway translates nothing on this port, and no other forward-hook table was seen that could drop it.
+    docker_published_path_live_test.go:69: proxy        observed  none           No configured proxy site or stream was associated with this host port.
+    docker_published_path_live_test.go:69: provider     unknown   unknown        No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers are not visible, so whether the outside reaches this host port is not known from here.
+    docker_published_path_live_test.go:71:     Public address on this host: 57.131.21.87
+    docker_published_path_live_test.go:69: external     unknown   unknown        No enrolled source has a retained measurement of this host port.
+    docker_published_path_live_test.go:87: comparison: Docker NAT: observed. Forwarded leg: admitted by Docker's rule ahead of the firewall adapter, unless ts-forward drops it first (not evaluated). Provider policy: unknown. External measurement: none retained.
+--- PASS: TestLivePublishedPathOnThisHost (2.31s)
+=== RUN   TestLivePostureUnknownsOnThisHost
+    handlers_security_live_test.go:29: status critical, 5 findings, skipped [fail2ban failed logins] (euid 0)
+    handlers_security_live_test.go:31: unknown provider  Provider policy is not visible: No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen: a port graded reachable here may be filtered upstream, and one graded closed may still be forwarded to by a provider's mapping. This host has a public address on an interface (57.131.21.87), so the internet can reach it without a provider translation.
+--- PASS: TestLivePostureUnknownsOnThisHost (2.30s)
+=== RUN   TestLiveFreePortPolicyOnThisHost
+    ports_reservations_live_test.go:20: source deployments  checked       0 active
+    ports_reservations_live_test.go:20: source previews     checked       21000–21999
+    ports_reservations_live_test.go:20: source ephemeral    checked       32768–60999
+    ports_reservations_live_test.go:20: source firewall     checked       ufw, 25 rules
+    ports_reservations_live_test.go:20: source gateway      checked       0 configured
+    ports_reservations_live_test.go:20: source provider     not_supplied  No provider adapter is configured, so ports a provider reserves or its firewall refuses are unknown.
+    ports_reservations_live_test.go:29: firewall passes over 11 ports; first: 80 ufw rule 4 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     80 ufw rule 4 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     443 ufw rule 5 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     3000 ufw rule 6 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5432 ufw rule 11 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5435 ufw rule 12 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5439 ufw rule 13 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     8000 ufw rule 2 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     8080 ufw rule 7 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:29: previews passes over 1000 ports; first: 21000 reserved for pull request previews' tailnet addresses (21000–21999)
+    ports_reservations_live_test.go:29: ephemeral passes over 28232 ports; first: 32768 inside the kernel's ephemeral range (32768–60999), which outgoing connections are given ports from
+--- PASS: TestLiveFreePortPolicyOnThisHost (0.49s)
+PASS

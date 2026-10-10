@@ -98,6 +98,49 @@ describe("what a save says", () => {
     })
   })
 
+  test("live only when nginx's master was seen loading the save", () => {
+    const loaded = { state: "loaded", workers: 2, listens: ["port 80/tcp"], listening: true }
+    expect(saveOutcome(result({ loadProof: loaded }), { existing: true })).toEqual({
+      tone: "success",
+      title: "app.example.com is live",
+      description: "nginx loaded it on 2 new workers, holding port 80/tcp.",
+    })
+    const unconfirmed = {
+      state: "unconfirmed",
+      note: "nginx had not taken the reload up 3s after it was sent, and logged nothing about it.",
+    }
+    expect(saveOutcome(result({ loadProof: unconfirmed }), { existing: true })).toEqual({
+      tone: "warning",
+      title: "app.example.com saved and reloaded",
+      description: unconfirmed.note,
+    })
+    const conflicts = [
+      { domain: "app.example.com", listen: "0.0.0.0:80", site: "legacy", effect: "takes" },
+    ]
+    const withConflict = saveOutcome(result({ conflicts, loadProof: unconfirmed }), {
+      existing: true,
+    })
+    expect(withConflict.title).toBe("app.example.com saved and reloaded with a name conflict")
+    expect(withConflict.description).toEndWith(unconfirmed.note)
+  })
+
+  test("a reload nginx's master refused names its reason, not a stopped nginx", () => {
+    const error = "bind() to 0.0.0.0:8443 failed (98: Address already in use)"
+    const outcome = saveOutcome(
+      result({
+        reloaded: false,
+        reloadError: `nginx did not take the reload up: ${error}`,
+        loadProof: { state: "refused", error },
+      }),
+      { existing: true },
+    )
+    expect(outcome).toEqual({
+      tone: "warning",
+      title: "app.example.com saved; nginx refused the reload",
+      description: `nginx refused it and serves what it had before: ${error}. Fix what it names, then reload nginx.`,
+    })
+  })
+
   test("a failed reload after a clean test is its own state", () => {
     const reloadError =
       'nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)'

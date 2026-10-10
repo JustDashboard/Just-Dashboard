@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
@@ -33,10 +34,11 @@ func (d *backupDatabaseDumper) DumpDatabase(ctx context.Context, id int64, direc
 	}
 	result, err := dbx.Dump(ctx, conn.Driver, dsn, "", directory)
 	if err != nil {
-		return backups.DatabaseDumpResult{}, err
+		// A backup run records why a dump failed, and shows it.
+		return backups.DatabaseDumpResult{}, withoutSecrets(dsn, err)
 	}
-	method := strings.TrimPrefix(result.Summary, "written by ")
-	if method == "" {
+	method := result.Tool
+	if method == "" || method == dbx.BuiltInDumpTool {
 		method = "built-in dump"
 	}
 	return backups.DatabaseDumpResult{
@@ -50,5 +52,27 @@ func (d *backupDatabaseDumper) RestoreDatabase(ctx context.Context, id int64, da
 	if err != nil {
 		return "", errors.New("database connection was not found")
 	}
-	return dbx.Restore(ctx, conn.Driver, dsn, database, dumpPath)
+	// The route that reaches this refuses a protected connection with its own
+	// answer. This is the same refusal where nothing can come past it: a
+	// restore replaces what is in the database, by whichever road it arrives.
+	if conn.ReadOnly {
+		return "", fmt.Errorf("%s is protected: a dump cannot be restored into it until protection is turned off in its settings", conn.Name)
+	}
+	// And where the dump lands in a database a protected connection to the
+	// same server is on: the dump is in hand here, so a Redis archive is asked
+	// which numbered databases it will write into.
+	for _, into := range restoreDestinations(conn, strings.TrimSpace(database), dumpPath) {
+		if err := d.server.refuseDatabaseOfProtected(ctx, conn, into); err != nil {
+			return "", err
+		}
+	}
+	// The dashboard's own sessions go first, as they do for a restore started
+	// from the Databases page: a pooled one would carry plans for tables that
+	// are about to be replaced, and on SQLite would hold a lock on the file.
+	if conn.Driver.IsSQL() {
+		d.server.modules.dbs.Close(id)
+		defer d.server.modules.dbs.Close(id)
+	}
+	output, err := dbx.Restore(ctx, conn.Driver, dsn, database, dumpPath)
+	return output, withoutSecrets(dsn, err)
 }

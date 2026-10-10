@@ -230,6 +230,9 @@ func (s *Server) handleDeploymentImportPreview(w http.ResponseWriter, r *http.Re
 	if source.Kind != deploy.SourceImport {
 		return httpx.BadRequest("import preview requires source kind %q", deploy.SourceImport)
 	}
+	if source.Mode != deploy.SourceModeExistingCheckout {
+		return httpx.Err(http.StatusUnprocessableEntity, "import_removed", "existing-workload import has been removed; only legacy Git-checkout import remains supported")
+	}
 	preview, err := s.modules.deploySources.PreviewImport(r.Context(), source)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -266,6 +269,9 @@ func (s *Server) handleDeploymentImportAdopt(w http.ResponseWriter, r *http.Requ
 	}
 	if draft.Data.Source == nil || draft.Data.Source.Kind != deploy.SourceImport {
 		return httpx.BadRequest("only an observed import draft can be adopted")
+	}
+	if draft.Data.Source.Mode != deploy.SourceModeExistingCheckout {
+		return httpx.Err(http.StatusUnprocessableEntity, "import_removed", "existing-workload import has been removed")
 	}
 	preview, err := s.modules.deploySources.PreviewImport(r.Context(), *draft.Data.Source)
 	if err != nil {

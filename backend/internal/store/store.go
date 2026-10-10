@@ -21,7 +21,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = `
+const schema = networkProbeSchema + networkIPAMSchema + networkWireGuardSchema + networkIncidentSchema + networkGatewaySchema + networkRouteHistorySchema + firewallHistorySchema + networkEgressSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -102,8 +102,24 @@ CREATE TABLE IF NOT EXISTS db_connections (
   name       TEXT NOT NULL UNIQUE,
   driver     TEXT NOT NULL,
   dsn_enc    TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- What the operator says about the connection, as opposed to what its DSN
+  -- says: which environment it serves, whether the dashboard may change what
+  -- is in it, and anything worth remembering about it.
+  environment TEXT NOT NULL DEFAULT '',
+  read_only   INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT NOT NULL DEFAULT ''
 );
+
+-- Background activity history is tied to the exact saved target.
+CREATE TABLE IF NOT EXISTS db_metric_samples (
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  identity      TEXT NOT NULL,
+  at            INTEGER NOT NULL,
+  snapshot      TEXT NOT NULL,
+  PRIMARY KEY (connection_id, identity, at)
+);
+CREATE INDEX IF NOT EXISTS idx_db_metric_samples_at ON db_metric_samples(at);
 
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
@@ -114,7 +130,8 @@ CREATE TABLE IF NOT EXISTS db_saved_queries (
   connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   sql           TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_db_saved_conn ON db_saved_queries(connection_id, name);
 
@@ -130,7 +147,9 @@ CREATE TABLE IF NOT EXISTS db_query_history (
   success       INTEGER NOT NULL DEFAULT 1,
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   row_count     INTEGER NOT NULL DEFAULT 0,
-  ran_at        INTEGER NOT NULL
+  ran_at        INTEGER NOT NULL,
+  rows_affected INTEGER NOT NULL DEFAULT 0,
+  error         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_db_history_conn ON db_query_history(connection_id, ran_at DESC);
 
@@ -147,6 +166,17 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   layout        TEXT NOT NULL,
   updated_at    INTEGER NOT NULL,
   PRIMARY KEY (connection_id, schema_name)
+);
+
+-- Databases found on this machine that the operator said to leave alone. The
+-- key is the inventory's own (docker:<container>, compose:<project>/<service>,
+-- host:<unit>, file:<path>), not a connection id: the point of the row is to
+-- outlive the connection that was forgotten, so the next reconcile does not
+-- quietly bring it back.
+CREATE TABLE IF NOT EXISTS db_inventory_ignored (
+  origin     TEXT PRIMARY KEY,
+  ignored_at INTEGER NOT NULL,
+  ignored_by TEXT NOT NULL DEFAULT ''
 );
 
 -- Boards live with the dashboard's other durable state, including embedded
@@ -564,6 +594,7 @@ CREATE TABLE IF NOT EXISTS deploy_webhook_deliveries (
 );
 
 CREATE TABLE IF NOT EXISTS deploy_variable_revisions (
+	value_mode TEXT NOT NULL DEFAULT '',
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
   key            TEXT NOT NULL,
@@ -736,6 +767,7 @@ CREATE TABLE IF NOT EXISTS deploy_drafts (
   revision             INTEGER NOT NULL DEFAULT 1,
   data_json            TEXT NOT NULL DEFAULT '{}',
   environment_enc      TEXT NOT NULL DEFAULT '',
+  adoption_enc         TEXT NOT NULL DEFAULT '',
   findings_json        TEXT NOT NULL DEFAULT '[]',
   plan_preview         TEXT NOT NULL DEFAULT '',
   committed_project_id INTEGER NOT NULL DEFAULT 0,
@@ -875,6 +907,49 @@ CREATE TABLE IF NOT EXISTS watched_domains (
   created_at INTEGER NOT NULL
 );
 
+-- Watched endpoints. watched_domains holds one row per name, so watching
+-- mail.example.com on 993 replaced it on 443. An endpoint is a name, a port
+-- and an address to reach the name at ('' for the name's own), and keeps its
+-- last live check, which the server makes on its own schedule. kind is what
+-- the check asks: 'tls', a handshake and its certificate (kept in
+-- certificate), or 'tcp', a network probe that only connects (kept in
+-- probe) — the network page's watched probes, on the same schedule, history
+-- and alerts. Here rather than in proxySchema because it gained columns after
+-- shipping, which addedColumns brings to an older table first.
+CREATE TABLE IF NOT EXISTS watched_endpoints (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain      TEXT NOT NULL,
+  port        INTEGER NOT NULL DEFAULT 443,
+  ip          TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  checked_at  INTEGER NOT NULL DEFAULT 0,
+  certificate TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL DEFAULT 'tls',
+  probe       TEXT NOT NULL DEFAULT '',
+  UNIQUE(domain, port, ip)
+);
+
+-- The watch list as watched_domains had it. This runs on every boot and
+-- brings back nothing removed since, because removing an endpoint removes
+-- its watched_domains row as well; watched_domains is otherwise left as it
+-- was, for a downgrade to find.
+INSERT OR IGNORE INTO watched_endpoints(domain, port, ip, created_at)
+  SELECT domain, port, '', created_at FROM watched_domains;
+
+-- Every check of a watched endpoint, by the schedule or an administrator,
+-- so a row can show how its days left, or a probe's connect time, moved and
+-- when its certificate changed. Kept to 2000 per endpoint and 90 days.
+CREATE TABLE IF NOT EXISTS watched_checks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint_id INTEGER NOT NULL REFERENCES watched_endpoints(id) ON DELETE CASCADE,
+  checked_at  INTEGER NOT NULL,
+  days_left   INTEGER,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  error       TEXT NOT NULL DEFAULT '',
+  ms          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_watched_checks_endpoint ON watched_checks(endpoint_id, checked_at);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -936,6 +1011,87 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- Pruning walks by time across every container, which the primary key (name
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
+
+-- Per-device traffic, recorded by the network module's sampler at the metrics
+-- interval (netx/sampler.go). Each row is the interval's mean and its busiest
+-- two seconds in each direction, and the errors and drops counted in it.
+-- Docker's veths are left out: each container's traffic is recorded with the
+-- container, and a row per veth per interval would be most of the table.
+CREATE TABLE IF NOT EXISTS metric_interface_samples (
+  ts         INTEGER NOT NULL,
+  iface      TEXT NOT NULL,
+  rx_rate    REAL NOT NULL DEFAULT 0,
+  tx_rate    REAL NOT NULL DEFAULT 0,
+  rx_peak    REAL NOT NULL DEFAULT 0,
+  tx_peak    REAL NOT NULL DEFAULT 0,
+  rx_errors  INTEGER NOT NULL DEFAULT 0,
+  tx_errors  INTEGER NOT NULL DEFAULT 0,
+  rx_dropped INTEGER NOT NULL DEFAULT 0,
+  tx_dropped INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (iface, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_interface_samples_ts ON metric_interface_samples(ts);
+
+-- Bounded saved observations from the existing network probe dispatcher.
+CREATE TABLE IF NOT EXISTS network_diagnostic_runs (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  job_id     TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  payload    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_network_diagnostic_runs_created ON network_diagnostic_runs(created_at DESC, id);
+
+-- Explicit bounded PCAP artifacts; private API access and fixed retention.
+CREATE TABLE IF NOT EXISTS network_packet_captures (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  payload TEXT NOT NULL CHECK(length(payload)<=65536),
+  artifact BLOB NOT NULL DEFAULT X'' CHECK(length(artifact)<=2097152)
+);
+CREATE INDEX IF NOT EXISTS idx_network_packet_captures_created ON network_packet_captures(created_at DESC,id);
+-- Opt-in socket snapshots retain only measured TCP deltas and peer metadata.
+-- Payload bytes, rows, UTC-hour coverage and retention are capped by netflows.
+CREATE TABLE IF NOT EXISTS network_flow_buckets (
+  id TEXT NOT NULL,
+  hour INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  remote_address TEXT NOT NULL DEFAULT '',
+  container_id TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL,
+  payload_bytes INTEGER NOT NULL,
+  PRIMARY KEY (id, hour)
+);
+CREATE INDEX IF NOT EXISTS idx_network_flow_hour ON network_flow_buckets(hour, last_seen);
+CREATE INDEX IF NOT EXISTS idx_network_flow_peer ON network_flow_buckets(remote_address, hour);
+CREATE INDEX IF NOT EXISTS idx_network_flow_container ON network_flow_buckets(container_id, hour);
+CREATE TABLE IF NOT EXISTS network_flow_cycles (
+  hour INTEGER PRIMARY KEY,
+  payload TEXT NOT NULL,
+  payload_bytes INTEGER NOT NULL
+);
+
+-- A WireGuard client's configuration, kept sealed (auth.Sealer) so an
+-- administrator can show its QR code again after the sheet that made it was
+-- closed. The client's private key is in it, which is why it is sealed and
+-- why it can be forgotten (config_sealed emptied) while the peer stays. The
+-- peer itself lives in the interface's own wg-quick file; this is only the
+-- half the server never needs.
+CREATE TABLE IF NOT EXISTS network_vpn_clients (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  iface         TEXT NOT NULL,
+  public_key    TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'device',
+  address       TEXT NOT NULL DEFAULT '',
+  config_sealed TEXT NOT NULL DEFAULT '',
+  created_by    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  UNIQUE (iface, public_key)
+);
 
 CREATE TABLE IF NOT EXISTS metric_samples (
   ts             INTEGER PRIMARY KEY,
@@ -1041,6 +1197,11 @@ BEFORE UPDATE OF environment_id, key, revision, sensitivity, scopes, value_enc,
 BEGIN
   SELECT RAISE(ABORT, 'deployment variable revision is immutable');
 END;
+CREATE TRIGGER IF NOT EXISTS deploy_variable_revision_mode_immutable
+BEFORE UPDATE OF value_mode ON deploy_variable_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'deployment variable revision is immutable');
+END;
 `
 
 // addedColumns are columns that arrived after the table they belong to had
@@ -1086,11 +1247,23 @@ var addedColumns = []struct{ table, column, spec string }{
 	// so closing the preview can drop exactly the copies and nothing the
 	// operator typed there themselves.
 	{"deploy_variable_revisions", "copied_from_environment", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_variable_revisions", "value_mode", "TEXT NOT NULL DEFAULT ''"},
 
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
+	// A connection remembers which discovered database it was made from, by
+	// the inventory's key. Where it dials can change — a container is given a
+	// new address when it is recreated — and the key does not.
+	{"db_connections", "origin", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// A saved connection gained what the operator says about it: the
+	// environment it serves, a protection that refuses every write made
+	// through the dashboard, and free notes. Existing connections are
+	// unlabelled, unprotected and have none.
+	{"db_connections", "environment", "TEXT NOT NULL DEFAULT ''"},
+	{"db_connections", "read_only", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_connections", "notes", "TEXT NOT NULL DEFAULT ''"},
 	// Reconciliation knew why a binding could not be repaired and threw the
 	// reason away, so the settings page could only say "check that the
 	// container is running". The reason is kept on the binding it belongs to.
@@ -1112,6 +1285,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "archived_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_drafts", "environment_enc", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_drafts", "adoption_enc", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
@@ -1137,6 +1311,12 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_runs", "slot_class", "TEXT NOT NULL DEFAULT 'light'"},
 	{"deploy_runs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'"},
 	{"deploy_releases", "expected_downtime", "INTEGER NOT NULL DEFAULT 1"},
+
+	// The query history learned why a statement failed and how many rows a
+	// write changed, and a saved query learned when it was last edited.
+	{"db_query_history", "error", "TEXT NOT NULL DEFAULT ''"},
+	{"db_query_history", "rows_affected", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_saved_queries", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 
 	// The CPU mode breakdown, added because one "busy" percentage cannot tell
 	// apart a server doing work, a server waiting on a disk, and a hypervisor
@@ -1193,6 +1373,38 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
 	{"metric_mount_samples", "inodes_percent", "REAL NOT NULL DEFAULT 0"},
+
+	// A device's own routes (its AllowedIPs) live only in its sealed client
+	// configuration; this unsealed copy lets an edit start from them. Empty for
+	// a peer made before it existed, which reads as unknown, never as none.
+	{"network_vpn_clients", "client_routes", "TEXT NOT NULL DEFAULT ''"},
+
+	// A device's recorded interval carries its exact counter growth and the
+	// seconds it covered, so a transfer budget is measured rather than inferred
+	// from a mean rate. Unknown (NULL) for rows recorded before, never zero.
+	{"metric_interface_samples", "rx_bytes", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "tx_bytes", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "rx_packets", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "tx_packets", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "span", "INTEGER DEFAULT NULL"},
+	// A watched endpoint may be a network probe that only connects, checked
+	// on the TLS watch's schedule with the same history and alerts, rather
+	// than a handshake; a probe's check keeps its connect time.
+	{"watched_endpoints", "kind", "TEXT NOT NULL DEFAULT 'tls'"},
+	{"watched_endpoints", "probe", "TEXT NOT NULL DEFAULT ''"},
+	{"watched_checks", "ms", "INTEGER NOT NULL DEFAULT 0"},
+	// How connections fared, not only how many there were: TCP's own rates of
+	// resent segments, failed attempts, resets and accept-queue drops, and the
+	// kernel's RTT of established connections to peers elsewhere. NULL on a
+	// row from before they were sampled, so an old hour reads as unmeasured
+	// rather than as a clean one.
+	{"metric_samples", "tcp_out_segs", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_retrans", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_attempt_fails", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_estab_resets", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_listen_drops", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_rtt_ms", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_rtt_p90_ms", "REAL DEFAULT NULL"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
@@ -1272,6 +1484,14 @@ func Open(dataDir string) (*Store, error) {
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := InitializeNetworkDNSEvidence(context.Background(), db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply network DNS evidence schema: %w", err)
+	}
+	if err := InitializeNetworkDNSServices(context.Background(), db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply managed DNS service schema: %w", err)
 	}
 	// Run after the schema, never instead of it: a fresh database gets its
 	// tables from the block above and finds nothing to add, while an existing

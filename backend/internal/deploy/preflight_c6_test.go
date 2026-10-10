@@ -63,7 +63,7 @@ func TestC6PreflightSurfacesNetworkFirewallAndDependencyGates(t *testing.T) {
 	// so a name nobody has published before is reported rather than refused.
 	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates")
 	assertC6Finding(t, findings, "public_bind", PreflightWarning, "")
-	assertC6Finding(t, findings, "firewall_mismatch", PreflightBlocked, "/security/firewall")
+	assertC6Finding(t, findings, "firewall_mismatch", PreflightBlocked, "/network/firewall")
 	assertC6Finding(t, findings, "database_unavailable", PreflightBlocked, "/databases/12")
 	assertC6Finding(t, findings, "storage_unavailable", PreflightDecision, "/docker/volumes/shared")
 	assertC6Finding(t, findings, "backup_stale", PreflightWarning, "/backups/42")

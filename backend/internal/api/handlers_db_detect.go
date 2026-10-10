@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -16,8 +18,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/docker/docker/errdefs"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // Finding and making database servers, so nobody has to write a DSN by hand.
@@ -57,8 +59,13 @@ type detectedServer struct {
 
 // handleDBDetected lists what is running here, from both places it can be.
 //
-// Docker is no longer required. A server with no Docker socket at all still
-// runs databases — that is what a VPS with an apt-installed Postgres is — and
+// It is the inventory, narrowed to the shape this route has always answered
+// with: the running servers a driver here can open, each as the connection
+// that could be made to it. The inventory route carries everything else — the
+// stopped ones, the files, the engines with no driver.
+//
+// Docker is not required. A server with no Docker socket at all still runs
+// databases — that is what a VPS with an apt-installed Postgres is — and
 // answering "unavailable" to the whole question because one of its two halves
 // is missing was how a native database became invisible.
 func (s *Server) handleDBDetected(w http.ResponseWriter, r *http.Request) error {
@@ -66,89 +73,85 @@ func (s *Server) handleDBDetected(w http.ResponseWriter, r *http.Request) error 
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 
-	var containers []dockerx.Container
-	if s.modules.docker != nil {
-		var err error
-		containers, err = s.modules.docker.ListContainers(ctx, false)
-		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
-		}
-	}
-	existing, err := s.existingDSNs(ctx)
+	inv, _ := s.buildInventory(ctx, true, dbFileScanResult{})
+	conns, names, err := s.savedConnections(ctx)
 	if err != nil {
 		return err
 	}
+	dbx.AttachConnections(inv.Instances, conns)
 
 	out := detectedResponse{Servers: []detectedServer{}}
-	for _, c := range containers {
-		cand, _ := dbx.Detect(c.Name, c.Image, nil, publishedPorts(c.Ports), nil)
-		if cand == nil {
+	for _, inst := range inv.Instances {
+		access, ok := inv.Access(inst.Key)
+		if !ok || inst.Kind != dbx.KindServer || inst.State != dbx.StateRunning {
 			continue
 		}
-		// The environment is only read once the image is known to be a
-		// database, so an inspect is not paid for every container on the host.
-		if detail, err := s.modules.docker.Inspect(ctx, c.ID); err == nil {
-			cand, _ = dbx.Detect(c.Name, c.Image, envMap(detail.Env), publishedPorts(c.Ports), containerIPs(detail))
-		}
-		if cand == nil {
+		if inst.Confidence == dbx.ConfidencePort {
+			// A container known only by a port it exposes is a guess, and this
+			// shape has no field to say so: every row here reads as a server
+			// that was detected. The inventory lists it, labelled.
 			continue
 		}
-		out.Servers = append(out.Servers, detectedServer{
-			Candidate: *cand,
-			Adopted:   existing[addressKey(cand.Host, cand.Port)],
-			Health:    c.Health,
-			Status:    c.Status,
-		})
-	}
-	for _, cand := range s.hostCandidates(ctx, out.Servers) {
-		out.Servers = append(out.Servers, detectedServer{
-			Candidate: cand,
-			Adopted:   existing[addressKey(cand.Host, cand.Port)],
-		})
+		server := detectedServer{Candidate: access.Candidate}
+		if !inst.Connectable {
+			server.Reason = inst.Reason
+		}
+		if adopted := connectionNames(inst.Connections, names); len(adopted) > 0 {
+			server.Adopted = adopted[0]
+		}
+		if inst.Container != nil {
+			server.Health, server.Status = inst.Container.Health, inst.Container.Status
+		}
+		out.Servers = append(out.Servers, server)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
 // hostCandidates finds the database servers installed on the machine itself,
-// as opposed to the ones in containers.
+// as opposed to the ones in containers: one candidate per server, at the
+// address its driver dials.
 //
 // A container published to the host is owned by `docker-proxy`, which matches
 // no rule, so the two halves do not normally overlap. One case does: a
 // container on the host's network namespace, which looks from here exactly
-// like a native server. Those are dropped by address, because the Docker half
-// knows their credentials and this one does not — reporting the same server
+// like a native server. Its sockets are left out, because the Docker half
+// knows its credentials and this one does not — reporting the same server
 // twice, once connectable and once asking for a password, would be worse than
 // either answer alone.
 func (s *Server) hostCandidates(ctx context.Context, known []detectedServer) []dbx.Candidate {
-	listeners, err := proxysvc.ListListeners(ctx)
-	if err != nil {
+	listeners, scan := s.collectListeners(ctx)
+	if !scan.OK {
 		return nil
+	}
+	native := listeners[:0:0]
+	for _, l := range listeners {
+		if l.Manager != "container" {
+			native = append(native, l)
+		}
 	}
 	seen := map[string]bool{}
 	for _, k := range known {
 		seen[addressKey(k.Host, k.Port)] = true
 	}
+	inv := dbx.Discover(dbx.Facts{Listeners: native})
 	out := []dbx.Candidate{}
-	for _, l := range listeners {
-		cand := dbx.DetectHost(dbx.HostListener{
-			Protocol: l.Protocol, Address: l.Address, Port: int(l.Port),
-			Process: l.Process, User: l.User,
-		})
-		if cand == nil {
+	for _, inst := range inv.Instances {
+		access, ok := inv.Access(inst.Key)
+		if !ok {
 			continue
 		}
-		key := addressKey(cand.Host, cand.Port)
+		key := addressKey(access.Candidate.Host, access.Candidate.Port)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, *cand)
+		out = append(out, access.Candidate)
 	}
 	return out
 }
 
-// existingDSNs maps a host:port already covered by a saved connection to that
+// existingDSNs maps an address already covered by a saved connection to that
 // connection's name. It opens each stored DSN, which is why it lives behind
 // the same capability as the rest of this file.
 func (s *Server) existingDSNs(ctx context.Context) (map[string]string, error) {
@@ -176,7 +179,10 @@ func (s *Server) existingDSNs(ctx context.Context) (map[string]string, error) {
 	return out, nil
 }
 
-func addressKey(host string, port int) string { return host + ":" + strconv.Itoa(port) }
+// addressKey names a server's address so that two spellings of it agree:
+// localhost, 127.0.0.1 and [::1] are one place on this machine, and a
+// connection typed with one must cover a server found at another.
+func addressKey(host string, port int) string { return dbx.AddressIdentity(host, port) }
 
 func publishedPorts(ports []dockerx.Port) []dbx.PublishedPort {
 	out := make([]dbx.PublishedPort, 0, len(ports))
@@ -208,6 +214,10 @@ type adoptRequest struct {
 // The client names a container, not a DSN. That is the whole point: the
 // credentials are read from the container here and sealed here, so the browser
 // never holds them and an operator never types them.
+//
+// It signs in before it saves. The caller that starts a server retries this
+// until the engine inside it answers, and used to be handed a connection row
+// on the first attempt whether or not the credentials in it worked.
 func (s *Server) handleDBAdopt(w http.ResponseWriter, r *http.Request) error {
 	var req adoptRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -223,71 +233,50 @@ func (s *Server) handleDBAdopt(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 
-	cand, password, err := s.candidateFor(ctx, req.Container)
+	inst, access, err := s.containerInstance(ctx, req.Container)
 	if err != nil {
 		return err
 	}
-	if !cand.Connectable() {
-		return httpx.BadRequest("%s cannot be connected to: %s", cand.Container, cand.Reason)
+	if !inst.Connectable {
+		return httpx.BadRequest("%s cannot be connected to: %s", inst.Name, inst.Reason)
 	}
-	dsn := dbx.BuildDSN(*cand, password)
-	if dsn == "" {
-		return httpx.BadRequest("no connection string could be built for %s", cand.Driver)
-	}
+	return s.connectInstance(ctx, w, r, inst, access, connectOptions{
+		name: req.Name, action: "database.connection.adopt",
+	})
+}
 
-	// Adopting the same container twice is not an error, it is the same
-	// request arriving again — which it does, because the caller that creates a
-	// server retries this until the engine inside it is actually answering, and
-	// the first attempt is the one that creates the row. Returning what is
-	// already there beats a UNIQUE violation on the name.
-	conn, stored, existing, err := s.adoptedDatabaseConnection(ctx, cand.Driver, dsn)
-	if err != nil {
-		return err
+// containerInstance re-detects one container by name or id, so an adopt acts
+// on what is true now rather than on what a listing said some time ago.
+func (s *Server) containerInstance(ctx context.Context, name string) (*dbx.Instance, *dbx.Access, error) {
+	ctx = s.modules.docker.WithReadSnapshot(ctx)
+	facts, _, scan := s.collectContainers(ctx, true)
+	if !scan.OK {
+		return nil, nil, httpx.Err(http.StatusBadGateway, "docker_failed", scan.Reason)
 	}
-	if conn != nil {
-		dsn, err = refreshedDatabasePassword(cand.Driver, stored, password)
-		if err != nil {
-			return httpx.Internal(err)
+	listeners, _ := s.collectListeners(ctx)
+	inv := dbx.Discover(dbx.Facts{Containers: facts, Listeners: listeners})
+	running := false
+	for _, c := range facts {
+		if c.Name != name && c.ID != name {
+			continue
 		}
-		if stored == dsn {
-			httpx.SkipAudit(r)
-			httpx.JSON(w, http.StatusOK, conn)
-			return nil
+		if c.State != "running" {
+			continue
 		}
-		// Preserve this login's database and transport options. A replacement
-		// container may rotate its password without changing its logical identity.
-		sealed, err := s.Sealer.Seal(dsn)
-		if err != nil {
-			return httpx.Internal(err)
+		running = true
+		inst, ok := inv.FindContainer(c.Name)
+		if !ok {
+			break
 		}
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
-			return httpx.BadRequest("could not update connection: %v", err)
+		if access, ok := inv.Access(inst.Key); ok {
+			return inst, &access, nil
 		}
-		// The pool, if any, was dialled with the old DSN and would keep failing.
-		s.modules.dbs.Close(conn.ID)
-		conn, _, err = s.dbConnRow(r.Context(), conn.ID)
-		if err != nil {
-			return err
-		}
-		httpx.SetAudit(r, "database.connection.refresh", conn.Name, map[string]any{
-			"container": cand.Container, "image": cand.Image, "driver": cand.Driver,
-			"host": conn.Host, "user": conn.User,
-		})
-		httpx.JSON(w, http.StatusOK, conn)
-		return nil
+		return inst, nil, nil
 	}
-
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = cand.Container
+	if running {
+		return nil, nil, httpx.BadRequest("%s is not a database image this dashboard recognises", name)
 	}
-	if !connNameRe.MatchString(name) {
-		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
-	}
-	name = uniqueConnectionName(name, existing)
-	return s.saveConnection(w, r, name, cand.Driver, dsn, "database.connection.adopt",
-		map[string]any{"container": cand.Container, "image": cand.Image})
+	return nil, nil, httpx.BadRequest("no running container named %q", name)
 }
 
 type hostConnectRequest struct {
@@ -326,6 +315,9 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 	if strings.TrimSpace(req.Host) == "" || req.Port <= 0 {
 		return httpx.BadRequest("a host and port are required")
 	}
+	if err := validConnectionNames(req.User, req.Database); err != nil {
+		return err
+	}
 	cand := dbx.Candidate{
 		Driver: req.Driver, Source: dbx.SourceHost, Host: strings.TrimSpace(req.Host),
 		Port: req.Port, User: strings.TrimSpace(req.User), Database: strings.TrimSpace(req.Database),
@@ -336,7 +328,7 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.probeConnection(ctx, req.Driver, dsn); err != nil {
+	if err := s.dialDatabase(ctx, req.Driver, dsn); err != nil {
 		httpx.SetAudit(r, "database.connection.host", cand.Host, map[string]any{
 			"ok": false, "driver": string(req.Driver), "user": cand.User,
 		})
@@ -346,18 +338,22 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("%v", err)
 	}
 
-	existing, err := s.existingDSNs(ctx)
+	// The same server, database and account is the same connection, and takes
+	// the password that was just seen to work. Anything less specific — the
+	// address alone — used to hand back whichever connection happened to be
+	// there and throw the new credentials away.
+	conn, stored, names, err := s.adoptedDatabaseConnection(ctx, req.Driver, dsn)
 	if err != nil {
 		return err
 	}
-	if have, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-		conn, _, err := s.connectionByName(ctx, have)
-		if err != nil {
-			return err
+	if conn != nil {
+		if stored == dsn {
+			httpx.SkipAudit(r)
+			httpx.JSON(w, http.StatusOK, conn)
+			return nil
 		}
-		httpx.SkipAudit(r)
-		httpx.JSON(w, http.StatusOK, conn)
-		return nil
+		return s.resealConnection(ctx, w, r, conn, req.Driver, dsn, "database.connection.host",
+			map[string]any{"port": cand.Port, "driver": req.Driver, "user": cand.User, "refreshed": true})
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -366,33 +362,71 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 	if !connNameRe.MatchString(name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
-	name = uniqueConnectionName(name, existing)
-	return s.saveConnection(w, r, name, cand.Driver, dsn, "database.connection.host",
+	name = uniqueConnectionName(name, names)
+	return s.saveConnectionFrom(w, r, s.hostOrigin(ctx, cand), name, cand.Driver, dsn, "database.connection.host",
 		map[string]any{"process": cand.Process, "port": cand.Port})
 }
 
-// candidateFor re-detects one container by name, so an adopt acts on what is
-// true now rather than on what a listing said some time ago.
-func (s *Server) candidateFor(ctx context.Context, name string) (*dbx.Candidate, string, error) {
-	containers, err := s.modules.docker.ListContainers(ctx, false)
+// resealConnection replaces a saved connection's DSN with one that has just
+// been dialled, keeping the row and everything that references it.
+func (s *Server) resealConnection(
+	ctx context.Context, w http.ResponseWriter, r *http.Request,
+	conn *dbConnection, driver dbx.Driver, dsn, action string, detail map[string]any,
+) error {
+	contained, err := s.containDSN(driver, dsn)
 	if err != nil {
-		return nil, "", httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
+		return err
 	}
-	for _, c := range containers {
-		if c.Name != name && c.ID != name {
+	sealed, err := s.Sealer.Seal(contained)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
+		return httpx.Internal(err)
+	}
+	// The pool, if any, was dialled with the old DSN and would keep failing.
+	s.modules.dbs.Close(conn.ID)
+	conn, _, err = s.dbConnRow(ctx, conn.ID)
+	if err != nil {
+		return err
+	}
+	detail["connection"] = conn.Name
+	httpx.SetAudit(r, action, conn.Host, detail)
+	httpx.JSON(w, http.StatusOK, conn)
+	return nil
+}
+
+// hostOrigin is the inventory key of the server on this machine a candidate
+// dials, or "" for a server that is somewhere else. It is what lets a
+// connection typed with a password be found again as the same server the
+// inventory lists.
+func (s *Server) hostOrigin(ctx context.Context, cand dbx.Candidate) string {
+	if !databaseLoopback(cand.Host) {
+		return ""
+	}
+	facts := dbx.Facts{}
+	facts.Listeners, _ = s.collectListeners(ctx)
+	facts.Sockets, _ = s.collectSockets(ctx)
+	facts.Units, _ = s.collectUnits(ctx)
+	native := facts.Listeners[:0:0]
+	for _, l := range facts.Listeners {
+		if l.Manager != "container" {
+			native = append(native, l)
+		}
+	}
+	facts.Listeners = native
+	want := addressKey(cand.Host, cand.Port)
+	for _, inst := range dbx.Discover(facts).Instances {
+		if inst.Driver != cand.Driver {
 			continue
 		}
-		detail, err := s.modules.docker.Inspect(ctx, c.ID)
-		if err != nil {
-			return nil, "", httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
+		for _, e := range inst.Endpoints {
+			if e.Kind == "tcp" && addressKey(e.Host, e.Port) == want {
+				return inst.Key
+			}
 		}
-		cand, password := dbx.Detect(c.Name, c.Image, envMap(detail.Env), publishedPorts(c.Ports), containerIPs(detail))
-		if cand == nil {
-			return nil, "", httpx.BadRequest("%s is not a database image this dashboard recognises", name)
-		}
-		return cand, password, nil
 	}
-	return nil, "", httpx.BadRequest("no running container named %q", name)
+	return ""
 }
 
 // saveConnection is the tail every route that creates a connection shares:
@@ -401,6 +435,18 @@ func (s *Server) candidateFor(ctx context.Context, name string) (*dbx.Candidate,
 func (s *Server) saveConnection(
 	w http.ResponseWriter, r *http.Request,
 	name string, driver dbx.Driver, dsn string, action string, detail map[string]any,
+) error {
+	return s.saveConnectionFrom(w, r, "", name, driver, dsn, action, detail)
+}
+
+// saveConnectionFrom is saveConnection for a connection made from a found
+// database: origin is that database's inventory key, kept on the row so the
+// connection is known for the same server after its address changes. Saving
+// one is the operator saying they want it, so any earlier word to ignore it
+// is taken back.
+func (s *Server) saveConnectionFrom(
+	w http.ResponseWriter, r *http.Request,
+	origin, name string, driver dbx.Driver, dsn string, action string, detail map[string]any,
 ) error {
 	contained, err := s.containDSN(driver, dsn)
 	if err != nil {
@@ -411,12 +457,21 @@ func (s *Server) saveConnection(
 		return httpx.Internal(err)
 	}
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
-		name, string(driver), sealed, time.Now().Unix())
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at, origin) VALUES(?,?,?,?,?)`,
+		name, string(driver), sealed, time.Now().Unix(), origin)
 	if err != nil {
 		return httpx.BadRequest("could not save connection: %v", err)
 	}
 	id, _ := res.LastInsertId()
+	if origin != "" {
+		unignored, err := s.setIgnored(r.Context(), origin, "", false)
+		if err != nil {
+			return err
+		}
+		if unignored {
+			detail["unignored"] = true
+		}
+	}
 	conn, _, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
@@ -440,9 +495,25 @@ func (s *Server) saveConnection(
 //
 // It is a POST, and it audits, because it writes: a GET that quietly created
 // connection rows would be both a lie about the verb and a hole in invariant 5.
-// Adopting is idempotent — a server already covered by a connection is skipped
-// by address, so calling this on every page load converges rather than
-// accumulating duplicates.
+// Adopting is idempotent — a server already covered by a connection is skipped,
+// so calling this on every page load converges rather than accumulating
+// duplicates.
+//
+// It signs in before it saves. It used not to: whatever a container's
+// environment stated was sealed and stored, and a container whose volume had
+// been initialised under another password became a connection that failed
+// every request made of it. A server that refuses what its container states
+// is reported with the engine's own words instead.
+//
+// It leaves alone what the operator said to leave alone. A server marked
+// ignored — by hand, or by forgetting its last connection — is not connected
+// again, which is what makes forgetting one mean something.
+//
+// It does not ask the same thing twice. This runs whenever the page opens, and
+// a server that refused what its container states would otherwise be sent the
+// same failed login on every visit; a refusal is remembered against what was
+// tried (see database_inventory_signin.go) and repeated from memory until the
+// container or its credentials change.
 //
 // It also reports what it recognised and could *not* adopt, which it used to
 // drop on the floor. A Postgres on a compose network with no published port is
@@ -457,116 +528,289 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 
-	var containers []dockerx.Container
-	if s.modules.docker != nil {
-		var err error
-		containers, err = s.modules.docker.ListContainers(ctx, false)
-		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
-		}
-	}
-	existing, err := s.existingDSNs(ctx)
+	// A fresh reading, with no files in it: a file is never connected unasked.
+	inv, scans := s.buildInventory(ctx, true, dbFileScanResult{})
+	conns, names, err := s.savedConnections(ctx)
 	if err != nil {
 		return err
 	}
+	dbx.AttachConnections(inv.Instances, conns)
+	ignored, err := s.ignoredOrigins(ctx)
+	if err != nil {
+		return err
+	}
+	taken := map[string]string{}
+	for id, name := range names {
+		taken[strconv.FormatInt(id, 10)] = name
+	}
 
-	added, skipped := []string{}, []string{}
+	// Three passes. The first decides, without touching the network, what each
+	// server needs; the second signs in to the ones worth trying, a few at a
+	// time; the third saves what worked and says the rest, in the order the
+	// servers were found — so the answer does not depend on which dial
+	// happened to finish first.
+	added, skipped, left, linked := []string{}, []string{}, []string{}, []string{}
 	unreachable := []unreachableServer{}
-	for _, c := range containers {
-		if cand, _ := dbx.Detect(c.Name, c.Image, nil, publishedPorts(c.Ports), nil); cand == nil {
-			continue
-		}
-		detail, err := s.modules.docker.Inspect(ctx, c.ID)
-		if err != nil {
-			continue
-		}
-		cand, password := dbx.Detect(c.Name, c.Image, envMap(detail.Env), publishedPorts(c.Ports), containerIPs(detail))
-		if cand == nil {
-			continue
-		}
-		if row, ok := unreachableFrom(cand); ok {
-			unreachable = append(unreachable, row)
-			continue
-		}
-		if name, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-			skipped = append(skipped, name)
-			continue
-		}
-		dsn := dbx.BuildDSN(*cand, password)
-		if dsn == "" {
-			continue
-		}
-		name := uniqueConnectionName(cand.Container, existing)
-		contained, err := s.containDSN(cand.Driver, dsn)
-		if err != nil {
-			continue
-		}
-		sealed, err := s.Sealer.Seal(contained)
-		if err != nil {
-			return httpx.Internal(err)
-		}
-		if _, err := s.Store.DB.ExecContext(ctx,
-			`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
-			name, string(cand.Driver), sealed, time.Now().Unix()); err != nil {
-			continue
-		}
-		existing[addressKey(cand.Host, cand.Port)] = name
-		added = append(added, name)
-	}
-
-	// The databases installed on the machine itself, which the loop above
-	// cannot see because they are in no container.
 	needsCredentials := []credentialServer{}
-	for _, cand := range s.hostCandidates(ctx, detectedFrom(containers)) {
-		if name, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-			skipped = append(skipped, name)
+	present := map[string]bool{}
+	attempts := []*syncAttempt{}
+	// outcomes holds, per instance, what the third pass reports for it.
+	outcomes := make([]func(), len(inv.Instances))
+	for i := range inv.Instances {
+		inst := &inv.Instances[i]
+		present[inst.Key] = true
+		if inst.Kind != dbx.KindServer || inst.Driver == "" || inst.State != dbx.StateRunning {
+			// Stopped servers, declared services and engines with no driver
+			// are the inventory's to list; there is nothing here to connect.
 			continue
 		}
-		dsn := dbx.BuildDSN(cand, "")
-		// An engine that ships with no credentials at all is simply tried, and
-		// kept if it answers. Everything else is asked about rather than
-		// guessed at: a wrong password against the operator's own server is an
-		// authentication failure in their logs, and on a host running fail2ban
-		// it is a step towards banning this dashboard.
-		if cand.NeedsCredentials || dsn == "" || s.probeConnection(ctx, cand.Driver, dsn) != nil {
-			needsCredentials = append(needsCredentials, credentialServer{
-				Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
-				Process: cand.Process, Name: dbx.HostConnectionName(cand),
-				User: cand.User, Database: cand.Database,
-			})
+		if len(inst.Connections) > 0 {
+			skipped = append(skipped, connectionNames(inst.Connections, names)...)
+			// A connection made before origins were recorded, or typed by
+			// hand, was matched by where it dials. It learns which server it
+			// is, so it is still known for it when that address changes.
+			for _, id := range inst.Connections {
+				res, err := s.Store.DB.ExecContext(ctx,
+					`UPDATE db_connections SET origin = ? WHERE id = ? AND origin = ''`, inst.Key, id)
+				if err != nil {
+					return httpx.Internal(err)
+				}
+				if n, _ := res.RowsAffected(); n > 0 {
+					linked = append(linked, names[id])
+				}
+			}
 			continue
 		}
-		name := uniqueConnectionName(dbx.HostConnectionName(cand), existing)
-		contained, err := s.containDSN(cand.Driver, dsn)
-		if err != nil {
+		if ignored[inst.Key] {
+			left = append(left, inst.Key)
 			continue
 		}
-		sealed, err := s.Sealer.Seal(contained)
-		if err != nil {
-			return httpx.Internal(err)
-		}
-		if _, err := s.Store.DB.ExecContext(ctx,
-			`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
-			name, string(cand.Driver), sealed, time.Now().Unix()); err != nil {
+		access, hasAccess := inv.Access(inst.Key)
+		if inst.Source == dbx.SourceHost {
+			if !inst.Connectable || !hasAccess {
+				continue
+			}
+			cand := access.Candidate
+			asks := func() {
+				needsCredentials = append(needsCredentials, credentialServer{
+					Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
+					Process: cand.Process, Name: dbx.HostConnectionName(cand),
+					User: cand.User, Database: cand.Database,
+				})
+			}
+			// An engine that ships with no credentials at all is simply
+			// tried, and kept if it answers. Everything else is asked about
+			// rather than guessed at: a wrong password against the operator's
+			// own server is an authentication failure in their logs, and on a
+			// host running fail2ban it is a step towards banning this
+			// dashboard.
+			if cand.NeedsCredentials || dbx.BuildDSN(cand, "") == "" {
+				outcomes[i] = asks
+				continue
+			}
+			attempt := &syncAttempt{inst: inst, access: access, fingerprint: signInFingerprint(inst, access)}
+			if _, refused := s.refusedBefore(inst.Key, attempt.fingerprint); refused {
+				// It was tried as it ships and wanted a password. It is not
+				// tried again until it is another process.
+				outcomes[i] = asks
+				continue
+			}
+			attempts = append(attempts, attempt)
+			outcomes[i] = func() {
+				switch {
+				case attempt.unattempted:
+					unreachable = append(unreachable, unreachableServer{
+						Container: inst.Name, Driver: string(inst.Driver), Reason: syncOutOfTime,
+					})
+				case attempt.err != nil:
+					s.rememberRefusal(inst.Key, attempt.fingerprint, "", credentialRefusal(attempt.err))
+					asks()
+				case attempt.dsn != "":
+					s.forgetRefusal(inst.Key)
+					name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(dbx.HostConnectionName(cand), taken), cand.Driver, attempt.dsn)
+					if err != nil {
+						return
+					}
+					taken["+"+name] = name
+					added = append(added, name)
+				}
+			}
 			continue
 		}
-		existing[addressKey(cand.Host, cand.Port)] = name
-		added = append(added, name)
+
+		container := inst.Name
+		if inst.Confidence == dbx.ConfidencePort {
+			// A guess from a port number is listed, and never connected — or
+			// reported as a failure to connect — on the dashboard's own
+			// initiative.
+			continue
+		}
+		cannot := func(reason string) func() {
+			return func() {
+				unreachable = append(unreachable, unreachableServer{
+					Container: container, Driver: string(inst.Driver), Reason: reason,
+				})
+			}
+		}
+		if !inst.Connectable || !hasAccess {
+			outcomes[i] = cannot(unreachableReason(inst.Reason))
+			continue
+		}
+		switch inst.Credentials {
+		case dbx.CredentialsEnv, dbx.CredentialsArgs, dbx.CredentialsOpen, dbx.CredentialsSecretFile:
+		default:
+			outcomes[i] = cannot(containerStatesNoPassword)
+			continue
+		}
+		attempt := &syncAttempt{inst: inst, access: access, fingerprint: signInFingerprint(inst, access)}
+		if kept, refused := s.refusedBefore(inst.Key, attempt.fingerprint); refused {
+			// The same container, stating the same credentials, already
+			// refused them. Saying so again costs nothing; asking again is a
+			// failed login in its log every time this page opens.
+			outcomes[i] = cannot(kept.says)
+			continue
+		}
+		attempts = append(attempts, attempt)
+		outcomes[i] = func() {
+			switch {
+			case attempt.unattempted:
+				cannot(syncOutOfTime)()
+			case attempt.secretErr != nil:
+				says := "its password is kept in " + access.SecretFile + " inside the container, which could not be read — connect it with the password"
+				s.rememberRefusal(inst.Key, attempt.fingerprint, says, false)
+				cannot(says)()
+			case attempt.err != nil:
+				says := refusalReason(attempt.err)
+				s.rememberRefusal(inst.Key, attempt.fingerprint, says, credentialRefusal(attempt.err))
+				cannot(says)()
+			case attempt.dsn != "":
+				s.forgetRefusal(inst.Key)
+				name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(container, taken), inst.Driver, attempt.dsn)
+				if err != nil {
+					return
+				}
+				taken["+"+name] = name
+				added = append(added, name)
+			}
+		}
 	}
 
-	if len(added) == 0 {
+	s.signInAll(ctx, attempts)
+	for _, outcome := range outcomes {
+		if outcome != nil {
+			outcome()
+		}
+	}
+	s.pruneRefusals(present)
+
+	if len(added) == 0 && len(linked) == 0 {
 		// Nothing happened, so nothing is worth a line in the audit log. The
 		// alternative is an entry every time somebody opens the page.
 		httpx.SkipAudit(r)
 	} else {
-		httpx.SetAudit(r, "database.connection.sync", strings.Join(added, ", "),
-			map[string]any{"added": added})
+		// A connection that learned which server it is changed too, once: it
+		// is what the next forget and the next reconcile will act on.
+		s.dropInventory()
+		httpx.SetAudit(r, "database.connection.sync", strings.Join(append(append([]string{}, added...), linked...), ", "),
+			map[string]any{"added": added, "linked": linked})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"added": added, "already": skipped, "unreachable": unreachable,
-		"needsCredentials": needsCredentials,
+		"needsCredentials": needsCredentials, "ignored": left, "scans": scans,
 	})
 	return nil
+}
+
+// containerStatesNoPassword is said of a container that is recognised and
+// states no credentials: the sync does not guess at one, and the fleet lists
+// it under the same words.
+const containerStatesNoPassword = "its container states no password — connect it with the one it uses"
+
+// syncOutOfTime is said of a server the reconcile did not get to. It is not a
+// refusal and must not be worded as one.
+const syncOutOfTime = "it was not tried this time: the reconcile ran out of time before reaching it"
+
+// syncAttempt is one sign-in the reconcile makes, and how it went.
+type syncAttempt struct {
+	inst        *dbx.Instance
+	access      dbx.Access
+	fingerprint string
+
+	// dsn is the connection string that signed in. unattempted says the
+	// request's time ran out first; secretErr that the container's password
+	// file could not be read; err that the server answered no.
+	dsn         string
+	unattempted bool
+	secretErr   error
+	err         error
+}
+
+// signInAll makes the reconcile's sign-ins, a few at a time. Each checks the
+// request's clock before it dials: a sign-in started after the deadline would
+// fail with the deadline's own error, and be reported as a refusal by a server
+// that was never asked.
+func (s *Server) signInAll(ctx context.Context, attempts []*syncAttempt) {
+	slots := make(chan struct{}, syncDialWorkers)
+	var wg sync.WaitGroup
+	for _, attempt := range attempts {
+		wg.Add(1)
+		go func(a *syncAttempt) {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				a.unattempted = true
+				return
+			}
+			if ctx.Err() != nil {
+				a.unattempted = true
+				return
+			}
+			password := a.access.Password
+			if a.inst.Source != dbx.SourceHost && a.inst.Credentials == dbx.CredentialsSecretFile {
+				secret, err := s.containerSecret(ctx, a.inst.Container.ID, a.access.SecretFile)
+				if err != nil {
+					a.secretErr = err
+					return
+				}
+				password = secret
+			}
+			dsn := dbx.BuildDSN(a.access.Candidate, password)
+			if dsn == "" {
+				return
+			}
+			if err := s.signIn(ctx, a.access.Candidate, &dsn, a.access.Unverified); err != nil {
+				if ctx.Err() != nil {
+					// The clock ran out under the dial; the server said nothing.
+					a.unattempted = true
+					return
+				}
+				a.err = err
+				return
+			}
+			a.dsn = dsn
+		}(attempt)
+	}
+	wg.Wait()
+}
+
+// insertConnection stores one connection the reconcile signed in to.
+func (s *Server) insertConnection(ctx context.Context, origin, name string, driver dbx.Driver, dsn string) (string, error) {
+	contained, err := s.containDSN(driver, dsn)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := s.Sealer.Seal(contained)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.Store.DB.ExecContext(ctx,
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at, origin) VALUES(?,?,?,?,?)`,
+		name, string(driver), sealed, time.Now().Unix(), origin); err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 // credentialServer is a database running on this machine that the dashboard
@@ -589,21 +833,6 @@ type credentialServer struct {
 	Database string `json:"database,omitempty"`
 }
 
-// detectedFrom is the addresses the Docker half already accounts for, so the
-// host half does not report the same server a second time. It reads the
-// published ports only — an inspect per container is what the caller pays for
-// when it actually needs the credentials, and this needs nothing but addresses.
-func detectedFrom(containers []dockerx.Container) []detectedServer {
-	out := []detectedServer{}
-	for _, c := range containers {
-		cand, _ := dbx.Detect(c.Name, c.Image, nil, publishedPorts(c.Ports), nil)
-		if cand != nil {
-			out = append(out, detectedServer{Candidate: *cand})
-		}
-	}
-	return out
-}
-
 // probeConnection dials a DSN once, without keeping anything. Every engine
 // answers something, including the two that are not SQL — a Redis reported as
 // unreachable because the SQL path refused it would be exactly the silence
@@ -615,22 +844,62 @@ func (s *Server) probeConnection(ctx context.Context, driver dbx.Driver, dsn str
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	// What a driver says of a string it could not use can quote the string,
+	// and every caller prints or records the answer.
+	return withoutSecrets(dsn, probeContained(ctx, driver, contained))
+}
+
+// probeContained is the dial itself, of a connection string already held to
+// the file roots.
+func probeContained(ctx context.Context, driver dbx.Driver, contained string) error {
 	switch driver {
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, contained)
 		if err != nil {
 			return err
 		}
-		return client.Disconnect(context.Background())
+		defer client.Disconnect(context.Background())
+		if mongoURINamesNobody(contained) {
+			// A ping is the one thing MongoDB answers without asking who is
+			// there, so a connection that names no account passes it against a
+			// server that will refuse everything else. Listing the databases
+			// is refused unless the server really is open. A connection that
+			// names an account was authenticated when it was made, and is not
+			// asked for a privilege it may not have.
+			if _, err := client.ListDatabaseNames(ctx, bson.D{}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(ctx, contained, 0)
+		// In the database the string names: one the server will not select
+		// is a connection every key route would fail on, and this is where
+		// to say so.
+		client, err := dbx.RedisClient(ctx, contained, dbx.RedisDSNDatabase)
 		if err != nil {
 			return err
 		}
 		return client.Close()
 	}
-	_, err = dbx.Probe(ctx, driver, contained)
+	_, err := dbx.Probe(ctx, driver, contained)
 	return err
+}
+
+// mongoURINamesNobody reports a MongoDB connection string with no account in
+// it: one that signs in as nobody.
+//
+// Read by hand rather than with net/url, which refuses the comma-separated
+// host list a replica set's string has.
+func mongoURINamesNobody(uri string) bool {
+	authority := uri
+	if _, rest, ok := strings.Cut(uri, "://"); ok {
+		authority = rest
+	}
+	if i := strings.IndexAny(authority, "/?"); i >= 0 {
+		authority = authority[:i]
+	}
+	at := strings.LastIndexByte(authority, '@')
+	return at <= 0 || strings.HasPrefix(authority, ":")
 }
 
 // unreachableServer is a database this host is running that could be
@@ -645,28 +914,12 @@ type unreachableServer struct {
 	Reason    string `json:"reason"`
 }
 
-// unreachableFrom projects a detected candidate into the row the sync response
-// carries, reporting false for one that can simply be adopted.
-//
-// A pure function, and tested as one, for the reason updaterArgs is: the whole
-// defect this replaces was a branch that fell through to `continue`, and a
-// test that needed a Docker daemon to notice it coming back is a test nobody
-// runs. The fallback reason matters too — a candidate that is unconnectable
-// for a reason dbx did not name would otherwise be reported as a blank line,
-// which is the same silence in a different shape.
-func unreachableFrom(c *dbx.Candidate) (unreachableServer, bool) {
-	if c == nil || c.Connectable() {
-		return unreachableServer{}, false
-	}
-	reason := c.Reason
+// unreachableReason never lets a server be reported with nothing said about it.
+func unreachableReason(reason string) string {
 	if strings.TrimSpace(reason) == "" {
-		reason = "this container was recognised but does not expose a port this dashboard can reach"
+		return "this container was recognised but does not expose a port this dashboard can reach"
 	}
-	return unreachableServer{
-		Container: c.Container,
-		Driver:    string(c.Driver),
-		Reason:    reason,
-	}, true
+	return reason
 }
 
 // uniqueConnectionName keeps a second container whose name collides with an
@@ -700,93 +953,232 @@ func uniqueConnectionName(base string, existing map[string]string) string {
 // engine listens; the volume is what stops the data disappearing with the
 // container.
 type provisionTemplate struct {
-	driver   dbx.Driver
-	label    string
+	driver dbx.Driver
+	// flavor is the product in the shared vocabulary: valkey behind the redis
+	// driver, timescaledb behind postgres.
+	flavor string
+	label  string
+	// image is what a request that names no version starts, and versions the
+	// closed list it may choose from, newest first. A request never supplies
+	// an image reference: the tag is looked up, not taken.
 	image    string
+	versions []provisionVersion
 	port     int
 	dataPath string
-	// env builds the container's environment from a generated password.
-	env func(password, database string) []dockerx.EnvVar
+	// user is the account the server is created with, and empty for an engine
+	// protected by a password alone. database reports whether the image
+	// creates a named database on first boot.
+	user     string
+	database bool
+	// env builds the container's environment from the account, its password
+	// and the initial database.
+	env func(user, password, database string) []dockerx.EnvVar
+	// bootstrap replaces the image's command for an engine that does not
+	// read its password from the environment. It is a constant script: the
+	// secret reaches it through the environment, never through its text.
+	bootstrap string
+}
+
+// provisionVersion is one release a template can start.
+type provisionVersion struct {
+	id, image string
+}
+
+func postgresProvisionEnv(user, pw, db string) []dockerx.EnvVar {
+	return []dockerx.EnvVar{
+		{Name: "POSTGRES_USER", Value: user},
+		{Name: "POSTGRES_PASSWORD", Value: pw},
+		{Name: "POSTGRES_DB", Value: db},
+	}
+}
+
+// passwordProvisionEnv is the environment of the engines that take a
+// password and nothing else. The variable is REDIS_PASSWORD for all of them,
+// whatever they are called: it is the name detection reads the password back
+// from when the container is adopted.
+func passwordProvisionEnv(_, pw, _ string) []dockerx.EnvVar {
+	return []dockerx.EnvVar{{Name: "REDIS_PASSWORD", Value: pw}}
+}
+
+// passwordProvisionBootstrap starts a Redis-protocol server that does not
+// read REDIS_PASSWORD itself. A private configuration keeps the password out
+// of command arguments; the script is built from two constants and contains no
+// request text.
+//
+// The file is removed before it is written, and that line is what lets the
+// container start a second time. It lives in /tmp and is handed to the
+// server's own account, and the kernel refuses to open a file in a sticky,
+// world-writable directory that neither the opener nor the directory's owner
+// owns (fs.protected_regular, on by default on every current distribution) —
+// root included. Without the rm the first start worked and every restart
+// after it died on "can't create: Permission denied", which with a restart
+// policy is a container that crash-loops from the first reboot onward.
+func passwordProvisionBootstrap(server, account string) string {
+	return `set -eu; umask 077; conf=/tmp/jd-` + server + `.conf; rm -f "$conf"; ` +
+		`printf 'requirepass %s\n' "$REDIS_PASSWORD" > "$conf"; chown ` + account + `:` + account + ` "$conf"; ` +
+		`exec docker-entrypoint.sh ` + server + ` "$conf"`
 }
 
 var provisionTemplates = map[string]provisionTemplate{
 	"postgres": {
-		driver: dbx.DriverPostgres, label: "PostgreSQL 16", image: "postgres:16-alpine",
-		port: 5432, dataPath: "/var/lib/postgresql/data",
-		env: func(pw, db string) []dockerx.EnvVar {
-			return []dockerx.EnvVar{
-				{Name: "POSTGRES_USER", Value: "jd"},
-				{Name: "POSTGRES_PASSWORD", Value: pw},
-				{Name: "POSTGRES_DB", Value: db},
-			}
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL", image: "postgres:16-alpine",
+		versions: []provisionVersion{
+			{"17", "postgres:17-alpine"}, {"16", "postgres:16-alpine"},
+			{"15", "postgres:15-alpine"}, {"14", "postgres:14-alpine"},
 		},
+		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
+		env: postgresProvisionEnv,
 	},
 	// The same server with the extension a retrieval or geospatial schema
 	// creates on its first migration; the official image ships neither.
 	"pgvector": {
-		driver: dbx.DriverPostgres, label: "PostgreSQL 16 + pgvector", image: "pgvector/pgvector:pg16",
-		port: 5432, dataPath: "/var/lib/postgresql/data",
-		env: func(pw, db string) []dockerx.EnvVar {
-			return []dockerx.EnvVar{
-				{Name: "POSTGRES_USER", Value: "jd"},
-				{Name: "POSTGRES_PASSWORD", Value: pw},
-				{Name: "POSTGRES_DB", Value: db},
-			}
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + pgvector", image: "pgvector/pgvector:pg16",
+		versions: []provisionVersion{
+			{"17", "pgvector/pgvector:pg17"}, {"16", "pgvector/pgvector:pg16"}, {"15", "pgvector/pgvector:pg15"},
 		},
+		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
+		env: postgresProvisionEnv,
 	},
 	"postgis": {
-		driver: dbx.DriverPostgres, label: "PostgreSQL 16 + PostGIS", image: "postgis/postgis:16-3.5-alpine",
-		port: 5432, dataPath: "/var/lib/postgresql/data",
-		env: func(pw, db string) []dockerx.EnvVar {
-			return []dockerx.EnvVar{
-				{Name: "POSTGRES_USER", Value: "jd"},
-				{Name: "POSTGRES_PASSWORD", Value: pw},
-				{Name: "POSTGRES_DB", Value: db},
-			}
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + PostGIS", image: "postgis/postgis:16-3.5-alpine",
+		versions: []provisionVersion{
+			{"17", "postgis/postgis:17-3.5-alpine"}, {"16", "postgis/postgis:16-3.5-alpine"},
+			{"15", "postgis/postgis:15-3.5-alpine"},
 		},
+		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
+		env: postgresProvisionEnv,
+	},
+	// PostgreSQL with the time-series extension preloaded, on the official
+	// image's own layout: the same variables, the same data directory.
+	"timescaledb": {
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorTimescaleDB, label: "TimescaleDB", image: "timescale/timescaledb:latest-pg16",
+		versions: []provisionVersion{
+			{"17", "timescale/timescaledb:latest-pg17"}, {"16", "timescale/timescaledb:latest-pg16"},
+			{"15", "timescale/timescaledb:latest-pg15"},
+		},
+		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
+		env: postgresProvisionEnv,
 	},
 	"mysql": {
-		driver: dbx.DriverMySQL, label: "MySQL 8", image: "mysql:8",
-		port: 3306, dataPath: "/var/lib/mysql",
-		env: func(pw, db string) []dockerx.EnvVar {
+		driver: dbx.DriverMySQL, flavor: dbx.FlavorMySQL, label: "MySQL", image: "mysql:8.4",
+		versions: []provisionVersion{{"9", "mysql:9"}, {"8.4", "mysql:8.4"}, {"8.0", "mysql:8.0"}},
+		port:     3306, dataPath: "/var/lib/mysql", user: "jd", database: true,
+		env: func(user, pw, db string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{
 				{Name: "MYSQL_ROOT_PASSWORD", Value: pw},
-				{Name: "MYSQL_USER", Value: "jd"},
+				{Name: "MYSQL_USER", Value: user},
 				{Name: "MYSQL_PASSWORD", Value: pw},
 				{Name: "MYSQL_DATABASE", Value: db},
 			}
 		},
 	},
 	"mariadb": {
-		driver: dbx.DriverMySQL, label: "MariaDB 11", image: "mariadb:11",
-		port: 3306, dataPath: "/var/lib/mysql",
-		env: func(pw, db string) []dockerx.EnvVar {
+		driver: dbx.DriverMySQL, flavor: dbx.FlavorMariaDB, label: "MariaDB", image: "mariadb:11",
+		versions: []provisionVersion{
+			{"12", "mariadb:12"}, {"11", "mariadb:11"}, {"11.4", "mariadb:11.4"},
+			{"10.11", "mariadb:10.11"}, {"10.6", "mariadb:10.6"},
+		},
+		port: 3306, dataPath: "/var/lib/mysql", user: "jd", database: true,
+		env: func(user, pw, db string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{
 				{Name: "MARIADB_ROOT_PASSWORD", Value: pw},
-				{Name: "MARIADB_USER", Value: "jd"},
+				{Name: "MARIADB_USER", Value: user},
 				{Name: "MARIADB_PASSWORD", Value: pw},
 				{Name: "MARIADB_DATABASE", Value: db},
 			}
 		},
 	},
 	"redis": {
-		driver: dbx.DriverRedis, label: "Redis 7", image: "redis:7-alpine",
+		driver: dbx.DriverRedis, flavor: dbx.FlavorRedis, label: "Redis", image: "redis:7-alpine",
+		versions: []provisionVersion{{"8", "redis:8-alpine"}, {"7", "redis:7-alpine"}, {"6", "redis:6-alpine"}},
+		port:     6379, dataPath: "/data",
+		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("redis-server", "redis"),
+	},
+	"valkey": {
+		driver: dbx.DriverRedis, flavor: dbx.FlavorValkey, label: "Valkey", image: "valkey/valkey:8-alpine",
+		versions: []provisionVersion{
+			{"9", "valkey/valkey:9-alpine"}, {"8", "valkey/valkey:8-alpine"}, {"7.2", "valkey/valkey:7.2-alpine"},
+		},
 		port: 6379, dataPath: "/data",
-		env: func(pw, _ string) []dockerx.EnvVar {
-			return []dockerx.EnvVar{{Name: "REDIS_PASSWORD", Value: pw}}
+		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("valkey-server", "valkey"),
+	},
+	// KeyDB publishes one tag for both architectures, and it has not moved
+	// since 6.3.4: there is no other release to offer.
+	"keydb": {
+		driver: dbx.DriverRedis, flavor: dbx.FlavorKeyDB, label: "KeyDB", image: "eqalpha/keydb:latest",
+		versions: []provisionVersion{{"latest", "eqalpha/keydb:latest"}},
+		port:     6379, dataPath: "/data",
+		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("keydb-server", "keydb"),
+	},
+	// Dragonfly reads any flag from a DFLY_-prefixed variable, so it needs no
+	// bootstrap. REDIS_PASSWORD is set beside it only so that adopting the
+	// container finds the password where it looks for every other one.
+	"dragonfly": {
+		driver: dbx.DriverRedis, flavor: dbx.FlavorDragonfly, label: "Dragonfly",
+		image:    "docker.dragonflydb.io/dragonflydb/dragonfly:latest",
+		versions: []provisionVersion{{"latest", "docker.dragonflydb.io/dragonflydb/dragonfly:latest"}},
+		port:     6379, dataPath: "/data",
+		env: func(_, pw, _ string) []dockerx.EnvVar {
+			return []dockerx.EnvVar{{Name: "DFLY_requirepass", Value: pw}, {Name: "REDIS_PASSWORD", Value: pw}}
 		},
 	},
 	"mongodb": {
-		driver: dbx.DriverMongo, label: "MongoDB 7", image: "mongo:7",
-		port: 27017, dataPath: "/data/db",
-		env: func(pw, db string) []dockerx.EnvVar {
+		driver: dbx.DriverMongo, flavor: dbx.FlavorMongoDB, label: "MongoDB", image: "mongo:7",
+		versions: []provisionVersion{{"8", "mongo:8"}, {"7", "mongo:7"}, {"6", "mongo:6"}},
+		port:     27017, dataPath: "/data/db", user: "jd", database: true,
+		env: func(user, pw, db string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{
-				{Name: "MONGO_INITDB_ROOT_USERNAME", Value: "jd"},
+				{Name: "MONGO_INITDB_ROOT_USERNAME", Value: user},
 				{Name: "MONGO_INITDB_ROOT_PASSWORD", Value: pw},
 				{Name: "MONGO_INITDB_DATABASE", Value: db},
 			}
 		},
 	},
+	// The native protocol's port, which is the one this package's driver
+	// speaks; the HTTP interface is left unpublished. Access management is
+	// switched on for the account so the roles it is later asked to create
+	// are ones it may create.
+	"clickhouse": {
+		driver: dbx.DriverClickHouse, flavor: dbx.FlavorClickHouse, label: "ClickHouse",
+		image: "clickhouse/clickhouse-server:25.8",
+		versions: []provisionVersion{
+			{"26.3", "clickhouse/clickhouse-server:26.3"}, {"25.8", "clickhouse/clickhouse-server:25.8"},
+			{"25.3", "clickhouse/clickhouse-server:25.3"}, {"24.8", "clickhouse/clickhouse-server:24.8"},
+		},
+		port: 9000, dataPath: "/var/lib/clickhouse", user: "jd", database: true,
+		env: func(user, pw, db string) []dockerx.EnvVar {
+			return []dockerx.EnvVar{
+				{Name: "CLICKHOUSE_USER", Value: user},
+				{Name: "CLICKHOUSE_PASSWORD", Value: pw},
+				{Name: "CLICKHOUSE_DB", Value: db},
+				{Name: "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", Value: "1"},
+			}
+		},
+	},
+}
+
+// provisionOrder is the order the templates are offered in. Written out
+// because a map has none, and a list of engines that reshuffles on every poll
+// is unusable.
+var provisionOrder = []string{
+	"postgres", "pgvector", "postgis", "timescaledb", "mysql", "mariadb",
+	"redis", "valkey", "keydb", "dragonfly", "mongodb", "clickhouse",
+}
+
+// version resolves the release a request named to its image, and the
+// template's own when it named none. Anything else is refused: the list is
+// closed so that what gets pulled is always a reference written in this file.
+func (t provisionTemplate) version(id string) (provisionVersion, error) {
+	for _, v := range t.versions {
+		if (id == "" && v.image == t.image) || (id != "" && v.id == id) {
+			return v, nil
+		}
+	}
+	ids := make([]string, 0, len(t.versions))
+	for _, v := range t.versions {
+		ids = append(ids, v.id)
+	}
+	return provisionVersion{}, fmt.Errorf("%s is offered in versions %s", t.label, strings.Join(ids, ", "))
 }
 
 type provisionOption struct {
@@ -794,22 +1186,45 @@ type provisionOption struct {
 	Label  string `json:"label"`
 	Image  string `json:"image"`
 	Driver string `json:"driver"`
+	Flavor string `json:"flavor"`
+	// Versions is every release a request may ask for, newest first, and
+	// DefaultVersion the one a request that names none is given.
+	Versions       []provisionVersionOption `json:"versions"`
+	DefaultVersion string                   `json:"defaultVersion"`
+	Port           int                      `json:"port"`
+	// DefaultUser is the account the server is created with unless the
+	// request names another, and empty for an engine that has no accounts —
+	// which then accepts no `user` at all. Database reports whether an
+	// initial database can be named.
+	DefaultUser string `json:"defaultUser"`
+	Database    bool   `json:"database"`
+}
+
+type provisionVersionOption struct {
+	Version string `json:"version"`
+	Image   string `json:"image"`
 }
 
 func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
-	// Ordered, because a map is not, and a list of engines that reshuffles on
-	// every poll is unusable.
 	out := []provisionOption{}
-	for _, key := range []string{"postgres", "pgvector", "postgis", "mysql", "mariadb", "redis", "mongodb"} {
+	for _, key := range provisionOrder {
 		if key == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
 			// Offered where it cannot run, it would fail only at the pull.
 			continue
 		}
 		t := provisionTemplates[key]
-		out = append(out, provisionOption{
-			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver),
-		})
+		option := provisionOption{
+			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver), Flavor: t.flavor,
+			Versions: []provisionVersionOption{}, Port: t.port, DefaultUser: t.user, Database: t.database,
+		}
+		for _, v := range t.versions {
+			option.Versions = append(option.Versions, provisionVersionOption{Version: v.id, Image: v.image})
+			if v.image == t.image {
+				option.DefaultVersion = v.id
+			}
+		}
+		out = append(out, option)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
@@ -819,46 +1234,91 @@ type provisionRequest struct {
 	Engine   string `json:"engine"`
 	Name     string `json:"name"`
 	Database string `json:"database"`
-	// Exposure is where the new server is reachable from: "public" publishes
-	// its port on every interface and opens the firewall, "local" keeps it to
-	// this server. Empty means public.
+	// Exposure is where the new server is reachable from: "local" keeps it to
+	// this server, "public" publishes its port on every interface and opens
+	// the firewall. Empty means local.
 	Exposure dbExposure `json:"exposure"`
+	// Version is one of the template's own; empty means its default.
+	Version string `json:"version"`
+	// User and Password replace the account name and the generated password.
+	// Both are optional, and a password the request did not supply is never
+	// sent back to it.
+	User     string `json:"user"`
+	Password string `json:"password"`
 }
 
 // provisionBinding turns the requested exposure into the host address the
-// port is published on. The default is every interface: a database made from
-// the Databases page exists to be handed to somebody, and a default that has
-// to be undone under Maintenance before the connection string works from a
-// laptop is a default nobody wanted. Deployment quick setup asks for "local"
-// explicitly, because its database is reached over the deployment network.
+// port is published on. The default is this server only.
+//
+// It used to be every interface, on the reasoning that a database made from
+// the Databases page exists to be handed to somebody. What that produced was
+// a fresh server on 0.0.0.0 with the firewall opened for it, for every
+// operator who pressed the button without reading the switch — the exposure
+// the fleet page then flags as a finding. Reaching a database from another
+// machine is one deliberate change on its settings page; reaching it from the
+// internet by default was a decision nobody made.
 func provisionBinding(exposure dbExposure) (dbExposure, string, error) {
 	switch exposure {
-	case "", exposurePublic:
-		return exposurePublic, "0.0.0.0", nil
-	case exposureLocal:
+	case "", exposureLocal:
 		return exposureLocal, "127.0.0.1", nil
+	case exposurePublic:
+		return exposurePublic, "0.0.0.0", nil
 	}
 	return "", "", fmt.Errorf("exposure must be local or public")
 }
 
-// Redis does not read REDIS_PASSWORD itself. A private configuration keeps the
-// generated password out of command arguments; the script contains no request text.
-const redisProvisionBootstrap = `set -eu; umask 077; printf 'requirepass %s\n' "$REDIS_PASSWORD" > /tmp/jd-redis.conf; chown redis:redis /tmp/jd-redis.conf; exec docker-entrypoint.sh redis-server /tmp/jd-redis.conf`
+var (
+	// provisionUserRe bounds an account name to what every engine here takes
+	// unquoted, since it becomes an environment value an image interpolates
+	// into its own first-boot SQL.
+	provisionUserRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,31}$`)
+	// provisionPasswordRe is deliberately narrow. The password is written
+	// into a Redis configuration line, a ClickHouse XML file, and a MySQL DSN
+	// whose own syntax is made of "@", ":" and "/"; a character that means
+	// something in any of those is refused here rather than escaped three
+	// different ways. Length is what makes it strong, not punctuation.
+	provisionPasswordRe = regexp.MustCompile(`^[A-Za-z0-9._~!*+=,-]{8,128}$`)
+)
 
-// handleDBProvision starts a database server and saves the connection to it.
+// provisionAccount resolves the account a request asked for against what the
+// engine allows, and holds a password it supplied to the characters every
+// place it is written can take.
+func provisionAccount(engine string, t provisionTemplate, user, password string) (string, error) {
+	user = strings.TrimSpace(user)
+	switch {
+	case user == "":
+		user = t.user
+	case t.user == "":
+		return "", fmt.Errorf("%s has no accounts to name; it is protected by its password alone", t.label)
+	case !provisionUserRe.MatchString(user):
+		return "", fmt.Errorf("a user name may contain letters, digits and underscores, and starts with a letter")
+	case (engine == "mysql" || engine == "mariadb") && strings.EqualFold(user, "root"):
+		// The image refuses it: root already exists and takes its password
+		// from another variable.
+		return "", fmt.Errorf("%s creates root itself; choose another name for the account", t.label)
+	}
+	if password != "" && !provisionPasswordRe.MatchString(password) {
+		return "", fmt.Errorf("a password is 8 to 128 characters from letters, digits and . _ ~ ! * + = , -")
+	}
+	return user, nil
+}
+
+// handleDBProvision starts a database server; the adopt that follows saves
+// the connection to it.
 //
-// The password is generated here and never leaves this process except into the
-// container's own environment: the operator does not choose it, see it or type
-// it, which is the difference between "automatic" and "a form with fewer
-// fields". It can always be read back from the container by an admin, and the
-// dashboard's own copy is sealed like every other stored DSN.
+// Unless the request supplies one, the password is generated here and never
+// leaves this process except into the container's own environment: the
+// operator does not choose it, see it or type it, which is the difference
+// between "automatic" and "a form with fewer fields". It can always be read
+// back from the container by an admin, and the dashboard's own copy is sealed
+// like every other stored DSN.
 //
-// The port is published on every interface unless the request asks for this
-// server only, and the firewall is opened for it the way the connection page's
-// Open to the internet switch does — so the string under "From anywhere" works
-// the moment the engine answers. The binding and what the firewall did are
-// audited, and the saved connection still dials loopback: hostAddress maps a
-// 0.0.0.0 binding to 127.0.0.1, which is the address this process can reach.
+// The port is published on this server only unless the request asks for every
+// interface, in which case the firewall is opened for it the way the
+// connection page's Open to the internet switch does. The binding and what
+// the firewall did are audited, and the saved connection dials loopback
+// either way: hostAddress maps a 0.0.0.0 binding to 127.0.0.1, which is the
+// address this process can reach.
 func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error {
 	var req provisionRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -871,6 +1331,10 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	if req.Engine == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
 		return httpx.BadRequest("the PostGIS image is published for x86-64 only and this server is %s; run a PostGIS server yourself and connect it", runtime.GOARCH)
 	}
+	version, err := tmpl.version(strings.TrimSpace(req.Version))
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	// MongoDB 5 and later die with an illegal instruction on a CPU without
 	// AVX (a Proxmox default CPU type) or ARMv8.2 atomics, and the linked
 	// application then restarts in a loop; saying so here is cheaper than a
@@ -878,7 +1342,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	if req.Engine == "mongodb" {
 		if features := deploy.HostCPUFeatures(); features != nil {
 			if missing := deploy.MongoCPUUnsupported(runtime.GOARCH, features); missing != "" {
-				return httpx.BadRequest("MongoDB 7 cannot run on this server's CPU (%s); set the VM's CPU type to host, or run MongoDB 4.4 from the Docker page", missing)
+				return httpx.BadRequest("MongoDB %s cannot run on this server's CPU (%s); set the VM's CPU type to host, or run MongoDB 4.4 from the Docker page", version.id, missing)
 			}
 		}
 	}
@@ -896,16 +1360,28 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		return httpx.BadRequest("a container name may contain letters, digits, dots, dashes and underscores")
 	}
 	database := strings.TrimSpace(req.Database)
-	if database == "" {
-		database = "app"
+	if !tmpl.database {
+		// An engine with no named database has nothing to call one, and the
+		// request's word for it is dropped rather than refused: the same form
+		// is posted for every engine.
+		database = ""
+	} else {
+		if database == "" {
+			database = "app"
+		}
+		if !dbNameRe.MatchString(database) {
+			return httpx.BadRequest("a database name may contain letters, digits and underscores")
+		}
 	}
-	if !dbNameRe.MatchString(database) {
-		return httpx.BadRequest("a database name may contain letters, digits and underscores")
-	}
-
-	password, err := generatePassword()
+	user, err := provisionAccount(req.Engine, tmpl, req.User, req.Password)
 	if err != nil {
-		return httpx.Internal(err)
+		return httpx.BadRequest("%v", err)
+	}
+	password := req.Password
+	if password == "" {
+		if password, err = generatePassword(); err != nil {
+			return httpx.Internal(err)
+		}
 	}
 	// A pull on a slow link is the long part, and the engines here are small.
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
@@ -924,13 +1400,13 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	spec := dockerx.ContainerSpec{
 		Name:  name,
-		Image: tmpl.image,
+		Image: version.image,
 		// Started, not merely created. A spec that only creates leaves a
 		// container in "Created" that never listens, so the adopt that follows
 		// waits for an engine that was never going to answer.
 		Start:         true,
 		RestartPolicy: "unless-stopped",
-		Env:           tmpl.env(password, database),
+		Env:           tmpl.env(user, password, database),
 		Ports: []dockerx.PortMapping{
 			{HostIP: hostIP, HostPort: port, ContainerPort: tmpl.port, Protocol: "tcp"},
 		},
@@ -938,10 +1414,8 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 			{Type: "volume", Source: volume, Target: tmpl.dataPath},
 		},
 	}
-	if req.Engine == "redis" {
-		// Redis does not consume REDIS_PASSWORD. A constant bootstrap writes a
-		// private config so the generated secret never becomes process argv.
-		spec.Command = []string{"sh", "-c", redisProvisionBootstrap}
+	if tmpl.bootstrap != "" {
+		spec.Command = []string{"sh", "-c", tmpl.bootstrap}
 	}
 	created, err := s.modules.docker.Create(ctx, spec, nil)
 	if err != nil {
@@ -956,7 +1430,8 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 	detail := map[string]any{
-		"engine": req.Engine, "image": tmpl.image, "port": port, "exposure": exposure,
+		"engine": req.Engine, "image": version.image, "version": version.id, "port": port,
+		"exposure": exposure, "user": user, "passwordSupplied": req.Password != "",
 	}
 	// The container is up before the engine is, but the firewall rule can go
 	// in now: nothing answers on the port until the engine does, and the
@@ -978,8 +1453,9 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	// blocks for a minute is indistinguishable from a broken dashboard, which
 	// is the same reason the compose runner streams.
 	resp := map[string]any{
-		"container": name, "engine": req.Engine, "driver": tmpl.driver,
-		"host": "127.0.0.1", "port": port, "database": database,
+		"container": name, "engine": req.Engine, "driver": tmpl.driver, "flavor": tmpl.flavor,
+		"version": version.id, "image": version.image,
+		"host": "127.0.0.1", "port": port, "user": user, "database": database,
 		"exposure": exposure, "firewall": firewall,
 	}
 	if ferr != nil {

@@ -4,13 +4,44 @@ import {
   deploymentRequests,
   healthyOperations,
   json,
-  mockProject,
+  mockProject as mockProjectBase,
   now,
   showcaseRuntime,
   steps,
   user,
 } from "./deploy-fixture"
-import type { DeploymentRuntimeServices, LogLine } from "../../src/lib/types"
+import type {
+  DeploymentRuntimeServices,
+  FirewallRule,
+  FirewallStatus,
+  LogLine,
+} from "../../src/lib/types"
+
+const editableFirewall: FirewallStatus = {
+  backend: "ufw",
+  available: true,
+  enabled: true,
+  policy: { incoming: "deny" },
+  capabilities: {
+    editable: true,
+    toggle: true,
+    defaultPolicy: true,
+    logging: true,
+    reset: true,
+    profiles: true,
+  },
+  rules: [],
+}
+
+function sourceDeny(ip: string): FirewallRule {
+  return { action: "DENY", direction: "IN", from: ip, to: "Anywhere", raw: "" }
+}
+
+async function mockProject(...args: Parameters<typeof mockProjectBase>) {
+  const result = await mockProjectBase(...args)
+  await args[0].route("**/api/v1/firewall/", (route) => json(route, editableFirewall))
+  return result
+}
 
 /**
  * The project's Logs page, after it stopped being one pane of container output.
@@ -229,12 +260,13 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByRole("img", { name: "Requests over the last hour" })).toBeVisible()
     await expect(page.getByRole("img", { name: "The p95 over the last hour" })).toBeVisible()
     await expect(page.locator('[data-slot="stat-tile"] img[src="/logos/chrome.svg"]')).toBeVisible()
-    // The container is named by what happened to it last, not by a bare count,
-    // and its exit code sits beside the word.
-    const container = page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" })
-    await expect(container.getByText("Exited", { exact: true })).toBeVisible()
-    await expect(container.getByText("exit 137")).toBeVisible()
-    await expect(container.getByText(/1 exit · 1 start · newest/)).toBeVisible()
+    // Four readings, none of them the container: what it did is the Events
+    // tab's, which counts the exit.
+    await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(4)
+    await expect(
+      page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" }),
+    ).toHaveCount(0)
+    await expect(page.getByTitle("1 exit or restart in the last hour")).toBeVisible()
   })
 
   test("a request row carries its status, its timing and its path, and opens for the rest", async ({
@@ -571,11 +603,8 @@ test.describe("a deployment's traffic", () => {
     )
     await page.goto("/deploy/7/logs")
 
-    const container = page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" })
-    await expect(container.getByText("Stopped", { exact: true })).toBeVisible()
-    await expect(container.getByText("Stopped", { exact: true })).not.toHaveClass(/destructive/)
-    await expect(container.getByText("1 stop · none failed")).toBeVisible()
-    await expect(container.getByText("Exited", { exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect(page.getByText("api-production-r20 exited cleanly")).toBeVisible()
     // Nothing for the Events tab to count: nothing failed.
     await expect(page.getByTitle(/exits? or restarts? in the last hour/)).toHaveCount(0)
   })
@@ -889,12 +918,14 @@ test.describe("a deployment's traffic", () => {
     await page.getByRole("button", { name: "Events", exact: true }).click()
     await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
     // The exit code stays on the row at every width: it is the one fact that
-    // changes what you do next. (The Container reading above says it too.)
+    // changes what you do next.
     const feed = page.getByRole("region", { name: "Container events" })
     await expect(feed.getByText("exit 137")).toBeVisible()
     // The feed reads under the hour it happened in, each event on the thing
-    // it happened to with what happened in the corner.
-    await expect(feed.getByText(/^\d{2}:00$/).first()).toBeVisible()
+    // it happened to with what happened in the corner. The events are minutes
+    // old, so for the hour after midnight they span two days and the heading
+    // leads with the date ("Oct 5 · 00:00"): this failed every run in that hour.
+    await expect(feed.getByText(/(^|· )\d{2}:00$/).first()).toBeVisible()
     // Docker records what happened and never who asked, so "the daemon did
     // this on its own" is the distinction worth drawing.
     await expect(page.getByText("docker itself").first()).toBeVisible()
@@ -1035,6 +1066,194 @@ test.describe("a deployment's traffic", () => {
         (q) => q.get("since") === "2026-09-03T11:58:31.000Z" && q.get("source") === `docker:${WEB}`,
       ),
     ).toBe(true)
+  })
+
+  test("a saved scanner deny clears the notice and survives view changes and reloads", async ({
+    page,
+  }, testInfo) => {
+    test.slow()
+    await mockProject(page)
+    const rules: FirewallRule[] = []
+    const writes: unknown[] = []
+    await page.route("**/api/v1/firewall/", (route) => json(route, { ...editableFirewall, rules }))
+    await page.route("**/api/v1/firewall/rules", (route) => {
+      const body = route.request().postDataJSON()
+      writes.push(body)
+      expect(route.request().headers()["x-jd-csrf"]).toBe("1")
+      rules.push(sourceDeny(body.from))
+      return json(route, { output: "Rule inserted" })
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    await expect(page.getByText("Scanners", { exact: true })).toBeVisible()
+    await expect(page.getByText(/Docker-published ingress ports can bypass it/)).toBeVisible()
+    await page.getByText("Scanners", { exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath("scanner-before.png") })
+    await page.getByRole("button", { name: "Block", exact: true }).first().click()
+    await expect(page.getByText("Scanners", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Deny saved", { exact: true })).toBeVisible()
+    await page.getByText("Deny saved", { exact: true }).scrollIntoViewIfNeeded()
+    await page.getByRole("button", { name: "Close toast", exact: true }).click()
+    await page.screenshot({ path: testInfo.outputPath("scanner-after.png") })
+    expect(writes).toEqual([
+      {
+        action: "deny",
+        direction: "in",
+        from: "203.0.113.55",
+        comment: "blocked from deployment 7 requests",
+      },
+    ])
+
+    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await page.getByText("/admin", { exact: true }).click()
+    await page.getByRole("button", { name: "More actions for this request" }).click()
+    await expect(page.getByRole("menuitem", { name: "Deny rule saved" })).toBeDisabled()
+    await page.keyboard.press("Escape")
+    await page.reload()
+    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await expect(page.getByText("Scanners", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Deny saved", { exact: true })).toBeVisible()
+    // The deny changes the action, not the historical traffic or the readings.
+    await expect(page.getByText("scanner · 12 probes")).toBeVisible()
+    expect(writes).toHaveLength(1)
+
+    rules.length = 0
+    await page.reload()
+    await expect(page.getByText("Scanners", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Block", exact: true }).first()).toBeEnabled()
+  })
+
+  test("blocking two addresses keeps both busy and prevents a repeat submission", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const pending = new Map<string, () => void>()
+    const rules: FirewallRule[] = []
+    const writes: string[] = []
+    await page.route("**/api/v1/firewall/", (route) => json(route, { ...editableFirewall, rules }))
+    await page.route("**/api/v1/firewall/rules", async (route) => {
+      const ip = route.request().postDataJSON().from as string
+      writes.push(ip)
+      await new Promise<void>((resolve) => pending.set(ip, resolve))
+      rules.push(sourceDeny(ip))
+      await json(route, { output: "Rule inserted" })
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    const client = (ip: string) =>
+      page.locator("li").filter({
+        has: page.getByRole("button", { name: `Show every request from ${ip}` }),
+      })
+    await client("203.0.113.55").getByRole("button", { name: "Block", exact: true }).click()
+    await client("172.217.0.1").getByRole("button", { name: "Block", exact: true }).click()
+    await expect.poll(() => pending.size).toBe(2)
+    await expect(client("203.0.113.55").getByRole("button", { name: "Blocking…" })).toBeDisabled()
+    await expect(client("172.217.0.1").getByRole("button", { name: "Blocking…" })).toBeDisabled()
+    // Even dispatching a click directly cannot resubmit a pending address.
+    await client("203.0.113.55").getByRole("button", { name: "Blocking…" }).dispatchEvent("click")
+    pending.get("172.217.0.1")!()
+    await expect(client("172.217.0.1").getByText("Deny saved")).toBeVisible()
+    await expect(client("203.0.113.55").getByRole("button", { name: "Blocking…" })).toBeDisabled()
+    pending.get("203.0.113.55")!()
+    await expect(page.getByText("Scanners", { exact: true })).toHaveCount(0)
+    expect(writes).toEqual(["203.0.113.55", "172.217.0.1"])
+  })
+
+  test("a refused block shows the server's reason and remains retryable", async ({ page }) => {
+    await mockProject(page)
+    let attempts = 0
+    await page.route("**/api/v1/firewall/rules", (route) => {
+      attempts += 1
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "would_lock_you_out",
+            message: "This rule would cut off your own connection to the dashboard",
+          },
+        }),
+      })
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    await page.getByRole("button", { name: "Block", exact: true }).first().click()
+    await expect(
+      page.getByText("This rule would cut off your own connection to the dashboard"),
+    ).toBeVisible()
+    await expect(page.getByText("[object Object]", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Scanners", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Block", exact: true }).first().click()
+    await expect.poll(() => attempts).toBe(2)
+  })
+
+  test("a duplicate saved in another tab is verified before clearing the notice", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const rules: FirewallRule[] = []
+    await page.route("**/api/v1/firewall/", (route) => json(route, { ...editableFirewall, rules }))
+    await page.route("**/api/v1/firewall/rules", (route) => {
+      rules.push(sourceDeny("203.0.113.55"))
+      return route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "bad_request", message: "ufw already has that exact rule" },
+        }),
+      })
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    await page.getByRole("button", { name: "Block", exact: true }).first().click()
+    await expect(
+      page.getByText("Deny rule already saved for 203.0.113.55", { exact: true }),
+    ).toBeVisible()
+    await expect(page.getByText("Scanners", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Could not block the address", { exact: true })).toHaveCount(0)
+  })
+
+  for (const [name, status, reason] of [
+    ["unavailable", { ...editableFirewall, available: false }, "No supported host firewall"],
+    ["disabled", { ...editableFirewall, enabled: false }, "The host firewall is disabled"],
+    [
+      "read-only",
+      {
+        ...editableFirewall,
+        capabilities: {
+          ...editableFirewall.capabilities,
+          editable: false,
+          readOnlyReason: "iptables is read-only",
+        },
+      },
+      "iptables is read-only",
+    ],
+  ] as const) {
+    test(`a ${name} firewall explains why Block is unavailable`, async ({ page }) => {
+      await mockProject(page)
+      await page.route("**/api/v1/firewall/", (route) => json(route, status))
+      await page.goto("/deploy/7/logs?view=insights")
+      await expect(page.getByRole("button", { name: "Block", exact: true }).first()).toBeDisabled()
+      await expect(page.getByText(reason, { exact: false })).toBeVisible()
+      await expect(page.getByRole("link", { name: "Open Firewall" })).toHaveAttribute(
+        "href",
+        "/network/firewall",
+      )
+    })
+  }
+
+  test("a reader has no block controls and does not fetch the firewall for them", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    let firewallReads = 0
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+    )
+    await page.route("**/api/v1/firewall/", (route) => {
+      firewallReads += 1
+      return json(route, editableFirewall)
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+    await expect(page.getByText("Scanners", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Block", exact: true })).toHaveCount(0)
+    expect(firewallReads).toBe(0)
   })
 
   test("only an address worth blocking is offered the verb", async ({ page }) => {
@@ -1488,6 +1707,7 @@ test.describe("a deployment's traffic", () => {
   test("the page fits without scrolling sideways, at a phone and at a laptop", async ({
     page,
   }, testInfo) => {
+    test.slow()
     await mockProject(page)
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 })

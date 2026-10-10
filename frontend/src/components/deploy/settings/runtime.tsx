@@ -1,10 +1,10 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { FormEvent } from "react"
 import Link from "next/link"
 import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -19,8 +19,7 @@ import type {
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Meter, utilisationTone } from "@/components/meter"
-import { ProductGlyph, imageProduct } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ProductGlyph, imageProduct, portProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import {
@@ -51,6 +50,15 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { Segments } from "@/components/deploy/settings/segments"
+import {
+  DEFAULT_GRACE_SECONDS,
+  DEFAULT_STOP_SIGNAL,
+  MAX_SHUTDOWN_SECONDS,
+  STOP_SIGNALS,
+  shutdownSeconds,
+  shutdownSummary,
+} from "@/components/deploy/settings/shutdown"
 import {
   HealthChecks,
   hasReadiness,
@@ -63,18 +71,22 @@ import {
  * listens, what it may use, how one release replaces the next, and what it
  * can reach on the server — then the checks that decide when it is ready.
  *
- * It opens on four readings drawn from the drafts below them (§15 pass 2: a
- * page you configure is not exempt), and two of them are readings of the
- * running container rather than of the form: the memory limit is drawn
- * against what the live release actually peaked at in the last hour, and the
- * release strategy is checked against the rule the executor applies at the
- * next deployment — a writable mount, a fixed host port or the host network
- * cannot run two releases side by side, and blue/green on such a plan used
- * to be offered here and then refused at start.
+ * There is no opening row of figures: each section's head says what it
+ * currently is. Two sections read the running container rather than only the
+ * form: each limit is drawn against what the live release actually peaked at
+ * in the last hour, and the release strategy is checked against the rule the
+ * executor applies at the next deployment — a writable mount, a fixed host
+ * port or the host network cannot run two releases side by side, and
+ * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (five rail sections, one PUT) and Health
+ * Two forms, two saves: Runtime (six sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
+ *
+ * A head says only what the fields under it do not: the command as one line,
+ * a count, a state. What a field needs while it is typed stays under it, a
+ * list's format is shown by its placeholder, and the reasoning behind a field
+ * is behind its ⓘ, so the page reads as heads, fields and switches.
  */
 
 type RuntimePlan = DeploymentConfiguration["runtime"]
@@ -137,14 +149,6 @@ const BIND_ADDRESSES: [string, string][] = [
   ["::", ":: · every IPv6 interface"],
 ]
 
-/** What a restart policy does, for the readings that say it back. */
-const RESTART_PHRASE: Record<string, string> = {
-  "unless-stopped": "restarts unless stopped",
-  always: "always restarts",
-  "on-failure": "restarts on failure",
-  no: "never restarts",
-}
-
 /** The scalar `runtime.*` fields a validation refusal can name. */
 const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.image": "runtime-image",
@@ -157,12 +161,15 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
   "runtime.restartPolicy": "runtime-restart",
+  "runtime.stopSignal": "runtime-stop-signal",
+  "runtime.gracePeriodSeconds": "runtime-grace",
+  "runtime.drainSeconds": "runtime-drain",
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
 }
 
-/** Which rail head a refused field belongs to, so that head says "Not saved". */
+/** Which section head a refused field belongs to, so that head says "Not saved". */
 const FIELD_SECTION: Record<string, string> = {
   "runtime-image": "runtime",
   "runtime-command": "runtime",
@@ -175,6 +182,9 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
   "runtime-restart": "releases",
+  "runtime-stop-signal": "shutdown",
+  "runtime-grace": "shutdown",
+  "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
 }
@@ -214,25 +224,6 @@ function blueGreenRefusal(
   return undefined
 }
 
-/** What decides the release is ready, in the words a reading uses. */
-function readinessPhrase(checks: Check[]) {
-  const readiness = checks.filter((check) => check.phase === "readiness" && check.required)
-  if (readiness.length > 1) return `${readiness.length} readiness checks first`
-  const [only] = readiness
-  if (!only) return "no readiness check"
-  const config = (only.config ?? {}) as { path?: string; port?: number }
-  switch (only.kind) {
-    case "http":
-      return `checks ${config.path || "/"} first`
-    case "tcp":
-      return `checks :${config.port || "port"} first`
-    case "docker_health":
-      return "waits for its HEALTHCHECK"
-    default:
-      return "runs its check first"
-  }
-}
-
 /** The live release's container over the last hour: its peaks, for the limits drawn against them. */
 type Usage =
   | { state: "none" | "loading" }
@@ -269,7 +260,7 @@ function useLiveUsage(): Usage {
     state: "ready",
     memory: Math.max(...points.map((point) => point.memBytesPeak)),
     // Docker's CPU percentage counts one core as 100.
-    cpus: Math.max(...points.map((point) => point.cpuPeak)) / 100,
+    cpus: Math.max(0, ...points.map((point) => point.cpuPeak ?? 0)) / 100,
     processes: Math.max(...points.map((point) => point.pids)),
   }
 }
@@ -284,13 +275,7 @@ export function RuntimeSettings({
   const state = useConfiguration(projectId, environmentId)
   const usage = useLiveUsage()
   return (
-    <SettingsPage
-      state={state}
-      pageKinds={["runtime", "check"]}
-      readings={(configuration) => (
-        <RuntimeReadings projectId={projectId} configuration={configuration} usage={usage} />
-      )}
-    >
+    <SettingsPage state={state} pageKinds={["runtime", "check"]}>
       {(configuration) => (
         <>
           <RuntimeForm
@@ -309,123 +294,20 @@ export function RuntimeSettings({
 type Save = ReturnType<typeof useConfiguration>["save"]
 
 /**
- * The four readings this page sets, above the forms that set them: where it
- * listens, how much memory it may take against what it took, how a release
- * replaces the last, and what it can reach.
- *
- * They read the drafts — the same session keys the forms below write — so a
- * limit typed below is the limit drawn here before anything is saved. A
- * reading is `warning` where the absence of an answer is the answer: an
- * uncapped container, a port open on every interface, blue/green on a plan
- * the executor will refuse, traffic moving to a release nobody checked.
+ * One or two states for a section head, side by side, or nothing when there
+ * are none. Stacked, "Unsaved changes" arriving under "Public" made a head
+ * with no state line a line taller, and pushed the field being typed in down.
  */
-function RuntimeReadings({
-  projectId,
-  configuration,
-  usage,
-}: {
-  projectId: number
-  configuration: DeploymentEnvironmentConfiguration
-  usage: Usage
-}) {
-  const { deployment } = useProject().detail
-  const runtime = runtimePlanOf(useRuntimeDraft(projectId, configuration).value)
-  const checks = useChecksDraft(projectId, configuration).value
-
-  const port = runtime.internalPort ?? 0
-  const hostPort = runtime.hostPort ?? 0
-  const bind = runtime.bindAddress || "127.0.0.1"
-  const memory = runtime.memoryMb ?? 0
-  const cpus = runtime.cpus ?? 0
-  const pids = runtime.pidsLimit ?? 0
-  const capped = [cpus > 0 && `${cpus} CPU`, pids > 0 && `${pids} processes`].filter(Boolean)
-  const peak = usage.state === "ready" ? usage.memory : undefined
-  const pct = peak !== undefined && memory > 0 ? (peak / (memory * MIB)) * 100 : undefined
-
-  const refusal = blueGreenRefusal(runtime, deployment.profile, configuration.build.method)
-  const blueGreen = runtime.strategy === "blue_green"
-  const web = deployment.profile === "web" || deployment.profile === "static"
-  const unverified = web && !hasReadiness(checks)
-  const restart = RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"]
-
-  const capabilities = runtime.capabilities ?? []
-  const devices = runtime.devices ?? []
-  const access = runtime.privileged
-    ? { value: "Privileged", tone: "danger" as const }
-    : runtime.hostNetwork
-      ? { value: "Host network", tone: "warning" as const }
-      : { value: "Unprivileged", tone: "default" as const }
-  const accessHint =
-    [
-      // Named here only when the figure above is already spent on `privileged`.
-      // With host networking alone the figure *is* "Host network", and a hint
-      // repeating it is the fact written twice.
-      runtime.privileged && runtime.hostNetwork && "host network",
-      capabilities.length > 0 && `${capabilities.length} capabilities`,
-      devices.length > 0 && `${devices.length} devices`,
-    ]
-      .filter(Boolean)
-      .join(" · ") ||
-    (runtime.hostNetwork ? "no added capabilities" : "own network, no added capabilities")
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Listening on"
-        value={port > 0 ? `:${port}` : "No port"}
-        tone={hostPort > 0 && publicBind(bind) ? "warning" : "default"}
-        hint={
-          port === 0
-            ? "runs in the background"
-            : hostPort > 0
-              ? `on the host at ${bind}:${hostPort}`
-              : "private behind its route"
-        }
-      />
-      <StatTile
-        key={usage.state}
-        className={usage.state === "ready" ? "animate-rise" : undefined}
-        label="Memory"
-        value={memory > 0 ? `${memory} MiB` : "No limit"}
-        tone={memory === 0 ? "warning" : pct !== undefined ? utilisationTone(pct) : "default"}
-        meter={pct}
-        // The peak itself is written once, under the Memory limit field and
-        // its own meter; the tile's meter is that same share at a glance.
-        hint={capped.length > 0 ? capped.join(" · ") : "no CPU or process cap"}
-      />
-      <StatTile
-        label="Releases"
-        value={blueGreen ? "Blue / green" : "Stop first"}
-        tone={(blueGreen && refusal) || unverified ? "warning" : "default"}
-        hint={
-          blueGreen && refusal
-            ? refusal
-            : unverified
-              ? "no readiness check — traffic moves unverified"
-              : `${readinessPhrase(checks)} · ${restart}`
-        }
-      />
-      <StatTile
-        label="Container access"
-        value={access.value}
-        tone={access.tone}
-        hint={accessHint}
-      />
-    </StatGrid>
-  )
-}
-
-/** One or two states for a rail head, stacked, or nothing when there are none. */
 function statuses(...items: React.ReactNode[]) {
   const shown = items.filter(Boolean)
   if (shown.length === 0) return undefined
-  return <span className="flex flex-col items-start gap-1">{shown}</span>
+  return <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{shown}</span>
 }
 
 /**
- * The Runtime form: five rail heads — the image and command, where it
- * listens, what it may use, how releases replace each other, what it can
- * reach — and one save, because one PUT writes all of it.
+ * The Runtime form: six section heads — the image and command, where it
+ * listens, what it may use, how releases replace each other, how it is
+ * stopped, what it can reach — and one save, because one PUT writes all of it.
  */
 function RuntimeForm({
   projectId,
@@ -443,7 +325,6 @@ function RuntimeForm({
   const { deployment } = useProject().detail
   const draft = useRuntimeDraft(projectId, configuration)
   const runtime = draft.value
-  const checks = useChecksDraft(projectId, configuration).value
   const patch = (fields: Partial<RuntimeDraft>) => draft.set((prev) => ({ ...prev, ...fields }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -473,18 +354,14 @@ function RuntimeForm({
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
-  const web = deployment.profile === "web" || deployment.profile === "static"
-  // The Releases reading's hint says the restart policy only while it has
-  // nothing more urgent to say; the head says it the rest of the time.
-  const restartUnsaid = failsNext || (web && !hasReadiness(checks))
+  const portMark = portProduct(port)
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     setError(undefined)
     setFieldError(undefined)
     if (fixedPort && hostPort === 0) {
       setFieldError({ id: "runtime-host-port", message: "Use a port from 1 to 65535." })
-      return
+      return false
     }
     setSaving(true)
     try {
@@ -498,9 +375,7 @@ function RuntimeForm({
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
       }))
-      notify.success("Runtime settings saved", {
-        description: "The desired revision changed; the live release was not touched.",
-      })
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.field && RUNTIME_FIELD_IDS[caught.field]) {
         setFieldError({ id: RUNTIME_FIELD_IDS[caught.field], message: caught.message })
@@ -511,6 +386,7 @@ function RuntimeForm({
       } else {
         notify.error("Could not save runtime settings", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -528,7 +404,7 @@ function RuntimeForm({
   return (
     <SettingForm
       name="Runtime"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -542,30 +418,26 @@ function RuntimeForm({
       applies="next-deployment"
       error={error}
     >
+      {/* The head is the command as one line, which the field under it, one
+          argument per line, does not show; the image was the field under it
+          again, glyph and all. The line rises when it swaps between the
+          image's own command and one typed here, not on every keystroke. */}
       <SettingSection
         id="runtime"
         title="Runtime"
         state={
-          <span className="block space-y-1">
-            {image ? (
-              <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-                <ProductGlyph id={imageProduct(image)} />
-                <span className="truncate font-mono" title={image}>
-                  {image}
-                </span>
-              </span>
+          <span
+            key={argv.length > 0 ? "argv" : "own"}
+            className="block animate-rise truncate"
+            title={argv.length > 0 ? argv.join(" ") : undefined}
+          >
+            {argv.length > 0 ? (
+              <>
+                runs <span className="font-mono text-foreground">{argv.join(" ")}</span>
+              </>
             ) : (
-              !built && <span className="block">no image set</span>
+              "runs the image's own command"
             )}
-            <span className="block truncate">
-              {argv.length > 0 ? (
-                <>
-                  runs <span className="font-mono text-foreground">{argv.join(" ")}</span>
-                </>
-              ) : (
-                "runs the image's own command"
-              )}
-            </span>
           </span>
         }
         status={settingStatus({
@@ -586,18 +458,19 @@ function RuntimeForm({
               readOnly={!canEdit}
               aria-invalid={Boolean(errorFor("runtime-image"))}
               className="font-mono"
-              placeholder={built ? "The image Build produces" : "image reference"}
+              placeholder={built ? "The image Build produces" : "ghcr.io/owner/image:tag"}
               autoComplete="off"
               spellCheck={false}
               onChange={(event) => patch({ image: event.target.value })}
             />
           </InputGroup>
         </Field>
+        {/* The placeholder is an argv written one argument per line, so it
+            says the format; what empty means is the head's line while it is. */}
         <Field
           label="Command argv"
           htmlFor="runtime-command"
-          hint="One argument per line."
-          info="Secret values belong in scoped variables, not argv: the command line is visible to anything on the server that can list processes."
+          info="One argument per line; empty runs the image's own command. Secret values belong in scoped variables, not argv: the command line is visible to anything on the server that can list processes."
           error={errorFor("runtime-command")}
         >
           <Textarea
@@ -606,7 +479,7 @@ function RuntimeForm({
             onChange={(event) => patch({ commandText: event.target.value })}
             readOnly={!canEdit}
             aria-invalid={Boolean(errorFor("runtime-command"))}
-            placeholder="Empty runs the image's own command"
+            placeholder={"node\ndist/server.js\n--port\n3000"}
             className="min-h-24 font-mono sm:text-xs"
           />
         </Field>
@@ -616,7 +489,7 @@ function RuntimeForm({
         id="listen"
         title="Where it listens"
         status={statuses(
-          exposed && <Status key="public" tone="warning" label="Public" />,
+          exposed && <Status key="public" tone="warning" label="Public" className="animate-rise" />,
           settingStatus({
             dirty: draft.changed(["internalPort", "hostPort", "bindAddress", "maxRequestBodyMb"]),
             refused: refusedIn("listen"),
@@ -624,63 +497,75 @@ function RuntimeForm({
         )}
       >
         <ListenPicture domains={configuration.domains} runtime={runtime} projectId={projectId} />
-        <Field
-          label="Application port"
-          htmlFor="runtime-internal-port"
-          error={errorFor("runtime-internal-port")}
-        >
-          <InputGroup>
-            <InputGroupAddon align="inline-start">
-              <InputGroupText className="font-mono">container :</InputGroupText>
-            </InputGroupAddon>
-            <InputGroupInput
-              id="runtime-internal-port"
-              type="number"
-              min={0}
-              max={65535}
-              value={runtime.internalPort ?? 0}
-              readOnly={!canEdit}
-              aria-invalid={Boolean(errorFor("runtime-internal-port"))}
-              className="font-mono"
-              onChange={(event) => patch({ internalPort: clampPort(event.target.value) })}
-            />
-          </InputGroup>
-        </Field>
-        <Field
-          label="Largest upload"
-          htmlFor="runtime-max-body"
-          info={`The proxy answers a bigger request with 413 before the application sees it. Zero keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}.`}
-          hint={
-            runtime.maxRequestBodyMb ? undefined : `Proxy default: ${DEFAULT_REQUEST_BODY_LIMIT}`
-          }
-          error={errorFor("runtime-max-body")}
-        >
-          <InputGroup>
-            <InputGroupInput
-              id="runtime-max-body"
-              type="number"
-              min={0}
-              max={MAX_REQUEST_BODY_MB}
-              value={runtime.maxRequestBodyMb ?? 0}
-              readOnly={!canEdit}
-              aria-invalid={Boolean(errorFor("runtime-max-body"))}
-              className="font-mono"
-              onChange={(event) =>
-                patch({
-                  maxRequestBodyMb:
-                    Math.min(MAX_REQUEST_BODY_MB, Math.max(0, Number(event.target.value) || 0)) ||
-                    undefined,
-                })
-              }
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText>MB</InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
-        </Field>
+        {/* Both are the proxy's way in to the application — where it forwards
+            and how much it lets through — so they read as one row. */}
+        <FieldRow>
+          <Field
+            label="Application port"
+            htmlFor="runtime-internal-port"
+            error={errorFor("runtime-internal-port")}
+          >
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                {portMark && <ProductGlyph id={portMark} />}
+                <InputGroupText className="font-mono">container :</InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                id="runtime-internal-port"
+                type="number"
+                min={0}
+                max={65535}
+                value={runtime.internalPort ?? 0}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-internal-port"))}
+                className="font-mono"
+                onChange={(event) => patch({ internalPort: clampPort(event.target.value) })}
+              />
+            </InputGroup>
+          </Field>
+          <Field
+            label="Largest upload"
+            htmlFor="runtime-max-body"
+            info="The proxy answers a bigger request with 413 before the application sees it. Zero keeps the proxy's default."
+            hint={
+              runtime.maxRequestBodyMb ? undefined : (
+                <span className="block animate-rise">
+                  Proxy default: {DEFAULT_REQUEST_BODY_LIMIT}
+                </span>
+              )
+            }
+            error={errorFor("runtime-max-body")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-max-body"
+                type="number"
+                min={0}
+                max={MAX_REQUEST_BODY_MB}
+                value={runtime.maxRequestBodyMb ?? 0}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-max-body"))}
+                className="font-mono"
+                onChange={(event) =>
+                  patch({
+                    maxRequestBodyMb:
+                      Math.min(MAX_REQUEST_BODY_MB, Math.max(0, Number(event.target.value) || 0)) ||
+                      undefined,
+                  })
+                }
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>MB</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </FieldRow>
         <OptionList>
+          {/* The consequence is the hint, so the title is the switch's name
+              rather than a sentence with a clause hung off it. */}
           <OptionRow
-            title="Publish on a fixed host port — blue/green is then unavailable"
+            title="Publish on a fixed host port"
+            hint="One release at a time can hold the port, so blue / green is unavailable."
             tone={exposed ? "warning" : "default"}
             checked={fixedPort}
             onCheckedChange={(on) => {
@@ -739,10 +624,10 @@ function RuntimeForm({
                 </Field>
               </FieldRow>
               {exposed && (
-                <FormNote tone="warning">
+                <FormNote tone="warning" className="animate-rise">
                   Open on every interface — reachable without the proxy. Close it at the{" "}
                   <Link
-                    href="/security/firewall"
+                    href="/network/firewall"
                     className="rounded-sm underline underline-offset-2 focus-ring hover:text-foreground"
                   >
                     firewall
@@ -755,7 +640,7 @@ function RuntimeForm({
         </OptionList>
         {/* The fields a refusal can name are behind the switch while it is off. */}
         {!fixedPort && (errorFor("runtime-host-port") || errorFor("runtime-bind")) && (
-          <FormNote tone="danger" role="alert">
+          <FormNote tone="danger" role="alert" className="animate-rise">
             {errorFor("runtime-host-port") || errorFor("runtime-bind")}
           </FormNote>
         )}
@@ -766,7 +651,7 @@ function RuntimeForm({
         title="Resources"
         status={statuses(
           memory === 0 && cpus === 0 && pids === 0 && (
-            <Status key="uncapped" tone="warning" label="No limits" />
+            <Status key="uncapped" tone="warning" label="No limits" className="animate-rise" />
           ),
           settingStatus({
             dirty: draft.changed(["memoryMb", "cpus", "pidsLimit"]),
@@ -817,15 +702,19 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
+      {/* No state line: it said the restart policy back ("restarts unless
+          stopped") over the select that already says it. */}
       <SettingSection
         id="releases"
         title="Releases"
-        state={
-          restartUnsaid ? RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"] : undefined
-        }
         status={statuses(
           failsNext && (
-            <Status key="fails" tone="warning" label="Will fail on the next deployment" />
+            <Status
+              key="fails"
+              tone="warning"
+              label="Will fail on the next deployment"
+              className="animate-rise"
+            />
           ),
           settingStatus({
             dirty: draft.changed(["strategy", "restartPolicy"]),
@@ -868,7 +757,7 @@ function RuntimeForm({
               a hint inside a faded option, the one sentence on the page the
               operator needed and the hardest to read. */}
           {refusal && (
-            <FormNote tone={failsNext ? "warning" : "default"}>
+            <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
               Blue / green is unavailable: {refusal}.
             </FormNote>
           )}
@@ -876,7 +765,7 @@ function RuntimeForm({
         <Field
           label="Restart policy"
           htmlFor="runtime-restart"
-          hint="Deployments stop and start their own releases either way."
+          info="What Docker does when the container exits or the server restarts. Deployments stop and start their own releases either way."
           error={errorFor("runtime-restart")}
         >
           <Select
@@ -899,14 +788,103 @@ function RuntimeForm({
         </Field>
       </SettingSection>
 
+      {/* A head that says what the three fields add up to, since the defaults
+          are not on any of them: the server stops a container with SIGTERM and
+          waits ten seconds before it kills it, whatever the image says. */}
+      <SettingSection
+        id="shutdown"
+        title="Shutdown"
+        state={
+          <span key={shutdownSummary(runtime)} className="block animate-rise">
+            {shutdownSummary(runtime)}
+          </span>
+        }
+        status={settingStatus({
+          dirty: draft.changed(["stopSignal", "gracePeriodSeconds", "drainSeconds"]),
+          refused: refusedIn("shutdown"),
+        })}
+      >
+        <Field
+          label="Stop signal"
+          info="What the container is sent when it is asked to stop. Most applications finish their work on SIGTERM; Node and Python programs that handle Ctrl-C only may want SIGINT, and nginx shuts down gracefully on SIGQUIT."
+          error={errorFor("runtime-stop-signal")}
+        >
+          <Segments
+            id="runtime-stop-signal"
+            label="Stop signal"
+            value={runtime.stopSignal || DEFAULT_STOP_SIGNAL}
+            options={STOP_SIGNALS.map((signal) => ({ value: signal, label: signal, mono: true }))}
+            disabled={!canEdit}
+            // The default is the field left out, as the server writes it back.
+            onChange={(stopSignal) =>
+              patch({ stopSignal: stopSignal === DEFAULT_STOP_SIGNAL ? undefined : stopSignal })
+            }
+          />
+        </Field>
+        <FieldRow>
+          <Field
+            label="Grace period"
+            htmlFor="runtime-grace"
+            info="How long the container has to exit after the stop signal before it is killed. Raise it for an application that finishes long requests or flushes a queue."
+            error={errorFor("runtime-grace")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-grace"
+                type="number"
+                min={0}
+                max={MAX_SHUTDOWN_SECONDS}
+                value={runtime.gracePeriodSeconds ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-grace"))}
+                className="font-mono"
+                placeholder={String(DEFAULT_GRACE_SECONDS)}
+                onChange={(event) =>
+                  patch({ gracePeriodSeconds: shutdownSeconds(event.target.value) })
+                }
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>seconds</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          <Field
+            label="Drain period"
+            htmlFor="runtime-drain"
+            info="How long the previous release keeps running after a deployment has moved traffic to the new one, so requests already in flight can finish. Empty stops it at once."
+            error={errorFor("runtime-drain")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-drain"
+                type="number"
+                min={0}
+                max={MAX_SHUTDOWN_SECONDS}
+                value={runtime.drainSeconds ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-drain"))}
+                className="font-mono"
+                placeholder="0"
+                onChange={(event) => patch({ drainSeconds: shutdownSeconds(event.target.value) })}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>seconds</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </FieldRow>
+      </SettingSection>
+
       <SettingSection
         id="access"
         title="Container access"
         status={statuses(
           runtime.privileged ? (
-            <Status key="privileged" tone="danger" label="Privileged" />
+            <Status key="privileged" tone="danger" label="Privileged" className="animate-rise" />
           ) : (
-            runtime.hostNetwork && <Status key="host" tone="warning" label="Host network" />
+            runtime.hostNetwork && (
+              <Status key="host" tone="warning" label="Host network" className="animate-rise" />
+            )
           ),
           settingStatus({
             dirty: draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]),
@@ -939,15 +917,17 @@ function RuntimeForm({
         <Disclosure
           quiet
           summary="Capabilities and devices"
-          facts={`${capabilities.length} ${capabilities.length === 1 ? "capability" : "capabilities"} · ${devices.length} ${devices.length === 1 ? "device" : "devices"}`}
+          facts={`${plural(capabilities.length, "capability", "capabilities")} · ${plural(devices.length, "device")}`}
           open={accessOpen || accessRefused}
           onOpenChange={setAccessOpen}
         >
+          {/* The format is the placeholders', which hold two lines each; the
+              rule the server checks it against is behind ⓘ. */}
           <FieldRow>
             <Field
               label="Linux capabilities"
               htmlFor="runtime-capabilities"
-              hint="One uppercase capability per line."
+              info="Kernel capabilities added to the container, one per line, in capitals."
               error={errorFor("runtime-capabilities")}
             >
               <Textarea
@@ -956,14 +936,14 @@ function RuntimeForm({
                 onChange={(event) => patch({ capabilitiesText: event.target.value })}
                 readOnly={!canEdit}
                 aria-invalid={Boolean(errorFor("runtime-capabilities"))}
-                placeholder="NET_ADMIN"
+                placeholder={"NET_ADMIN\nSYS_TIME"}
                 className="min-h-20 font-mono sm:text-xs"
               />
             </Field>
             <Field
               label="Host devices"
               htmlFor="runtime-devices"
-              hint="One absolute path per line."
+              info="Devices on this server passed into the container, one absolute path per line."
               error={errorFor("runtime-devices")}
             >
               <Textarea
@@ -972,7 +952,7 @@ function RuntimeForm({
                 onChange={(event) => patch({ devicesText: event.target.value })}
                 readOnly={!canEdit}
                 aria-invalid={Boolean(errorFor("runtime-devices"))}
-                placeholder="/dev/dri"
+                placeholder={"/dev/dri\n/dev/net/tun"}
                 className="min-h-20 font-mono sm:text-xs"
               />
             </Field>
@@ -1015,20 +995,21 @@ function LimitField({
   onChange: (value: number) => void
 }) {
   const pct = peak !== undefined && value > 0 ? (peak / value) * 100 : undefined
+  // Keyed on which line it is rather than on its text, so "no limit" rises as
+  // the field is cleared and a peak rises when its hour lands, but a figure
+  // that only moves is not re-announced.
+  const hint =
+    peak !== undefined ? (
+      <span key="peak" className="block animate-rise">
+        peak {peakLabel(peak)} in the last hour
+      </span>
+    ) : value === 0 ? (
+      <span key="unlimited" className="block animate-rise">
+        no limit
+      </span>
+    ) : undefined
   return (
-    <Field
-      label={label}
-      htmlFor={id}
-      info={info}
-      hint={
-        peak !== undefined
-          ? `peak ${peakLabel(peak)} in the last hour`
-          : value === 0
-            ? "no limit"
-            : undefined
-      }
-      error={error}
-    >
+    <Field label={label} htmlFor={id} info={info} hint={hint} error={error}>
       <InputGroup>
         <InputGroupInput
           id={id}
@@ -1127,21 +1108,28 @@ function ListenPicture({
       }
     />
   )
+  // The second way in rises as the switch opens it — its mark and its words,
+  // never the node: the line to it is measured once as it appears, and a node
+  // still four pixels into its rise would leave the line ending under its mark.
   const anywhereNode = exposed && (
     <WireNode
       key="anywhere"
       nodeRef={anywhereMark}
       align="end"
       mark={
-        <WireMark size="md" tone="warning">
+        <WireMark size="md" tone="warning" className="animate-rise">
           <Globe />
         </WireMark>
       }
-      eyebrow="Anywhere"
-      title="Any address"
-      hint={<span className="text-warning">bypasses the proxy</span>}
+      eyebrow={<span className="inline-block animate-rise">Anywhere</span>}
+      title={<span className="block animate-rise">Any address</span>}
+      hint={<span className="block animate-rise text-warning">bypasses the proxy</span>}
     />
   )
+  // What the server's address is, as a kind rather than a value: its words
+  // rise when the kind changes — a fixed port turned on, the host network —
+  // and not with every digit typed into a port.
+  const hostKind = hostNetwork ? "host" : port === 0 ? "none" : hostPort > 0 ? "fixed" : "leased"
   const hostNode = (
     <WireNode
       nodeRef={hostMark}
@@ -1153,17 +1141,19 @@ function ListenPicture({
       }
       eyebrow="This server"
       title={
-        hostNetwork ? (
-          <span className="font-mono">:{port || "any"}</span>
-        ) : port === 0 ? (
-          // No application port leases no host port (activation_executor.go):
-          // there is nothing for the proxy to forward to.
-          "No port"
-        ) : (
-          <span className="font-mono">
-            {hostPort > 0 ? `${bind}:${hostPort}` : "127.0.0.1:leased"}
-          </span>
-        )
+        <span key={hostKind} className="block animate-rise">
+          {hostNetwork ? (
+            <span className="font-mono">:{port || "any"}</span>
+          ) : port === 0 ? (
+            // No application port leases no host port (activation_executor.go):
+            // there is nothing for the proxy to forward to.
+            "No port"
+          ) : (
+            <span className="font-mono">
+              {hostPort > 0 ? `${bind}:${hostPort}` : "127.0.0.1:leased"}
+            </span>
+          )}
+        </span>
       }
       hint={
         hostNetwork
@@ -1180,11 +1170,11 @@ function ListenPicture({
       align="start"
       mark={
         port > 0 ? (
-          <WireMark size="md" tone="brand">
+          <WireMark key="listens" size="md" tone="brand" className="animate-rise">
             <Box />
           </WireMark>
         ) : (
-          <WirePlaceholder size="md">
+          <WirePlaceholder key="none" size="md" className="animate-rise">
             <Box />
           </WirePlaceholder>
         )
@@ -1259,8 +1249,7 @@ function HealthChecksForm({
   const [error, setError] = useState<string>()
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     setError(undefined)
     setRowError(undefined)
     setSaving(true)
@@ -1270,9 +1259,7 @@ function HealthChecksForm({
       // What was sent, not what was typed: a command's blank lines stay out
       // of the draft too, or they would read as an edit the save did not make.
       draft.set(next)
-      notify.success("Health checks saved", {
-        description: "The desired revision changed; the live release was not touched.",
-      })
+      return true
     } catch (caught) {
       const index = caught instanceof ApiError ? refusedIndex(caught.field, "checks") : undefined
       if (caught instanceof ApiError && index !== undefined) {
@@ -1282,6 +1269,7 @@ function HealthChecksForm({
       } else {
         notify.error("Could not save health checks", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -1293,7 +1281,7 @@ function HealthChecksForm({
   return (
     <SettingForm
       name="Health checks"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1308,21 +1296,26 @@ function HealthChecksForm({
     >
       {/* The head counts only what nothing below it does: each phase's rule
           carries its own count and each check its own summary. The absence of
-          a readiness check is the head's to say — once, as a state — and the
-          Releases reading above says what it costs. */}
+          a readiness check is the head's to say — once, as a state. */}
       <SettingSection
         id="health-checks"
         title="Health checks"
         state={
           checks.length > 0 ? (
-            <>
+            // Rises as a switch or a new check changes it.
+            <span key={required} className="inline-block animate-rise">
               <span className="numeric">{required}</span> required
-            </>
+            </span>
           ) : undefined
         }
         status={statuses(
           web && !hasReadiness(checks) && (
-            <Status key="unverified" tone="warning" label="No readiness check" />
+            <Status
+              key="unverified"
+              tone="warning"
+              label="No readiness check"
+              className="animate-rise"
+            />
           ),
           settingStatus({
             dirty: draft.dirty,

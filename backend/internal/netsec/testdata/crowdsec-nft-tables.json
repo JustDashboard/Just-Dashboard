@@ -1,0 +1,1 @@
+{"nftables": [{"metainfo": {"version": "1.1.1", "release_name": "Commodore Bullmoose #2", "json_schema_version": 1}}, {"table": {"family": "ip", "name": "crowdsec", "handle": 1}}, {"table": {"family": "ip6", "name": "crowdsec6", "handle": 2}}, {"table": {"family": "inet", "name": "filter", "handle": 3}}]}

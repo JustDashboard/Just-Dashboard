@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
@@ -19,16 +18,25 @@ type deploymentResourceRemover struct {
 	docker   *dockerx.Client
 	proxy    *proxysvc.Service
 	backups  *backups.Store
-	dbs      *dbx.Manager
 	store    *basestore.Store
 	files    *files.Service
 	networks *deploymentDatabaseNetworks
+	// forget removes a connection's row with everything kept about it, on
+	// behalf of actor: the same forgetting the Databases routes do, so a
+	// connection removed with its deployment is not connected again by the
+	// next sync.
+	forget func(ctx context.Context, id int64, actor string) (forgottenConnection, error)
+	actor  string
+	// ignored are the found servers that forgetting put on discovery's ignore
+	// list, for the audit entry of the request that removed them.
+	ignored []string
 }
 
-func newDeploymentResourceRemover(s *Server) *deploymentResourceRemover {
+func newDeploymentResourceRemover(s *Server, actor string) *deploymentResourceRemover {
 	return &deploymentResourceRemover{
 		docker: s.modules.docker, proxy: s.modules.proxy, backups: s.modules.backupStore,
-		dbs: s.modules.dbs, store: s.Store, files: files.New(s.Cfg.DeployRoots), networks: s.modules.deployDatabases,
+		store: s.Store, files: files.New(s.Cfg.DeployRoots), networks: s.modules.deployDatabases,
+		forget: s.forgetConnection, actor: actor,
 	}
 }
 
@@ -91,15 +99,15 @@ func (r *deploymentResourceRemover) RemoveManagedResource(ctx context.Context, t
 		if err != nil || id <= 0 {
 			return errors.New("database connection id is invalid")
 		}
-		result, err := r.store.DB.ExecContext(ctx, `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+		forgotten, err := r.forget(ctx, id, r.actor)
 		if err != nil {
 			return err
 		}
-		if affected, _ := result.RowsAffected(); affected != 1 {
+		if !forgotten.removed {
 			return errors.New("database connection is missing or still linked to a managed deployment network")
 		}
-		if r.dbs != nil {
-			r.dbs.Close(id)
+		if forgotten.ignored {
+			r.ignored = append(r.ignored, forgotten.origin)
 		}
 		return nil
 	default:

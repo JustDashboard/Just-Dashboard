@@ -42,12 +42,7 @@ export function NumberTicker({
   useEffect(
     () =>
       springValue.on("change", (latest) => {
-        if (ref.current) {
-          ref.current.textContent = Intl.NumberFormat("en-US", {
-            minimumFractionDigits: decimalPlaces,
-            maximumFractionDigits: decimalPlaces,
-          }).format(Number(latest.toFixed(decimalPlaces)))
-        }
+        if (ref.current) ref.current.textContent = figure(latest, decimalPlaces)
       }),
     [springValue, decimalPlaces],
   )
@@ -55,8 +50,16 @@ export function NumberTicker({
   return (
     <span ref={ref} className={cn("numeric inline-block", className)} {...props}>
       {/* With reduced motion the spring never moves, so this is the figure
-          the reader sees: at the precision asked for, never the raw double. */}
-      {reduced ? value.toFixed(decimalPlaces) : startValue}
+          the reader sees — and so is a start that is already the value: at
+          the precision asked for, never the raw double. */}
+      {figure(reduced ? value : startValue, decimalPlaces)}
     </span>
   )
+}
+
+function figure(value: number, decimalPlaces: number) {
+  return Intl.NumberFormat("en-US", {
+    minimumFractionDigits: decimalPlaces,
+    maximumFractionDigits: decimalPlaces,
+  }).format(Number(value.toFixed(decimalPlaces)))
 }

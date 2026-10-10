@@ -724,6 +724,32 @@ test("a read-only account reads the last check and cannot ask for another", asyn
   expect(lists.length).toBeGreaterThan(0)
 })
 
+test("a network probe on the watch list reads its connection, not a certificate", async ({
+  page,
+}) => {
+  await mockShowcase(page)
+  await page.route("**/api/v1/certificates/watched", (route) =>
+    json(route, [
+      {
+        id: 5,
+        domain: "db.example.com",
+        port: 5432,
+        kind: "tcp",
+        checkedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+        probe: { ok: true, state: "connected", ms: 4, address: "10.0.0.5:5432" },
+      },
+    ]),
+  )
+  await page.goto("/proxy/certificates")
+  const watched = page.getByRole("list", { name: "Watched domains" })
+  const row = watched.locator("[data-slot='choice-row']").filter({ hasText: "db.example.com" })
+  await expect(row).toContainText("Network probe: connects over TCP to 10.0.0.5:5432")
+  await expect(row).toContainText("connects in 4 ms")
+  await row.getByRole("button", { name: "More actions for db.example.com:5432" }).click()
+  await expect(page.getByRole("menuitem", { name: "TLS report" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Stop watching" })).toBeVisible()
+})
+
 test("a scan asked for again says it is scanning until the answer replaces the report", async ({
   page,
 }) => {
@@ -1193,7 +1219,7 @@ test("a failed scan says where to look next, and only where the fault can be her
   await page.getByRole("button", { name: "Scan", exact: true }).click()
   await expect(page.getByRole("link", { name: "Firewall" })).toHaveAttribute(
     "href",
-    "/security/firewall",
+    "/network/firewall",
   )
   expect((await tiles(page))["Port 443"]).toBe("timed out")
 })

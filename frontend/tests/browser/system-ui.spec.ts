@@ -1,5 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
+test.use({ video: recordWorkspace ? "on" : "off" })
+
 /**
  * The two System pages, System users and the audit log, checked in a browser
  * against a mocked host with enough people, daemons and history in it for
@@ -291,30 +294,83 @@ async function mockHost(page: Page) {
 }
 
 test.describe("system users", () => {
-  test("opens on four readings and draws every account as a card", async ({ page }) => {
+  test("opens on the host's accounts, not on tiles, and draws every account as a card", async ({
+    page,
+  }) => {
     await mockHost(page)
     await page.goto("/system-users")
     await page.waitForLoadState("networkidle")
 
-    const tiles = page.locator("[data-slot='stat-tile']")
-    await expect(tiles).toHaveCount(4)
-    await expect(tiles.nth(0)).toContainText("4")
-    // Two hold sudo, and one of them needs no password to sign in.
-    await expect(tiles.nth(1)).toContainText("2")
-    await expect(tiles.nth(1)).toContainText("1 without a password")
-    await expect(tiles.nth(3)).toContainText("ion")
+    // The four metric tiles are gone; the identity line says what they counted.
+    await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+    const line = page.locator("[data-slot='host-identity']")
+    await expect(line).toContainText("4 people")
+    await expect(line).toContainText("3 can sign in")
+    await expect(line).toContainText("3 SSH keys authorised")
+    await expect(line).toContainText("ion")
+    // Mira holds sudo and needs no password, so she is the verdict.
+    await expect(line).toContainText("1 without a password")
+    await expect(line).toContainText("1 can run anything as root")
 
     // Cards you open, not a table: each opens its keys.
     expect(await page.locator("[data-slot='table']").count()).toBe(0)
     const cards = page.locator("[data-slot='choice-row']")
     await expect(cards).toHaveCount(4)
-    await expect(page.getByRole("button", { name: "SSH keys for ion" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "SSH keys for ion" }).first()).toBeVisible()
+    // The account that needs no password leads the list.
+    await expect(cards.first()).toContainText("mira")
+    const ion = cards.filter({ hasText: "ion" }).first()
     // A person is their initials; an administrator's group is said first.
-    await expect(cards.first()).toContainText("IO")
-    await expect(cards.first()).toContainText("sudo")
-    await expect(cards.first().locator("img[src='/logos/docker.svg']")).toHaveCount(1)
+    await expect(ion).toContainText("IO")
+    await expect(ion).toContainText("sudo")
+    await expect(ion.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
     // Where they last signed in from is drawn as the network it is on.
-    await expect(cards.first().locator("img[src='/logos/tailscale.svg']")).toHaveCount(1)
+    await expect(ion.locator("img[src='/logos/tailscale.svg']")).toHaveCount(1)
+  })
+
+  test("the band says who signed in, who can become root and whose keys open the host", async ({
+    page,
+  }) => {
+    await mockHost(page)
+    await page.goto("/system-users")
+    await page.waitForLoadState("networkidle")
+
+    const band = page.locator("[data-slot='access-band']")
+    const signIns = band.getByRole("region", { name: "Last sign-ins" })
+    await expect(signIns.getByRole("listitem")).toHaveCount(2)
+    await expect(signIns.getByRole("listitem").first()).toContainText("ion")
+    await expect(signIns).toContainText("1 never signed in")
+    // The 24h window holds only Ion's sign-in two hours ago.
+    await signIns.getByRole("button", { name: "24h" }).click()
+    await expect(signIns.getByRole("listitem")).toHaveCount(1)
+    await expect(signIns).toContainText("1 earlier")
+
+    // Mira leads: sudo, no password. Ion is in sudo and docker.
+    const root = band.getByRole("region", { name: "Root access" })
+    await expect(root.getByRole("listitem")).toHaveCount(3)
+    await expect(root.getByRole("listitem").first()).toContainText("mira")
+    await expect(root.getByRole("listitem").first()).toContainText("No password")
+
+    const keys = band.getByRole("region", { name: "SSH keys by account" })
+    // Ion holds two of the three keys.
+    await expect(keys).toContainText("67%")
+    await keys.getByRole("button", { name: "SSH keys for ion" }).click()
+    await expect(page.getByRole("dialog")).toContainText("/home/ion/.ssh/authorized_keys")
+  })
+
+  test("the verdict and the No password chip narrow the cards to who needs no password", async ({
+    page,
+  }) => {
+    await mockHost(page)
+    await page.goto("/system-users")
+    await page.waitForLoadState("networkidle")
+
+    await page.getByRole("button", { name: /without a password/ }).click()
+    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+    await expect(page.locator("[data-slot='choice-row']")).toContainText("mira")
+    await page.getByRole("button", { name: /^All/ }).click()
+    await page.getByRole("button", { name: /^No password/ }).click()
+    await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
   })
 
   test("the chips narrow the cards and system accounts are their own shelf", async ({ page }) => {
@@ -342,7 +398,10 @@ test.describe("system users", () => {
     await page.goto("/system-users")
     await page.waitForLoadState("networkidle")
 
-    await page.getByRole("button", { name: "SSH keys for ion" }).click()
+    await page
+      .locator("[data-slot='choice-row']")
+      .getByRole("button", { name: "SSH keys for ion" })
+      .click()
     const sheet = page.getByRole("dialog")
     await expect(sheet).toContainText("ion")
     await expect(sheet).toContainText("github-actions-deploy")
@@ -440,4 +499,65 @@ test.describe("on a phone", () => {
       })
     }
   })
+})
+
+test("workspace: audit filter history and incoming entries preserve the row being read", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let incoming = false
+  await page.route("**/api/v1/audit/**", (route) => {
+    const answer = audit(new URL(route.request().url()))
+    if (incoming) answer.entries.unshift({ ...trail[0], id: 9999, action: "new.entry" })
+    return json(route, answer)
+  })
+  await page.goto("/audit")
+  const rows = page.locator("[data-workspace-item]")
+  await expect(rows.first()).toBeVisible()
+  const first = await rows.first().getAttribute("data-workspace-item")
+  await rows.first().focus()
+  incoming = true
+  await page.keyboard.press("F5")
+  await expect(page.getByRole("button", { name: "Show 1 new audit entry" })).toBeVisible()
+  await expect(rows.first()).toHaveAttribute("data-workspace-item", first!)
+  await page.getByRole("button", { name: "Show 1 new audit entry" }).click()
+  await expect(page.locator('[data-workspace-item="9999"]:visible')).toBeVisible()
+  const action = page.getByPlaceholder("Action, e.g. docker.container")
+  await action.fill("docker.")
+  await expect(page).toHaveURL(/action=docker\./)
+  await action.fill("git.")
+  await expect(page).toHaveURL(/action=git\./)
+  await page.goBack()
+  await expect(action).toHaveValue("docker.")
+})
+
+test("workspace: mobile audit navigation respects input and sidebar focus", async ({
+  page,
+}, testInfo) => {
+  await mockHost(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.goto("/audit")
+  const rows = page.locator("[data-workspace-item]:visible")
+  await expect(rows.first()).toBeVisible()
+  await rows.first().focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(rows.nth(1)).toBeFocused()
+  if (recordWorkspace) {
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: testInfo.outputPath("audit-phone.png") })
+  }
+  await page.keyboard.press("?")
+  await expect(page.getByRole("dialog", { name: "Audit shortcuts" })).toBeVisible()
+  await expect(page.getByRole("dialog")).not.toContainText("Open item")
+  if (recordWorkspace) await page.waitForTimeout(700)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.keyboard.press("Control+f")
+  const action = page.getByPlaceholder("Action, e.g. docker.container")
+  await expect(action).toBeFocused()
+  await action.press("?")
+  await expect(action).toHaveValue("?")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
 })

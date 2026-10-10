@@ -1,0 +1,155 @@
+{
+  "at": "2026-10-10T01:33:48Z",
+  "bootId": "4ca9e11f-94fc-418d-abe3-bc1bfbb5398b",
+  "evidence": {
+    "change": "e07b0cc57ec60129cc70e56a1a3ffccc",
+    "confirmed": {
+      "appliedAt": "2026-10-10T01:33:47.26480883Z",
+      "boot": "enabled",
+      "expiresAt": "2026-10-10T01:35:17.053312124Z",
+      "generation": "4b5458b79982c8034e2c2bb74a361b1dbe6c7724a8d1f46ef269d845fff167d8",
+      "id": "e07b0cc57ec60129cc70e56a1a3ffccc",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:33:48.00446122Z",
+      "verifiedAt": "2026-10-10T01:33:47.99708902Z",
+      "watchdog": "completed"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:33:47.26480883Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "sqm"
+      ],
+      "expiresAt": "2026-10-10T01:35:17.053312124Z",
+      "files": [
+        "/etc/just-dashboard/network/shaping.batch",
+        "/etc/systemd/system/just-dashboard-network.service",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "4b5458b79982c8034e2c2bb74a361b1dbe6c7724a8d1f46ef269d845fff167d8",
+      "id": "e07b0cc57ec60129cc70e56a1a3ffccc",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:33:48.00446122Z",
+      "verifiedAt": "2026-10-10T01:33:47.99708902Z",
+      "watchdog": "completed"
+    },
+    "journalPending": {
+      "appliedAt": "2026-10-10T01:33:47.26480883Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "sqm"
+      ],
+      "expiresAt": "2026-10-10T01:35:17.053312124Z",
+      "files": [
+        "/etc/just-dashboard/network/shaping.batch",
+        "/etc/systemd/system/just-dashboard-network.service",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "4b5458b79982c8034e2c2bb74a361b1dbe6c7724a8d1f46ef269d845fff167d8",
+      "id": "e07b0cc57ec60129cc70e56a1a3ffccc",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:33:47.752660058Z",
+      "watchdog": "armed"
+    },
+    "readbackBeforeReboot": {
+      "cake": {
+        "ack-filter": "disabled",
+        "atm": "noatm",
+        "bandwidth": 1125000,
+        "diffserv": "diffserv4",
+        "flowmode": "triple-isolate",
+        "fwmark": "0",
+        "ingress": true,
+        "mpu": 64,
+        "nat": false,
+        "overhead": 22,
+        "raw": false,
+        "rtt": 80000,
+        "split_gso": true,
+        "wash": true
+      },
+      "ifb": "jds333b09bebe94",
+      "ifbAlias": "jd-sqm:333b09bebe947e7ad38db26f27074ff1",
+      "ifbExists": true,
+      "ifbMac": "02:6f:27:07:4f:f1",
+      "ifbUp": true,
+      "redirect": [
+        {
+          "chain": 0,
+          "kind": "matchall",
+          "options": {
+            "actions": [
+              {
+                "bind": 1,
+                "control_action": {
+                  "type": "stolen"
+                },
+                "cookie": "333b09bebe947e7ad38db26f27074ff1",
+                "direction": "egress",
+                "index": 1,
+                "kind": "mirred",
+                "mirred_action": "redirect",
+                "order": 1,
+                "ref": 1,
+                "to_dev": "jds333b09bebe94"
+              }
+            ],
+            "handle": 51966,
+            "not_in_hw": true,
+            "skip_hw": true
+          },
+          "pref": 49152,
+          "protocol": "all"
+        }
+      ],
+      "savedSourceMac": "52:54:00:4a:44:06",
+      "sourceMac": "52:54:00:4a:44:06"
+    },
+    "shapingView": {
+      "boot": {
+        "checkedAt": "2026-10-10T01:33:48.268269225Z",
+        "status": "verified"
+      },
+      "diffserv": "diffserv4",
+      "flowMode": "triple-isolate",
+      "helper": {
+        "checkedAt": "2026-10-10T01:33:48.189495146Z",
+        "status": "verified"
+      },
+      "ifb": "jds333b09bebe94",
+      "linkLayer": "noatm",
+      "mpu": 64,
+      "nat": false,
+      "overhead": 22,
+      "preserveDscp": false,
+      "queue": {
+        "backlog": 0,
+        "bytes": 70,
+        "drops": 0,
+        "kind": "cake",
+        "overlimits": 0,
+        "packets": 1,
+        "requeues": 0
+      },
+      "rttMillis": 80
+    },
+    "unitSqmLine": [
+      "ExecStart=/etc/just-dashboard/network/network-recovery --network-sqm-restore /etc/just-dashboard/network"
+    ]
+  },
+  "failures": [],
+  "phase": "p14-apply",
+  "result": "pass",
+  "seconds": 3.6
+}

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import Link from "next/link"
 import {
   BlendMode,
   Bug,
@@ -23,6 +24,7 @@ import { bytes, clock, timestamp } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { setLogView, useLogView } from "@/lib/log-view"
 import { crawlerOf, networkOf, refererProduct } from "@/lib/clients"
+import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import type { RequestEntry, RequestSummary } from "@/lib/types"
 import {
   CLASS_EDGE,
@@ -108,7 +110,8 @@ export function RequestConsole({
   onFilterPath,
   onFilterClient,
   onBlock,
-  blocking,
+  blockState,
+  blockUnavailable,
   onEventsAround,
   outputFor,
   renderInline,
@@ -131,8 +134,9 @@ export function RequestConsole({
   onFilterClient?: (ip: string) => void
   /** Deny an address at the firewall. Absent for a role that may not. */
   onBlock?: (ip: string) => void
-  /** The address a deny is in flight for, so the verb says it is working. */
-  blocking?: string | null
+  /** Saved and in-flight denies, shared with the Insights actions. */
+  blockState?: (ip: string) => RequestBlockState
+  blockUnavailable?: string
   /** The Events view scoped to this request's minute. */
   onEventsAround?: (entry: RequestEntry) => void
   /**
@@ -386,7 +390,8 @@ export function RequestConsole({
                       onFilterPath={onFilterPath}
                       onFilterClient={onFilterClient}
                       onBlock={onBlock}
-                      blocking={blocking}
+                      blockState={blockState}
+                      blockUnavailable={blockUnavailable}
                       onEventsAround={onEventsAround}
                       onOutput={outputFor?.(entry)}
                       inline={renderInline?.(entry)}
@@ -495,7 +500,8 @@ function RequestDetail({
   onFilterPath,
   onFilterClient,
   onBlock,
-  blocking,
+  blockState,
+  blockUnavailable,
   onEventsAround,
   onOutput,
   inline,
@@ -506,7 +512,8 @@ function RequestDetail({
   onFilterPath?: (path: string) => void
   onFilterClient?: (ip: string) => void
   onBlock?: (ip: string) => void
-  blocking?: string | null
+  blockState?: (ip: string) => RequestBlockState
+  blockUnavailable?: string
   onEventsAround?: (entry: RequestEntry) => void
   onOutput?: () => void
   inline?: React.ReactNode
@@ -626,10 +633,15 @@ function RequestDetail({
             key: "block",
             // A deny takes a round trip, and a verb that sits still while it
             // runs is pressed twice — which writes the rule twice (§13).
-            label: blocking === ip ? "Blocking…" : "Block this address",
+            label:
+              blockState?.(ip) === "saved"
+                ? "Deny rule saved"
+                : blockState?.(ip) === "blocking"
+                  ? "Blocking…"
+                  : "Block this address",
             icon: Slash,
             danger: true,
-            disabled: blocking === ip,
+            disabled: Boolean(blockUnavailable) || Boolean(blockState?.(ip)),
             progressive: "Blocking…",
             run: () => onBlock(ip),
           },
@@ -728,6 +740,14 @@ function RequestDetail({
         />
       </div>
 
+      {ip && onBlock && !isPrivate(ip) && blockUnavailable && (
+        <p className="mt-2 font-sans text-xs text-muted-foreground">
+          {blockUnavailable}{" "}
+          <Link href="/network/firewall" className="text-link hover:underline">
+            Open Firewall
+          </Link>
+        </p>
+      )}
       {inline}
     </div>
   )

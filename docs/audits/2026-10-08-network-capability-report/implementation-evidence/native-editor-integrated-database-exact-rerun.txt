@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:1558345) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › tests/browser/design-system.spec.ts:433:7 › the databases pages keep the rules (54.0s)
+
+  1 passed (55.0s)

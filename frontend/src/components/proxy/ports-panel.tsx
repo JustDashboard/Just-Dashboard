@@ -42,13 +42,7 @@ import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import {
-  ProductLogo,
-  imageProduct,
-  portProduct,
-  processProduct,
-  unitProduct,
-} from "@/components/product-logo"
+import { ProductLogo } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
@@ -62,6 +56,7 @@ import {
   findSocket,
   foldDualStack,
   internetHint,
+  listenerProduct,
   networkWords,
   onUplink,
   ownerLabel,
@@ -382,7 +377,7 @@ function PortsView() {
         key: "firewall",
         label: "Firewall",
         icon: Shield,
-        run: () => router.push("/security/firewall"),
+        run: () => router.push("/network/firewall"),
       })
     }
     if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
@@ -1183,21 +1178,9 @@ function OwnerLine({ socket, tagged }: { socket: Socket; tagged?: boolean }) {
   )
 }
 
-/**
- * The owner as the product it is, bare at the line's height — Postgres on
- * 5432, nginx on 443, Caddy for a container of its image — the way the
- * identity line draws a host's facts. Read from the container's image or the
- * program first and the port second, so a `postgres` on an unusual port is
- * still Postgres and a `python` on 5432 is not.
- */
+/** The owner as the product it is, on the tile the identity line draws a host's facts with. */
 function ProcessMark({ listener }: { listener: Listener }) {
-  const unit = listener.activates || (listener.manager === "systemd" ? listener.managerName : "")
-  const product = listener.container
-    ? imageProduct(listener.container.image)
-    : (processProduct(listener.displayName || listener.process || "") ??
-      (unit ? unitProduct(unit) : undefined) ??
-      portProduct(listener.port))
-  return <ProductLogo id={product} size="sm" fallback={Router} />
+  return <ProductLogo id={listenerProduct(listener)} size="sm" fallback={Router} />
 }
 
 /**

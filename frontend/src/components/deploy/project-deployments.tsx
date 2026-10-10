@@ -22,7 +22,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { Row, RowList } from "@/components/row-list"
 import { ChoiceList, GroupRule } from "@/components/flow"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Status } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
@@ -112,21 +112,18 @@ function dayLabel(iso: string, now: number) {
 }
 
 /**
- * The runs still going, then the rest under the day each was asked for. Each
- * group knows where it starts in the whole list, for the arrival stagger.
+ * The runs still going, then the rest under the day each was asked for.
  */
 function groupRuns(runs: DeploymentEngineRun[], now: number) {
-  const groups: { label: string; start: number; runs: DeploymentEngineRun[] }[] = []
+  const groups: { label: string; runs: DeploymentEngineRun[] }[] = []
   const active = runs.filter((run) => isActiveRun(run.state))
-  if (active.length > 0) groups.push({ label: "In progress", start: 0, runs: active })
-  let position = active.length
+  if (active.length > 0) groups.push({ label: "In progress", runs: active })
   for (const run of runs) {
     if (isActiveRun(run.state)) continue
     const label = dayLabel(run.requestedAt, now)
     const last = groups.at(-1)
     if (last && last.label === label) last.runs.push(run)
-    else groups.push({ label, start: position, runs: [run] })
-    position += 1
+    else groups.push({ label, runs: [run] })
   }
   return groups
 }
@@ -171,7 +168,7 @@ function durationScale(runs: DeploymentEngineRun[]) {
  *
  * They are grouped the way a history is read: what is in flight, then day by
  * day. The header carries the loaded runs' outcomes as a strip, and the
- * status chips count what they would show. A reason in the delivery figures
+ * status filters count what they would show. A reason in the delivery figures
  * narrows the list to the failed runs.
  *
  * Each run's verbs are declared once (`run-verbs.tsx`) and drawn behind its
@@ -203,6 +200,20 @@ export function ProjectDeployments() {
   // Keyed by run, so a verb on one row neither replaces nor clears another's.
   const [working, setWorking] = useState<Record<number, Working>>({})
   const list = useRef<HTMLDivElement>(null)
+  const results = useRef<HTMLDivElement>(null)
+  const [resultsMinHeight, setResultsMinHeight] = useState<number>()
+
+  // Shrinking a long history clamps the shell's scroll position and moves
+  // the filter away from the pointer. Keep the space the reader was using,
+  // including the pagination footer, until they leave this page.
+  const reserveResultsSpace = () => {
+    const height = results.current?.offsetHeight ?? 0
+    setResultsMinHeight((current) => Math.max(current ?? 0, height))
+  }
+  const changeFilter = (next: StatusFilter) => {
+    reserveResultsSpace()
+    setFilter(next)
+  }
 
   const previews = usePoll(
     (signal) =>
@@ -473,8 +484,9 @@ export function ProjectDeployments() {
       {project.normalized && (
         <Insights
           projectId={project.projectId}
+          presentation="history"
           onFailureClick={() => {
-            setFilter("failed")
+            changeFilter("failed")
             list.current?.scrollIntoView({ block: "start", behavior: "smooth" })
           }}
         />
@@ -492,7 +504,10 @@ export function ProjectDeployments() {
                 {environments.length > 1 && (
                   <Select
                     value={String(selectedEnv)}
-                    onValueChange={(value) => setEnvironmentId(Number(value))}
+                    onValueChange={(value) => {
+                      reserveResultsSpace()
+                      setEnvironmentId(Number(value))
+                    }}
                   >
                     <SelectTrigger size="sm" className="w-40 sm:ml-2" aria-label="Environment">
                       <SelectValue />
@@ -510,110 +525,120 @@ export function ProjectDeployments() {
               </>
             }
           />
-          <PanelToolbar>
-            <ChipStrip>
+          <PanelToolbar className="py-0">
+            <ChipStrip
+              role="group"
+              aria-label="Deployment status"
+              className="gap-0 max-sm:my-0 max-sm:py-0"
+            >
               {STATUS_FILTERS.map((entry) => (
-                <FilterChip
+                <button
                   key={entry.key}
-                  selected={filter === entry.key}
-                  // A filter that would show nothing is drawn the way the build
-                  // console's Errors chip is: there, and not pressable.
-                  disabled={counts[entry.key] === 0 && filter !== entry.key}
-                  className="disabled:opacity-50"
-                  onClick={() => setFilter(entry.key)}
+                  type="button"
+                  aria-pressed={filter === entry.key}
+                  aria-controls="deployment-history-results"
+                  className={tabClasses(filter === entry.key, "h-11 sm:h-10")}
+                  onClick={() => changeFilter(entry.key)}
                 >
-                  {entry.label} <ChipCount>{counts[entry.key]}</ChipCount>
-                </FilterChip>
+                  {entry.label}
+                  <ChipCount className="min-w-[2ch] text-hint">{counts[entry.key]}</ChipCount>
+                </button>
               ))}
             </ChipStrip>
           </PanelToolbar>
-          <PanelBody flush className="pt-4">
-            {project.runsLoading && runs.length === 0 ? (
-              <LoadingPanel rows={5} plain />
-            ) : project.runs.length === 0 ? (
-              <EmptyState
-                mark={<ProjectMark deployment={deployment} size="md" />}
-                title="No deployments yet"
-                description="The first deployment will appear here as soon as its request is accepted."
-                className="border-0 py-6"
-              />
-            ) : runs.length === 0 ? (
-              <EmptyState
-                title="No deployments match"
-                description="Try another status, or clear the filters to see everything."
-                action={
-                  <Button size="sm" variant="outline" onClick={() => setFilter("all")}>
-                    Clear filters
-                  </Button>
-                }
-                className="border-0 py-6"
-              />
-            ) : (
-              <div className="space-y-5">
-                {groups.map((group) => (
-                  <div key={group.label} className="space-y-2.5">
-                    {/* A day's count beside its date reads as part of it
+          <div
+            ref={results}
+            id="deployment-history-results"
+            style={{ minHeight: resultsMinHeight }}
+          >
+            <PanelBody flush className="pt-4">
+              {project.runsLoading && runs.length === 0 ? (
+                <LoadingPanel rows={5} plain />
+              ) : project.runs.length === 0 ? (
+                <EmptyState
+                  mark={<ProjectMark deployment={deployment} size="md" />}
+                  title="No deployments yet"
+                  description="The first deployment will appear here as soon as its request is accepted."
+                  className="border-0 py-6"
+                />
+              ) : runs.length === 0 ? (
+                <EmptyState
+                  title="No deployments match"
+                  description="Try another status, or clear the filters to see everything."
+                  action={
+                    <Button size="sm" variant="outline" onClick={() => changeFilter("all")}>
+                      Clear filters
+                    </Button>
+                  }
+                  className="border-0 py-6"
+                />
+              ) : (
+                <div className="space-y-5">
+                  {groups.map((group) => (
+                    <div key={group.label} className="space-y-2.5">
+                      {/* A day's count beside its date reads as part of it
                         ("Sep 1 3"); only what is in flight is counted. */}
-                    <GroupRule
-                      label={group.label}
-                      count={group.label === "In progress" ? group.runs.length : undefined}
-                    />
-                    <ChoiceList aria-label={group.label}>
-                      {group.runs.map((run, offset) => {
-                        const release = releaseOf(run)
-                        const isLive = Boolean(release) && release!.id === deployment.liveReleaseId
-                        const pending = pendingOf(run, release)
-                        const preview =
-                          run.environmentId !== project.environmentId &&
-                          (environments.find((entry) => entry.id === run.environmentId)?.label ??
-                            "Preview")
-                        return (
-                          <RunRow
-                            key={run.id}
-                            run={run}
-                            deployment={source}
-                            release={release}
-                            live={isLive}
-                            index={group.start + offset}
-                            meter={meter(run)}
-                            tags={
-                              <>
-                                {pending && (
-                                  <TextShimmer className="text-hint">{pending.word}</TextShimmer>
-                                )}
-                                {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
-                                {preview && <Tag>{preview}</Tag>}
-                              </>
-                            }
-                            actions={
-                              <VerbActions
-                                dim
-                                verbs={verbsFor(run, pending?.verb)}
-                                menuLabel={`Actions for ${runTitle(run)}`}
-                              />
-                            }
-                          />
-                        )
-                      })}
-                    </ChoiceList>
-                  </div>
-                ))}
-              </div>
+                      <GroupRule
+                        label={group.label}
+                        count={group.label === "In progress" ? group.runs.length : undefined}
+                      />
+                      <ChoiceList aria-label={group.label}>
+                        {group.runs.map((run) => {
+                          const release = releaseOf(run)
+                          const isLive =
+                            Boolean(release) && release!.id === deployment.liveReleaseId
+                          const pending = pendingOf(run, release)
+                          const preview =
+                            run.environmentId !== project.environmentId &&
+                            (environments.find((entry) => entry.id === run.environmentId)?.label ??
+                              "Preview")
+                          return (
+                            <RunRow
+                              key={run.id}
+                              run={run}
+                              deployment={source}
+                              release={release}
+                              live={isLive}
+                              meter={meter(run)}
+                              tags={
+                                <>
+                                  {pending && (
+                                    <TextShimmer className="text-hint">{pending.word}</TextShimmer>
+                                  )}
+                                  {release?.pinned && <Tag icon={Pin}>Pinned</Tag>}
+                                  {preview && <Tag>{preview}</Tag>}
+                                </>
+                              }
+                              actions={
+                                <VerbActions
+                                  dim
+                                  verbs={verbsFor(run, pending?.verb)}
+                                  menuLabel={`Actions for ${runTitle(run)}`}
+                                />
+                              }
+                            />
+                          )
+                        })}
+                      </ChoiceList>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </PanelBody>
+            {project.runs.length > 0 && !exhausted && (
+              <PanelFooter className="mt-4">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingOlder}
+                  pending={loadingOlder}
+                  onClick={() => void loadOlder()}
+                >
+                  Load older deployments
+                </Button>
+              </PanelFooter>
             )}
-          </PanelBody>
-          {project.runs.length > 0 && !exhausted && (
-            <PanelFooter className="mt-4">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={loadingOlder}
-                pending={loadingOlder}
-                onClick={() => void loadOlder()}
-              >
-                Load older deployments
-              </Button>
-            </PanelFooter>
-          )}
+          </div>
         </Panel>
       </div>
 

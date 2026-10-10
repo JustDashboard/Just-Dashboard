@@ -3,6 +3,8 @@ package dockerx
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -191,6 +193,27 @@ type Volume struct {
 	Size       int64             `json:"size"`
 	RefCount   int64             `json:"refCount"`
 	InUse      bool              `json:"inUse"`
+	// MountType names what a local volume's driver options mount — nfs, cifs,
+	// bind — and is empty for a plain one. Docker's prune never touches a
+	// volume that has options, so the list says which have them for the page
+	// to name exactly what a prune would take. The options themselves stay on
+	// the inspect route: a CIFS `o=` carries the share's password.
+	MountType string `json:"mountType,omitempty"`
+}
+
+// optionMount reads a local volume's driver options as the kind of thing they
+// mount, or "" when there are none.
+func optionMount(options map[string]string) string {
+	if len(options) == 0 {
+		return ""
+	}
+	if strings.Contains(","+options["o"]+",", ",bind,") {
+		return "bind"
+	}
+	if t := options["type"]; t != "" && t != "none" {
+		return t
+	}
+	return "custom"
 }
 
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
@@ -223,6 +246,7 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		vol := Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			MountType: optionMount(v.Options),
 		}
 		if vol.Labels == nil {
 			vol.Labels = map[string]string{}
@@ -306,6 +330,49 @@ type Network struct {
 	// UsedBy names the containers attached, so the delete dialog can say which
 	// ones rather than only how many.
 	UsedBy []string `json:"usedBy"`
+	// Bridge is the host device a bridge network is carried on, which is how
+	// the Network pages put a Docker network's name on br-1a2b3c4d5e6f.
+	Bridge string `json:"bridge,omitempty"`
+	// MembersKnown is false where the container listing failed: UsedBy is
+	// then not "nothing is attached" but "not read", and a network must not
+	// look removable on the strength of a failed read.
+	MembersKnown bool   `json:"membersKnown"`
+	MembersError string `json:"membersError,omitempty"`
+	// Owner is who created the network, by its labels. The API sets it,
+	// since telling the dashboard's own project needs its data directory.
+	Owner *NetworkOwner `json:"owner,omitempty"`
+	// Gateway is the address the containers on it route through: the host's
+	// own end of the bridge.
+	Gateway string `json:"gateway,omitempty"`
+	// Endpoints is each attached container's place on the network — the
+	// address the others reach it at — so a page can draw who is where for
+	// every network at once. The listing that joins UsedBy carries it for
+	// free; an inspect per network would be a round trip per row.
+	Endpoints []NetworkEndpoint `json:"endpoints,omitempty"`
+}
+
+// NetworkEndpoint is one container's address on one network, as the container
+// listing reports it. The listing leaves aliases out, so the names it answers
+// to beyond its own are NetworkDetail's to say.
+type NetworkEndpoint struct {
+	Container string `json:"container"`
+	Name      string `json:"name"`
+	IPv4      string `json:"ipv4,omitempty"`
+	IPv6      string `json:"ipv6,omitempty"`
+	MAC       string `json:"mac,omitempty"`
+}
+
+// endpointOf is a listing's endpoint as the address the others reach it at,
+// with its prefix, which is how a network's own inspect writes it.
+func endpointOf(ep *network.EndpointSettings) NetworkEndpoint {
+	out := NetworkEndpoint{MAC: ep.MacAddress}
+	if ep.IPAddress != "" {
+		out.IPv4 = fmt.Sprintf("%s/%d", ep.IPAddress, ep.IPPrefixLen)
+	}
+	if ep.GlobalIPv6Address != "" {
+		out.IPv6 = fmt.Sprintf("%s/%d", ep.GlobalIPv6Address, ep.GlobalIPv6PrefixLen)
+	}
+	return out
 }
 
 func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
@@ -329,14 +396,22 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 	// with the container listing, the same way its mounts do for the volumes
 	// view. An inspect per network would be one round trip per row.
 	members := map[string][]string{}
-	if containers, err := c.listContainerSummaries(ctx, container.ListOptions{All: true}); err == nil {
+	endpoints := map[string][]NetworkEndpoint{}
+	containers, membersErr := c.listContainerSummaries(ctx, container.ListOptions{All: true})
+	if membersErr == nil {
 		for _, ct := range containers {
 			for _, name := range ct.Networks {
 				members[name] = append(members[name], ct.Name)
+				ep := ct.Endpoints[name]
+				ep.Container, ep.Name = ct.ID, ct.Name
+				endpoints[name] = append(endpoints[name], ep)
 			}
 		}
 		for name := range members {
 			sort.Strings(members[name])
+			sort.Slice(endpoints[name], func(i, j int) bool {
+				return endpoints[name][i].Name < endpoints[name][j].Name
+			})
 		}
 	}
 	out := make([]Network, 0, len(items))
@@ -345,18 +420,26 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 			ID: n.ID, Name: n.Name, Driver: n.Driver, Scope: n.Scope,
 			Internal: n.Internal, Attachable: n.Attachable, IPv6: n.EnableIPv6,
 			Created: n.Created.UTC(), Labels: n.Labels, Subnets: []string{},
-			UsedBy: members[n.Name],
+			UsedBy: members[n.Name], Endpoints: endpoints[n.Name],
+			MembersKnown: membersErr == nil,
+		}
+		if membersErr != nil {
+			nw.MembersError = membersErr.Error()
 		}
 		if nw.UsedBy == nil {
 			nw.UsedBy = []string{}
 		}
 		nw.Containers = len(nw.UsedBy)
+		nw.Bridge = bridgeDevice(n.ID, n.Name, n.Driver, n.Options)
 		if nw.Labels == nil {
 			nw.Labels = map[string]string{}
 		}
 		for _, cfg := range n.IPAM.Config {
 			if cfg.Subnet != "" {
 				nw.Subnets = append(nw.Subnets, cfg.Subnet)
+			}
+			if cfg.Gateway != "" && nw.Gateway == "" {
+				nw.Gateway = cfg.Gateway
 			}
 		}
 		out = append(out, nw)
@@ -637,6 +720,8 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 // the conservative answer, so a zero value is `docker system prune`: stopped
 // containers, dangling images, unused networks and dangling build cache.
 type PruneOptions struct {
+	// ImagesAndCacheOnly narrows an advisory remedy to its advertised scope.
+	ImagesAndCacheOnly bool
 	// Volumes is the only one that destroys data, which is why it is the only
 	// one behind a typed phrase at the route.
 	Volumes bool
@@ -679,35 +764,74 @@ func (c *Client) PruneAll(ctx context.Context, opts PruneOptions) ([]PruneReport
 		reports = append(reports, rep)
 	}
 
-	ctRep, err := cli.ContainersPrune(ctx, filters.NewArgs())
-	add(PruneReport{
-		Kind: "containers", SpaceReclaimed: ctRep.SpaceReclaimed, Items: ctRep.ContainersDeleted,
-	}, err)
+	if !opts.ImagesAndCacheOnly {
+		ctRep, err := cli.ContainersPrune(ctx, filters.NewArgs())
+		add(PruneReport{
+			Kind: "containers", SpaceReclaimed: ctRep.SpaceReclaimed, Items: ctRep.ContainersDeleted,
+		}, err)
+	}
 	add(c.PruneImages(ctx, opts.AllImages))
 	if opts.BuildCache {
 		add(c.PruneBuildCache(ctx, opts.AllBuildCache))
 	}
-	if opts.Volumes {
+	if opts.Volumes && !opts.ImagesAndCacheOnly {
 		add(c.PruneVolumes(ctx))
 	}
-	add(c.pruneNetworks(ctx))
+	if !opts.ImagesAndCacheOnly {
+		add(c.pruneNetworks(ctx))
+	}
 	return reports, nil
 }
 
+// pruneNetworks removes the networks nothing names at all — no running and
+// no stopped container — and none a deployment manages. The Engine's own
+// prune also takes a network a stopped container still names, which then
+// fails to start, while the cleanup preview counted it as in use; this
+// removes exactly what the preview counts. Without the dashboard's records a
+// managed network's deployment is assumed to exist, so it is kept.
 func (c *Client) pruneNetworks(ctx context.Context) (PruneReport, error) {
 	cli, err := c.api()
 	if err != nil {
 		return PruneReport{}, err
 	}
-	rep, err := cli.NetworksPrune(ctx, filters.NewArgs())
+	rep := PruneReport{Kind: "networks", Items: []string{}}
+	candidates, err := c.removableNetworks(ctx)
 	if err != nil {
-		return PruneReport{}, err
+		return rep, err
 	}
-	items := rep.NetworksDeleted
-	if items == nil {
-		items = []string{}
+	failures := []string{}
+	for _, candidate := range candidates {
+		if err := cli.NetworkRemove(ctx, candidate.ID); err != nil {
+			failures = append(failures, candidate.Name+": "+err.Error())
+			continue
+		}
+		rep.Items = append(rep.Items, candidate.Name)
 	}
-	return PruneReport{Kind: "networks", Items: items}, nil
+	if len(failures) > 0 {
+		return rep, errors.New(strings.Join(failures, "; "))
+	}
+	return rep, nil
+}
+
+// removableNetworks is what pruneNetworks removes and the cleanup preview
+// counts.
+func (c *Client) removableNetworks(ctx context.Context) ([]PruneCandidate, error) {
+	networks, err := c.ListNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	containers, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	kept := func(int64) (string, bool) { return "", true }
+	out := []PruneCandidate{}
+	for _, candidate := range PruneCandidates(networks, containers, "", kept) {
+		if candidate.Removable {
+			out = append(out, candidate)
+		}
+	}
+	return out, nil
 }
 
 // ImageRef normalises a user-supplied reference so "nginx" pulls nginx:latest
@@ -729,4 +853,24 @@ func orEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// bridgeDevice names the host device a bridge network uses: the name its
+// options give it, docker0 for the default network, and otherwise the br-
+// and the first twelve characters of its id Docker makes for every
+// user-defined one.
+func bridgeDevice(id, name, driver string, options map[string]string) string {
+	if driver != "bridge" {
+		return ""
+	}
+	if dev := options["com.docker.network.bridge.name"]; dev != "" {
+		return dev
+	}
+	if name == "bridge" {
+		return "docker0"
+	}
+	if len(id) < 12 {
+		return ""
+	}
+	return "br-" + id[:12]
 }

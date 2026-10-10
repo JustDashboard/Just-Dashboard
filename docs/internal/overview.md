@@ -48,20 +48,29 @@ development server or an unrelated dashboard on port 3000. Rebuild after fronten
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 
-**Backend testing.** 33 internal packages carry unit and integration tests. Unit fixtures are isolated;
+**Backend testing.** 38 of the 39 internal packages carry unit and integration tests (every one but
+`audit`). Unit fixtures are isolated;
 live database and Docker tests can contact reachable services, so configure disposable test targets.
 Integration families skip rather than fail when their dependencies are absent:
 
-- **Live database tests** (`dbx/live*_test.go`, `api/handlers_db_live_test.go`) read each engine's DSN
-  from an env var defaulting to a local instance. Re-run with `-count=1` or the cache serves yesterday's
-  skips. These are the tests that matter for dbx: a catalogue query naming a column the server does not
-  have is string-matched identically by a unit test, and only a real engine rejects it.
+- **Live database tests** (`dbx/*live*_test.go`, `api/handlers_db*_live_test.go`) read each engine's DSN
+  from an environment variable. The oldest fixtures fall back to a local instance on the engine's
+  standard port; everything written since runs only where its variable is set, because a standard port is
+  as likely to be somebody's real data as a fixture
+  ([CONTRIBUTING](../../CONTRIBUTING.md#running-the-database-tests-against-real-engines) lists every
+  variable). Re-run with `-count=1` or the cache serves yesterday's skips. These are the tests that
+  matter for dbx: a catalogue query naming a column the server does not have is string-matched
+  identically by a unit test, and only a real engine rejects it.
 - **Docker tests** use a reachable daemon for supported live checks. Deployment artifact/activation
   suites and daemon-wide prune tests require the separate opt-ins documented in `CONTRIBUTING.md`.
 - **`term` and the terminal half of `api`** drive real PTYs. Direct-session tests isolate clipboard
   storage and never touch an operator shell; the remaining legacy tmux tests inside `term` take a private
-  server in that package's `TestMain` (`TMUX_TMPDIR`). Held-session tests never reach systemd: the test
-  binary re-executes itself as the holder (`JD_TEST_HOLDER`), and `ptyhold` runs its holder in-process.
+  server in that package's `TestMain` (`TMUX_TMPDIR`). By default, held-session tests re-execute the
+  test binary as an isolated holder (`JD_TEST_HOLDER` in `term`, `JD_TEST_API_HOLDER` in `api`), and
+  `ptyhold` runs its holder in-process. Process-exit tests also run a separate manager so shutdown and
+  crashes can be checked with no dashboard or browser attached. Optional root/systemd verification
+  (`JD_TERMINAL_SYSTEMD_LIVE=1`) starts temporary host units and replaces the installed holder binary;
+  see [terminal lifetime verification](../audits/2026-10-02-terminal-persistence/README.md).
 
 Extend these when you touch the matching surface: security — `httpx/confirm_test.go`,
 `api/routes_test.go`, `api/docker_spec_test.go`, `files/files_test.go`, `safepath/safepath_test.go`,

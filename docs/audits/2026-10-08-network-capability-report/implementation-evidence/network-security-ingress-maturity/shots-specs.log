@@ -1,0 +1,13 @@
+
+Running 8 tests using 1 worker
+
+  ✓  1 [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 390 wide › /security/intrusion at 390 (6.8s)
+  ✓  2 [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 390 wide › /security/ssh at 390 (5.2s)
+  ✓  3 [chromium] › tests/browser/security-intrusion.spec.ts:94:11 › screenshots › 390 wide › intrusion without CrowdSec and Suricata at 390 (4.0s)
+  ✓  4 [chromium] › tests/browser/security-intrusion.spec.ts:100:11 › screenshots › 390 wide › ssh as a jump host, staged, at 390 (4.3s)
+  ✓  5 [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 1440 wide › /security/intrusion at 1440 (6.0s)
+  ✓  6 [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 1440 wide › /security/ssh at 1440 (4.4s)
+  ✓  7 [chromium] › tests/browser/security-intrusion.spec.ts:94:11 › screenshots › 1440 wide › intrusion without CrowdSec and Suricata at 1440 (3.7s)
+  ✓  8 [chromium] › tests/browser/security-intrusion.spec.ts:100:11 › screenshots › 1440 wide › ssh as a jump host, staged, at 1440 (4.8s)
+
+  8 passed (40.5s)

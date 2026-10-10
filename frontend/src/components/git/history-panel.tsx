@@ -16,7 +16,8 @@ import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { SourceBranch } from "@/components/git/glyphs"
+import { SourceBranch, SourceCommit, SourceMerge } from "@/components/git/glyphs"
+import { AuthorMark, ShortSha } from "@/components/git/marks"
 import type { GitCommit, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -26,7 +27,6 @@ import { RefTags } from "@/components/git/ref-tags"
 import type { GitRun } from "@/components/git/run"
 import { SearchInput } from "@/components/page"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { VerbActions, type Verb } from "@/components/verbs"
 
@@ -259,6 +259,7 @@ export function HistoryPanel({
       <div className="flex shrink-0 items-center gap-1.5 border-b border-hairline px-2 py-1.5">
         <SearchInput
           dense
+          data-workspace-search
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search commit messages…"
@@ -316,10 +317,24 @@ export function HistoryPanel({
               <li
                 key={c.sha}
                 className={cn(
-                  "group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+                  "group flex min-w-0 items-start gap-2 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
                   active === `commit:${c.sha}` && "bg-accent",
                 )}
               >
+                {/* The commit as a node on its line, a merge in the merged
+                    hue, so a run of merged pull requests is seen as one
+                    before a subject is read. */}
+                {c.isMerge ? (
+                  <SourceMerge
+                    aria-label="merge commit"
+                    className="mt-0.5 size-4 shrink-0 text-(--pull-merged)"
+                  />
+                ) : (
+                  <SourceCommit
+                    aria-hidden
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground/70"
+                  />
+                )}
                 <button
                   type="button"
                   aria-pressed={active === `commit:${c.sha}`}
@@ -328,14 +343,19 @@ export function HistoryPanel({
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate text-body">{c.subject}</span>
-                    {c.isMerge && <Tag>merge</Tag>}
                   </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-hint text-muted-foreground">
-                      <span className="font-mono">{c.short}</span> · {c.author} ·{" "}
-                      {relativeTime(c.at)}
+                  <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                    <AuthorMark name={c.author} />
+                    <span className="max-w-[8rem] min-w-0 truncate text-foreground/75">
+                      {c.author}
                     </span>
-                    <RefTags refs={c.refs} className="hidden min-w-0 items-center gap-1 sm:flex" />
+                    <span className="shrink-0 whitespace-nowrap">{relativeTime(c.at)}</span>
+                    <ShortSha sha={c.short} />
+                    <RefTags
+                      refs={c.refs}
+                      max={2}
+                      className="hidden min-w-0 shrink items-center gap-1 overflow-hidden sm:flex"
+                    />
                   </span>
                 </button>
                 {(c.insertions > 0 || c.deletions > 0) && (

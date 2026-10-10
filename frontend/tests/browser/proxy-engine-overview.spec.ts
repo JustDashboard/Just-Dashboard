@@ -57,17 +57,15 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("Sites could not be read")).toBeVisible()
   await expect(page.getByText("Certificates could not be read")).toBeVisible()
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
-  // The tiles say so rather than showing a bare dash.
-  const sitesTile = page.locator("a[aria-label='Sites'] [data-slot='stat-tile']")
-  await expect(sitesTile).toContainText("couldn't read")
-  // The reason is on the hint for a pointer resting on the tile.
-  await expect(sitesTile.getByText("couldn't read")).toHaveAttribute(
+  // The engine line's facts say so rather than counting nothing, with the
+  // reason for a pointer resting on the fact.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("couldn't read sites")).toHaveAttribute(
     "title",
     "could not determine Docker ingress ownership",
   )
-  await expect(page.locator("a[aria-label='Certificates'] [data-slot='stat-tile']")).toContainText(
-    "couldn't read",
-  )
+  await expect(identity.getByText("couldn't read certificates")).toBeVisible()
+  await expect(identity.getByRole("link", { name: /^\d+ sites?,/ })).toHaveCount(0)
   // Routes and expiry show the failure, not an empty host.
   await expect(
     page.getByRole("alert").filter({ hasText: "could not determine Docker ingress ownership" }),
@@ -83,7 +81,10 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
   await expect(page.getByText("Sites could not be read")).toHaveCount(0)
-  await expect(sitesTile).toContainText("3")
+  await expect(identity.getByRole("link", { name: "3 sites, 2 on TLS" })).toHaveAttribute(
+    "href",
+    "/proxy/sites",
+  )
 })
 
 test("a source that fails after answering is not judged from its last answer", async ({ page }) => {
@@ -99,22 +100,24 @@ test("a source that fails after answering is not judged from its last answer", a
   )
   await page.goto("/proxy")
 
-  const sitesTile = page.locator("a[aria-label='Sites'] [data-slot='stat-tile']")
+  const identity = page.locator("[data-slot='host-identity']")
+  const sitesFact = identity.getByRole("link", { name: "3 sites, 2 on TLS" })
   const plainText = page.getByText("legacy.example.com serves an application in plain text")
   await expect(plainText).toBeVisible()
-  await expect(sitesTile).toContainText("3")
+  await expect(sitesFact).toBeVisible()
 
   // Reload reads the sites again, and this time they fail. The poll keeps its
   // last answer, and the page went on judging it: the old plain-text finding
   // and the old count stayed up beside "Sites could not be read".
   sitesFail = true
-  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Reload" }).click()
+  await identity.getByRole("button", { name: "Reload" }).click()
   await expect(page.getByText("nginx reloaded")).toBeVisible()
   await expect(page.getByText("Sites could not be read")).toBeVisible()
   await expect(plainText).toHaveCount(0)
-  await expect(sitesTile).toContainText("—")
-  await expect(sitesTile).toContainText("couldn't read")
-  await expect(sitesTile).not.toContainText("3")
+  await expect(identity.getByText("couldn't read sites")).toBeVisible()
+  await expect(sitesFact).toHaveCount(0)
+  // Nor is the picture drawn from the sites it last had.
+  await expect(page.locator("[data-slot='route-picture']")).toHaveCount(0)
   await expect(
     page.getByRole("alert").filter({ hasText: "could not determine Docker ingress ownership" }),
   ).toBeVisible()

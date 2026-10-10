@@ -1,0 +1,7 @@
+=== RUN   TestDNSEvidenceNativeDisposableResolver
+    dns_evidence_live_test.go:64: === RUN   TestDNSEvidenceNativeDisposableResolver
+        --- PASS: TestDNSEvidenceNativeDisposableResolver (5.94s)
+        PASS
+
+--- PASS: TestDNSEvidenceNativeDisposableResolver (7.28s)
+PASS

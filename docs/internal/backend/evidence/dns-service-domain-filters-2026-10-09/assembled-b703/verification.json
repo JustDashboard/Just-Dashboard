@@ -1,0 +1,200 @@
+{
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "native_fixture_unchanged": true,
+  "compiled_and_run_backend_go_file_count": 1863,
+  "module_file_count": 2,
+  "all_source_hashes_match_named_git_and_current_checkout": true,
+  "binary_sha256": "1874158aaf8b7a852573d214325f1c568919ae386c04e74fc745a73d9669a178",
+  "original_compiler_receipt_sha256": "25afaf64cd2b5b29a6699631355a58f91f8d91346343d750a3e2057abb651fef",
+  "corrected_wrapper_receipt_sha256": "759163487118603ccc6a1a97e677aa1492eaea68dbd02b48ad30de2f640e9072",
+  "original_preflight_only_no_native_spawn": true,
+  "preflight_transcript_is_copied_tool_session_output_not_redirected_native_log": true,
+  "engines": {
+    "adguard": {
+      "wrapper_seconds": 70.471,
+      "test_seconds": 69.44,
+      "raw_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "current_reads": 16,
+      "custom_domain_current_reads": 8,
+      "seeded_and_restored_inventory_fingerprint": "eec5a55047a615bd94111822ec28ed988c613309c66a722ddec9ad1aab770260",
+      "restart_inventory_fingerprint": "875888944738cf9b8a1ca8b2a27319c24bc6ecfe6b6147d94e0264e67fbd85fc",
+      "source_and_module_maps_match": true,
+      "pass_no_skip": true,
+      "owned_cleanup_zero": true,
+      "host_unchanged": true
+    },
+    "pihole": {
+      "wrapper_seconds": 91.545,
+      "test_seconds": 90.49,
+      "raw_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "current_reads": 20,
+      "custom_domain_current_reads": 8,
+      "seeded_and_restored_inventory_fingerprint": "45696d5794685e91803a4759009a6cf2cf9670810fbd7c0511b298ee01f394b5",
+      "restart_inventory_fingerprint": "5487aa14d75c7f4118c6c03dd5f3c3d2589e5a0c0f9d02b7fb1cd4a4dd2275a6",
+      "source_and_module_maps_match": true,
+      "pass_no_skip": true,
+      "owned_cleanup_zero": true,
+      "host_unchanged": true
+    }
+  },
+  "records": {
+    "prepare-native.py": {
+      "sha256": "acacbbe87e2d39621924058ab8b66d282be01178b5afbe2a7185ceda3fa3f259",
+      "bytes": 5062,
+      "workspace_original_sha256": "acacbbe87e2d39621924058ab8b66d282be01178b5afbe2a7185ceda3fa3f259",
+      "byte_identical": true
+    },
+    "domain-native-runner-final.py": {
+      "sha256": "206507c738b4582ccdc813fa6a9672fc1861b1e71c00928019830fd441ce8421",
+      "bytes": 5648,
+      "workspace_original_sha256": "206507c738b4582ccdc813fa6a9672fc1861b1e71c00928019830fd441ce8421",
+      "byte_identical": true
+    },
+    "domain-native-runner-corrected.py": {
+      "sha256": "190b19d3f9f1c8a1a835b23c810bbff20cbf4b9553f8eaaf09935de796bd58ae",
+      "bytes": 6912,
+      "workspace_original_sha256": "190b19d3f9f1c8a1a835b23c810bbff20cbf4b9553f8eaaf09935de796bd58ae",
+      "byte_identical": true
+    },
+    "domain-native-runner-corrected.receipt.json": {
+      "sha256": "759163487118603ccc6a1a97e677aa1492eaea68dbd02b48ad30de2f640e9072",
+      "bytes": 1155,
+      "workspace_original_sha256": "759163487118603ccc6a1a97e677aa1492eaea68dbd02b48ad30de2f640e9072",
+      "byte_identical": true
+    },
+    "domain-native-compile.json": {
+      "sha256": "25afaf64cd2b5b29a6699631355a58f91f8d91346343d750a3e2057abb651fef",
+      "bytes": 222132,
+      "workspace_original_sha256": "25afaf64cd2b5b29a6699631355a58f91f8d91346343d750a3e2057abb651fef",
+      "byte_identical": true
+    },
+    "domain-native-compile.log.original.gz": {
+      "sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "bytes": 20,
+      "encoding": "deterministic gzip; filename empty; mtime zero",
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "uncompressed_bytes": 0
+    },
+    "domain-native-compile.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "workspace_original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "byte_identical": true
+    },
+    "native-adguard-preflight-original.log.original.gz": {
+      "sha256": "636ebdbccecd222424cd6f893265b69d174b00684cc33acea1fce239e61a548a",
+      "bytes": 348,
+      "encoding": "deterministic gzip; filename empty; mtime zero",
+      "uncompressed_sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+      "uncompressed_bytes": 804
+    },
+    "native-adguard-preflight-original.log": {
+      "sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+      "bytes": 804,
+      "workspace_original_sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+      "byte_identical": true
+    },
+    "native-adguard-preflight-original.result.json": {
+      "sha256": "1bb2b3646dc82cf4880c7445cfbec6ff6aa76990b82213cb70204ae25cf60905",
+      "bytes": 800,
+      "workspace_original_sha256": "1bb2b3646dc82cf4880c7445cfbec6ff6aa76990b82213cb70204ae25cf60905",
+      "byte_identical": true
+    },
+    "native-adguard-final.log.original.gz": {
+      "sha256": "9413499021d55ee416c92f57b2ec6ced0f2be09b6cd139f63465924b97e38d2f",
+      "bytes": 858,
+      "encoding": "deterministic gzip; filename empty; mtime zero",
+      "uncompressed_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "uncompressed_bytes": 5452
+    },
+    "native-adguard-final.log": {
+      "sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "bytes": 5452,
+      "workspace_original_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "byte_identical": true
+    },
+    "native-adguard-final.source-binary.json": {
+      "sha256": "0ebc0aceec8f08c2620e9a6bb37a9540a603d581798d9b5853ce44a02fa7d65a",
+      "bytes": 221985,
+      "workspace_original_sha256": "0ebc0aceec8f08c2620e9a6bb37a9540a603d581798d9b5853ce44a02fa7d65a",
+      "byte_identical": true
+    },
+    "native-adguard-final.result.json": {
+      "sha256": "19d84179d7526ebf02e05d5dea761a733aaf06e11f7cf84b6a530996119e4fb9",
+      "bytes": 1031,
+      "workspace_original_sha256": "19d84179d7526ebf02e05d5dea761a733aaf06e11f7cf84b6a530996119e4fb9",
+      "byte_identical": true
+    },
+    "native-pihole-final.log.original.gz": {
+      "sha256": "89ad05e4c2bae06f93efe83fc34ab0ab400a018c063292e184284f08922c55a9",
+      "bytes": 738,
+      "encoding": "deterministic gzip; filename empty; mtime zero",
+      "uncompressed_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "uncompressed_bytes": 3869
+    },
+    "native-pihole-final.log": {
+      "sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "bytes": 3869,
+      "workspace_original_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "byte_identical": true
+    },
+    "native-pihole-final.source-binary.json": {
+      "sha256": "924e8d7180d95b82d043fe5ec51e121e5ebbfa156ea61562ffdcf869095b319b",
+      "bytes": 221984,
+      "workspace_original_sha256": "924e8d7180d95b82d043fe5ec51e121e5ebbfa156ea61562ffdcf869095b319b",
+      "byte_identical": true
+    },
+    "native-pihole-final.result.json": {
+      "sha256": "82bcf4604c46fa533463a5f1019aeb81aaf82302d18929cdb57dc220ba402908",
+      "bytes": 1030,
+      "workspace_original_sha256": "82bcf4604c46fa533463a5f1019aeb81aaf82302d18929cdb57dc220ba402908",
+      "byte_identical": true
+    }
+  },
+  "log_copy_normalization": {
+    "domain-native-compile.log": {
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "normalized_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "original_bytes": 0,
+      "normalized_bytes": 0,
+      "changed": false,
+      "original_gzip": "domain-native-compile.log.original.gz",
+      "normalization": "Only ANSI CSI, CRLF, trailing horizontal whitespace/CR, and terminal blank lines; preserve semantic lines and one terminal LF for nonempty logs."
+    },
+    "native-adguard-preflight-original.log": {
+      "original_sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+      "normalized_sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+      "original_bytes": 804,
+      "normalized_bytes": 804,
+      "changed": false,
+      "original_gzip": "native-adguard-preflight-original.log.original.gz",
+      "normalization": "Only ANSI CSI, CRLF, trailing horizontal whitespace/CR, and terminal blank lines; preserve semantic lines and one terminal LF for nonempty logs."
+    },
+    "native-adguard-final.log": {
+      "original_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "normalized_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+      "original_bytes": 5452,
+      "normalized_bytes": 5452,
+      "changed": false,
+      "original_gzip": "native-adguard-final.log.original.gz",
+      "normalization": "Only ANSI CSI, CRLF, trailing horizontal whitespace/CR, and terminal blank lines; preserve semantic lines and one terminal LF for nonempty logs."
+    },
+    "native-pihole-final.log": {
+      "original_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "normalized_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+      "original_bytes": 3869,
+      "normalized_bytes": 3869,
+      "changed": false,
+      "original_gzip": "native-pihole-final.log.original.gz",
+      "normalization": "Only ANSI CSI, CRLF, trailing horizontal whitespace/CR, and terminal blank lines; preserve semantic lines and one terminal LF for nonempty logs."
+    }
+  },
+  "broader_boundaries": {
+    "effective_client_filtering": "unmeasured",
+    "subscription_download": "not performed",
+    "technitium_domain_control": "unsupported; no run in this batch",
+    "frontend_browser_gate": "separately owned root validation",
+    "timer_reboot_controller": "not exercised",
+    "complete_P17": "open"
+  }
+}

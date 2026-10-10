@@ -17,7 +17,6 @@ import {
 import { cn } from "@/lib/utils"
 import { API_BASE, get } from "@/lib/api"
 import { minuteSpan, plural, relativeTime, timestamp } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import type { DeploymentRequests, RequestEntry, TrafficAlert } from "@/lib/types"
 import {
@@ -59,7 +58,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Field } from "@/components/form"
-import { blockAddress } from "@/components/security/address-verbs"
+import { useRequestBlocks } from "@/components/deploy/use-request-blocks"
 import { RequestChart, type ChartMarker } from "@/components/deploy/request-chart"
 import { RequestConsole } from "@/components/deploy/request-console"
 import { Address, LiveDot, socketReading } from "@/components/deploy/request-marks"
@@ -159,7 +158,6 @@ export function RequestsWorkspace({
 }) {
   const { can } = useAuth()
   const [live, setLive] = useState(false)
-  const [blocking, setBlocking] = useState<string | null>(null)
   const narrowing = useMemo(() => requestNarrowing(query), [query])
 
   // The window reloads on its own while nothing is streaming, so the readings
@@ -178,6 +176,7 @@ export function RequestsWorkspace({
     [base, JSON.stringify(query)],
   )
   const data = poll.data?.window
+  const blocks = useRequestBlocks(can("system.admin"), subject, data?.driver === "docker-caddy")
   // The window's own words, for what is keyed on it: resolved against the
   // clock it would change on every poll, and every poll is not a new window.
   const windowKey = `${query.range}:${query.since ?? ""}:${query.until ?? ""}`
@@ -193,21 +192,7 @@ export function RequestsWorkspace({
     [query, onQueryChange],
   )
 
-  const block = async (ip: string) => {
-    setBlocking(ip)
-    try {
-      await blockAddress(ip, `blocked from ${subject} requests`)
-      notify.success(`${ip} blocked`, {
-        description:
-          "A deny rule now sits in front of every allow. Unlike a ban, it does not expire.",
-      })
-    } catch (error) {
-      notify.error("Could not block the address", { description: String(error) })
-    } finally {
-      setBlocking(null)
-    }
-  }
-  const onBlock = can("system.admin") ? (ip: string) => void block(ip) : undefined
+  const onBlock = can("system.admin") ? (ip: string) => void blocks.block(ip) : undefined
 
   // The export asks again what the rows on screen answered, so the file is
   // the window the reader is looking at rather than a newer one.
@@ -349,7 +334,9 @@ export function RequestsWorkspace({
             onFilterStatus={(code) => onQueryChange({ ...query, statuses: [code] })}
             onFilterSlow={(ms) => onQueryChange({ ...query, minMs: Math.floor(ms) })}
             onBlock={onBlock}
-            blocking={blocking}
+            blockState={blocks.state}
+            blockUnavailable={blocks.unavailable}
+            dockerIngress={data.driver === "docker-caddy"}
           />
           {poll.data &&
             afterInsights?.({ since: poll.data.asked.since, until: poll.data.asked.until })}
@@ -366,7 +353,8 @@ export function RequestsWorkspace({
           onFilterPath={(path) => onQueryChange({ ...query, path })}
           onFilterClient={(client) => onQueryChange({ ...query, client })}
           onBlock={onBlock}
-          blocking={blocking}
+          blockState={blocks.state}
+          blockUnavailable={blocks.unavailable}
           onEventsAround={onEventsAround}
           outputFor={outputFor}
           renderInline={renderInline && ((entry) => renderInline(entry, data))}

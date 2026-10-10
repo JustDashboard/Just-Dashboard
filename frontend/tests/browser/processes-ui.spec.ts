@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
 
 /**
@@ -134,7 +134,49 @@ const inventory = {
     { value: "container", label: "Container", count: 9 },
     { value: "pm2", label: "PM2", count: 4 },
   ],
+  groups: [
+    {
+      key: "pm2:api",
+      manager: "pm2",
+      name: "api",
+      count: 4,
+      cpuPercent: 61.3,
+      memory: 1073741824,
+      ioRate: 0,
+      pid: 4021,
+    },
+    {
+      key: "systemd:nginx.service",
+      manager: "systemd",
+      name: "nginx.service",
+      count: 5,
+      cpuPercent: 2.4,
+      memory: 46137344,
+      ioRate: 0,
+      pid: 812,
+    },
+    {
+      key: "container:c13e58c8f7b4",
+      manager: "container",
+      name: "c13e58c8f7b4",
+      label: "postgres",
+      count: 18,
+      cpuPercent: 9.1,
+      memory: 2147483648,
+      ioRate: 0,
+      pid: 2211,
+    },
+  ],
 }
+
+/** A process's recent windows, as the sampler keeps them. */
+const history = Array.from({ length: 30 }, (_, i) => ({
+  at: new Date(Date.now() - (30 - i) * 4000).toISOString(),
+  cpu: 30 + (i % 5) * 4,
+  rss: 268435456 + i * 1048576,
+  read: 0,
+  write: 4096 * i,
+}))
 
 const pm2 = {
   available: true,
@@ -143,6 +185,7 @@ const pm2 = {
       account: "deploy",
       home: "/home/deploy",
       dumpSavedAt: earlier,
+      savedApps: ["api", "worker"],
       startupUnit: "pm2-deploy.service",
     },
   ],
@@ -157,6 +200,34 @@ const pm2 = {
       pid: 4021,
       cpu: 12.5,
       memory: 268435456,
+      restarts: 3,
+      unstableRestarts: 0,
+      uptimeMs: 3 * 3600_000,
+      execMode: "cluster_mode",
+      instances: 2,
+      scriptPath: "/srv/api/server.js",
+      cwd: "/srv/api",
+      outLogPath: "/home/deploy/.pm2/logs/api-out.log",
+      errLogPath: "/home/deploy/.pm2/logs/api-err.log",
+      nodeVersion: "24.0.0",
+      user: "deploy",
+      watching: false,
+      interpreter: "node",
+      autorestart: true,
+      maxMemoryRestart: 314572800,
+      createdAtMs: Date.now() - 86400_000,
+      logTimes: true,
+    },
+    {
+      id: 2,
+      daemonId: "deploy",
+      logsAvailable: true,
+      name: "api",
+      namespace: "default",
+      status: "online",
+      pid: 4022,
+      cpu: 3.5,
+      memory: 201326592,
       restarts: 3,
       unstableRestarts: 0,
       uptimeMs: 3 * 3600_000,
@@ -412,10 +483,13 @@ async function mockHost(page: Page): Promise<LogMocks> {
         exe: "/usr/bin/node",
         cwd: "/srv/api",
         fileDescriptors: 1020,
+        fdReady: true,
         openFilesLimit: 1024,
+        ioReady: true,
         children: 2,
         listening: [{ proto: "tcp", address: "0.0.0.0", port: 3000 }],
         connections: 7,
+        history,
       })
     }
     if (path === "/pm2/") return json(route, pm2)
@@ -485,24 +559,33 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(page.getByRole("heading", { name: "Live" })).toBeVisible()
 
   // The machine first, as the identity line the Overview opens on, with the
-  // table's cadence and cap at its right end.
+  // table's cadence, Pause and the shortcuts at its right end — the line of
+  // two buttons that stood above it is gone.
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("srv-1")
   await expect(identity).toContainText("Ubuntu 24.04")
+  await expect(identity).toContainText("143 processes")
   await expect(identity.getByRole("button", { name: /Every 4s/ })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Pause updates" })).toBeVisible()
+  await expect(page.locator("[data-slot='page-context']")).toHaveCount(0)
 
-  // Figures over the whole host, not over the filtered rows — and the
-  // products the listed processes are, after the figure.
-  await expect(page.locator("[data-slot='stat-tile']").first()).toContainText("143")
-  await expect(
-    page.locator("[data-slot='stat-tile']").first().locator("img[src='/logos/nginx.svg']"),
-  ).toBeVisible()
+  // No tiles: who is using the machine is the band of workloads, and the
+  // counts the tiles held are the state chips in the table's head.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const band = page.locator("[data-slot='workloads']")
+  await expect(band.getByRole("button", { name: "Only api's processes" }).first()).toBeVisible()
+  await expect(band.getByRole("button", { name: "Only postgres's processes" })).toHaveCount(2)
+  const states = page.locator("[aria-label='State']")
+  await expect(states.getByRole("button", { name: /Zombie/ })).toContainText("1")
+  await expect(states.getByRole("button", { name: /Blocked/ })).toContainText("1")
+
   // A row is its product: nginx's mark on the nginx row, Node's on node, and
-  // a glyph rather than a guess on a kernel worker.
+  // a glyph rather than a guess on a kernel thread — which says what it is
+  // rather than borrowing a command line it does not have.
   await expect(page.locator("td img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.locator("td img[src='/logos/nodejs.svg']").first()).toBeVisible()
-  await expect(page.getByText("exited, but the parent has not reaped them")).toBeVisible()
-  await expect(page.getByText("waiting on a disk or a lock")).toBeVisible()
+  await expect(page.getByRole("row", { name: /kworker/ })).toContainText("kernel thread")
+  await expect(page.getByRole("row", { name: /defunct/ })).toContainText("waiting for its parent")
 
   // The process table frames itself because it is a table (§2); nothing else
   // on the page may.
@@ -516,22 +599,98 @@ test("the live table reads the host and every process verb is a word", async ({ 
       "Kill",
       "Pause",
       "Hang up",
+      "Interrupt",
+      "Send SIGUSR1",
       "Open api",
       "Copy PID",
     ]),
   )
 
-  // The sheet: sockets, the parent chain, and named buttons for the two
-  // verbs that matter.
+  // The sheet: the readings over their recent shape, the sockets, the parent
+  // chain as a path, and named buttons for the two verbs that matter.
   await page.getByRole("button", { name: "node", exact: true }).first().click()
-  await expect(page.getByText("tcp 0.0.0.0:3000")).toBeVisible()
-  await expect(page.getByText("7 open connections")).toBeVisible()
-  await expect(page.getByText("1020 of 1024")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Terminate" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Kill" })).toBeVisible()
-  await page.getByRole("tab", { name: "Tree" }).click()
-  await expect(page.getByRole("button", { name: /PM2 v6.0.5: God Daemon/ })).toBeVisible()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(4)
+  await expect(
+    sheet.locator("[data-slot='stat-tile']", { hasText: "CPU" }).locator("svg"),
+  ).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Open files" })).toContainText(
+    "of 1024",
+  )
+  await expect(sheet.getByText(":3000")).toBeVisible()
+  await expect(sheet.getByText("every interface")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Terminate" })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: /PM2 v6.0.5: God Daemon/ })).toBeVisible()
   await expect(page).toHaveURL(/pid=4021/)
+})
+
+// A kernel thread ignores a signal from user space and a zombie has already
+// exited: both used to offer a Kill that reported success and changed nothing.
+test("a kernel thread and a zombie are not offered signals they cannot take", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/processes")
+  const kernel = await menuLabels(page, "kworker")
+  expect(kernel).not.toContain("Terminate")
+  expect(kernel).not.toContain("Kill")
+  const zombie = await menuLabels(page, "defunct")
+  expect(zombie).not.toContain("Kill")
+  expect(zombie).toContain("Open parent (1)")
+
+  await page.goto("/processes?pid=6000")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("Exited, and not yet reaped")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Open parent (1)" }).click()
+  await expect(page).toHaveURL(/pid=1\b/)
+})
+
+// The band answers who; a press narrows the table to that workload, and the
+// chip it leaves in the toolbar is how it is let go.
+test("a workload narrows the table to its processes", async ({ page }) => {
+  await mockHost(page)
+  const groups: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.endsWith("/processes/inventory"))
+      groups.push(url.searchParams.get("group") ?? "")
+  })
+  await page.goto("/processes")
+  const api = page
+    .locator("[data-slot='workloads']")
+    .getByRole("button", { name: "Only api's processes" })
+    .first()
+  await api.click()
+  await expect(api).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => groups.at(-1)).toBe("pm2:api")
+  const chip = page.getByRole("button", { name: /Showing api's processes/ })
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await expect.poll(() => groups.at(-1)).toBe("")
+  await expect(api).toHaveAttribute("aria-pressed", "false")
+})
+
+// A sheet open on a process that exits used to keep its last reading under
+// live verbs, polled into a 404 nobody saw.
+test("a process that exits while its sheet is open says so and stops", async ({ page }) => {
+  await mockHost(page)
+  let gone = false
+  await page.route("**/api/v1/processes/4021", (route) =>
+    gone
+      ? route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: '{"error":"not_found"}',
+        })
+      : route.fallback(),
+  )
+  await page.goto("/processes?pid=4021")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
+  gone = true
+  await expect(sheet.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
+  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
+  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
 })
 
 /**
@@ -575,6 +734,67 @@ test("a process named by its whole command line stays inside its cell", async ({
   expect(bleeding, "content painted past the cell holding it").toEqual([])
 })
 
+test("the wheel over a half-shown table brings all of it on screen before its rows move", async ({
+  page,
+}) => {
+  const many = Array.from({ length: 80 }, (_, i) =>
+    process({ pid: 2000 + i, name: `worker-${i}`, cpuPercent: 80 - i / 2 }),
+  )
+  await mockHost(page)
+  await page.route("**/api/v1/processes/inventory*", (route) =>
+    json(route, { ...inventory, processes: many, total: many.length }),
+  )
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto("/processes")
+  await expect(page.getByRole("button", { name: "worker-0", exact: true })).toBeVisible()
+
+  const table = page
+    .locator('[data-slot="table-container"]')
+    .filter({ has: page.getByRole("button", { name: "worker-0", exact: true }) })
+  const read = () =>
+    table.evaluate((region) => {
+      const port = document.querySelector<HTMLElement>("[data-workspace-shell-scroll]")!
+      const box = region.getBoundingClientRect()
+      const view = port.getBoundingClientRect()
+      return {
+        top: box.top - view.top,
+        bottom: view.bottom - box.bottom,
+        page: port.scrollTop,
+        rows: region.scrollTop,
+        x: box.left + box.width / 2,
+        y: (Math.max(box.top, view.top) + Math.min(box.bottom, view.bottom)) / 2,
+      }
+    })
+
+  const start = await read()
+  expect(start.bottom, "the table starts below the fold").toBeLessThan(0)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.wheel(0, 120)
+  await expect.poll(async () => (await read()).bottom).toBeGreaterThanOrEqual(0)
+  const revealed = await read()
+  expect(revealed.top).toBeGreaterThanOrEqual(0)
+  expect(revealed.rows, "the rows held still while the page moved").toBe(0)
+
+  await page.mouse.move(revealed.x, revealed.y)
+  await page.mouse.wheel(0, 120)
+  await expect.poll(async () => (await read()).rows).toBeGreaterThan(0)
+  expect((await read()).page, "a table in view keeps the wheel").toBe(revealed.page)
+
+  // Clipped at the top, the wheel upward brings it back down into view. The
+  // page ends just under this table, so it is given room to scroll past it.
+  await table.evaluate((region) => {
+    const port = document.querySelector<HTMLElement>("[data-workspace-shell-scroll]")!
+    port.append(Object.assign(document.createElement("div"), { style: "height: 100vh" }))
+    port.scrollTop += region.getBoundingClientRect().top - port.getBoundingClientRect().top + 120
+  })
+  const clipped = await read()
+  expect(clipped.top).toBeLessThan(0)
+  await page.mouse.move(clipped.x, clipped.y)
+  await page.mouse.wheel(0, -120)
+  await expect.poll(async () => (await read()).top).toBeGreaterThanOrEqual(0)
+  expect((await read()).rows).toBe(clipped.rows)
+})
+
 test("PM2 says whether it survives a reboot and offers the housekeeping verbs", async ({
   page,
 }) => {
@@ -586,10 +806,36 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   await expect(identity.locator("img[src='/logos/pm2.svg']")).toBeVisible()
   await expect(identity).toContainText("deploy")
   await expect(identity).toContainText("Node 24.0.0")
+  await expect(identity).toContainText("2 applications")
   await expect(identity.getByText("Resurrects on boot")).toBeVisible()
-  await expect(page.getByText("15 unstable — crashing soon after start")).toBeVisible()
-  // Each application as what runs it.
-  await expect(page.locator("td img[src='/logos/nodejs.svg']")).toHaveCount(2)
+  await expect(identity.getByRole("button", { name: "Save list" })).toHaveCount(0)
+
+  // No tiles: what PM2 takes of the machine is the band, the counts are the
+  // state chips in the table's head, and the crashing worker is the first row.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const band = page.locator("[data-slot='pm2-band']")
+  await expect(band.getByRole("button", { name: "Only api" })).toHaveCount(2)
+  await expect(band.getByRole("button", { name: "Only api" }).first()).toContainText("×2")
+  const states = page.locator("[aria-label='State']")
+  await expect(states.getByRole("button", { name: /Online/ })).toContainText("2")
+  await expect(states.getByRole("button", { name: /Errored/ })).toContainText("1")
+  const rows = page.locator("tbody tr")
+  await expect(rows.first()).toContainText("worker")
+  await expect(rows.first()).toContainText("15 unstable")
+  await expect(rows.first()).toContainText("PM2 stopped retrying")
+  // Each application as what runs it, memory against its restart limit.
+  await expect(page.locator("td img[src='/logos/nodejs.svg']")).toHaveCount(3)
+  await expect(page.getByRole("row", { name: /api #0/ })).toContainText("of 300 MB")
+
+  // A press on the band narrows the table to the application, and its chip
+  // lets it go.
+  await band.getByRole("button", { name: "Only api" }).first().click()
+  await expect(rows).toHaveCount(2)
+  await page.getByRole("button", { name: /Showing api only/ }).click()
+  await expect(rows).toHaveCount(3)
+  await states.getByRole("button", { name: /Errored/ }).click()
+  await expect(rows).toHaveCount(1)
+  await states.getByRole("button", { name: /Errored/ }).click()
 
   const labels = await menuLabels(page, "worker")
   expect(labels).toEqual(
@@ -598,10 +844,22 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   const api = await menuLabels(page, "api")
   expect(api).toContain("Scale…")
 
+  // Starting one: what runs it and how many are cards, and the command is
+  // the one that will run.
   await page.getByRole("button", { name: "Start application" }).click()
+  const start = page.getByRole("dialog")
   await page.getByLabel("Script or ecosystem file").fill("/srv/api/server.js")
-  await page.getByLabel("Name").fill("api2")
-  await expect(page.getByText("pm2 start /srv/api/server.js --name api2")).toBeVisible()
+  await page.getByLabel("Name", { exact: true }).fill("api2")
+  await expect(start).toContainText("pm2 start /srv/api/server.js --name api2")
+  await start.getByRole("button", { name: /Python/ }).click()
+  await start.getByRole("button", { name: /One per core/ }).click()
+  await expect(start).toContainText(
+    "pm2 start /srv/api/server.js --name api2 --interpreter python3 -i max",
+  )
+  // An ecosystem file is handed over whole.
+  await page.getByLabel("Script or ecosystem file").fill("/srv/ecosystem.config.js")
+  await expect(start.getByRole("button", { name: /Python/ })).toHaveCount(0)
+  await expect(start).toContainText("pm2 start /srv/ecosystem.config.js --only api2")
   await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Startup and bulk" }).click()
@@ -609,23 +867,104 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   expect(bulk).toEqual(["Save startup list", "Reload all", "Restart all", "Stop all"])
 })
 
+test("PM2's verdict reads the saved list, and saving it again is one press", async ({ page }) => {
+  await mockHost(page)
+  const saved: string[] = []
+  await page.route("**/api/v1/pm2/**", (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith("/pm2/save")) {
+      saved.push(path)
+      return json(route, { exitCode: 0 })
+    }
+    return json(route, {
+      ...pm2,
+      daemons: [{ ...pm2.daemons[0], savedApps: ["api", "old-cron"] }],
+    })
+  })
+  await page.goto("/processes/pm2")
+  // The worker was started after the save: a reboot would not bring it back,
+  // and the row says so.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("worker is not in the saved list")).toBeVisible()
+  await expect(page.getByRole("row", { name: /worker/ })).toContainText("not saved")
+  await identity.getByRole("button", { name: "Save list" }).click()
+  await expect.poll(() => saved.length).toBe(1)
+})
+
+test("a PM2 application's sheet reads its process live and scales its cluster", async ({
+  page,
+}) => {
+  await mockHost(page)
+  const scaled: unknown[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/pm2/api/scale")) {
+      scaled.push(request.postDataJSON())
+    }
+  })
+  // A bare name is what the live table's owner link carries; a cluster's
+  // name is every instance, and it opens the first one running.
+  await page.goto("/processes/pm2?app=api")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("heading", { name: /api/ })).toContainText("#0")
+  // Four readings from the process table's read of its PID, over its history.
+  const tiles = sheet.locator("[data-slot='stat-tile']")
+  await expect(tiles).toHaveCount(4)
+  await expect(tiles.nth(1)).toContainText("of 300 MB")
+  await expect(tiles.nth(3)).toContainText("3")
+  await expect(sheet.locator("[data-slot='stat-tile'] svg").first()).toBeVisible()
+  await expect(sheet.getByText(":3000")).toBeVisible()
+  await expect(sheet.getByText("every interface")).toBeVisible()
+  await expect(sheet.getByText("cluster instance 1 of 2")).toBeVisible()
+
+  // Its other instance opens in the same sheet.
+  const instances = sheet.locator("section, [data-slot=panel]").filter({
+    has: page.getByRole("heading", { name: "Instances" }),
+  })
+  await instances.getByRole("button", { name: /#2/ }).click()
+  await expect(page).toHaveURL(/app=deploy%3A2|app=deploy:2/)
+  await expect(sheet.getByText("cluster instance 2 of 2")).toBeVisible()
+
+  // Scaling is a stepper over the workers, said before it is done.
+  await sheet.getByRole("button", { name: "Scale…" }).first().click()
+  const scale = page.getByRole("dialog", { name: /Scale api/ })
+  await expect(scale.getByRole("button", { name: "Scale to 2" })).toBeDisabled()
+  await scale.getByRole("button", { name: "One worker more" }).click()
+  await expect(scale).toContainText("Starts 1 worker")
+  await scale.getByRole("button", { name: "Scale to 3" }).click()
+  await expect.poll(() => scaled).toEqual([{ instances: 3 }])
+
+  // The worker PM2 gave up on says so, and the press reads its log.
+  await page.goto("/processes/pm2?app=deploy:1")
+  await expect(sheet.getByText("PM2 stopped restarting it")).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Read the log" }).first().click()
+  await expect(sheet.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
+
 test("services list failed units first and the sheet offers reload where it applies", async ({
   page,
 }) => {
   await mockHost(page)
   await page.goto("/processes/services")
-  await expect(page.getByText("listed first below")).toBeVisible()
+  // No tiles: what they counted is the state chips in the table's head, the
+  // failed one in its tone, and the verdict at the end of the identity line.
+  // This host's backend predates the readings, and the page still opens.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(
+    page.locator("[aria-label='State']").getByRole("button", { name: /Failed/ }),
+  ).toContainText("1")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("1 service failed")
+  expect(await framedNonTables(page)).toEqual([])
   const names = await page
     .locator("[data-slot='table-row'] [data-slot='table-cell']:first-child button")
     .allInnerTexts()
   expect(names[0]).toBe("postgresql.service")
-  // A unit is the product it runs, and the Failed tile says what failed
-  // before the table does.
+  // A unit is the product it runs.
   await expect(page.locator("td img[src='/logos/postgresql.svg']")).toBeVisible()
   await expect(page.locator("td img[src='/logos/nginx.svg']")).toBeVisible()
-  await expect(
-    page.locator("[data-slot='stat-tile']").nth(1).locator("img[src='/logos/postgresql.svg']"),
-  ).toBeVisible()
 
   const failed = await menuLabels(page, "postgresql")
   expect(failed).toEqual(
@@ -642,20 +981,43 @@ test("services list failed units first and the sheet offers reload where it appl
 test("scheduled says what each schedule means and builds a new one in words", async ({ page }) => {
   await mockHost(page)
   await page.goto("/processes/scheduled")
-  await expect(page.getByText("Every day at 03:00")).toBeVisible()
-  await expect(page.getByText("Every hour at :17")).toBeVisible()
+  const jobs = page.getByRole("table").first()
+  await expect(jobs.getByText("Every day at 03:00")).toBeVisible()
   await expect(page.getByText("runs certbot.service")).toBeVisible()
 
-  // Five readings over the three lists and cron's log: what fires next
-  // across cron and the timers together, and the counts none of the lists
-  // says alone — among them what cron actually started in the last day.
-  const tiles = page.locator("[data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(5)
-  await expect(tiles.nth(0)).toContainText("Next run")
-  await expect(tiles.nth(1)).toContainText("1 disabled · root")
-  await expect(tiles.nth(2)).toContainText("Cron runs")
-  await expect(tiles.nth(3)).toContainText("of 2 · 1 enabled on boot")
-  await expect(tiles.nth(4)).toContainText("1 file owned by packages")
+  // No tiles: the machine's identity line counts the three places schedules
+  // live, and what fires next counts down at its end.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("1 cron job for root, 1 disabled")
+  await expect(identity).toContainText("1 of 2 timers armed")
+  await expect(identity).toContainText("1 package cron line")
+  const next = page.locator("[data-slot='next-up']")
+  await expect(next).toContainText("Next run")
+  await expect(next).toContainText(/\d+[smhd]/)
+
+  // The next day of all three on one axis: a lane per schedule that fires in
+  // it, soonest first, each kind a chip that counts and narrows.
+  const band = page.getByRole("list", { name: "Schedules" })
+  await expect(band.locator(":scope > li")).toHaveCount(3)
+  await expect(
+    band.getByRole("img", { name: "run-parts: 24 runs in the next 24 hours" }),
+  ).toBeVisible()
+  const kinds = page.locator("[aria-label='Kind']")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  await expect(band.locator(":scope > li")).toHaveCount(1)
+  await expect(band).toContainText("certbot")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  // What the axis does not draw is said under it.
+  await expect(page.getByText("2 switched off")).toBeVisible()
+
+  // The crontab's head counts its jobs as chips that narrow the table.
+  const states = page.locator("[aria-label='Job state']")
+  await states.getByRole("button", { name: /Disabled/ }).click()
+  await expect(jobs.getByRole("row", { name: /prune/ })).toBeVisible()
+  await expect(jobs.getByRole("row", { name: /backup/ })).toHaveCount(0)
+  await states.getByRole("button", { name: /All/ }).click()
+
   // certbot's timer is Let's Encrypt's renewal; a script of the operator's
   // own keeps the clock.
   await expect(page.locator("td img[src='/logos/lets-encrypt.svg']")).toBeVisible()
@@ -670,13 +1032,30 @@ test("scheduled says what each schedule means and builds a new one in words", as
     page.getByRole("row", { name: /prune/ }).first().getByRole("button", { name: "Enable" }),
   ).toBeVisible()
 
+  // The editor is a sheet that draws the week the schedule makes as it is
+  // written.
   await page.getByRole("button", { name: "Add job" }).click()
-  await page.getByLabel("Command").fill("/usr/local/bin/report")
-  const dialog = page.getByRole("dialog")
-  await expect(dialog.getByText("0 3 * * *", { exact: true })).toBeVisible()
-  await expect(dialog.getByText("Every day at 03:00")).toBeVisible()
-  await expect(dialog.getByText(/^Next: /)).toBeVisible()
+  const editor = page.getByRole("dialog", { name: "Add cron job" })
+  await editor.getByLabel("Command").fill("/usr/local/bin/report")
+  const preview = editor.locator("[data-slot='schedule-preview']")
+  await expect(preview.getByText("0 3 * * *", { exact: true })).toBeVisible()
+  await expect(preview.getByText("Every day at 03:00")).toBeVisible()
+  await expect(preview.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(preview.getByText(/^Next: /)).toBeVisible()
+  await editor.getByRole("radio", { name: "Hourly" }).click()
+  await expect(preview.getByText("0 * * * *", { exact: true })).toBeVisible()
+  await expect(editor.getByRole("button", { name: "Add job" })).toBeEnabled()
   await page.keyboard.press("Escape")
+
+  // A job opens on its week, its command and the runs cron logged for it.
+  await jobs.getByRole("button", { name: "/usr/local/bin/backup" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/job=cron(%3A|:)3/)
+  await expect(sheet.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  await expect(sheet.getByRole("button", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/job=/)
 })
 
 const RUN_PREDICATES = [
@@ -862,7 +1241,7 @@ test("a PM2 application's logs are its own lensed stream, beside PM2's count of 
   await expect(sheet.getByRole("button", { name: "Around the last start" })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  await page.getByRole("button", { name: "api", exact: true }).click()
+  await page.getByRole("button", { name: "api", exact: true }).first().click()
   await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/0/api")
   const around = sheet.getByRole("button", { name: "Around the last start" })
@@ -897,16 +1276,17 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
     .filter({ has: page.getByRole("heading", { name: "Cron log", exact: true }) })
   await expect(cronLog.getByLabel("Log lines").getByText(/usr\/local\/bin\/backup/)).toBeVisible()
   await expect(cronLog.getByText("output lost", { exact: true })).toBeVisible()
-  // What cron started in the last day, and the runs whose output went nowhere.
-  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: "Cron runs" })
-  await expect(tile).toContainText("143")
-  await expect(tile).toContainText("2 runs with their output discarded")
+  // What cron started in the last day, and the runs whose output went
+  // nowhere: the lens's readings are counts on its chips, where a tile stood.
+  await expect(cronLog.getByRole("button", { name: /^Runs/ })).toContainText("143")
+  await expect(cronLog.getByRole("button", { name: /^Output discarded/ })).toContainText("2")
 
-  // A timer opens in place on the runs of the service it fires.
-  const certbot = page.getByRole("button", { name: "certbot.timer", exact: true })
-  await certbot.click()
-  await expect(certbot).toHaveAttribute("aria-expanded", "true")
-  const runs = page.getByRole("list", { name: "Runs" })
+  // A timer opens its sheet on the runs of the service it fires.
+  await page.getByRole("button", { name: "certbot.timer", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/timer=certbot\.timer/)
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  const runs = sheet.getByRole("list", { name: "Runs" })
   const rows = runs.locator(":scope > li")
   await expect(rows).toHaveCount(3)
   const asked = logs.searches.find((s) => s.get("lens") === "systemd")!
@@ -918,7 +1298,8 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
   await expect(rows.nth(1)).toContainText("failed")
   await expect(rows.nth(1)).toContainText("exit 1")
   await expect(rows.nth(1)).toContainText("2.11s CPU")
-  await certbot.click()
+  await expect(sheet.getByRole("button", { name: "Run now" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(runs).toHaveCount(0)
 })
 
@@ -927,7 +1308,12 @@ test.describe("with no hover available", () => {
 
   test("every row's verbs are reachable on a phone", async ({ page }) => {
     await mockHost(page)
-    for (const path of ["/processes", "/processes/pm2", "/processes/services"]) {
+    for (const path of [
+      "/processes",
+      "/processes/pm2",
+      "/processes/services",
+      "/processes/scheduled",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       const hidden = await page.evaluate(() => {
@@ -978,5 +1364,364 @@ for (const width of [1280, 1720]) {
       expect(unnamed, `unlabelled icon-only controls on ${path}`).toEqual([])
       await page.screenshot({ path: `test-results/processes-${name}-${width}.png`, fullPage: true })
     }
+  })
+}
+
+test("workspace: process focus holds row order and paused searches remain usable", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.goto("/processes")
+  const rows = page.locator("[data-workspace-item]")
+  await expect(rows.first()).toBeVisible()
+  await rows.first().focus()
+  await expect(page.getByText("Row order held while inspecting")).toBeVisible()
+  await page.keyboard.press("ArrowDown")
+  await expect(rows.nth(1)).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Pause updates", exact: true }).click()
+  await expect(page.getByText("Updates paused", { exact: true })).toBeVisible()
+  await page.keyboard.press("Control+f")
+  await expect(page.locator("[data-page-search]")).toBeFocused()
+  await page.locator("[data-page-search]").fill("node")
+  await expect(rows.first()).toBeVisible()
+  await page.getByRole("button", { name: "Resume updates", exact: true }).click()
+  await expect(page.getByText("Updates paused", { exact: true })).toHaveCount(0)
+})
+
+test("workspace: changing process rankings keep focused rows steady and Pause stops polling", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockHost(page)
+  let reads = 0
+  let reordered = false
+  await page.route("**/api/v1/processes/inventory*", (route) => {
+    reads++
+    return json(route, {
+      ...inventory,
+      processes: reordered ? [...inventory.processes].reverse() : inventory.processes,
+    })
+  })
+  await page.goto("/processes")
+  const rows = page.locator("[data-workspace-item]:visible")
+  await expect(rows.first()).toBeVisible()
+  const before = await rows.evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-workspace-item")),
+  )
+  await rows.first().focus()
+  reordered = true
+  const initialReads = reads
+  await page.clock.fastForward(5000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  await expect
+    .poll(() =>
+      rows.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-workspace-item"))),
+    )
+    .toEqual(before)
+  await page.getByRole("button", { name: "Pause updates", exact: true }).click()
+  await page.clock.fastForward(1000)
+  const pausedReads = reads
+  await page.clock.fastForward(30000)
+  expect(reads).toBe(pausedReads)
+  await page.keyboard.press("F5")
+  await expect.poll(() => reads).toBeGreaterThan(pausedReads)
+})
+
+test("automatic focus retains the table, scroll and readings while its next ranking is slow", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let stream: WebSocketRoute | undefined
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => {
+    stream = socket
+  })
+  const many = Array.from({ length: 80 }, (_, i) =>
+    process({ pid: 2000 + i, name: `worker-${i}`, cpuPercent: 80 - i / 2 }),
+  )
+  let release: (() => void) | undefined
+  await page.route("**/api/v1/processes/inventory*", async (route) => {
+    const sort = new URL(route.request().url()).searchParams.get("sort")
+    if (sort === "memory") await new Promise<void>((resolve) => (release = resolve))
+    return json(route, { ...inventory, processes: many, total: many.length })
+  })
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.goto("/processes")
+  await expect(page.getByText(/sorted by highest disk I\/O/)).toBeVisible()
+  await expect.poll(() => stream).toBeTruthy()
+  const table = page.locator("[data-slot=table-container]:visible")
+  const node = (await table.elementHandle())!
+  await table.evaluate((element) => (element.scrollTop = 250))
+  const scroll = await table.evaluate((element) => element.scrollTop)
+  expect(scroll).toBeGreaterThan(0)
+  stream!.send(
+    JSON.stringify({
+      type: "metrics",
+      ts: Date.now(),
+      data: {
+        ts: new Date().toISOString(),
+        cpu: { totalPercent: 25, cores: 2, loadAvg1: 0.4 },
+        memory: { total: 8589934592, available: 3221225472, usedPercent: 50 },
+        swap: { total: 0, used: 0, usedPercent: 0 },
+        pressure: { supported: true, cpuSome: 0, memSome: 10, ioSome: 0 },
+        procs: { blocked: 0, running: 11, total: 143 },
+        uptimeSeconds: 86400,
+        mounts: [],
+        net: [],
+      },
+    }),
+  )
+  await expect.poll(() => release).toBeTruthy()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await table.evaluate((element) => element.scrollTop)).toBe(scroll)
+  await expect(page.getByText(/sorted by highest disk I\/O/)).toBeVisible()
+  release!()
+  await expect(page.getByText(/sorted by highest memory/)).toBeVisible()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await table.evaluate((element) => element.scrollTop)).toBe(scroll)
+})
+
+for (const [surface, width] of (["live", "pm2", "services", "timers"] as const).flatMap((surface) =>
+  [390, 1720].map((width) => [surface, width] as const),
+)) {
+  test(`${surface} at ${width}: a background state change preserves hovered rows and their open menu`, async ({
+    page,
+  }) => {
+    await page.clock.install()
+    await mockHost(page)
+    await page.setViewportSize({ width, height: 1000 })
+    if (width === 390) await page.emulateMedia({ reducedMotion: "reduce" })
+    const fixtures = {
+      live: {
+        path: "/processes",
+        endpoint: "**/api/v1/processes/inventory*",
+        selector: "[data-workspace-item]:visible",
+        data: inventory,
+        changed: {
+          ...inventory,
+          processes: [...processes].reverse().map((p) => ({ ...p, state: "stopped" })),
+        },
+        reading: "stopped",
+      },
+      pm2: {
+        path: "/processes/pm2",
+        endpoint: "**/api/v1/pm2/",
+        selector: "[data-process-row]:visible, [data-workspace-item]:visible",
+        data: pm2,
+        changed: {
+          ...pm2,
+          processes: [...pm2.processes].reverse().map((p) => ({ ...p, status: "stopped" })),
+        },
+        reading: "stopped",
+      },
+      services: {
+        path: "/processes/services",
+        endpoint: "**/api/v1/systemd/",
+        selector: "[data-process-row]:visible, [data-workspace-item]:visible",
+        data: units,
+        changed: {
+          ...units,
+          units: [...units.units].reverse().map((u) => ({ ...u, activeState: "inactive" })),
+        },
+        reading: "inactive",
+      },
+      timers: {
+        path: "/processes/scheduled",
+        endpoint: "**/api/v1/systemd/timers",
+        selector: "[data-process-row]:visible",
+        data: timers,
+        changed: {
+          ...timers,
+          timers: [...timers.timers].reverse().map((t) => ({ ...t, activeState: "inactive" })),
+        },
+        reading: "stopped",
+      },
+    }
+    const fixture = fixtures[surface]
+    let changed = false
+    let failed = false
+    let reads = 0
+    await page.route(fixture.endpoint, (route) => {
+      reads++
+      if (failed)
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "Temporary read failure" },
+          }),
+        })
+      return json(route, changed ? fixture.changed : fixture.data)
+    })
+    await page.goto(fixture.path)
+    const rows = page.locator(fixture.selector)
+    await expect(rows.first()).toBeVisible()
+    const names = () =>
+      rows.evaluateAll((elements) =>
+        elements.map(
+          (element) =>
+            element.getAttribute("data-process-row") ?? element.getAttribute("data-workspace-item"),
+        ),
+      )
+    const before = await names()
+    const first = (await rows.first().elementHandle())!
+    await rows.first().hover()
+    // Hold starts on hover, before pressing a control gives the row focus.
+    changed = true
+    const initialReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(initialReads)
+    await expect(rows.first()).toContainText(fixture.reading)
+    expect(await names()).toEqual(before)
+    expect(await first.evaluate((element) => element.isConnected)).toBe(true)
+    expect(
+      await rows.evaluateAll((elements) =>
+        elements.some((row) => row.classList.contains("animate-rise")),
+      ),
+    ).toBe(false)
+    await rows.first().getByRole("button", { name: "More actions" }).click()
+    const menu = page.getByRole("menu")
+    await expect(menu).toBeVisible()
+    const menuNode = (await menu.elementHandle())!
+    changed = false
+    const menuReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(menuReads)
+    await expect(menu).toBeVisible()
+    expect(await menuNode.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await names()).toEqual(before)
+    failed = true
+    const failedReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(failedReads)
+    await expect(menu).toBeVisible()
+    expect(await first.evaluate((element) => element.isConnected)).toBe(true)
+    failed = false
+    changed = true
+    const finalReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(finalReads)
+    await expect(rows.first()).toContainText(fixture.reading)
+    await page.keyboard.press("Escape")
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+    await page.mouse.move(0, 0)
+    await expect
+      .poll(names)
+      .toEqual(surface === "pm2" ? ["deploy:0", "deploy:2", "deploy:1"] : [...before].reverse())
+  })
+}
+
+test("cron disable updates its existing row and keeps keyboard focus on the toggle", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let disabled = false
+  await page.route("**/api/v1/cron/user/root", (route) => {
+    if (route.request().method() === "PUT") {
+      disabled = true
+      return json(route, { exitCode: 0 })
+    }
+    return json(route, {
+      ...crontab,
+      jobs: crontab.jobs.map((job, index) =>
+        index === 0 && disabled ? { ...job, disabled: true, raw: `# ${job.raw}` } : job,
+      ),
+    })
+  })
+  await page.goto("/processes/scheduled")
+  const row = page.getByRole("row", { name: /backup/ }).first()
+  const node = (await row.elementHandle())!
+  const button = (await row.getByRole("button", { name: "Disable", exact: true }).elementHandle())!
+  await row.getByRole("button", { name: "Disable", exact: true }).click()
+  await expect(row.getByRole("button", { name: "Enable", exact: true })).toBeFocused()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await button.evaluate((element) => element.isConnected)).toBe(true)
+})
+
+test("a timer opened by deep link holds the list's first loaded order while its sheet is open", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockHost(page)
+  let reversed = false
+  let reads = 0
+  await page.route("**/api/v1/systemd/timers", (route) => {
+    reads++
+    return json(route, {
+      ...timers,
+      timers: reversed ? [...timers.timers].reverse() : timers.timers,
+    })
+  })
+  await page.goto("/processes/scheduled?timer=certbot.timer")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  const names = () =>
+    page
+      .locator("[data-process-row]")
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-process-row")),
+      )
+  await expect.poll(names).toEqual(["certbot.timer", "fstrim.timer"])
+  reversed = true
+  const initialReads = reads
+  await page.clock.fastForward(31000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  expect(await names()).toEqual(["certbot.timer", "fstrim.timer"])
+  await expect(page.getByRole("dialog")).toBeVisible()
+})
+
+for (const surface of ["pm2", "services"] as const) {
+  test(`${surface}: start and stop refresh the existing table in place`, async ({ page }) => {
+    await mockHost(page)
+    await page.setViewportSize({ width: 1720, height: 1000 })
+    const isPM2 = surface === "pm2"
+    let started = false
+    await page.route(`**/api/v1/${isPM2 ? "pm2" : "systemd"}/**`, (route) => {
+      const path = new URL(route.request().url()).pathname
+      if (route.request().method() === "POST" && /\/(start|stop)$/.test(path)) {
+        started = path.endsWith("/start")
+        return json(route, { exitCode: 0 })
+      }
+      if (path.endsWith(isPM2 ? "/pm2/" : "/systemd/")) {
+        return json(
+          route,
+          isPM2
+            ? {
+                ...pm2,
+                processes: pm2.processes.map((p) =>
+                  p.id === 1 ? { ...p, status: started ? "online" : "stopped" } : p,
+                ),
+              }
+            : {
+                ...units,
+                units: units.units.map((u) =>
+                  u.name === "apt-daily.service"
+                    ? {
+                        ...u,
+                        activeState: started ? "active" : "inactive",
+                        subState: started ? "running" : "dead",
+                      }
+                    : u,
+                ),
+              },
+        )
+      }
+      return route.fallback()
+    })
+    await page.goto(`/processes/${surface}`)
+    const row = page.getByRole("row", { name: isPM2 ? /worker/ : /apt-daily/ })
+    await expect(row).toBeVisible()
+    const node = (await row.elementHandle())!
+    const table = (await page.locator("[data-slot=table-container]:visible").elementHandle())!
+    await row.getByRole("button", { name: "Start", exact: true }).click()
+    await expect(row).toContainText(isPM2 ? "online" : "running")
+    expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await table.evaluate((element) => element.isConnected)).toBe(true)
+    await row.getByRole("button", { name: "Stop", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click()
+    await expect(row).toContainText(isPM2 ? "stopped" : "inactive")
+    expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await table.evaluate((element) => element.isConnected)).toBe(true)
   })
 }

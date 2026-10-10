@@ -47,6 +47,19 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiTarget}/api/:path*` }]
   },
+  // The network pages left Security in 0.7.1. Every link inside the product
+  // was moved with them; these keep a bookmark working, and keep the query
+  // string the firewall's rule hand-off and the tools' hand-off are written
+  // in. Not permanent: a 308 is cached by the browser for good, and these
+  // paths may mean something again one day.
+  async redirects() {
+    return [
+      { source: "/security/firewall", destination: "/network/firewall", permanent: false },
+      { source: "/security/connections", destination: "/network/connections", permanent: false },
+      { source: "/security/network", destination: "/network/interfaces", permanent: false },
+      { source: "/security/tools", destination: "/network/tools", permanent: false },
+    ]
+  },
 }
 
 export default nextConfig

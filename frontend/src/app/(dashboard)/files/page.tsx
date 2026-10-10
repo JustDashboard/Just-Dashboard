@@ -1,9 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { useMarquee } from "@/components/files/use-marquee"
+import { rangePaths } from "@/components/files/selection"
 import {
   ArrowMove,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Check,
   ChevronDown,
@@ -22,6 +27,7 @@ import {
   Plus,
   PlusSquareSmall,
   PreviewDocument,
+  Question,
   RefreshClockwise,
   SettingsSliders,
   SidebarLeftClose,
@@ -63,11 +69,16 @@ import { GridView, type TileSize } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
 import { MediaViewer } from "@/components/files/media-viewer"
 import { PathBar } from "@/components/files/path-bar"
+import { useFolderNavigation } from "@/components/files/use-folder-navigation"
+import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
+import { matchName } from "@/components/files/navigation"
+import { FilesShortcuts } from "@/components/files/shortcuts-dialog"
 import { PlacesMenu } from "@/components/files/places-menu"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
-import { QuickOpen } from "@/components/files/quick-open"
+import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
+import { homeFor } from "@/components/files/search"
 import {
   archiveHref,
   colourVerb,
@@ -99,7 +110,7 @@ import { startPathDrag, useDropTarget, type DropMode } from "@/components/files/
 import { ResizeHandle } from "@/components/resize-handle"
 import { Meter, utilisationTone } from "@/components/meter"
 import { IconAction } from "@/components/icon-action"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -128,12 +139,15 @@ type SortKey = "name" | "size" | "modified" | "owner" | "mode"
 type Sort = { key: SortKey; dir: "asc" | "desc" }
 type ViewMode = "list" | "grid"
 type Clip = { mode: "cut" | "copy"; paths: string[] }
+type FolderVisit = { active: string | null; selected: string[]; scroll: number; view: ViewMode }
 
 const RAIL = { base: 264, min: 200, max: 440 }
 const INSPECTOR = { base: 320, min: 260, max: 560 }
 const EMPTY = new Set<string>()
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
+// Reading register: the workbench owns its scroll boundaries; directory and
+// selection counts stay in the listing footer, where they describe the work.
 export default function FilesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -142,6 +156,8 @@ export default function FilesPage() {
   const canWrite = can("file.write")
   const canDestruct = can("destructive")
   const canAdmin = can("system.admin")
+  const reducedMotion = useReducedMotion()
+  const [dragging, setDragging] = useState<Set<string>>(EMPTY)
   const caps = useMemo(
     () => ({ write: canWrite, destruct: canDestruct, admin: canAdmin }),
     [canWrite, canDestruct, canAdmin],
@@ -151,17 +167,14 @@ export default function FilesPage() {
   // "/", which is the one directory on a Linux server where nothing an
   // operator owns lives. A ?path= from a deep link still wins.
   const initialPath = useSearchParams().get("path")
+  const initialEntry = useSearchParams().get("entry")
   const places = usePoll<FilePlaces>((signal) => get("/files/places", undefined, signal), 0, [])
   // Derived rather than copied into state by an effect: until either the URL
   // or a navigation has said otherwise, the answer *is* whatever the server
   // reports as home. The chosen directory is kept for the tab, so the rail's
   // bare link comes back to the folder being worked in rather than to home.
-  const [chosenPath, setChosenPath] = useSessionState<string | null>(
-    "files.path",
-    null,
-    initialPath ? cleanPath(initialPath) : undefined,
-  )
-  const path = chosenPath ?? places.data?.home ?? null
+  const navigation = useFolderNavigation(places.data?.home)
+  const path = navigation.path
   const pathRef = useRef(path)
   useEffect(() => {
     pathRef.current = path
@@ -194,20 +207,26 @@ export default function FilesPage() {
   const [permsEntry, setPermsEntry] = useState<FileEntry | null>(null)
   const [symlinkOpen, setSymlinkOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
+  const [quickMode, setQuickMode] = useState<FileSearchMode>("names")
+  const [searchLocation, setSearchLocation] = useState<{ path: string; line?: number }>()
   const [clip, setClip] = useState<Clip | null>(null)
-  // The selection and the active row are scoped to the directory they were
-  // made in, so navigating away discards both without a reset effect.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [visits, setVisits] = useSessionState<Record<string, FolderVisit>>("files.visits", {})
+  // A directory's explicit selection wins over its remembered visit; neither
+  // is allowed to select a path in another directory or a vanished entry.
   const [selection, setSelection] = useState<{ dir: string; paths: Set<string> }>({
-    dir: path ?? "/",
+    dir: "",
     paths: new Set(),
   })
-  const [active, setActive] = useState<{ dir: string; entry: FileEntry } | null>(null)
+  const [active, setActive] = useState<{ dir: string; entry: FileEntry | null } | undefined>()
   // Where a Shift-click range starts: the last row clicked or arrowed to.
   const anchor = useRef<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
-  const selected = selection.dir === path ? selection.paths : EMPTY
-  const activeEntry = active && active.dir === path ? active.entry : null
+  const listingElement = useRef<HTMLDivElement>(null)
+  const restored = useRef<string | null>(null)
+  const focusAfterNavigation = useRef(false)
+  const nameTyping = useRef({ query: "", time: 0, dir: path })
 
   // Polled gently: a file that arrived by scp, a deploy that wrote a release,
   // a log that rotated — the listing used to show none of it until the
@@ -269,6 +288,116 @@ export default function FilesPage() {
     return list
   }, [listing.data, sort])
   const byPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+  const visit = path ? visits[path] : undefined
+  const selected = useMemo(
+    () =>
+      new Set(
+        [...(selection.dir === path ? selection.paths : (visit?.selected ?? []))].filter((p) =>
+          byPath.has(p),
+        ),
+      ),
+    [selection, path, visit, byPath],
+  )
+  const activeEntry =
+    active === undefined && initialEntry && path === initialPath
+      ? (byPath.get(initialEntry) ?? null)
+      : active?.dir === path
+        ? (byPath.get(active.entry?.path ?? "") ?? null)
+        : (byPath.get(visit?.active ?? "") ?? null)
+
+  const rememberFolder = useCallback(() => {
+    if (!path || listing.data?.path !== path) return
+    const scroll = listingElement.current?.querySelector<HTMLElement>(
+      "[data-file-scroll], [data-slot='table-container']",
+    )
+    const snapshot = {
+      active: activeEntry?.path ?? null,
+      selected: [...selected],
+      scroll: scroll?.scrollTop ?? 0,
+      view,
+    }
+    setVisits((previous) => {
+      const saved = previous[path]
+      if (
+        saved &&
+        saved.active === snapshot.active &&
+        saved.scroll === snapshot.scroll &&
+        saved.view === snapshot.view &&
+        saved.selected.length === snapshot.selected.length &&
+        saved.selected.every((p, i) => p === snapshot.selected[i])
+      )
+        return previous
+      return Object.fromEntries([
+        ...Object.entries(previous)
+          .filter(([dir]) => dir !== path)
+          .slice(-39),
+        [path, snapshot],
+      ])
+    })
+  }, [path, listing.data, activeEntry, selected, view, setVisits])
+
+  useEffect(() => {
+    // A stable listener survives the synchronous traversal render. It uses
+    // only the persistent listing region, never an outgoing render's rows.
+    const onPop = () => {
+      focusAfterNavigation.current =
+        document.activeElement === document.body ||
+        !!listingElement.current?.contains(document.activeElement)
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  useEffect(() => {
+    // Remember interaction state while it belongs to this folder, before a
+    // native history render can replace it with the destination's state.
+    rememberFolder()
+    const contents = listingElement.current
+    let frame: number | undefined
+    const onScroll = () => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        rememberFolder()
+      })
+    }
+    contents?.addEventListener("scroll", onScroll, { capture: true, passive: true })
+    return () => {
+      contents?.removeEventListener("scroll", onScroll, true)
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    }
+  }, [rememberFolder])
+
+  useLayoutEffect(() => {
+    if (!listing.data || listing.data.path !== path) {
+      restored.current = null
+      return
+    }
+    const key = `${path}:${view}`
+    if (restored.current === key) return
+    restored.current = key
+    anchor.current = activeEntry?.path ?? null
+    const scroll = listingElement.current?.querySelector<HTMLElement>(
+      "[data-file-scroll], [data-slot='table-container']",
+    )
+    if (scroll) scroll.scrollTop = visit?.view === view ? visit.scroll : 0
+    if (focusAfterNavigation.current) {
+      focusAfterNavigation.current = false
+      // The browser restores history focus after popstate. Put the listing's
+      // focus back on the next frame, after that native restoration finishes.
+      requestAnimationFrame(() => {
+        const contents = listingElement.current
+        if (contents?.dataset.folderPath !== path) return
+        const row = activeEntry
+          ? contents.querySelector<HTMLElement>(
+              `[data-entry-path="${CSS.escape(activeEntry.path)}"]`,
+            )
+          : null
+        const focusTarget = row ?? contents
+        focusTarget?.focus({ preventScroll: true })
+      })
+    }
+  }, [path, view, listing.data, visit, activeEntry])
   const names = useMemo(() => new Set(entries.map((e) => e.name)), [entries])
   // The viewer walks the folder's files in the order the listing shows them.
   const viewable = useMemo(() => entries.filter((e) => !e.isDir), [entries])
@@ -326,10 +455,11 @@ export default function FilesPage() {
   // The row above the listing that goes up a level — only where up is
   // somewhere the server will list. An install that narrowed JD_FILE_ROOTS
   // used to offer a parent that answered 403.
-  const parent =
-    listing.data && listing.data.parent !== listing.data.path ? listing.data.parent : null
+  const parentPath = listing.data?.parent ?? (path ? parentOf(path) : null)
+  const parent = parentPath !== path ? parentPath : null
   const parentReachable =
-    parent !== null && (listing.data?.roots ?? []).some((root) => isWithin(parent, root))
+    parent !== null &&
+    (listing.data?.roots ?? places.data?.roots ?? []).some((root) => isWithin(parent, root))
 
   // The disk this folder is on, from the metrics stream the shell already
   // keeps open: a cloud says how much room is left, and so does this.
@@ -360,53 +490,83 @@ export default function FilesPage() {
 
   // --- selection ---
 
-  const clearSelection = useCallback(
-    () => setSelection({ dir: path ?? "/", paths: new Set() }),
-    [path],
-  )
+  const clearSelection = useCallback(() => {
+    anchor.current = null
+    setSelection({ dir: path ?? "/", paths: new Set() })
+  }, [path])
   const setSelected = useCallback(
-    (paths: Set<string>) => setSelection({ dir: path ?? "/", paths }),
+    (paths: Set<string>) =>
+      setSelection((previous) => {
+        if (
+          previous.dir === path &&
+          previous.paths.size === paths.size &&
+          [...paths].every((p) => previous.paths.has(p))
+        )
+          return previous
+        return { dir: path ?? "/", paths }
+      }),
     [path],
   )
-  const toggleSelected = (entry: FileEntry, checked: boolean) =>
+  const toggleSelected = (entry: FileEntry, checked: boolean) => {
+    anchor.current = entry.path
+    setActive({ dir: path ?? "/", entry })
     setSelection((prev) => {
       const paths = new Set(prev.dir === path ? prev.paths : [])
       if (checked) paths.add(entry.path)
       else paths.delete(entry.path)
       return { dir: path ?? "/", paths }
     })
+  }
 
-  /** Plain click makes a row active; Ctrl toggles it; Shift takes the range. */
+  /** Once selection begins, the whole entry toggles; double-click and Enter still open. */
   const selectRow = (
     entry: FileEntry,
-    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; detail?: number },
   ) => {
+    if ((event.detail ?? 1) > 1) return
     const mod = event.ctrlKey || event.metaKey
     if (event.shiftKey && anchor.current) {
-      const a = entries.findIndex((e) => e.path === anchor.current)
-      const b = entries.findIndex((e) => e.path === entry.path)
-      if (a >= 0 && b >= 0) {
-        const [lo, hi] = a < b ? [a, b] : [b, a]
-        const paths = new Set(mod ? selected : [])
-        for (let i = lo; i <= hi; i++) paths.add(entries[i].path)
-        setSelected(paths)
-      }
-    } else if (mod) {
+      setSelected(
+        new Set([
+          ...(mod ? selected : []),
+          ...rangePaths(
+            entries.map((e) => e.path),
+            anchor.current,
+            entry.path,
+          ),
+        ]),
+      )
+    } else if (mod || selected.size > 0) {
       toggleSelected(entry, !selected.has(entry.path))
-      anchor.current = entry.path
     } else {
       anchor.current = entry.path
     }
     setActive({ dir: path ?? "/", entry })
   }
 
+  const marquee = useMarquee({
+    scope: `${path}:${view}:${tile}`,
+    selected,
+    onSelect: setSelected,
+    onClear: () => {
+      clearSelection()
+      setActive({ dir: path ?? "/", entry: null })
+      anchor.current = null
+    },
+  })
+
   const navigate = useCallback(
     (next: string) => {
-      setChosenPath(cleanPath(next))
-      setActive(null)
+      if (cleanPath(next) === path) return
+      focusAfterNavigation.current =
+        document.activeElement === document.body ||
+        !!listingElement.current?.contains(document.activeElement)
+      rememberFolder()
+      navigation.navigate(next)
+      setActive(undefined)
       setViewing(null)
     },
-    [setChosenPath],
+    [path, rememberFolder, navigation],
   )
 
   const viewEntry = useCallback(
@@ -521,6 +681,7 @@ export default function FilesPage() {
         policy = answer
       }
       let ok = 0
+      const moved = new Set<string>()
       for (const src of targets) {
         const base = baseOf(src)
         let name = base
@@ -534,6 +695,7 @@ export default function FilesPage() {
         try {
           await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
           taken.add(name)
+          if (mode === "move") moved.add(src)
           ok++
         } catch (err) {
           notify.error(`Could not ${mode} ${base}`, err)
@@ -542,7 +704,17 @@ export default function FilesPage() {
       if (ok > 0) {
         const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
         notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
-        if (mode === "move") afterLabelledChange(targets)
+        if (mode === "move") {
+          afterLabelledChange([...moved])
+          setActive((previous) => {
+            const entry = previous?.entry
+            return entry &&
+              previous.dir === path &&
+              [...moved].some((src) => isWithin(entry.path, src))
+              ? { dir: previous.dir, entry: null }
+              : previous
+          })
+        }
       }
       clearSelection()
       reload()
@@ -576,7 +748,7 @@ export default function FilesPage() {
         if (name === entry.name) return
         await post("/files/move", { from: entry.path, to: joinPath(path ?? "/", name) })
         notify.success(`Renamed to ${name}`)
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
       },
@@ -620,7 +792,7 @@ export default function FilesPage() {
         await del("/files/delete", {
           query: { path: entry.path, recursive: entry.isDir },
         })
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
       },
@@ -652,7 +824,7 @@ export default function FilesPage() {
           }
         }
         clearSelection()
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange(targets.map((e) => e.path))
         if (failed) notify.error(`${plural(failed, "item")} could not be deleted`)
@@ -824,7 +996,12 @@ export default function FilesPage() {
   ]
 
   const dragStart = (entry: FileEntry, event: React.DragEvent) => {
-    startPathDrag(event, selected.has(entry.path) ? [...selected] : [entry.path])
+    const paths = selected.has(entry.path) ? [...selected] : [entry.path]
+    setDragging(new Set(paths))
+    if (!selected.has(entry.path)) setSelected(new Set(paths))
+    anchor.current = entry.path
+    setActive({ dir: path ?? "/", entry })
+    startPathDrag(event, paths)
   }
 
   // Files from the desktop dropped anywhere on the listing land in the folder
@@ -835,69 +1012,123 @@ export default function FilesPage() {
     onDropFiles: (transfer, dir) => void dropFiles(transfer, dir),
   })
 
-  /** Arrow keys walk the listing; Shift extends the selection as they go. */
-  const moveActive = (key: "ArrowDown" | "ArrowUp" | "Home" | "End", extend: boolean) => {
+  const activateEntry = (entry: FileEntry) => {
+    setActive((previous) =>
+      previous?.dir === path && previous.entry?.path === entry.path
+        ? previous
+        : { dir: path ?? "/", entry },
+    )
+  }
+
+  const focusEntry = (entry: FileEntry) => {
+    activateEntry(entry)
+    requestAnimationFrame(() => {
+      const el = listingElement.current?.querySelector<HTMLElement>(
+        `[data-entry-path="${CSS.escape(entry.path)}"]`,
+      )
+      el?.scrollIntoView({ block: "nearest" })
+      el?.focus({ preventScroll: true })
+    })
+  }
+
+  /** Vertical arrows follow rendered tile rows, including after a resize. */
+  const moveActive = (
+    key: "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" | "Home" | "End",
+    extend: boolean,
+  ) => {
     if (entries.length === 0) return
     const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
+    const grid = listingElement.current?.querySelector<HTMLElement>("[data-file-grid]")
+    const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1
+    const step = key === "ArrowDown" || key === "ArrowUp" ? columns : 1
     const next =
       key === "Home"
         ? 0
         : key === "End"
           ? entries.length - 1
-          : key === "ArrowDown"
-            ? Math.min(entries.length - 1, index + 1)
-            : Math.max(0, index - 1)
+          : index < 0
+            ? 0
+            : key === "ArrowDown" || key === "ArrowRight"
+              ? Math.min(entries.length - 1, index + step)
+              : Math.max(0, index - step)
     const entry = entries[next]
-    setActive({ dir: path ?? "/", entry })
+    focusEntry(entry)
     if (extend && anchor.current) {
-      const a = entries.findIndex((e) => e.path === anchor.current)
-      const [lo, hi] = a < next ? [a, next] : [next, a]
-      const paths = new Set<string>()
-      for (let i = Math.max(0, lo); i <= hi; i++) paths.add(entries[i].path)
-      setSelected(paths)
+      setSelected(
+        new Set(
+          rangePaths(
+            entries.map((e) => e.path),
+            anchor.current,
+            entry.path,
+          ),
+        ),
+      )
     } else {
       anchor.current = entry.path
     }
-    requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLElement>(
-        `[data-entry-path="${CSS.escape(entry.path)}"]`,
-      )
-      el?.scrollIntoView({ block: "nearest" })
-      if (el?.tagName === "TR") el.focus({ preventScroll: true })
-    })
   }
 
-  // The page's own shortcuts. They all match something people already have
-  // in their hands: Ctrl+P is every editor's "go to file", F2 renames as it
-  // has since Norton Commander, Space is a quick look, Backspace goes up,
-  // and the clipboard chords do what the menu's Copy, Cut and Paste do.
-  useEffect(() => {
+  // A layout effect, so the listener that answers a key is always the one for
+  // the folder on screen: as a passive effect it was swapped in after paint,
+  // and an Alt+→ pressed the moment Alt+← had drawn the previous folder still
+  // read the old history position and went nowhere.
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
+      if (!filesOwnKeyboard(event) || isTypingTarget(event.target)) return
       const target = event.target as HTMLElement | null
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable === true
-      // A dialog or a menu open anywhere owns the keyboard; a shortcut firing
-      // behind one acts on a page the operator cannot see. One that is
-      // closing — still in the DOM for its exit animation — no longer does.
-      if (
-        document.querySelector(
-          "[role='dialog']:not([data-state='closed']), [role='menu']:not([data-state='closed'])",
-        )
-      ) {
-        return
-      }
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
-
-      if (mod && key === "p") {
+      if (mod && event.shiftKey && key === "f") {
         event.preventDefault()
+        setQuickMode("content")
         setQuickOpen(true)
         return
       }
-      if (typing) return
+      if (mod && !event.shiftKey && (key === "p" || key === "f")) {
+        event.preventDefault()
+        setQuickMode("names")
+        setQuickOpen(true)
+        return
+      }
+      if ((event.key === "F5" || (mod && key === "r")) && !event.shiftKey && !event.altKey) {
+        event.preventDefault()
+        reload()
+        return
+      }
+      if ((event.altKey && event.key === "ArrowLeft") || (event.metaKey && key === "[")) {
+        if (navigation.canBack) {
+          event.preventDefault()
+          navigation.back()
+        }
+        return
+      }
+      if ((event.altKey && event.key === "ArrowRight") || (event.metaKey && key === "]")) {
+        if (navigation.canForward) {
+          event.preventDefault()
+          navigation.forward()
+        }
+        return
+      }
+      if (event.altKey && event.key === "ArrowUp") {
+        event.preventDefault()
+        if (parentReachable && parent) navigate(parent)
+        return
+      }
+      if (mod && event.shiftKey && key === "n" && canWrite) {
+        event.preventDefault()
+        newFolder()
+        return
+      }
+      if (mod && event.shiftKey && (key === "." || event.code === "Period")) {
+        event.preventDefault()
+        setShowHidden((previous) => !previous)
+        return
+      }
+      if (mod && event.code === "Space" && activeEntry) {
+        event.preventDefault()
+        toggleSelected(activeEntry, !selected.has(activeEntry.path))
+        return
+      }
       if (mod && key === "a") {
         event.preventDefault()
         setSelected(new Set(entries.map((e) => e.path)))
@@ -916,17 +1147,21 @@ export default function FilesPage() {
         void paste()
         return
       }
-      if (mod) return
-
-      // A control with the focus keeps its own keys: Space on a checkbox is
-      // the checkbox's, Enter on a button is the button's.
-      const onControl = target?.closest(
-        "button, a, input, select, textarea, [role='checkbox'], [role='menuitem']",
-      )
+      if (mod || event.altKey) return
+      // File name buttons belong to the listing; other controls keep their
+      // own Space, Enter and arrow behavior.
+      const onControl =
+        !target?.closest("[data-file-name]") &&
+        target?.closest("button, a, input, select, textarea, [role='checkbox'], [role='menuitem']")
       switch (event.key) {
         case "Escape":
-          clearSelection()
-          setActive(null)
+          event.preventDefault()
+          nameTyping.current.query = ""
+          if (selected.size > 0 || activeEntry) {
+            clearSelection()
+            setActive({ dir: path ?? "/", entry: null })
+            listingElement.current?.focus({ preventScroll: true })
+          } else if (clip) setClip(null)
           break
         case "F2":
           if (activeEntry && canWrite) {
@@ -941,10 +1176,8 @@ export default function FilesPage() {
           else if (activeEntry) deleteEntry(activeEntry)
           break
         case "Backspace":
-          if (parentReachable && parent) {
-            event.preventDefault()
-            navigate(parent)
-          }
+          event.preventDefault()
+          if (parentReachable && parent) navigate(parent)
           break
         case "Enter":
           if (activeEntry && !onControl) {
@@ -960,18 +1193,66 @@ export default function FilesPage() {
           break
         case "ArrowDown":
         case "ArrowUp":
+        case "ArrowLeft":
+        case "ArrowRight":
         case "Home":
         case "End":
           if (onControl) break
           event.preventDefault()
+          if (view === "list" && event.key === "ArrowRight") {
+            if (activeEntry?.isDir) openEntry(activeEntry)
+            break
+          }
+          if (view === "list" && event.key === "ArrowLeft") {
+            if (parentReachable && parent) navigate(parent)
+            break
+          }
           moveActive(event.key, event.shiftKey)
           break
+        case "?":
+          if (onControl) break
+          event.preventDefault()
+          setShortcutsOpen(true)
+          break
+        default: {
+          if (onControl || event.key.length !== 1 || event.key === " ") break
+          const now = performance.now()
+          const previous = nameTyping.current
+          const fresh = previous.dir !== path || now - previous.time > 700
+          const repeated = [...previous.query].every((letter) => letter.toLocaleLowerCase() === key)
+          const query = fresh || repeated ? event.key : previous.query + event.key
+          nameTyping.current = { query, time: now, dir: path }
+          const cycling = [...query].every((letter) => letter.toLocaleLowerCase() === key)
+          const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
+          const next = matchName(
+            entries.map((e) => e.name),
+            cycling ? event.key : query,
+            cycling ? index : index - 1,
+          )
+          if (next >= 0) {
+            event.preventDefault()
+            anchor.current = entries[next].path
+            focusEntry(entries[next])
+          }
+        }
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntry, canWrite, canDestruct, entries, path, selected, clip, parent, parentReachable])
+  }, [
+    activeEntry,
+    canWrite,
+    canDestruct,
+    entries,
+    path,
+    selected,
+    clip,
+    parent,
+    parentReachable,
+    navigation,
+    reload,
+  ])
 
   const openFileInput = () => fileInput.current?.click()
   const uploadFromInput = (input: HTMLInputElement) => {
@@ -994,7 +1275,7 @@ export default function FilesPage() {
     : undefined
 
   return (
-    <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -1016,11 +1297,18 @@ export default function FilesPage() {
           }
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
         >
-          <PaneHeader className="flex-wrap gap-x-1 gap-y-1.5 px-2 py-1.5">
+          {/* Every control in the strip has a face, and the faces come in
+              groups: the way back and forward, where you are, finding, how
+              the folder is drawn, and what you can make here. It used to be
+              a row of bare glyphs with three boxed controls dropped among
+              them, so nothing said which buttons belonged together and the
+              boxed ones read as the only ones that were buttons. */}
+          <PaneHeader className="flex-wrap gap-x-2 gap-y-1.5 px-2 py-1.5">
             <IconAction
+              variant="outline"
               label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
               aria-pressed={showSidebar}
-              className="hidden size-7 lg:inline-flex"
+              className="hidden size-8 lg:inline-flex"
               onClick={() => setShowSidebar(!showSidebar)}
             >
               {showSidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
@@ -1034,20 +1322,46 @@ export default function FilesPage() {
                 current={path ?? "/"}
                 onPick={navigate}
               >
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Places"
-                  className="size-7 text-muted-foreground"
-                >
+                <Button size="icon-sm" variant="outline" aria-label="Places">
                   <Location className="size-3.5" />
                 </Button>
               </PlacesMenu>
             </div>
 
-            {/* The strip's folder controls the colour of every folder; the
-                inspector and folder menus still label one folder at a time. */}
-            <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
+            <StripGroup aria-label="Folder navigation">
+              <IconAction
+                label="Back to previous folder"
+                className={STRIP_SEGMENT}
+                disabled={!navigation.canBack}
+                onClick={navigation.back}
+              >
+                <ArrowLeft />
+              </IconAction>
+              <IconAction
+                label="Forward to next folder"
+                className={STRIP_SEGMENT}
+                disabled={!navigation.canForward}
+                onClick={navigation.forward}
+              >
+                <ArrowRight />
+              </IconAction>
+              <IconAction
+                label="Go to parent folder"
+                className={STRIP_SEGMENT}
+                disabled={!parentReachable}
+                onClick={() => parent && navigate(parent)}
+              >
+                <ArrowUp />
+              </IconAction>
+              <IconAction label="Refresh" className={STRIP_SEGMENT} onClick={reload}>
+                <RefreshClockwise />
+              </IconAction>
+            </StripGroup>
+
+            {/* Where you are, drawn as the field it turns into on Ctrl+L: the
+                folder's colour at its head, the crumbs, and the star at its
+                end, because starring is a fact about this path. */}
+            <div className="flex h-8 min-w-0 flex-1 basis-64 items-center gap-0.5 rounded-md border border-input bg-input/30 pr-0.5 pl-0.5 focus-ring-within">
               {here &&
                 (canWrite ? (
                   <FolderColourMenu
@@ -1058,17 +1372,19 @@ export default function FilesPage() {
                     <button
                       type="button"
                       aria-label="Colour all folders"
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring transition-colors hover:bg-row-hover"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring-inset transition-colors hover:bg-accent"
                     >
                       <FolderSwatch colour={defaultColour ?? "blue"} className="size-4" />
                     </button>
                   </FolderColourMenu>
                 ) : (
-                  <FolderIcon name={here.name} path={here.path} className="size-4" />
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center">
+                    <FolderIcon name={here.name} path={here.path} className="size-4" />
+                  </span>
                 ))}
               <PathBar
                 path={path ?? "/"}
-                home={places.data?.home}
+                home={homeFor(path ?? "/", places.data)}
                 onNavigate={navigate}
                 onDropPaths={dropInto}
                 onDropFiles={dropFilesInto}
@@ -1077,7 +1393,8 @@ export default function FilesPage() {
               {canWrite && here && (
                 <IconAction
                   label={starred ? "Unstar this folder" : "Star this folder"}
-                  className="size-7"
+                  aria-pressed={starred}
+                  className="size-7 focus-ring-inset"
                   onClick={() => toggleStar(here.path, here.name)}
                 >
                   {starred ? <StarFill className="text-warning" /> : <Star />}
@@ -1085,33 +1402,40 @@ export default function FilesPage() {
               )}
             </div>
 
-            {/* What you can do here: find, look, arrange, then make. */}
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+            <StripGroup aria-label="Search" className="bg-input/30">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <button
+                    type="button"
                     aria-label="Find"
-                    className="text-muted-foreground hover:text-foreground md:w-40 md:justify-start"
-                    onClick={() => setQuickOpen(true)}
+                    className="flex items-center gap-2 px-2.5 text-body text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-foreground md:w-44"
+                    onClick={() => {
+                      setQuickMode("names")
+                      setQuickOpen(true)
+                    }}
                   >
-                    <MagnifyingGlass className="size-4" />
-                    <span className="hidden md:inline">Find</span>
-                    <kbd className="ml-auto hidden rounded-sm border border-hairline px-1 text-micro md:inline">
-                      ⌃P
+                    <MagnifyingGlass className="size-4 shrink-0" />
+                    <span className="hidden flex-1 text-left md:inline">Find files</span>
+                    <kbd className="hidden rounded-sm border border-hairline px-1 font-mono text-micro md:inline">
+                      Ctrl P
                     </kbd>
-                  </Button>
+                  </button>
                 </TooltipTrigger>
-                <TooltipContent>Fuzzy-find a file or folder under here</TooltipContent>
+                <TooltipContent>Find files by name · Ctrl+P / ⌘P</TooltipContent>
               </Tooltip>
-              <SearchDialog
-                path={path ?? "/"}
-                onOpen={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
-              />
-              <IconAction label="Refresh" className="size-7" onClick={reload}>
-                <RefreshClockwise />
+              <IconAction
+                label="Search inside files"
+                className={STRIP_SEGMENT}
+                onClick={() => {
+                  setQuickMode("content")
+                  setQuickOpen(true)
+                }}
+              >
+                <PreviewDocument />
               </IconAction>
+            </StripGroup>
+
+            <div className="flex shrink-0 items-center gap-2">
               <ToggleGroup
                 type="single"
                 size="sm"
@@ -1119,12 +1443,12 @@ export default function FilesPage() {
                 value={view}
                 onValueChange={(v) => v && setView(v)}
                 aria-label="View"
-                className="h-7"
+                className="h-8"
               >
-                <ToggleGroupItem value="list" aria-label="Details" className="h-7 min-w-7 px-1.5">
+                <ToggleGroupItem value="list" aria-label="Details" className="h-8 min-w-8 px-0">
                   <ListUnordered className="size-3.5" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-7 min-w-7 px-1.5">
+                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-8 min-w-8 px-0">
                   <GridSquare className="size-3.5" />
                 </ToggleGroupItem>
               </ToggleGroup>
@@ -1137,7 +1461,9 @@ export default function FilesPage() {
                 setTile={setTile}
                 grid={view === "grid"}
               />
-              <span aria-hidden className="mx-1 hidden h-5 w-px bg-hairline md:block" />
+            </div>
+
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               {/* Edits made here are committed somewhere else, so the account
                   those commits will carry belongs on this page too. */}
               <div className="hidden md:contents">
@@ -1172,9 +1498,10 @@ export default function FilesPage() {
                 </>
               )}
               <IconAction
+                variant="outline"
                 label={showInspector ? "Hide the details" : "Show the details"}
                 aria-pressed={showInspector}
-                className="hidden size-7 xl:inline-flex"
+                className="hidden size-8 xl:inline-flex"
                 onClick={() => setShowInspector(!showInspector)}
               >
                 {showInspector ? <SidebarRightClose /> : <SidebarRightOpen />}
@@ -1208,48 +1535,71 @@ export default function FilesPage() {
               </div>
             )}
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {selected.size > 0 ? (
-                <SelectionBar
-                  count={selected.size}
-                  size={selectedBytes}
-                  canWrite={canWrite}
-                  canDestruct={canDestruct}
-                  archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
-                  onCopy={() => cutCopy("copy", [...selected])}
-                  onCut={() => cutCopy("cut", [...selected])}
-                  onDelete={bulkDelete}
-                  onClear={clearSelection}
-                />
-              ) : (
-                clip && (
-                  <div className="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
-                    {clip.mode === "cut" ? (
-                      <ArrowMove className="size-3.5 text-muted-foreground" />
-                    ) : (
-                      <Clipboard className="size-3.5 text-muted-foreground" />
-                    )}
-                    <span className="text-muted-foreground">
-                      {plural(clip.paths.length, "item")} ready to{" "}
-                      {clip.mode === "cut" ? "move" : "copy"}
-                    </span>
-                    <span className="flex-1" />
-                    {canWrite && (
-                      <Button size="xs" onClick={() => void paste()}>
-                        <Clipboard className="size-3.5" />
-                        Paste here
-                      </Button>
-                    )}
-                    <IconAction
-                      label="Forget the clipboard"
-                      className="size-6"
-                      onClick={() => setClip(null)}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div
+                data-file-actions
+                className="pointer-events-none absolute inset-x-2 bottom-12 z-20 flex justify-center"
+              >
+                <AnimatePresence initial={false} mode="wait">
+                  {selected.size > 0 ? (
+                    <motion.div
+                      key="selection"
+                      initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.16 }}
+                      className="pointer-events-auto max-w-full"
                     >
-                      <Cross />
-                    </IconAction>
-                  </div>
-                )
-              )}
+                      <SelectionBar
+                        count={selected.size}
+                        size={selectedBytes}
+                        canWrite={canWrite}
+                        canDestruct={canDestruct}
+                        archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
+                        onCopy={() => cutCopy("copy", [...selected])}
+                        onCut={() => cutCopy("cut", [...selected])}
+                        onDelete={bulkDelete}
+                        onClear={clearSelection}
+                      />
+                    </motion.div>
+                  ) : (
+                    clip && (
+                      <motion.div
+                        key="clipboard"
+                        initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                        transition={{ duration: reducedMotion ? 0 : 0.16 }}
+                        className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border border-hairline bg-popover px-3 py-2 text-xs"
+                      >
+                        {clip.mode === "cut" ? (
+                          <ArrowMove className="size-3.5 text-muted-foreground" />
+                        ) : (
+                          <Clipboard className="size-3.5 text-muted-foreground" />
+                        )}
+                        <span className="text-muted-foreground">
+                          {plural(clip.paths.length, "item")} ready to{" "}
+                          {clip.mode === "cut" ? "move" : "copy"}
+                        </span>
+                        <span className="flex-1" />
+                        {canWrite && (
+                          <Button size="xs" onClick={() => void paste()}>
+                            <Clipboard className="size-3.5" />
+                            Paste here
+                          </Button>
+                        )}
+                        <IconAction
+                          label="Forget the clipboard"
+                          className="size-6"
+                          onClick={() => setClip(null)}
+                        >
+                          <Cross />
+                        </IconAction>
+                      </motion.div>
+                    )
+                  )}
+                </AnimatePresence>
+              </div>
 
               {/* The body does not scroll; whatever is inside it does. That is
                   what keeps the table's header stuck to the top of the list: a
@@ -1265,7 +1615,16 @@ export default function FilesPage() {
                 className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
               >
                 <div
-                  className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden"
+                  ref={listingElement}
+                  data-file-listing
+                  data-folder-path={path ?? undefined}
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Folder contents"
+                  className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden focus-ring-inset"
+                  {...marquee.handlers}
+                  onDragEnd={() => setDragging(EMPTY)}
+                  onDropCapture={() => setDragging(EMPTY)}
                   {...dropZone.handlers}
                 >
                   {dropZone.over && (
@@ -1279,7 +1638,11 @@ export default function FilesPage() {
                   {listing.error && <ErrorState error={listing.error} className="m-4" />}
 
                   {listing.data && view === "grid" && (
-                    <div key={path} className="min-h-0 flex-1 animate-rise overflow-auto">
+                    <div
+                      data-file-scroll
+                      key={path}
+                      className="min-h-0 flex-1 animate-rise overflow-auto"
+                    >
                       {entries.length === 0 ? (
                         <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
                       ) : (
@@ -1288,15 +1651,16 @@ export default function FilesPage() {
                           selected={selected}
                           activePath={activeEntry?.path ?? null}
                           dimmed={dimmed}
+                          dragging={dragging}
                           caps={caps}
                           size={tile}
                           onToggle={toggleSelected}
                           onSelect={selectRow}
+                          onFocusEntry={activateEntry}
                           onOpen={openEntry}
                           onDragStart={canWrite ? dragStart : undefined}
                           onDropPaths={dropInto}
                           onDropFiles={dropFilesInto}
-                          actions={actionsFor}
                         />
                       )}
                     </div>
@@ -1307,7 +1671,7 @@ export default function FilesPage() {
                       key={path}
                       className="relative min-h-0 flex-1 animate-rise overflow-hidden"
                     >
-                      <Table containerClassName="h-full">
+                      <Table className="mb-24" containerClassName="h-full">
                         <TableHeader className={stickyTableHeader}>
                           <TableRow>
                             <TableHead className="w-8">
@@ -1384,9 +1748,11 @@ export default function FilesPage() {
                               selected={selected.has(entry.path)}
                               active={activeEntry?.path === entry.path}
                               dimmed={dimmed.has(entry.path)}
+                              dragging={dragging.has(entry.path)}
                               caps={caps}
                               onToggle={(checked) => toggleSelected(entry, checked)}
                               onSelect={(event) => selectRow(entry, event)}
+                              onFocusEntry={() => activateEntry(entry)}
                               onOpen={() => openEntry(entry)}
                               onDragStart={
                                 canWrite ? (event) => dragStart(entry, event) : undefined
@@ -1407,6 +1773,19 @@ export default function FilesPage() {
                       </Table>
                     </div>
                   )}
+                  {marquee.box && (
+                    <div
+                      data-file-marquee
+                      aria-hidden
+                      className="pointer-events-none absolute z-10 rounded-sm border border-rule-brand bg-wash-brand"
+                      style={{
+                        left: marquee.box.left,
+                        top: marquee.box.top,
+                        width: Math.max(0, marquee.box.right - marquee.box.left),
+                        height: Math.max(0, marquee.box.bottom - marquee.box.top),
+                      }}
+                    />
+                  )}
                 </div>
               </ListingContextMenu>
 
@@ -1419,7 +1798,7 @@ export default function FilesPage() {
               />
 
               <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
-                <span className="numeric min-w-0 truncate">
+                <span aria-live="polite" aria-atomic="true" className="numeric min-w-0 truncate">
                   {listing.data
                     ? selected.size > 0
                       ? `${plural(selected.size, "item")} selected${
@@ -1435,6 +1814,13 @@ export default function FilesPage() {
                             .join(", ")
                     : ""}
                 </span>
+                <IconAction
+                  label="Files shortcuts"
+                  className="size-6 shrink-0"
+                  onClick={() => setShortcutsOpen(true)}
+                >
+                  <Question />
+                </IconAction>
                 {mount && (
                   <span className="flex min-w-0 shrink-0 items-center gap-2">
                     <Meter
@@ -1482,13 +1868,22 @@ export default function FilesPage() {
           </div>
         </div>
       </FolderColourProvider>
+      <FilesShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
 
       <QuickOpen
         open={quickOpen}
         onOpenChange={setQuickOpen}
         root={path ?? "/"}
-        home={places.data?.home}
-        onOpenPath={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
+        places={places.data}
+        entries={listing.data?.entries}
+        initialMode={quickMode}
+        onOpenPath={(p, isDir, line) => {
+          if (isDir) navigate(p)
+          else {
+            setSearchLocation({ path: p, line })
+            setEditing(p)
+          }
+        }}
       />
       <MediaViewer
         items={viewable}
@@ -1511,15 +1906,18 @@ export default function FilesPage() {
       />
       <FileEditorSheet
         path={editing}
+        root={path ?? undefined}
+        revealLine={searchLocation?.path === editing ? searchLocation.line : undefined}
         onOpenChange={(open) => !open && setEditing(null)}
         onSaved={reload}
       />
       <ImageEditorSheet
         path={editingImage}
+        root={path ?? undefined}
         modified={activeEntry?.path === editingImage ? activeEntry?.modified : undefined}
         onOpenChange={(open) => !open && setEditingImage(null)}
         onSaved={() => {
-          setActive(null)
+          setActive({ dir: path ?? "/", entry: null })
           reload()
         }}
       />
@@ -1560,6 +1958,27 @@ function EmptyFolder({ canWrite, onUpload }: { canWrite: boolean; onUpload: () =
   )
 }
 
+/** One segment of a `StripGroup`: the group draws the edge, the segment only its hover. */
+const STRIP_SEGMENT = "h-full w-8 min-w-8 rounded-none px-0 focus-ring-inset"
+
+/**
+ * Controls that are one idea, inside one edge — the same shape as the Git
+ * workspace's fetch, pull and push. Each segment is a ghost the full height of
+ * the box, and the hairline between two is the group's, never the segment's.
+ */
+function StripGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      role="group"
+      className={cn(
+        "flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border border-input bg-control [&>*+*]:border-l [&>*+*]:border-input",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 /**
  * Sorting, hidden files and tile size in one menu.
  *
@@ -1596,12 +2015,7 @@ function ArrangeMenu({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-7 text-muted-foreground"
-              aria-label="Arrange"
-            >
+            <Button variant="outline" size="icon-sm" aria-label="Arrange">
               <SettingsSliders className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
@@ -1697,7 +2111,7 @@ function SortHead({
   )
 }
 
-/** The strip that replaces the toolbar's quiet state once rows are checked. */
+/** Selection commands float within the workbench, so the entries keep their positions. */
 function SelectionBar({
   count,
   size,
@@ -1720,7 +2134,11 @@ function SelectionBar({
   onClear: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-hairline px-3 py-1.5">
+    <div
+      role="toolbar"
+      aria-label="Selection actions"
+      className="flex flex-wrap items-center gap-1.5 rounded-md border border-hairline bg-popover px-2.5 py-2"
+    >
       <span className="numeric mr-1 text-body font-medium">
         {plural(count, "item")} selected
         {size > 0 && (
@@ -1922,101 +2340,5 @@ function SymlinkBody({
         </div>
       </div>
     </Modal>
-  )
-}
-
-/**
- * The other search: a literal substring or a regular expression, optionally
- * inside file contents.
- *
- * It stays next to the fuzzy finder rather than being replaced by it because
- * the two answer different questions — this one is "which files mention this
- * connection string", and no amount of name matching answers that.
- */
-function SearchDialog({
-  path,
-  onOpen,
-}: {
-  path: string
-  onOpen: (path: string, isDir: boolean) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [content, setContent] = useState(true)
-  const [regex, setRegex] = useState(false)
-  const [hits, setHits] = useState<
-    { path: string; name: string; isDir: boolean; line?: number; snippet?: string }[]
-  >([])
-  const [busy, setBusy] = useState(false)
-
-  const run = async () => {
-    if (!query) return
-    setBusy(true)
-    try {
-      setHits(await get("/files/search", { path, q: query, content, regex, limit: 200 }))
-    } catch (err) {
-      notify.error("Search failed", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <IconAction label="Search inside files" className="size-7" onClick={() => setOpen(true)}>
-        <PreviewDocument />
-      </IconAction>
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        size="lg"
-        title={<>Search under {truncateMiddle(path, 40)}</>}
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && run()}
-              placeholder={content ? "Text to find inside files" : "File or directory name"}
-            />
-            <Button onClick={run} disabled={busy || !query} pending={busy}>
-              Search
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-body">
-              <Checkbox checked={content} onCheckedChange={(v) => setContent(v === true)} />
-              Search inside file contents
-            </label>
-            <label className="flex items-center gap-2 text-body">
-              <Checkbox checked={regex} onCheckedChange={(v) => setRegex(v === true)} />
-              Regular expression
-            </label>
-          </div>
-          <div className="max-h-80 space-y-0.5 overflow-auto">
-            {hits.map((hit) => (
-              <button
-                key={`${hit.path}:${hit.line ?? 0}`}
-                className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
-                onClick={() => {
-                  onOpen(hit.path, hit.isDir)
-                  setOpen(false)
-                }}
-              >
-                <span className="block truncate font-mono text-xs">{hit.path}</span>
-                {hit.snippet && (
-                  <span className="block truncate text-hint text-muted-foreground">
-                    line {hit.line}: {hit.snippet}
-                  </span>
-                )}
-              </button>
-            ))}
-            {!busy && hits.length === 0 && query && <EmptyNote>No matches.</EmptyNote>}
-          </div>
-        </div>
-      </Modal>
-    </>
   )
 }

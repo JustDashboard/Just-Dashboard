@@ -1,0 +1,3 @@
+blog.events.held_in has type year, which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+blog.posts.flags has type set('pinned','featured'), which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+Index ft_posts_body on blog.posts is a full-text index and was left out; it still exists in the database.

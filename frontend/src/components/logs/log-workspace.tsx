@@ -86,6 +86,8 @@ export type WorkspaceView = {
 }
 
 type WorkspaceProps = {
+  onSubmitQuestion?: () => void
+  refreshToken?: number
   source: LogSource
   sourceId: string
   units: LogSourceIndex["units"]
@@ -123,11 +125,6 @@ type WorkspaceProps = {
   modes?: ("live" | "search" | "insights")[]
   /** A page's own views of the source, after the three. */
   views?: WorkspaceView[]
-  /**
-   * The lens's readings at the top of Insights: the logs page, which has no
-   * room above its workbench. A service page draws them above its pane.
-   */
-  insightReadings?: boolean
   /** The lens's readings as the figures on the lens row's chips, for a page that draws no tiles. */
   readings?: LensReadingsState
   /**
@@ -143,7 +140,11 @@ type WorkspaceProps = {
   compact?: boolean
   /** What sits before the source's name in the top strip — the rail toggle. */
   leading?: React.ReactNode
-  /** The source's name in the strip, where it is a control: the picker of a page's sources. */
+  /**
+   * The source's name in the strip, where it is a control: the picker of a
+   * page's sources. `null` where the page names the source above the pane —
+   * the strip is then its views alone, from its leading edge.
+   */
   name?: React.ReactNode
   /** The source's facts, beside its name: its kind, path, size, state. */
   facts?: React.ReactNode
@@ -228,6 +229,15 @@ export function LogWorkspace(props: WorkspaceProps) {
   // Enter, Search and a zoom are the asks that carry the words in the box.
   const [insightAsk, setInsightAsk] = useState(0)
   const [insightFacets, setInsightFacets] = useState<LogSearchResult["facets"]>()
+
+  const refreshToken = props.refreshToken ?? 0
+  useEffect(() => {
+    if (!refreshToken) return
+    if (mode === "live") live.reconnect()
+    else if (mode === "search") search.run()
+    // The token is an explicit refresh, not a change to the current question.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
 
   // Arriving on a shared link that already says "history, this term" should
   // show the answer, not a form with the question typed into it. The workspace
@@ -325,6 +335,7 @@ export function LogWorkspace(props: WorkspaceProps) {
 
   const view = props.views?.find((v) => v.id === mode)
   const filtered = !view || view.filtered
+  const named = props.name !== null
   const requirement = requirementOf(lens, filter)
 
   const renderDetail = (line: LogLine, head: LogLine | undefined) => (
@@ -355,17 +366,25 @@ export function LogWorkspace(props: WorkspaceProps) {
           History are two places within the source, not two commands. Where
           the pane is too narrow for the name beside every tab — a phone, a
           sheet — the tabs take a line of their own under it rather than
-          squeezing the name to its chevron. */}
+          squeezing the name to its chevron. Where the page names the source
+          above the pane, the tabs lead the strip, as a deployment's do. */}
       <div className="flex min-h-10 shrink-0 flex-wrap items-stretch border-b border-hairline pr-1 pl-2">
-        <div className="@container flex min-w-[min(10rem,100%)] flex-1 items-center gap-2 py-1.5">
-          {props.leading}
-          {props.name ?? <span className="truncate text-body font-medium">{source.label}</span>}
-          {props.facts}
-        </div>
+        {named ? (
+          <div className="@container flex min-w-[min(10rem,100%)] flex-1 items-center gap-2 py-1.5">
+            {props.leading}
+            {props.name ?? <span className="truncate text-body font-medium">{source.label}</span>}
+            {props.facts}
+          </div>
+        ) : (
+          props.leading && <div className="flex shrink-0 items-center pr-1">{props.leading}</div>
+        )}
         {props.actions && <div className="flex shrink-0 items-center gap-2">{props.actions}</div>}
         <nav
           aria-label="Log mode"
-          className="flex max-w-full shrink-0 items-stretch overflow-x-auto"
+          className={cn(
+            "flex max-w-full items-stretch overflow-x-auto",
+            named ? "shrink-0" : "min-w-0 flex-1",
+          )}
         >
           {modes.map((id) => (
             <button
@@ -408,6 +427,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           filter={filter}
           onFilterChange={onFilterChange}
           onSubmit={(next) => {
+            props.onSubmitQuestion?.()
             if (mode === "search") search.run({ filter: next })
             else if (mode === "insights") setInsightAsk((n) => n + 1)
             else if (mode === "live") switchMode("search", next)
@@ -470,7 +490,9 @@ export function LogWorkspace(props: WorkspaceProps) {
       )}
 
       {view ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto">{view.render()}</div>
+        <div key={refreshToken} className="flex min-h-0 flex-1 flex-col overflow-auto">
+          {view.render()}
+        </div>
       ) : mode === "insights" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Insights
@@ -489,8 +511,7 @@ export function LogWorkspace(props: WorkspaceProps) {
             until={props.until}
             archives={props.archives}
             boot={props.boot}
-            ask={insightAsk}
-            readings={props.insightReadings}
+            ask={insightAsk + refreshToken}
             onZoom={(from, to) => {
               props.onCustomRange(from, to)
               setInsightAsk((n) => n + 1)
@@ -516,6 +537,11 @@ export function LogWorkspace(props: WorkspaceProps) {
           )}
 
           <LogConsole
+            // The place is the question's as asked, not as the live tail
+            // trails it: keyed on the debounced filter, a run's question
+            // opened on an empty filter for 400ms, and a record opened in
+            // that window was filed where Back and Forward never look.
+            stateKey={`${sourceId}.${mode}.${JSON.stringify({ filter, range: props.range, since: props.since, until: props.until, boot: props.boot, lens: forced })}`}
             lines={lines}
             filter={applied}
             leading={<LevelChips filter={filter} onFilterChange={onFilterChange} counts={counts} />}

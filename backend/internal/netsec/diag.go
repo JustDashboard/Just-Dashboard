@@ -1,6 +1,7 @@
 package netsec
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -38,6 +39,22 @@ type ProbeResult struct {
 	// answer: refused is instant, filtered hangs until the timeout.
 	Duration string `json:"duration"`
 	Error    string `json:"error,omitempty"`
+	// Verdict refines OK where a bare success/failure would mislead: an
+	// unanswered ping is "unknown", not a service that is down. Empty keeps
+	// the older reading of OK.
+	Verdict string `json:"verdict,omitempty"`
+	// Summary is the one sentence the verdict is read with.
+	Summary     string         `json:"summary,omitempty"`
+	Facts       []ProbeFact    `json:"facts,omitempty"`
+	Stages      []ProbeStage   `json:"stages,omitempty"`
+	Tables      []ProbeTable   `json:"tables,omitempty"`
+	Findings    []ProbeFinding `json:"findings,omitempty"`
+	Links       []ProbeLink    `json:"links,omitempty"`
+	Metrics     []ProbeMetric  `json:"metrics,omitempty"`
+	Limitations []string       `json:"limitations,omitempty"`
+	// ResultID names a quick result the server holds briefly so it can be
+	// saved without sending the probe again. It is never part of a saved run.
+	ResultID string `json:"resultId,omitempty"`
 }
 
 // hostRe accepts a hostname or an IPv4 literal. Deliberately strict: this
@@ -49,6 +66,9 @@ var hostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,251}[A-Za-z0-9])?
 // ValidTarget reports whether a probe target is a plain hostname or IP.
 func ValidTarget(target string) bool {
 	target = strings.TrimSpace(target)
+	// An absolute DNS name ends in the root dot; keeping it prevents search
+	// domains from changing the operator's diagnostic target.
+	target = strings.TrimSuffix(target, ".")
 	if target == "" || len(target) > 253 {
 		return false
 	}
@@ -70,12 +90,12 @@ func (s *Service) Ping(ctx context.Context, target string) (*ProbeResult, error)
 	// -n keeps ping from doing a reverse lookup per hop, which on a host with
 	// a slow resolver is most of the elapsed time and none of the answer.
 	// -w bounds the whole run so a black hole cannot hold the request open.
-	out, elapsed, err := runProbe(ctx, 20*time.Second, "ping", "-n", "-c", "4", "-W", "2", "-w", "12", target)
+	out, elapsed, err := diagnosticRun(ctx, 20*time.Second, "ping", "-n", "-c", "4", "-W", "2", "-w", "12", target)
 	res.Output, res.Duration = out, elapsed
-	res.OK = err == nil
 	if err != nil {
 		res.Error = err.Error()
 	}
+	interpretPing(res, parsePing(out), target, err)
 	return res, nil
 }
 
@@ -88,19 +108,31 @@ func (s *Service) Traceroute(ctx context.Context, target string) (*ProbeResult, 
 	res := &ProbeResult{Tool: "traceroute", Target: target}
 	var out, elapsed string
 	var err error
+	var report traceReport
+	tool := "traceroute"
 	switch {
-	case hostexec.AvailableOnHost("traceroute"):
-		out, elapsed, err = runProbe(ctx, 60*time.Second, "traceroute", "-n", "-w", "2", "-q", "1", "-m", "20", target)
-	case hostexec.AvailableOnHost("tracepath"):
-		out, elapsed, err = runProbe(ctx, 60*time.Second, "tracepath", "-n", "-m", "20", target)
+	case diagnosticHas("traceroute"):
+		args := []string{"-n", "-w", "2", "-q", "1", "-m", "20"}
+		// traceroute defaults to IPv4 even when given an IPv6 literal.
+		if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
+			args = append(args, "-6")
+		}
+		out, elapsed, err = diagnosticRun(ctx, 60*time.Second, "traceroute", append(args, target)...)
+		report = parseTraceroute(out)
+	case diagnosticHas("tracepath"):
+		tool = "tracepath"
+		out, elapsed, err = diagnosticRun(ctx, 60*time.Second, "tracepath", "-n", "-m", "20", target)
+		report = parseTracepath(out)
 	default:
 		res.Error = "neither traceroute nor tracepath is installed on this host"
+		res.Verdict = ProbeFailed
 		return res, nil
 	}
-	res.Output, res.Duration, res.OK = out, elapsed, err == nil
+	res.Output, res.Duration = out, elapsed
 	if err != nil {
 		res.Error = err.Error()
 	}
+	interpretTrace(res, report, tool, target, err)
 	return res, nil
 }
 
@@ -125,7 +157,7 @@ func (s *Service) Lookup(ctx context.Context, target, recordType string) (*Probe
 		return nil, fmt.Errorf("target must be a hostname or IP address")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	start := time.Now()
 	res := &ProbeResult{Tool: "dns", Target: target, Records: []string{}}
@@ -133,13 +165,13 @@ func (s *Service) Lookup(ctx context.Context, target, recordType string) (*Probe
 	switch recordType {
 	case "A", "AAAA":
 		var addrs []net.IP
-		addrs, err = net.DefaultResolver.LookupIP(ctx, familyFor(recordType), target)
+		addrs, err = lookupResolver.LookupIP(ctx, familyFor(recordType), target)
 		for _, a := range addrs {
 			res.Records = append(res.Records, a.String())
 		}
 	case "MX":
 		var mx []*net.MX
-		mx, err = net.DefaultResolver.LookupMX(ctx, target)
+		mx, err = lookupResolver.LookupMX(ctx, target)
 		for _, m := range mx {
 			host := strings.TrimSuffix(m.Host, ".")
 			if host == "" {
@@ -153,22 +185,22 @@ func (s *Service) Lookup(ctx context.Context, target, recordType string) (*Probe
 			res.Records = append(res.Records, fmt.Sprintf("%d %s", m.Pref, host))
 		}
 	case "TXT":
-		res.Records, err = net.DefaultResolver.LookupTXT(ctx, target)
+		res.Records, err = lookupResolver.LookupTXT(ctx, target)
 	case "NS":
 		var ns []*net.NS
-		ns, err = net.DefaultResolver.LookupNS(ctx, target)
+		ns, err = lookupResolver.LookupNS(ctx, target)
 		for _, n := range ns {
 			res.Records = append(res.Records, strings.TrimSuffix(n.Host, "."))
 		}
 	case "CNAME":
 		var cname string
-		cname, err = net.DefaultResolver.LookupCNAME(ctx, target)
+		cname, err = lookupResolver.LookupCNAME(ctx, target)
 		if cname != "" {
 			res.Records = append(res.Records, strings.TrimSuffix(cname, "."))
 		}
 	case "PTR":
 		var names []string
-		names, err = net.DefaultResolver.LookupAddr(ctx, target)
+		names, err = lookupResolver.LookupAddr(ctx, target)
 		for _, n := range names {
 			res.Records = append(res.Records, strings.TrimSuffix(n, "."))
 		}
@@ -182,6 +214,31 @@ func (s *Service) Lookup(ctx context.Context, target, recordType string) (*Probe
 		res.Error = "no " + recordType + " records"
 	}
 	res.Output = strings.Join(res.Records, "\n")
+	rcode := addLookupProvenance(ctx, res, target, recordType)
+	switch {
+	case res.OK:
+		res.Verdict = ProbeOK
+		res.Summary = fmt.Sprintf("%d %s record(s) from this host's resolver.", len(res.Records), recordType)
+	case (err == nil || isDNSNotFound(err)) && rcode == "NOERROR":
+		// NODATA is an answer: the name exists without this record type.
+		res.Verdict, res.Error = ProbeOK, "no "+recordType+" records"
+		res.Summary = "The name exists but publishes no " + recordType + " records (the nameserver answered NOERROR with none)."
+	case err != nil && isDNSNotFound(err) && rcode == "NXDOMAIN":
+		res.Verdict = ProbeFailed
+		res.Summary = "The name does not exist (the nameserver answered NXDOMAIN)."
+	case err != nil && isDNSNotFound(err):
+		res.Verdict = ProbeFailed
+		res.Summary = "This host's resolver found no " + recordType + " answer; the direct nameserver question did not say whether the name exists."
+	case err == nil:
+		res.Verdict = ProbeOK
+		res.Summary = "The resolver answered without " + recordType + " records."
+	default:
+		res.Verdict = ProbeFailed
+		res.Summary = "The resolver failed: " + err.Error()
+	}
+	if len(res.Findings) > 0 && res.OK {
+		res.Verdict = ProbeFindings
+	}
 	return res, nil
 }
 
@@ -198,31 +255,51 @@ func familyFor(recordType string) string {
 // the *server* can reach a destination. It is not a check of whether the
 // internet can reach the server, which cannot be answered from inside it.
 func (s *Service) PortCheck(ctx context.Context, target string, port int) (*ProbeResult, error) {
+	return s.PortCheckFromSource(ctx, target, port, "")
+}
+
+func (s *Service) PortCheckFromSource(ctx context.Context, target string, port int, source string) (*ProbeResult, error) {
 	if !ValidTarget(target) {
 		return nil, fmt.Errorf("target must be a hostname or IP address")
 	}
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("port must be between 1 and 65535")
 	}
-	res := &ProbeResult{Tool: "port", Target: target + ":" + strconv.Itoa(port)}
+	res := &ProbeResult{Tool: "port", Target: net.JoinHostPort(target, strconv.Itoa(port))}
 	start := time.Now()
 	dialer := &net.Dialer{Timeout: 6 * time.Second}
+	if source != "" {
+		ip := net.ParseIP(source)
+		if ip == nil || net.ParseIP(target) == nil || (ip.To4() == nil) != (net.ParseIP(target).To4() == nil) {
+			return nil, fmt.Errorf("the probe source and literal target must have the same family")
+		}
+		dialer.LocalAddr = &net.TCPAddr{IP: ip}
+	}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(target, strconv.Itoa(port)))
 	res.Duration = time.Since(start).Round(time.Millisecond).String()
+	res.Limitations = append(res.Limitations, "A TCP handshake from this host shows neither what the internet can reach nor that the service behind the port works.")
 	if err != nil {
 		res.Error = err.Error()
-		// Refused and timed out mean different things — one is a host saying
-		// no, the other is a firewall saying nothing — and the distinction is
-		// the reason to run the check at all.
+		// Refusal and silence provide different evidence, but neither
+		// identifies which device or policy caused the failure.
 		res.Output = describeDialError(err)
+		state, sentence := dialFailure(err)
+		if addr := dialedAddress(err); addr != "" {
+			res.fact("Attempted address", addr, BasisObserved)
+		}
+		res.fact("Failure", state, BasisInferred)
+		res.Verdict, res.Summary = ProbeFailed, sentence
 		return res, nil
 	}
+	res.fact("Connected address", conn.RemoteAddr().String(), BasisObserved)
+	res.fact("Local source", conn.LocalAddr().String(), BasisObserved)
 	conn.Close()
 	res.OK = true
 	res.Output = "Connected in " + res.Duration + "."
 	if preset, ok := PresetFor(strconv.Itoa(port), "tcp"); ok {
 		res.Output += " Port " + strconv.Itoa(port) + " is normally " + preset.Name + "."
 	}
+	res.Verdict, res.Summary = ProbeOK, "TCP connected from this host in "+res.Duration+"."
 	return res, nil
 }
 
@@ -230,9 +307,9 @@ func describeDialError(err error) string {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "refused"):
-		return "Connection refused: something answered and said no. The host is reachable and nothing is listening on that port."
+		return "Connection refused: the connection was actively rejected. A closed port or a firewall rejection can cause this."
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
-		return "Timed out with no reply, which is what a firewall dropping packets looks like from the outside."
+		return "Timed out with no reply. A firewall dropping packets, an offline host or a broken route can all cause this."
 	case strings.Contains(msg, "no such host"):
 		return "The name did not resolve."
 	}
@@ -243,6 +320,40 @@ func runProbe(ctx context.Context, limit time.Duration, name string, args ...str
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
-	raw, err := hostexec.CommandOnHost(ctx, name, args...).CombinedOutput()
-	return strings.TrimSpace(string(raw)), time.Since(start).Round(time.Millisecond).String(), err
+	cmd := hostexec.CommandOnHost(ctx, name, args...)
+	var raw probeOutput
+	cmd.Stdout, cmd.Stderr = &raw, &raw
+	// nsenter may fork a child holding the output pipes. Stop the whole
+	// process group so a timed-out capture cannot survive its request.
+	_, err = hostexec.RunGroup(ctx, cmd, 200*time.Millisecond)
+	return strings.TrimSpace(raw.String()), time.Since(start).Round(time.Millisecond).String(), err
+}
+
+// A remote registry or a busy capture must not allocate its entire output
+// before the response is truncated. Continue draining once the cap is met.
+type probeOutput struct {
+	// A named field prevents io.Copy using bytes.Buffer.ReadFrom and
+	// bypassing the cap enforced by Write.
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *probeOutput) Len() int { return b.buffer.Len() }
+
+func (b *probeOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxProbeOutput - b.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(p)
+	return n, nil
+}
+
+func (b *probeOutput) String() string {
+	if b.truncated {
+		return b.buffer.String() + "\n… (truncated)"
+	}
+	return b.buffer.String()
 }

@@ -603,15 +603,20 @@ test("pull request files and conversation stay in the preview", async ({ page })
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "GitHub" }).click()
   await page.getByRole("button", { name: /Review this change/ }).click()
+  // The conversation is what a request opens on; the files are a tab beside it.
+  await expect(page.getByText("Existing conversation")).toBeVisible()
+  await page.getByRole("tab", { name: /Files changed/ }).click()
   await page.getByRole("button", { name: /a.txt.*\+1/ }).click()
   await expect(page.locator("pre").filter({ hasText: "+reviewed" })).toBeVisible()
   expect(seen.find((r) => r.path === "/git/github/pulls/7/files")?.query.get("head")).toBe(sha)
-  await page.getByRole("button", { name: "Conversation", exact: true }).click()
+  await page.getByRole("tab", { name: /Conversation/ }).click()
   await expect(page.getByText("Existing conversation")).toBeVisible()
 })
 
+// A verdict is pinned to the commit the files were read at; a comment is not
+// a verdict and goes to the conversation as one. Both are written in the box
+// under the conversation rather than in a dialog over it.
 for (const [label, event] of [
-  ["Comment", "COMMENT"],
   ["Approve", "APPROVE"],
   ["Request changes", "REQUEST_CHANGES"],
 ]) {
@@ -620,10 +625,10 @@ for (const [label, event] of [
     await page.goto("/git?repo=%2Fsrv%2Fapp")
     await page.getByRole("tab", { name: "GitHub" }).click()
     await page.getByRole("button", { name: /Review this change/ }).click()
-    await page.getByRole("combobox", { name: "Review action" }).click()
-    await page.getByRole("option", { name: label, exact: true }).click()
-    await page.getByRole("textbox", { name: "Review comment" }).fill("Reviewed these changes")
-    await page.getByRole("button", { name: "Publish review", exact: true }).click()
+    const box = page.getByRole("form", { name: "Comment on #7" })
+    await box.getByRole("radio", { name: label, exact: true }).click()
+    await box.getByRole("textbox", { name: "Comment", exact: true }).fill("Reviewed these changes")
+    await box.getByRole("button", { name: label, exact: true }).click()
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "Publish review", exact: true })
@@ -1151,12 +1156,12 @@ test("a comment on a pull request goes to its conversation as the checkout's own
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "GitHub" }).click()
   await page.getByRole("button", { name: /Review this change/ }).click()
-  await page
-    .locator("[data-slot=git-preview]")
-    .getByRole("button", { name: "Comment", exact: true })
-    .click()
-  await page.getByRole("textbox", { name: "Comment", exact: true }).fill("Looks good to me")
-  await page.getByRole("dialog").getByRole("button", { name: "Comment", exact: true }).click()
+  const box = page.getByRole("form", { name: "Comment on #7" })
+  await box.getByRole("textbox", { name: "Comment", exact: true }).fill("Looks good to me")
+  // Preview draws the comment as it will be read.
+  await box.getByRole("tab", { name: "Preview" }).click()
+  await expect(box.getByText("Looks good to me")).toBeVisible()
+  await box.getByRole("button", { name: "Comment", exact: true }).click()
   await expect
     .poll(() => seen.find((r) => r.path === "/git/github/pulls/7/comment")?.body)
     .toEqual({ body: "Looks good to me" })
@@ -1170,7 +1175,7 @@ test("open issues are listed under the pull requests and can be answered", async
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("tab", { name: "GitHub" }).click()
   const row = page.locator("li").filter({ hasText: "Crash on start" })
-  await expect(row).toContainText("2 comments")
+  await expect(row.getByLabel("2 comments")).toBeVisible()
   await row.getByRole("button", { name: "Comment", exact: true }).click()
   await page.getByRole("textbox", { name: "Comment", exact: true }).fill("On it")
   await page.getByRole("dialog").getByRole("button", { name: "Comment", exact: true }).click()

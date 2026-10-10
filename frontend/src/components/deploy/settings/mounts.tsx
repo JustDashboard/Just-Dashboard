@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { ArrowRight, LockClosed, Servers, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
@@ -54,13 +55,7 @@ export const OWNERSHIP: Record<Ownership, { word: string; hint: string }> = {
   observed: { word: "Observed", hint: "watched only; never removed" },
 }
 
-/**
- * Who owns a mount, a volume or a hostname, drawn one way wherever it is
- * asked: the word "Ownership" inside the trigger, so the value never floats
- * with nothing saying what it is, and what removal does to each choice as the
- * option's hint. A hostname can only be managed or linked, so its caller
- * narrows `options`.
- */
+/** Ownership uses the shared select; removal consequences stay beside the chosen value. */
 export function OwnershipSelect<T extends Ownership>({
   value,
   onChange,
@@ -77,27 +72,29 @@ export function OwnershipSelect<T extends Ownership>({
   disabled?: boolean
   className?: string
 }) {
+  const descriptionId = useId()
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as T)} disabled={disabled}>
-      {/* The body size at every width: this sits in a line of other small
-          controls and readings, where the phone's 16px select face was the
-          loudest word in the row. */}
-      <SelectTrigger aria-label={label} className={cn("gap-1.5 max-sm:text-body", className)}>
-        <span className="text-muted-foreground">Ownership</span>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent position="popper" align="start" className="min-w-72">
-        {options.map((ownership) => (
-          <SelectItem
-            key={ownership}
-            value={ownership}
-            hint={<span aria-hidden>{OWNERSHIP[ownership].hint}</span>}
-          >
-            {OWNERSHIP[ownership].word}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1", className)}>
+      <Select value={value} onValueChange={(next) => onChange(next as T)} disabled={disabled}>
+        <SelectTrigger
+          aria-label={label}
+          aria-describedby={descriptionId}
+          className="max-sm:text-body"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((ownership) => (
+            <SelectItem key={ownership} value={ownership}>
+              {OWNERSHIP[ownership].word}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span id={descriptionId} className="text-hint text-muted-foreground">
+        {OWNERSHIP[value].hint}
+      </span>
+    </div>
   )
 }
 
@@ -111,7 +108,8 @@ export function MountRows({
   onChange,
   readOnly,
   idPrefix = "mount",
-  emptyLabel = "No persistent mounts. The runtime is currently stateless.",
+  // The title already says there are none; this says what that costs.
+  emptyLabel = "Whatever the container writes is gone on its next release.",
   rowError,
   product,
 }: {
@@ -133,12 +131,15 @@ export function MountRows({
     <ul aria-label="Mounts" className="@container divide-y divide-hairline">
       {mounts.map((mount, index) => {
         const source = mount.source.trim()
+        const kind = source ? mountKind(source) : undefined
         return (
+          // A row rises as it is added (§11's *arrived*) rather than snapping
+          // in under the button that added it.
           <li
             key={index}
-            className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @min-[36rem]:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
+            className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @min-[36rem]:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
           >
-            <span className="row-start-1 mb-0.5 flex">
+            <span key={kind ?? "none"} className="row-start-1 mb-0.5 flex animate-rise">
               <MountMark source={source} product={source ? product : undefined} />
             </span>
             <Field label="Source" htmlFor={`${idPrefix}-source-${index}`} className="row-start-1">
@@ -151,9 +152,13 @@ export function MountRows({
                   onChange={(event) => change(index, { source: event.target.value })}
                   className="font-mono"
                 />
-                {source && (
+                {/* Keyed on the kind, so the word rises when "/" turns a
+                    volume into a host path and not on every letter typed. */}
+                {kind && (
                   <InputGroupAddon align="inline-end">
-                    <InputGroupText>{mountKind(source)}</InputGroupText>
+                    <InputGroupText key={kind} className="animate-rise">
+                      {kind}
+                    </InputGroupText>
                   </InputGroupAddon>
                 )}
               </InputGroup>
@@ -210,7 +215,10 @@ export function MountRows({
               className="col-[2/span_2] row-start-3 @min-[36rem]:col-[2/span_4] @min-[36rem]:row-start-2"
             />
             {rowError?.(index) && (
-              <p role="alert" className="col-span-full pl-11 text-hint text-destructive">
+              <p
+                role="alert"
+                className="col-span-full animate-rise pl-11 text-hint text-destructive"
+              >
                 {rowError(index)}
               </p>
             )}

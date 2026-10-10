@@ -33,23 +33,33 @@ func openSSLNames(v VersionSuites) string {
 // HTTP/2 has its own directive only where the installed nginx supports it.
 func requireLiveNginxHTTP2(t *testing.T) {
 	t.Helper()
-	binary, err := exec.LookPath("nginx")
-	if err != nil {
+	if _, err := exec.LookPath("nginx"); err != nil {
 		t.Skip("nginx is not installed")
 	}
+	if !liveNginxHasHTTP2Directive(t) {
+		t.Skip("nginx does not support the http2 on directive")
+	}
+}
+
+// liveNginxHasHTTP2Directive asks the installed nginx whether it takes
+// `http2 on;`, which arrived in 1.25.1; an older build turns HTTP/2 on in the
+// listen instead.
+func liveNginxHasHTTP2Directive(t *testing.T) bool {
+	t.Helper()
 	root := t.TempDir()
 	config := filepath.Join(root, "nginx.conf")
 	content := fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\nhttp { access_log off; server { listen 127.0.0.1:8080; http2 on; } }\n", root)
 	if err := os.WriteFile(config, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.Command(binary, "-p", root, "-c", config, "-t").CombinedOutput()
+	output, err := exec.Command("nginx", "-p", root, "-c", config, "-t").CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(output), `unknown directive "http2"`) {
-			t.Skip("nginx does not support the http2 on directive")
+			return false
 		}
 		t.Fatalf("check nginx HTTP/2 support: %v\n%s", err, output)
 	}
+	return true
 }
 
 func TestLiveDeepScanOfNginx(t *testing.T) {

@@ -1,4 +1,7 @@
 # Dashboard-only interactive startup. The outer login shell already read profiles.
+__jd_start_agent="${JD_TERMINAL_START_AGENT:-}"
+__jd_start_dir="${JD_TERMINAL_START_DIR:-}"
+unset JD_TERMINAL_START_AGENT JD_TERMINAL_START_DIR
 [[ -r ~/.bashrc ]] && source ~/.bashrc
 if ! declare -F _completion_loader >/dev/null && [[ -r /usr/share/bash-completion/bash_completion ]]; then
   source /usr/share/bash-completion/bash_completion
@@ -15,3 +18,14 @@ __jd_prompt() {
 }
 PROMPT_COMMAND+=(__jd_prompt)
 __jd_prompt
+# Profiles may change directory; a requested agent still starts beside the
+# focused terminal. A failed or missing tool must leave its shell available.
+if [[ -n $__jd_start_agent ]]; then
+  if [[ -z $__jd_start_dir ]] || builtin cd -- "$__jd_start_dir"; then
+    case "$__jd_start_agent" in
+      codex) codex --yolo || true ;;
+      claude) claude --dangerously-skip-permissions || true ;;
+    esac
+  fi
+fi
+unset __jd_start_agent __jd_start_dir

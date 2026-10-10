@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-10T00:42:59Z",
+  "bootId": "c2f179c6-ea82-4adf-8091-f289044aaf71",
+  "evidence": {},
+  "failures": [
+    "PUT /network/native/profiles/enp0s4 -> 409: {'error': {'code': 'would_lock_you_out', 'message': 'this would leave this server with no route to the internet over IPv6, which your connection and every outbound one ride on, so it was put back'}}"
+  ],
+  "phase": "p11-kill netplan-networkd 17",
+  "result": "fail",
+  "seconds": 4.2
+}

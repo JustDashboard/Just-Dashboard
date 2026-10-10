@@ -111,6 +111,23 @@ var stepLabels = map[StepKey]string{
 	StepLegacyPipeline:       "Compatibility pipeline",
 }
 
+// liveReleaseStepLabels name start_candidate for the operations that take it
+// against the live release instead of starting a new one
+// (operationTargetsLiveRelease): a Stop read "Start new release" in the
+// project header while it took the site down.
+var liveReleaseStepLabels = map[Operation]string{
+	OperationRestart: "Restart live release",
+	OperationStop:    "Stop live release",
+	OperationStart:   "Start live release",
+}
+
+func stepLabel(key StepKey, operation Operation) string {
+	if label, ok := liveReleaseStepLabels[operation]; ok && key == StepStartCandidate {
+		return label
+	}
+	return stepLabels[key]
+}
+
 // DeploymentFacts are the source and build facts an archived deployment's
 // plan recorded, so the archived list can draw each one as what it deployed
 // rather than as a generic workload.
@@ -244,7 +261,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		if livePort > 0 {
 			summary.HostPort = livePort
 		}
-		summary.PendingChanges = summary.LiveReleaseID == 0 || summary.LivePlanRevision != summary.DesiredRevision
+		summary.PendingChanges = summary.LiveReleaseID == 0
 		result.Deployments = append(result.Deployments, summary)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,6 +269,20 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	// An undone edit advances the revision with nothing left to deploy, so a
+	// revision the live release was not built from is compared by content. Only
+	// those deployments pay for it, which is why it is not batched below.
+	for index := range result.Deployments {
+		summary := &result.Deployments[index]
+		if summary.LiveReleaseID == 0 || summary.LivePlanRevision == summary.DesiredRevision {
+			continue
+		}
+		pending, err := pendingState(ctx, s.db, summary.ID, summary.EnvironmentID)
+		if err != nil {
+			return nil, err
+		}
+		summary.PendingChanges = pending.Pending
 	}
 	projectIDs := make([]int64, 0, len(result.Deployments))
 	releaseIDs := make([]int64, 0, len(result.Deployments))
@@ -674,7 +705,7 @@ func (s *OrchestrationStore) currentSteps(ctx context.Context, runIDs []int64) (
 	}
 	placeholders, args := inPlaceholders(runIDs)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT run_id, step_key, status FROM (
+		SELECT ranked.run_id, ranked.step_key, ranked.status, deploy_runs.operation FROM (
 		  SELECT run_id, step_key, status,
 		         ROW_NUMBER() OVER (
 		           PARTITION BY run_id
@@ -683,18 +714,20 @@ func (s *OrchestrationStore) currentSteps(ctx context.Context, runIDs []int64) (
 		         ) AS rank
 		    FROM deploy_steps
 		   WHERE run_id IN `+placeholders+` AND status IN ('running','blocked','failed','pending')
-		) WHERE rank = 1`, args...)
+		) ranked JOIN deploy_runs ON deploy_runs.id = ranked.run_id
+		 WHERE ranked.rank = 1`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read current deployment steps: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var runID int64
+		var operation Operation
 		step := &CurrentStep{}
-		if err := rows.Scan(&runID, &step.Key, &step.State); err != nil {
+		if err := rows.Scan(&runID, &step.Key, &step.State, &operation); err != nil {
 			return nil, err
 		}
-		step.Label = stepLabels[step.Key]
+		step.Label = stepLabel(step.Key, operation)
 		result[runID] = step
 	}
 	return result, rows.Err()

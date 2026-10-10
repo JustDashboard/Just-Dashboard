@@ -1,0 +1,72 @@
+[
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-build-73252220.log",
+    "text_copy": "build-initial-failed.log",
+    "raw_gzip": "build-initial-failed.log.raw.gz",
+    "original_sha256": "017404cc88b4a9402a79dd9a3543a568c3ceb613b3325de90c9c29aabb7775bc",
+    "copy_sha256": "017404cc88b4a9402a79dd9a3543a568c3ceb613b3325de90c9c29aabb7775bc",
+    "raw_gzip_sha256": "6b186a83bc85318906d2fbdf694e811644a8334fd937adb7ad1e0d5928e5b2b2",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-install-frozen.log",
+    "text_copy": "install-frozen.log",
+    "raw_gzip": "install-frozen.log.raw.gz",
+    "original_sha256": "89181aeba34e9abbae226b687f49dc0c785423364bd12f20ad41d551ef716b15",
+    "copy_sha256": "89181aeba34e9abbae226b687f49dc0c785423364bd12f20ad41d551ef716b15",
+    "raw_gzip_sha256": "4d37ce1408528ccf3d38dc78ed58aed53d28f2f59ac1afb1dac46544dcd52da7",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-build-current.log",
+    "text_copy": "build-initial-passed.log",
+    "raw_gzip": "build-initial-passed.log.raw.gz",
+    "original_sha256": "834557ad802d6c11e6a2dbafe07afc3570f5d5d3ecad12750de238c577ab508e",
+    "copy_sha256": "13e1f2e462167ac2e150ad916c9e0e60ad619d1b02430a56f0922d148fe56d60",
+    "raw_gzip_sha256": "d78cbbe00654f366d45ef347d55ad1d4746db71c564bd8f01ea58454e08a3fc8",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first.log",
+    "text_copy": "browser-initial.log",
+    "raw_gzip": "browser-initial.log.raw.gz",
+    "original_sha256": "4c8ccea173936676e37fc0f5b91fa54b6253782a28e51768b057d25045a633eb",
+    "copy_sha256": "4c8ccea173936676e37fc0f5b91fa54b6253782a28e51768b057d25045a633eb",
+    "raw_gzip_sha256": "023d4d47036e2de3df61aa94ca5cd7998cd8c38e97d561ff893d0a3578566703",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-required-cd6bacf5.log",
+    "text_copy": "required-initial.log",
+    "raw_gzip": "required-initial.log.raw.gz",
+    "original_sha256": "5541ad09beda9a874a67b2590ee0455091bab287e339955fe97e9d5f1eee1142",
+    "copy_sha256": "5541ad09beda9a874a67b2590ee0455091bab287e339955fe97e9d5f1eee1142",
+    "raw_gzip_sha256": "d2a7fccc9830bc4a854dd52bf91db47623c4429e93c8a37fee388b884083677d",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-build-settled.log",
+    "text_copy": "build-final.log",
+    "raw_gzip": "build-final.log.raw.gz",
+    "original_sha256": "212dbad0aa81e1f99e209db3d130b4486a8e0ab8c1b7837d67682b71b9571d65",
+    "copy_sha256": "83143630c317a5dadad86c627a43d4b3350120d78894a3c6ac9ebbd442123634",
+    "raw_gzip_sha256": "e8428143d0abb1c72501fe65b622e077bfe97987b01196b1b51695b49b4efc1a",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-required-final-2dc3d86c.log",
+    "text_copy": "required-final.log",
+    "raw_gzip": "required-final.log.raw.gz",
+    "original_sha256": "aa4c4378086ce65fc0b811bef864f1cb4cb79b8f1ba83b477ad320374b4f5ad5",
+    "copy_sha256": "aa4c4378086ce65fc0b811bef864f1cb4cb79b8f1ba83b477ad320374b4f5ad5",
+    "raw_gzip_sha256": "81fcdf30dc92d07009ca094ad28f7ccc0aab8128b36d9ab7e9e5bb0ef4fb1e6c",
+    "normalization": "remove carriage returns and trailing line/EOF whitespace only",
+    "raw_gzip_roundtrip": true
+  }
+]

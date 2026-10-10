@@ -131,13 +131,11 @@ func (c *Client) PreviewCleanup(ctx context.Context) (*CleanupPreview, error) {
 		Key: "networks", Label: "Unused networks", Recommended: true, Examples: []string{},
 		Cost: "Networks occupy no disk. Removing the unused ones frees address space and tidies the list; a network a stopped stack will want again is recreated on the next deploy.",
 	}
-	if list, err := c.ListNetworks(ctx); err == nil {
+	if list, err := c.removableNetworks(ctx); err == nil {
 		for _, n := range list {
-			if n.Containers == 0 && !IsSystemNetwork(n.Name) && n.Name != "" {
-				networks.Items++
-				if len(networks.Examples) < 4 {
-					networks.Examples = append(networks.Examples, n.Name)
-				}
+			networks.Items++
+			if len(networks.Examples) < 4 {
+				networks.Examples = append(networks.Examples, n.Name)
 			}
 		}
 	}
@@ -147,7 +145,7 @@ func (c *Client) PreviewCleanup(ctx context.Context) (*CleanupPreview, error) {
 	// go looking is how somebody prunes a database by accident somewhere else.
 	volumes := CleanupCategory{
 		Key: "volumes", Label: "Volumes attached to nothing", Destroys: true, Examples: []string{},
-		Cost: "This destroys data permanently. A volume outlives the container that made it, so an unattached volume is often the only copy of something — and Docker counts a volume belonging to a merely *stopped* stack as unused.",
+		Cost: "This destroys data permanently. A volume outlives the container that made it, so an unattached volume is often the only copy of something — a stack taken down with `docker compose down` leaves its volumes attached to nothing.",
 	}
 	for _, v := range du.Volumes {
 		if v.UsageData == nil || v.UsageData.RefCount > 0 {

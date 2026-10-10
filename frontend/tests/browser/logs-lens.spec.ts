@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
-import { json, mockProject, run as fixtureRun, steps as fixtureSteps } from "./deploy-fixture"
-import { PG, mockLensLogs } from "./logs-lens-fixture"
+import { json, mockProject, now } from "./deploy-fixture"
+import { PG, mockLensLogs, type LensMocks } from "./logs-lens-fixture"
 
 /**
  * `/logs` reading a source through its lens: the lines by what they record,
@@ -13,6 +13,9 @@ import { PG, mockLensLogs } from "./logs-lens-fixture"
  */
 
 const pgLog = `/logs?source=${encodeURIComponent(PG)}`
+
+/** The questions about lines: the lens's readings ask for counts (`limit=1`) each minute. */
+const lineSearches = (mocks: LensMocks) => mocks.searches.filter((s) => s.get("limit") !== "1")
 
 test("a lensed log reads as its events, folds a record and counts a repeat", async ({ page }) => {
   await mockLensLogs(page)
@@ -57,7 +60,7 @@ test("a quick view and a field's value narrow the stream on the server", async (
   // The question is no longer the quick view's, so it shows as what it is.
   await expect(page.getByRole("button", { name: "Clear the user filter" })).toBeVisible()
   await expect(slow).toHaveAttribute("aria-pressed", "false")
-  expect(mocks.searches).toHaveLength(0)
+  expect(lineSearches(mocks)).toHaveLength(0)
 })
 
 test("paused, a new question's lines are held, and the pane says so rather than that none match", async ({
@@ -89,12 +92,12 @@ test("a line opens in place, and the lines around it are two searches either sid
   )
   await expect(page.getByRole("button", { name: "Only this event" })).toBeVisible()
   // Nothing is fetched for the context until it is asked for.
-  expect(mocks.searches).toHaveLength(0)
+  expect(lineSearches(mocks)).toHaveLength(0)
 
   await page.getByRole("button", { name: "Lines around this" }).click()
-  await expect.poll(() => mocks.searches.length).toBe(2)
-  const before = mocks.searches.find((s) => s.has("until"))!
-  const after = mocks.searches.find((s) => s.get("order") === "asc")!
+  await expect.poll(() => lineSearches(mocks).length).toBe(2)
+  const before = lineSearches(mocks).find((s) => s.has("until"))!
+  const after = lineSearches(mocks).find((s) => s.get("order") === "asc")!
   expect(before.get("until")).toBe("2026-09-27T10:01:03.221Z")
   expect(before.get("limit")).toBe("25")
   expect(after.get("since")).toBe("2026-09-27T10:01:03.221Z")
@@ -126,8 +129,9 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("heading", { name: "Slow statements" })).toBeVisible()
   await expect(page.getByText(/JOIN customers c ON/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Patterns" })).toBeVisible()
-  // The logs page carries the lens's readings at the top of Insights.
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  // The lens's readings stand over the workbench rather than in Insights,
+  // which on this window carries them as its chips' counts instead.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   const overview = mocks.searches.find((s) => s.get("facets")?.includes("pattern"))!
   expect(overview.get("limit")).toBe("1")
@@ -153,6 +157,58 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("button", { name: "Clear the user filter" })).toBeVisible()
 })
 
+test("the source is named over the workbench with its readings, and the strip is its views", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const mocks = await mockLensLogs(page)
+  await page.goto(pgLog)
+
+  // What is being read, as the page's opening line, with its verbs at its end.
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("postgresql-16-main.log", { exact: true })).toBeVisible()
+  await expect(identity.getByText("/var/log/postgresql/postgresql-16-main.log")).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Export" })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Logs shortcuts" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Export" })).toHaveCount(1)
+
+  // The strip is the views alone, from its leading edge, as a deployment's is.
+  const strip = page.getByRole("navigation", { name: "Log mode" })
+  const toggle = await page.getByRole("button", { name: "Hide the sources" }).boundingBox()
+  const live = await strip.getByRole("button", { name: "Live", exact: true }).boundingBox()
+  expect(live!.x - (toggle!.x + toggle!.width)).toBeLessThan(16)
+
+  // The lens's five readings, the quick view each answers carrying no second count.
+  const tiles = page.locator("[data-slot=stat-tile]")
+  await expect(tiles).toHaveCount(5)
+  await expect(tiles.filter({ hasText: "Slow statements" })).toContainText("4")
+  await expect(page.getByRole("button", { name: /^Slow\b/ })).toHaveText("Slow")
+
+  // A press narrows the lines to what it counts, and a second lets it go.
+  const reading = page.getByRole("button", { name: "Show the lines behind slow statements" })
+  await reading.click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual(["event:slow"])
+  await expect(page.getByRole("button", { name: /^Slow\b/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await page
+    .getByRole("button", { name: "Show every line again, not only the slow statements" })
+    .click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual([])
+})
+
+test("on a laptop's window the readings are the lens row's counts, and the lines keep the height", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await mockLensLogs(page)
+  await page.goto(pgLog)
+  await expect(page.locator("[data-slot=host-identity]")).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Slow\b/ })).toContainText("4")
+})
+
 test("the rail draws a stack as what it runs and offers the journal's readings a host lacks", async ({
   page,
 }) => {
@@ -173,26 +229,28 @@ test("the rail draws a stack as what it runs and offers the journal's readings a
 test("a service page's logs open on the lens's defaults and drop them for another vocabulary", async ({
   page,
 }) => {
-  // `/deploy/7/runs/84`'s runtime logs are the service logs every page embeds.
-  await mockProject(page)
-  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
-    socket.send(
-      JSON.stringify({
-        type: "snapshot",
-        data: { run: fixtureRun, steps: fixtureSteps },
-        ts: Date.now(),
-      }),
-    )
+  // A deployment's Output is the service logs every page embeds, one source
+  // per container its release runs.
+  const container = (containerId: string, name: string, image: string) => ({
+    containerId,
+    name,
+    releaseId: 20,
+    liveRelease: true,
+    state: "running",
+    health: "healthy",
+    imageId: `sha256:${containerId.padEnd(64, "0")}`,
+    image,
   })
-  await page.route("**/api/v1/deploy/7/runs/84/logs", (route) =>
-    json(route, {
+  await mockProject(page, {
+    runtime: {
       status: "available",
-      sources: [
-        { containerId: "gate", name: "ssh-gate", liveUrl: "" },
-        { containerId: "db", name: "shop-db", liveUrl: "" },
+      observedAt: now,
+      services: [
+        container("gate", "ssh-gate", "linuxserver/openssh-server"),
+        container("db", "shop-db", "postgres:16"),
       ],
-    }),
-  )
+    },
+  })
   const sockets: URLSearchParams[] = []
   await page.routeWebSocket(/\/api\/v1\/logs\/stream/, (socket) => {
     const params = new URL(socket.url()).searchParams
@@ -218,11 +276,7 @@ test("a service page's logs open on the lens's defaults and drop them for anothe
     return json(route, {})
   })
 
-  await page.goto("/deploy/7/runs/84")
-  await page
-    .getByRole("group", { name: "Run views" })
-    .getByRole("button", { name: "Runtime logs", exact: true })
-    .click()
+  await page.goto("/deploy/7/logs?view=output&service=gate")
   await expect(page.getByText("hello from docker:gate")).toBeVisible()
   // The auth lens hides its scans and cron sessions from the first socket —
   // not a second one after the fact — and says so as a chip.
@@ -232,7 +286,7 @@ test("a service page's logs open on the lens's defaults and drop them for anothe
   expect(sockets).toHaveLength(1)
   expect(sockets[0].getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
 
-  await page.getByRole("combobox", { name: "Runtime log source" }).click()
+  await page.getByRole("combobox", { name: "Service" }).click()
   await page.getByRole("option", { name: "shop-db" }).click()
   await expect(page.getByText("hello from docker:db")).toBeVisible()
   expect(sockets.at(-1)!.getAll("f")).toEqual([])

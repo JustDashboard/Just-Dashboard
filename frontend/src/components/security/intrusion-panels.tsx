@@ -6,7 +6,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Address, jailProduct } from "@/components/security/marks"
 import { get } from "@/lib/api"
 import { lensFor } from "@/lib/log-lenses"
-import type { Fail2banJail } from "@/lib/types"
+import type { BlocksView, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { PageContext } from "@/components/page"
@@ -22,9 +22,62 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { AreaFindings } from "@/components/security/posture-panel"
+import { BlocksPanel } from "@/components/security/blocks-panel"
+import { CrowdSecPanel } from "@/components/security/crowdsec-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
 import { OffendersPanel } from "@/components/security/offenders-panel"
 import { useSecurity } from "@/components/security/security-context"
+import { SuricataPanel } from "@/components/security/suricata-panel"
+
+/**
+ * Intrusion prevention: three tools that read different things, one after the
+ * other, each opening on its own identity line.
+ *
+ * fail2ban reads this host's logs and bans what it saw misbehave; CrowdSec
+ * reads them too and adds what other servers saw, enforced by bouncers; Suricata
+ * reads the packets. They are not alternatives — a server can run all three —
+ * so a tool that is not installed is a handoff in its own section and never
+ * hides the others.
+ */
+export function IntrusionPanels() {
+  // One read of every engine's refused addresses, shared by the merged list
+  // and by both ban forms, which say what already holds an address.
+  const blocks = usePoll<BlocksView>((signal) => get("/security/blocks", undefined, signal), 30_000)
+  return (
+    <>
+      <PageContext eyebrow="Security" title="Intrusion prevention" />
+      <BlocksPanel
+        data={blocks.data}
+        error={blocks.error}
+        loading={blocks.loading}
+        onRetry={blocks.refresh}
+      />
+      <Fail2banSection blocks={blocks.data} onBlocked={blocks.refresh} />
+      <ToolSection name="CrowdSec">
+        <CrowdSecPanel blocks={blocks.data} onBlocked={blocks.refresh} />
+      </ToolSection>
+      <ToolSection name="Suricata">
+        <SuricataPanel />
+      </ToolSection>
+    </>
+  )
+}
+
+/**
+ * A tool of its own under the one before it. The hairline is what says the
+ * page has started on something else: each tool opens on the same identity
+ * line, and without it the three read as one long fail2ban page.
+ */
+function ToolSection({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <section
+      aria-label={name}
+      className="flex min-w-0 flex-col gap-6 border-t border-hairline pt-8 md:gap-8 md:pt-10"
+    >
+      {children}
+    </section>
+  )
+}
 
 /**
  * fail2ban: the tool itself in one identity line, drawn as its own mark with
@@ -42,7 +95,7 @@ import { useSecurity } from "@/components/security/security-context"
  * writes to the journal said there was nothing to read; the journal is read
  * now instead.
  */
-export function IntrusionPanels() {
+function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked: () => void }) {
   const { can } = useAuth()
   const { posture, exposure, applyFix } = useSecurity()
   const { data, error, loading, refresh } = usePoll(
@@ -82,28 +135,11 @@ export function IntrusionPanels() {
     />
   )
 
-  const header = <PageContext eyebrow="Security" title="Intrusion prevention" />
-
-  if (loading && !data) {
-    return (
-      <>
-        {header}
-        <LoadingPanel />
-      </>
-    )
-  }
-  if (error && !data) {
-    return (
-      <>
-        {header}
-        <ErrorState error={error} />
-      </>
-    )
-  }
+  if (loading && !data) return <LoadingPanel />
+  if (error && !data) return <ErrorState error={error} />
   if (!data?.available) {
     return (
       <>
-        {header}
         <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
         <EmptyState
           icon={Slash}
@@ -116,7 +152,6 @@ export function IntrusionPanels() {
   if (!data.running) {
     return (
       <>
-        {header}
         <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
         <EmptyState
           icon={Slash}
@@ -133,8 +168,6 @@ export function IntrusionPanels() {
 
   return (
     <>
-      {header}
-
       <HostIdentity
         mark="fail2ban"
         title="fail2ban"
@@ -197,7 +230,11 @@ export function IntrusionPanels() {
         jails={jails}
         canManage={can("system.admin")}
         clientIp={exposure?.client}
-        onChanged={refresh}
+        blocks={blocks}
+        onChanged={() => {
+          refresh()
+          onBlocked()
+        }}
       />
 
       <OffendersPanel onBlocked={refresh} journal={activity.data?.kind === "journal"} />

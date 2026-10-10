@@ -7,8 +7,8 @@ import { useLayoutEffect, useRef, useState } from "react"
  * readings beside its name when there is room and under it when there is not.
  *
  * The window is the wrong thing to ask. A settings page's fields column is
- * what is left of the window once the navigation and, from `xl`, the rail
- * have taken theirs, so at 768 a list that "is on a tablet" is 450 pixels wide
+ * what is left of the window once the navigation has taken its share, and
+ * never more than 48rem, so at 768 a list that "is on a tablet" is 450 pixels wide
  * and a row that laid its readings out for the window lost its name to them.
  * The choice is still made once and drawn once (§12): a reading that exists
  * in a hidden copy is two answers to every query a test or a screen reader

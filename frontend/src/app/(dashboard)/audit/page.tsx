@@ -1,8 +1,9 @@
 "use client"
 
 import { Fragment, useMemo, useState } from "react"
-import { useSessionState } from "@/lib/view-state"
-import { useSearchParams } from "next/navigation"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useFilterHistory } from "@/components/workspace/history"
+import { useHeldList } from "@/components/workspace/held-list"
 import { CrossCircle, FileText } from "@/components/icons"
 import { get } from "@/lib/api"
 import { calendarDate, clock, plural, relativeTime } from "@/lib/format"
@@ -76,17 +77,41 @@ export default function AuditPage() {
   // an audit entry offers a link, and a link that lands on an unfiltered list
   // of everything the dashboard has ever done is not the entry it promised.
   //
-  // Read once as an initial value rather than kept in sync, like the other
-  // deep links in this product — the URL is where the reader arrived, not
-  // where they are now, and re-applying it on every keystroke would fight the
-  // filter box.
-  const initialAction = useSearchParams().get("action") ?? ""
-  const [username, setUsername] = useSessionState("audit.username", "")
-  const [action, setAction] = useSessionState("audit.action", "", initialAction || undefined)
-  const [onlyFailed, setOnlyFailed] = useSessionState("audit.failed", false)
-  const [offset, setOffset] = useSessionState("audit.offset", 0)
+  // Settled filters are complete questions; Back restores them without racing the input.
+  const [filters, setFilters] = useFilterHistory("audit.filters", {
+    username: "",
+    action: "",
+    failed: "",
+    offset: "0",
+  })
+  const { username, action } = filters
+  const onlyFailed = filters.failed === "1"
+  const offset =
+    /^\d+$/.test(filters.offset) && Number.isSafeInteger(Number(filters.offset))
+      ? Math.floor(Number(filters.offset) / PAGE_SIZE) * PAGE_SIZE
+      : 0
+  const setUsername = (username: string) => setFilters((previous) => ({ ...previous, username }))
+  const setAction = (action: string) => setFilters((previous) => ({ ...previous, action }))
+  const setOnlyFailed = (next: boolean | ((value: boolean) => boolean)) =>
+    setFilters((previous) => ({
+      ...previous,
+      failed: (typeof next === "function" ? next(previous.failed === "1") : next) ? "1" : "",
+    }))
+  const setOffset = (offset: number | ((value: number) => number)) =>
+    setFilters(
+      (previous) => ({
+        ...previous,
+        offset: String(typeof offset === "function" ? offset(Number(previous.offset)) : offset),
+      }),
+      true,
+    )
 
-  const { data, error, loading } = usePoll(
+  const {
+    data,
+    error,
+    loading,
+    refresh: trailRefresh,
+  } = usePoll(
     (signal) =>
       get<AuditPage>(
         "/audit/",
@@ -117,258 +142,297 @@ export default function AuditPage() {
   if (data && data.total !== total) setTotal(data.total)
 
   const filtered = username !== "" || action !== "" || onlyFailed
-  const entries = useMemo(() => data?.entries ?? [], [data])
+  const held = useHeldList(data?.entries, (entry) => String(entry.id), JSON.stringify(filters))
+  const entries = held.rows
   const arrived = useArrivals(entries.map((entry) => String(entry.id)))
   const days = useMemo(() => byDay(entries), [entries])
 
   const narrow = (next: () => void) => {
     next()
-    setOffset(0)
+    setFilters((previous) => ({ ...previous, offset: "0" }))
   }
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Advanced" title="Audit log" />
+    <Workspace
+      name="Audit"
+      openItems={false}
+      refresh={() => {
+        held.reveal()
+        trailRefresh()
+        day.refresh()
+      }}
+      escape={() => {
+        if (!filtered) return false
+        setFilters({ username: "", action: "", failed: "", offset: "0" }, true)
+        return true
+      }}
+    >
+      <Page className="animate-rise">
+        <PageContext eyebrow="Advanced" title="Audit log" />
 
-      {day.data && <DayReadings day={day.data} />}
+        {day.data && <DayReadings day={day.data} />}
 
-      {/* The table is the whole of the trail, and it is framed: a grid that
+        {/* The table is the whole of the trail, and it is framed: a grid that
           owns its own scrolling takes an edge, or a row whose actions sit past
           the right of it reads as a row with no actions (§2). The toolbar stays
           mounted across a filter change so the box being typed into never
           loses its caret to a skeleton. */}
-      <Panel>
-        <PanelHeader
-          title="Recorded requests"
-          actions={
-            total !== undefined && (
-              <span className="text-hint text-muted-foreground">
-                {filtered ? "Matching" : "Recorded"}{" "}
-                <span key={total} className="numeric inline-block animate-rise text-foreground">
-                  {total.toLocaleString()}
+        <Panel>
+          <PanelHeader
+            title="Recorded requests"
+            actions={
+              total !== undefined && (
+                <span className="text-hint text-muted-foreground">
+                  {filtered ? "Matching" : "Recorded"}{" "}
+                  <span key={total} className="numeric inline-block animate-rise text-foreground">
+                    {total.toLocaleString()}
+                  </span>
                 </span>
-              </span>
-            )
-          }
-        />
-        <PanelToolbar>
-          <SearchInput
-            containerClassName="sm:w-48"
-            value={username}
-            onChange={(e) => narrow(() => setUsername(e.target.value))}
-            placeholder="User"
-          />
-          <Input
-            value={action}
-            onChange={(e) => narrow(() => setAction(e.target.value))}
-            placeholder="Action, e.g. docker.container"
-            className="h-8 w-full text-body sm:w-64"
-          />
-          <FilterChip
-            selected={onlyFailed}
-            onClick={() => narrow(() => setOnlyFailed(!onlyFailed))}
-          >
-            <CrossCircle aria-hidden className="size-3.5 text-destructive" />
-            Failures only
-          </FilterChip>
-        </PanelToolbar>
-        <PanelToolbar>
-          <ChipStrip role="group" aria-label="Sections">
-            {AUDIT_SECTIONS.filter((section) => CHIPS.includes(section.key)).map((section) => {
-              const selected = action === section.filter
-              return (
-                <FilterChip
-                  key={section.key}
-                  selected={selected}
-                  onClick={() => narrow(() => setAction(selected ? "" : section.filter))}
-                >
-                  {section.product ? (
-                    <ProductGlyph id={section.product} />
-                  ) : (
-                    <section.glyph aria-hidden className="size-3.5 text-muted-foreground" />
-                  )}
-                  {section.label}
-                </FilterChip>
               )
-            })}
-          </ChipStrip>
-        </PanelToolbar>
+            }
+          />
+          <PanelToolbar>
+            <SearchInput
+              containerClassName="sm:w-48"
+              value={username}
+              onChange={(e) => narrow(() => setUsername(e.target.value))}
+              placeholder="User"
+            />
+            <Input
+              value={action}
+              onChange={(e) => narrow(() => setAction(e.target.value))}
+              data-workspace-search
+              placeholder="Action, e.g. docker.container"
+              className="h-8 w-full text-body sm:w-64"
+            />
+            <FilterChip
+              selected={onlyFailed}
+              onClick={() => narrow(() => setOnlyFailed(!onlyFailed))}
+            >
+              <CrossCircle aria-hidden className="size-3.5 text-destructive" />
+              Failures only
+            </FilterChip>
+            <WorkspaceHelp />
+            {held.pending > 0 && (
+              <Button
+                size="xs"
+                aria-label={`Show ${held.pending} new audit ${held.pending === 1 ? "entry" : "entries"}`}
+                onClick={held.reveal}
+              >
+                <span role="status">
+                  {held.pending} new {held.pending === 1 ? "entry" : "entries"}
+                </span>{" "}
+                · Show
+              </Button>
+            )}
+          </PanelToolbar>
+          <PanelToolbar>
+            <ChipStrip role="group" aria-label="Sections">
+              {AUDIT_SECTIONS.filter((section) => CHIPS.includes(section.key)).map((section) => {
+                const selected = action === section.filter
+                return (
+                  <FilterChip
+                    key={section.key}
+                    selected={selected}
+                    onClick={() => narrow(() => setAction(selected ? "" : section.filter))}
+                  >
+                    {section.product ? (
+                      <ProductGlyph id={section.product} />
+                    ) : (
+                      <section.glyph aria-hidden className="size-3.5 text-muted-foreground" />
+                    )}
+                    {section.label}
+                  </FilterChip>
+                )
+              })}
+            </ChipStrip>
+          </PanelToolbar>
 
-        <PanelBody flush>
-          {loading && !data && <LoadingPanel rows={8} />}
-          {error && !data && <ErrorState error={error} />}
-          {data && (
-            <div key="rows" className="animate-rise">
-              {/* The outer columns take the gutter from their own cell padding,
+          <PanelBody flush>
+            {loading && !data && <LoadingPanel rows={8} />}
+            {error && !data && <ErrorState error={error} />}
+            {data && (
+              <div key="rows" className="animate-rise">
+                {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-              <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
-                <Table containerClassName="max-h-[calc(100svh-22rem)]">
-                  <TableHeader className={stickyTableHeader}>
-                    <TableRow>
-                      <TableHead className="w-28">When</TableHead>
-                      <TableHead>Who</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead className="w-full">Target</TableHead>
-                      <TableHead>Result</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {days.map(({ label, entries: rows }) => (
-                      <Fragment key={label}>
-                        <TableRow className="border-b-0 hover:bg-transparent">
-                          <TableCell colSpan={5} className="pt-4 pb-1.5">
-                            <DayLabel label={label} count={rows.length} />
-                          </TableCell>
-                        </TableRow>
-                        {rows.map((entry) => (
-                          <TableRow
-                            key={entry.id}
-                            className={cn(arrived.has(String(entry.id)) && "animate-rise")}
-                          >
-                            <TableCell>
-                              <div className="numeric font-mono text-xs">{clock(entry.ts)}</div>
-                              <p className="text-hint text-muted-foreground">
-                                {relativeTime(entry.ts)}
-                              </p>
+                <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
+                  <Table containerClassName="max-h-[calc(100svh-22rem)]">
+                    <TableHeader className={stickyTableHeader}>
+                      <TableRow>
+                        <TableHead className="w-28">When</TableHead>
+                        <TableHead>Who</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead className="w-full">Target</TableHead>
+                        <TableHead>Result</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {days.map(({ label, entries: rows }) => (
+                        <Fragment key={label}>
+                          <TableRow className="border-b-0 hover:bg-transparent">
+                            <TableCell colSpan={5} className="pt-4 pb-1.5">
+                              <DayLabel label={label} count={rows.length} />
                             </TableCell>
-                            <TableCell>
-                              <Actor entry={entry} />
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex max-w-[20rem] min-w-0 items-center gap-3">
-                                <ActionMark action={entry.action} />
-                                <div className="min-w-0">
-                                  <ActionName action={entry.action} className="block text-xs" />
-                                  {entry.path && (
-                                    <p className="flex min-w-0 items-baseline gap-1.5 text-hint">
-                                      <MethodWord method={entry.method} />
-                                      <RequestPath path={entry.path} />
-                                    </p>
-                                  )}
+                          </TableRow>
+                          {rows.map((entry) => (
+                            <TableRow
+                              key={entry.id}
+                              data-workspace-item={String(entry.id)}
+                              data-workspace-name={entry.action}
+                              tabIndex={0}
+                              className={cn(
+                                "focus-ring-inset",
+                                arrived.has(String(entry.id)) && "animate-rise",
+                              )}
+                            >
+                              <TableCell>
+                                <div className="numeric font-mono text-xs">{clock(entry.ts)}</div>
+                                <p className="text-hint text-muted-foreground">
+                                  {relativeTime(entry.ts)}
+                                </p>
+                              </TableCell>
+                              <TableCell>
+                                <Actor entry={entry} />
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex max-w-[20rem] min-w-0 items-center gap-3">
+                                  <ActionMark action={entry.action} />
+                                  <div className="min-w-0">
+                                    <ActionName action={entry.action} className="block text-xs" />
+                                    {entry.path && (
+                                      <p className="flex min-w-0 items-baseline gap-1.5 text-hint">
+                                        <MethodWord method={entry.method} />
+                                        <RequestPath path={entry.path} />
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            </TableCell>
-                            {/* The column that yields: `max-w-0` beside `w-full` lets it
+                              </TableCell>
+                              {/* The column that yields: `max-w-0` beside `w-full` lets it
                                 shrink to what the others leave and truncate, where a
                                 path longer than that pushed Result past the frame. */}
-                            <TableCell className="max-w-0">
-                              <div className="truncate font-mono text-xs" title={entry.target}>
-                                {entry.target}
+                              <TableCell className="max-w-0">
+                                <div className="truncate font-mono text-xs" title={entry.target}>
+                                  {entry.target}
+                                </div>
+                                {entry.detail && (
+                                  <p
+                                    className="truncate text-hint text-muted-foreground"
+                                    title={entry.detail}
+                                  >
+                                    {entry.detail}
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Result entry={entry} />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {/* Below `lg` the same entries are drawn down the row instead of
+                  across it, so the phone still sees who did what to what, and
+                  whether it worked. */}
+                <div className="px-4 group-data-[plain]/panel:px-0 lg:hidden">
+                  {days.map(({ label, entries: rows }) => (
+                    <section key={label} className="pt-4">
+                      <DayLabel label={label} count={rows.length} />
+                      <ul className="mt-1.5 divide-y divide-hairline">
+                        {rows.map((entry) => (
+                          <li
+                            key={entry.id}
+                            data-workspace-item={String(entry.id)}
+                            data-workspace-name={entry.action}
+                            tabIndex={0}
+                            className={cn(
+                              "flex min-w-0 items-start gap-3 py-3 focus-ring-inset",
+                              ROW_BLEED,
+                              arrived.has(String(entry.id)) && "animate-rise",
+                            )}
+                          >
+                            <ActionMark action={entry.action} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-baseline gap-2">
+                                <ActionName action={entry.action} className="text-xs font-medium" />
+                                <span className="numeric shrink-0 text-hint text-muted-foreground">
+                                  {clock(entry.ts)}
+                                </span>
                               </div>
+                              <p className="truncate font-mono text-hint text-muted-foreground">
+                                {entry.target}
+                              </p>
+                              <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                                <span className="shrink-0 text-foreground">{actorName(entry)}</span>
+                                {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
+                              </p>
                               {entry.detail && (
-                                <p
-                                  className="truncate text-hint text-muted-foreground"
-                                  title={entry.detail}
-                                >
+                                <p className="truncate text-hint text-muted-foreground">
                                   {entry.detail}
                                 </p>
                               )}
-                            </TableCell>
-                            <TableCell>
-                              <Result entry={entry} />
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </Fragment>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              {/* Below `lg` the same entries are drawn down the row instead of
-                  across it, so the phone still sees who did what to what, and
-                  whether it worked. */}
-              <div className="px-4 group-data-[plain]/panel:px-0 lg:hidden">
-                {days.map(({ label, entries: rows }) => (
-                  <section key={label} className="pt-4">
-                    <DayLabel label={label} count={rows.length} />
-                    <ul className="mt-1.5 divide-y divide-hairline">
-                      {rows.map((entry) => (
-                        <li
-                          key={entry.id}
-                          className={cn(
-                            "flex min-w-0 items-start gap-3 py-3",
-                            ROW_BLEED,
-                            arrived.has(String(entry.id)) && "animate-rise",
-                          )}
-                        >
-                          <ActionMark action={entry.action} />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-baseline gap-2">
-                              <ActionName action={entry.action} className="text-xs font-medium" />
-                              <span className="numeric shrink-0 text-hint text-muted-foreground">
-                                {clock(entry.ts)}
-                              </span>
                             </div>
-                            <p className="truncate font-mono text-hint text-muted-foreground">
-                              {entry.target}
-                            </p>
-                            <p className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                              <span className="shrink-0 text-foreground">{actorName(entry)}</span>
-                              {entry.ip && <Address ip={entry.ip} className="min-w-0" />}
-                            </p>
-                            {entry.detail && (
-                              <p className="truncate text-hint text-muted-foreground">
-                                {entry.detail}
-                              </p>
-                            )}
-                          </div>
-                          <Result entry={entry} className="shrink-0" />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ))}
+                            <Result entry={entry} className="shrink-0" />
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+                {entries.length === 0 && (
+                  <EmptyState
+                    icon={FileText}
+                    title={
+                      data.total === 0 && !filtered ? "Nothing recorded yet" : "No entries match"
+                    }
+                    description={
+                      data.total === 0 && !filtered
+                        ? "Every request that changes something on this host is written here."
+                        : "Clear a filter, or look further back with the pager."
+                    }
+                    className="mt-4"
+                  />
+                )}
               </div>
-              {entries.length === 0 && (
-                <EmptyState
-                  icon={FileText}
-                  title={
-                    data.total === 0 && !filtered ? "Nothing recorded yet" : "No entries match"
-                  }
-                  description={
-                    data.total === 0 && !filtered
-                      ? "Every request that changes something on this host is written here."
-                      : "Clear a filter, or look further back with the pager."
-                  }
-                  className="mt-4"
-                />
-              )}
-            </div>
-          )}
-        </PanelBody>
+            )}
+          </PanelBody>
 
-        <PanelFooter className="justify-between">
-          <span className="numeric text-hint text-muted-foreground">
-            {!data
-              ? "Loading…"
-              : data.total === 0
-                ? filtered
-                  ? "No matching entries"
-                  : "Nothing recorded yet"
-                : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
-          </span>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={offset === 0}
-              onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            >
-              Previous
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!data || offset + PAGE_SIZE >= data.total}
-              onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            >
-              Next
-            </Button>
-          </div>
-        </PanelFooter>
-      </Panel>
-    </Page>
+          <PanelFooter className="justify-between">
+            <span className="numeric text-hint text-muted-foreground">
+              {!data
+                ? "Loading…"
+                : data.total === 0
+                  ? filtered
+                    ? "No matching entries"
+                    : "Nothing recorded yet"
+                  : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={offset === 0}
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!data || offset + PAGE_SIZE >= data.total}
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+              >
+                Next
+              </Button>
+            </div>
+          </PanelFooter>
+        </Panel>
+      </Page>
+    </Workspace>
   )
 }
 

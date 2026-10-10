@@ -1,22 +1,13 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import Link from "next/link"
-import {
-  ArrowUpRight,
-  CheckCircle,
-  ChevronDoubleDown,
-  ChevronDoubleUp,
-  ChevronDown,
-  GitBranch,
-} from "@/components/icons"
+import { CheckCircle, ChevronDoubleDown, ChevronDoubleUp, ChevronDown } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { splitDiff, type FileDiff } from "@/lib/diff-files"
-import type { GitDetect, GitFileChange, GitStatus } from "@/lib/types"
+import type { GitFileChange, GitStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { DiffView } from "@/components/files/diff-view"
-import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 
@@ -32,15 +23,13 @@ type Section = {
 }
 
 /**
- * The work in the repository the shell is in, as its diff — nothing else.
+ * The work in the repository the shell is in, as its diff.
  *
- * This column was a whole git client: staging, a commit box, history,
- * branches, stashes. The Git page is that client, a click away, and beside a
- * terminal the question is narrower — *what have I changed?* — which is
- * answered by reading the change, not by operating on it. So it is the
- * changed files, each with its status and its line counts, and each diff
- * under its name, folded where it is long. The staged and the unstaged halves
- * of a file are both shown, because both are the work.
+ * *What have I changed?* is answered by reading the change, not by operating
+ * on it, so nothing here stages or commits — the Git page is that client. It
+ * is the changed files, each with its status and its line counts, and each
+ * diff under its name, folded where it is long. The staged and the unstaged
+ * halves of a file are both shown, because both are the work.
  *
  * The file list is the status the panel already polls for the tree's badges;
  * the diffs are read again whenever that list changes, as two requests for
@@ -48,17 +37,12 @@ type Section = {
  * diff for.
  */
 export function DiffTools({
-  detect,
-  detectLoading,
-  detectError,
+  repoPath,
   status,
 }: {
-  detect?: GitDetect
-  detectLoading: boolean
-  detectError?: Error
+  repoPath: string
   status: { data?: GitStatus | null; loading: boolean; error?: Error }
 }) {
-  const repo = detect?.inRoots ? detect.repo : undefined
   const files = useMemo(() => status.data?.files ?? [], [status.data])
   // Read the diffs again when what changed changes, not on a timer of their
   // own: the status poll is the clock.
@@ -66,8 +50,7 @@ export function DiffTools({
 
   const fetchDiffs = useCallback(
     async (signal: AbortSignal) => {
-      if (!repo) return null
-      const path = repo.path
+      const path = repoPath
       const untracked = files.filter((f) => f.label === "untracked").slice(0, UNTRACKED_READ)
       const [unstaged, staged, added] = await Promise.all([
         get<{ diff: string }>("/git/diff", { path }, signal),
@@ -83,9 +66,9 @@ export function DiffTools({
     },
     // The signature stands in for the list's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [repo?.path, signature],
+    [repoPath, signature],
   )
-  const diffs = usePoll(fetchDiffs, 0, [repo?.path, signature], { enabled: Boolean(repo) })
+  const diffs = usePoll(fetchDiffs, 0, [repoPath, signature])
 
   const sections = useMemo<Section[]>(
     () =>
@@ -125,55 +108,8 @@ export function DiffTools({
     setFlipped(new Set())
   }
 
-  if (detectError) return <ErrorState error={detectError} className="m-3" />
-  if (detectLoading && !detect) return <LoadingRows className="p-3" rows={5} />
-  if (!detect?.available) {
-    return (
-      <EmptyState
-        className="m-3"
-        icon={GitBranch}
-        title="git is not installed"
-        description="Install git on the host and the shell's changes show up here."
-      />
-    )
-  }
-  if (!repo) {
-    return (
-      <EmptyState
-        className="m-3"
-        icon={GitBranch}
-        title="Not in a repository"
-        description="cd into a git checkout and what you have changed there shows up here."
-      />
-    )
-  }
-
-  const branch = status.data?.repo.branch ?? repo.branch
-  const ahead = status.data?.repo.ahead ?? repo.ahead
-  const behind = status.data?.repo.behind ?? repo.behind
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-3 py-1.5">
-        <ProductGlyph id="git" />
-        <span className="min-w-0 truncate font-mono text-xs text-foreground" title={repo.path}>
-          {branch || "detached"}
-        </span>
-        {(ahead > 0 || behind > 0) && (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {ahead > 0 && `↑${ahead}`} {behind > 0 && `↓${behind}`}
-          </span>
-        )}
-        <span className="flex-1" />
-        <Link
-          href={`/git?repo=${encodeURIComponent(repo.path)}`}
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm text-hint font-medium text-muted-foreground focus-ring transition-colors hover:text-foreground"
-        >
-          Open in Git
-          <ArrowUpRight aria-hidden className="size-3" />
-        </Link>
-      </div>
-
       {files.length === 0 ? (
         status.loading && !status.data ? (
           <LoadingRows className="p-3" rows={4} />

@@ -20,7 +20,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // An object-storage target, end to end against a real S3 API: the target
@@ -66,7 +66,7 @@ func TestLiveObjectStorageBackupUploadsPrunesAndRestores(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

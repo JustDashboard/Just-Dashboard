@@ -1,0 +1,33 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:215: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=0 ruleEvidence=configured fingerprint=cb099727ddc992518d5184a22e590ffd1418cfec5635f61322faa69f28e03300 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:222: engine=pihole nativeDHCPVersion=v6.7.1 enabled=false ranges=1 leases=0 configuration=configured leaseEvidence=reported
+    provision_live_test.go:281: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=1 ruleEvidence=configured fingerprint=5d865714fa516582e634c43b543e8b9f3281ea7836fa2562172e59c17836d517 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:328: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:333: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:328: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:333: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:328: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:333: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:328: Native exact-selection current read passed: filter_add planned
+    provision_live_test.go:333: Native exact-selection current read passed: filter_add verified
+    provision_live_test.go:341: native custom-domain configuration verified engine=pihole match=exact disposition=allow groups=&[0] decisions=unmeasured
+    provision_live_test.go:328: Native exact-selection current read passed: filter_add planned
+    provision_live_test.go:333: Native exact-selection current read passed: filter_add verified
+    provision_live_test.go:341: native custom-domain configuration verified engine=pihole match=exact disposition=deny groups=&[] decisions=unmeasured
+    provision_live_test.go:348: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=3 ruleEvidence=configured fingerprint=e3fa9ea34e60d41a99bf154cf4ee2110c69e173de4ea7b0acd413bbeb7fe330a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:388: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=3 ruleEvidence=configured fingerprint=e3fa9ea34e60d41a99bf154cf4ee2110c69e173de4ea7b0acd413bbeb7fe330a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:412: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:417: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:412: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:417: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:412: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:417: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:412: Native exact-selection current read passed: filter_remove planned
+    provision_live_test.go:417: Native exact-selection current read passed: filter_remove verified
+    provision_live_test.go:412: Native exact-selection current read passed: filter_remove planned
+    provision_live_test.go:417: Native exact-selection current read passed: filter_remove verified
+    provision_live_test.go:419: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=1 ruleEvidence=configured fingerprint=5d865714fa516582e634c43b543e8b9f3281ea7836fa2562172e59c17836d517 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:459: engine=pihole image=pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be nativeVersion=v6.7.1 UDP/TCP=owned-fixture.invalid owner=8de06600a9147f25f7efaec26e115bd3 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (79.59s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	79.602s

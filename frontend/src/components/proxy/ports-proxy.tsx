@@ -10,6 +10,7 @@ import { Field, FieldRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import type { Socket } from "@/components/proxy/ports"
 import { formatEndpoint } from "@/components/proxy/ports-list"
+import { unreadSources } from "@/components/proxy/ports-reachability"
 import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -207,6 +208,37 @@ export function FreePortFinder() {
             {!result.containersChecked && (
               <p className="text-hint text-muted-foreground">
                 Docker did not answer, so ports kept by stopped containers were not avoided.
+              </p>
+            )}
+            {(result.reservations ?? []).length > 0 && (
+              // Claims a bind cannot see: a deployment's lease, the preview
+              // range, the ephemeral range, and ports a firewall rule or a
+              // gateway forward already decides for.
+              <div className="space-y-1">
+                <p className="text-hint">Also passed over</p>
+                <ul aria-label="Ports passed over" className="space-y-0.5">
+                  {result.reservations?.map((r) => (
+                    <li key={`${r.source}:${r.port}`} className="text-hint text-muted-foreground">
+                      <span className="numeric font-mono text-foreground">{r.port}</span> {r.detail}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {result.sources && (
+              <p className="text-hint text-muted-foreground">
+                Checked:{" "}
+                {result.sources
+                  .filter((s) => s.state === "checked")
+                  .map((s) => s.label.toLowerCase())
+                  .join(", ")}
+                .
+                {unreadSources(result.sources).map((s) => (
+                  <span key={s.key} className="block">
+                    {s.state === "not_supplied" ? "Not supplied" : "Not read"}: {s.label}
+                    {s.detail && ` — ${s.detail}`}
+                  </span>
+                ))}
               </p>
             )}
             <p className="text-hint text-muted-foreground">

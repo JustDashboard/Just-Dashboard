@@ -1,0 +1,2 @@
+posts.flags has type set('pinned','featured'), which Prisma has no scalar for; it is emitted as Unsupported and Prisma Client will not read or write it.
+Index ft_posts_body on posts is a full-text index and was left out; it still exists in the database.

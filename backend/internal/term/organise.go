@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
@@ -518,13 +517,3 @@ func (m *Manager) KillWindow(ctx context.Context, tmuxName string, index int) er
 // sessionPrefix marks the tmux sessions this dashboard owns, and is what keeps
 // every listing and every action off the operator's personal ones.
 const sessionPrefix = "vpsd-"
-
-// idleDetach is how long a persisted session may sit with nobody attached
-// before its PTY is released.
-//
-// Long, and it only ever *detaches*: the tmux session, its processes and its
-// scrollback all continue, and the session reappears under "still running"
-// with its name intact. The point is to give back the PTY and the slot, not to
-// end anybody's work — which is why the reaper no longer kills a persisted
-// session at all, however long it has been idle.
-var idleDetach = 12 * time.Hour

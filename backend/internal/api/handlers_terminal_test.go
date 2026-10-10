@@ -13,9 +13,12 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,8 +26,9 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -35,8 +39,22 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 }
 
 func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler) {
+	return terminalServerWithShell(t, tlsMode, "")
+}
+
+func terminalServerWithShell(t *testing.T, tlsMode, shell string) (*Server, http.Handler) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	if shell == "" {
+		// Headless route tests must not depend on account rc files reading
+		// input or negotiating with an emulator that is not attached yet.
+		home := t.TempDir()
+		shell = filepath.Join(home, "bash")
+		wrapper := "#!/bin/sh\nexport HOME=" + evidenceShellQuote(home) + "\nexec /bin/bash \"$@\"\n"
+		if err := os.WriteFile(shell, []byte(wrapper), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +84,23 @@ func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler)
 		LogRoots:       []string{t.TempDir()},
 		TerminalEnable: true,
 		TerminalUser:   me.Username,
+		TerminalShell:  shell,
 		TLSMode:        tlsMode,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
 	s := New(cfg, log, st, svc, sealer, audit.New(st, log), nil)
 	s.modules.term.SetClipboardRootForTest(t.TempDir())
+	if err := s.modules.term.SetupShell(); err != nil {
+		t.Fatal(err)
+	}
+	// A short path fits Unix sockets even when the test's own name is long.
+	holders, err := os.MkdirTemp("", "jd-api-terminal-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(holders) })
+	s.modules.term.SetHolderLauncherForTest(holders, terminalHolderLauncherForTest)
 	if _, err := s.modules.term.Account(); err != nil {
 		t.Skipf("no account to open a session as: %v", err)
 	}
@@ -85,6 +114,21 @@ func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler)
 		s.Shutdown()
 	})
 
+	return s, terminalHandlerForTest(s)
+}
+
+func terminalHolderLauncherForTest(_ context.Context, _, socket string) error {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestTerminalHolderProcess$")
+	cmd.Env = append(os.Environ(), "JD_TEST_API_HOLDER="+socket)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
+}
+
+func terminalHandlerForTest(s *Server) http.Handler {
 	r := chi.NewRouter()
 	// The capability middleware on the route group needs somebody to check.
 	r.Use(func(next http.Handler) http.Handler {
@@ -101,7 +145,7 @@ func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler)
 		})
 	})
 	s.mountTerminalRoutes(r)
-	return s, r
+	return r
 }
 
 type apiCall struct {
@@ -141,9 +185,137 @@ func (c apiCall) ok(method, path string, body any, confirm string) *httptest.Res
 }
 
 type listResponse struct {
-	Enabled  bool             `json:"enabled"`
-	Folders  []terminalFolder `json:"folders"`
-	Sessions []workspace      `json:"sessions"`
+	Enabled          bool             `json:"enabled"`
+	Persistent       bool             `json:"persistent"`
+	PersistenceError string           `json:"persistenceError"`
+	Folders          []terminalFolder `json:"folders"`
+	Sessions         []workspace      `json:"sessions"`
+}
+
+// The API fixture uses this test binary as a real, independently running holder.
+func TestTerminalHolderProcess(t *testing.T) {
+	socket := os.Getenv("JD_TEST_API_HOLDER")
+	if socket == "" {
+		t.Skip("terminal holder helper process")
+	}
+	if err := ptyhold.Run(socket); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTerminalCreateRequiresRestartProtection(t *testing.T) {
+	s, handler := terminalServer(t)
+	s.modules.term.SetHolderLauncherForTest("", nil)
+	api := apiCall{t, handler}
+	listing := api.list()
+	if listing.Persistent || listing.PersistenceError == "" {
+		t.Fatalf("missing protection was not reported: %+v", listing)
+	}
+	response := api.do(http.MethodPost, "/terminal/", map[string]any{}, "")
+	if response.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(response.Body.String(), "terminal_persistence_unavailable") {
+		t.Fatalf("unprotected create = %d: %s", response.Code, response.Body.String())
+	}
+	if len(s.modules.term.List()) != 0 {
+		t.Fatal("an unprotected terminal was created")
+	}
+}
+
+func TestTerminalWindowRequiresRestartProtectionWithoutEndingExistingWork(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("agent", "")
+	sess, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.modules.term.SetHolderLauncherForTest("", nil)
+	response := api.do(http.MethodPost, "/terminal/"+created.ID+"/windows", map[string]any{}, "")
+	if response.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(response.Body.String(), "terminal_persistence_unavailable") {
+		t.Fatalf("unprotected window = %d: %s", response.Code, response.Body.String())
+	}
+	if got := api.list(); len(got.Sessions) != 1 || got.Sessions[0].Windows != 1 {
+		t.Fatalf("existing work was changed: %+v", got)
+	}
+	if err := syscall.Kill(sess.PID, 0); err != nil {
+		t.Fatalf("existing terminal ended: %v", err)
+	}
+}
+
+func TestTerminalWorkContinuesAfterTheLastBrowserDisconnects(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("unattended", "")
+	sess, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/terminal/" + created.ID + "/attach"
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	marker := filepath.Join(t.TempDir(), "finished")
+	release := filepath.Join(filepath.Dir(marker), "continue")
+	command := "while [ ! -f " + strconv.Quote(release) + " ]; do sleep 0.05; done; echo done > " +
+		strconv.Quote(marker) + "; echo disconnected-$((6*7))\r"
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte(command)); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var seen []byte
+	for !bytes.Contains(seen, []byte("while [")) {
+		kind, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == websocket.BinaryMessage {
+			seen = append(seen, data...)
+		}
+	}
+	conn.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for sess.Attached() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the disconnected browser remained subscribed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if data, err := os.ReadFile(marker); err == nil && string(data) == "done\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("work stopped after the last browser disconnected")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(sess.PID, 0); err != nil {
+		t.Fatalf("the terminal ended after finishing the unattended command: %v", err)
+	}
+	back, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer back.Close()
+	back.SetReadDeadline(time.Now().Add(10 * time.Second))
+	seen = nil
+	for !bytes.Contains(seen, []byte("disconnected-42")) {
+		kind, data, err := back.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == websocket.BinaryMessage {
+			seen = append(seen, data...)
+		}
+	}
 }
 
 func (c apiCall) list() listResponse {
@@ -240,9 +412,8 @@ func TestDirectPTYAttachRetainsBestEffortShellHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A real login shell as the host account, with whatever its rc files
-	// load; on a runner already busy with the rest of the suite, five seconds
-	// to the first prompt was not a fair bound.
+	// A real login shell as the host account, with an isolated home. A runner
+	// busy with the rest of the suite still needs time to reach its first prompt.
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		snapshot, id, _, err := sess.Subscribe()
@@ -472,6 +643,194 @@ func TestDirectPTYWindowsCanBeNamedReorderedAndClosed(t *testing.T) {
 	}
 	if rec := api.do(http.MethodGet, base+"/windows/0/panes", nil, ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("pane route = %d, want 404", rec.Code)
+	}
+}
+
+func TestTerminalWindowUsesFocusedLiveDirectory(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("focused-directory", "")
+	base := "/terminal/" + created.ID
+	// The source is a sibling, so consulting the workspace's first window
+	// would pass a weaker test while opening in the wrong directory.
+	response := api.ok(http.MethodPost, base+"/windows", nil, "")
+	var source struct{ ID string }
+	if err := json.Unmarshal(response.Body.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := s.modules.term.Get(source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(t.TempDir(), "repo 'quoted' $ dollar; directory")
+	if err := os.Mkdir(cwd, 0700); err != nil {
+		t.Fatal(err)
+	}
+	quoted := "'" + strings.ReplaceAll(cwd, "'", "'\\''") + "'"
+	if _, err := sess.Write([]byte("cd -- " + quoted + "\nprintf 'cwd-ready:%s\\n' \"$PWD\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	awaitTerminalOutput(t, sess, "cwd-ready:"+cwd)
+	response = api.ok(http.MethodPost, base+"/windows", map[string]any{
+		"sourceWindowId": source.ID,
+		// A source id takes precedence over stale client directory metadata.
+		"cwd": "/",
+	}, "")
+	var next struct{ ID string }
+	if err := json.Unmarshal(response.Body.Bytes(), &next); err != nil {
+		t.Fatal(err)
+	}
+	opened, err := s.modules.term.Get(next.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.CWDHint != cwd {
+		t.Fatalf("new terminal requested cwd = %q, want %q", opened.CWDHint, cwd)
+	}
+	if _, err := opened.Write([]byte("printf 'opened-directory:%s\\n' \"$PWD\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	awaitTerminalOutput(t, opened, "opened-directory:"+cwd)
+}
+
+func TestTerminalWindowRejectsUnknownAgentAndForeignSource(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("launch-validation", "")
+	foreign := api.create("foreign-source", "")
+	base := "/terminal/" + created.ID
+	before := len(s.modules.term.List())
+	for _, test := range []struct {
+		body map[string]any
+		code string
+	}{
+		{map[string]any{"agent": "codex; id"}, "invalid_terminal_agent"},
+		{map[string]any{"sourceWindowId": foreign.ID}, "invalid_terminal_source"},
+		{map[string]any{"sourceWindowId": "missing-window"}, "invalid_terminal_source"},
+	} {
+		response := api.do(http.MethodPost, base+"/windows", test.body, "")
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), test.code) {
+			t.Fatalf("invalid launch %v = %d: %s", test.body, response.Code, response.Body.String())
+		}
+	}
+	if len(s.modules.term.List()) != before {
+		t.Fatal("a rejected launch created a terminal")
+	}
+}
+
+func TestTerminalAgentLaunchRejectsUnsupportedShell(t *testing.T) {
+	s, handler := terminalServerWithShell(t, selfcfg.TLSInternal, "/bin/sh")
+	api := apiCall{t, handler}
+	created := api.create("plain-shell", "")
+	response := api.do(http.MethodPost, "/terminal/"+created.ID+"/windows", map[string]any{
+		"sourceWindowId": created.ID, "agent": "codex",
+	}, "")
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "terminal_agent_shell_unavailable") {
+		t.Fatalf("unsupported shell = %d: %s", response.Code, response.Body.String())
+	}
+	if len(s.modules.term.List()) != 1 {
+		t.Fatal("unsupported launch opened another terminal")
+	}
+}
+
+func TestTerminalAgentLaunchRejectsDeletedSourceDirectory(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("deleted-agent-directory", "")
+	source, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if _, err := source.Write([]byte("cd -- '" + cwd + "'\nprintf 'deleted-source-ready:%s\\n' \"$PWD\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	awaitTerminalOutput(t, source, "deleted-source-ready:"+cwd)
+	if err := os.Remove(cwd); err != nil {
+		t.Fatal(err)
+	}
+	response := api.do(http.MethodPost, "/terminal/"+created.ID+"/windows", map[string]any{
+		"sourceWindowId": created.ID, "agent": "codex",
+	}, "")
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "cwd_unavailable") {
+		t.Fatalf("deleted directory = %d: %s", response.Code, response.Body.String())
+	}
+	if len(s.modules.term.List()) != 1 {
+		t.Fatal("the agent was opened in a fallback directory")
+	}
+}
+
+func TestTerminalAgentLaunchCreatesFreshWindow(t *testing.T) {
+	// A native rc fixture supplies the tool, avoiding a real installed agent
+	// and proving that launch uses the target account's interactive PATH.
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	shell := filepath.Join(home, "bash")
+	wrapper := "#!/bin/sh\nexport HOME='" + home + "'\nexec /bin/bash \"$@\"\n"
+	if err := os.WriteFile(shell, []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".bashrc"), []byte("export PATH='"+bin+"':$PATH\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\nprintf 'api-agent:claude flag:%s cwd:%s\\n' \"$1\" \"$PWD\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(stub), 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, handler := terminalServerWithShell(t, selfcfg.TLSInternal, shell)
+	api := apiCall{t, handler}
+	created := api.create("fresh-agent", "")
+	source, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if _, err := source.Write([]byte("cd -- '" + cwd + "'\n(cd /; printf 'api-background-ready:%s\\n' \"$PWD\"; sleep 30) & JD_BG_PID=$!\nprintf 'source-ready:%s\\n' \"$PWD\"\n")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { source.Write([]byte("kill \"$JD_BG_PID\" 2>/dev/null\n")) })
+	awaitTerminalOutput(t, source, "source-ready:"+cwd)
+	awaitTerminalOutput(t, source, "api-background-ready:/")
+	response := api.ok(http.MethodPost, "/terminal/"+created.ID+"/windows", map[string]any{
+		"sourceWindowId": created.ID, "agent": "claude",
+	}, "")
+	var opened struct{ ID string }
+	if err := json.Unmarshal(response.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.ID == created.ID || len(s.modules.term.List()) != 2 {
+		t.Fatalf("agent reused an existing terminal: %s", response.Body.String())
+	}
+	window, err := s.modules.term.Get(opened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitTerminalOutput(t, window, "api-agent:claude flag:--dangerously-skip-permissions cwd:"+cwd)
+}
+
+func awaitTerminalOutput(t *testing.T, sess *term.Session, want string) {
+	t.Helper()
+	snapshot, id, out, err := sess.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Unsubscribe(id)
+	seen := string(snapshot)
+	timer := time.NewTimer(20 * time.Second)
+	defer timer.Stop()
+	for !strings.Contains(seen, want) {
+		select {
+		case data, ok := <-out:
+			if !ok {
+				t.Fatalf("terminal ended before %q; output %q", want, seen)
+			}
+			seen += string(data)
+		case <-timer.C:
+			t.Fatalf("terminal did not print %q; output %q", want, seen)
+		}
 	}
 }
 

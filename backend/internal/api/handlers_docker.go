@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -51,6 +53,12 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
+			// The inbound path to one published port, Docker's NAT and the
+			// forwarded leg's filters included. It reads the host's iptables
+			// and firewall, as the connection investigator does, so it is the
+			// investigator's capability.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodGet, "/{id}/published/{port}", s.handle(s.handleContainerPublishedPath))
 			r.Method(http.MethodGet, "/{id}/stats/stream", s.handle(s.handleContainerStatStream))
 			r.Method(http.MethodGet, "/stats/history", s.handle(s.handleContainerSparklines))
 			r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleContainerStatsHistory))
@@ -74,6 +82,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/preview", s.handle(s.handleContainerPreview))
 				r.Method(http.MethodPost, "/{id}/rename", s.handle(s.handleContainerRename))
 				r.Method(http.MethodPatch, "/{id}/resources", s.handle(s.handleContainerResources))
+				r.Method(http.MethodPatch, "/{id}/restart-policy", s.handle(s.handleContainerRestartPolicy))
 			})
 			// Lifecycle actions interrupt a running service and use the destructive gate.
 			s.destructive(r, func(r chi.Router) {
@@ -123,7 +132,15 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 
 		r.Route("/networks", func(r chi.Router) {
 			r.Method(http.MethodGet, "/", s.handle(s.handleNetworkList))
+			// What this Engine can create a network with, read now.
+			r.Method(http.MethodGet, "/drivers", s.handle(s.handleNetworkDrivers))
+			// The previews read what a change would disturb and change
+			// nothing; the mutations below refuse what they block.
+			r.Method(http.MethodGet, "/prune", s.handle(s.handleNetworkPrunePreview))
 			r.Method(http.MethodGet, "/{id}", s.handle(s.handleNetworkInspect))
+			r.Method(http.MethodGet, "/{id}/removal", s.handle(s.handleNetworkRemovalPreview))
+			r.Method(http.MethodGet, "/{id}/connect", s.handle(s.handleNetworkConnectPreview))
+			r.Method(http.MethodGet, "/{id}/disconnect", s.handle(s.handleNetworkDisconnectPreview))
 			r.Group(func(r chi.Router) {
 				r.Use(httpx.RequireCapability(auth.CapServiceControl))
 				r.Method(http.MethodPost, "/", s.handle(s.handleNetworkCreate))
@@ -318,26 +335,73 @@ func (s *Server) handleContainerInspect(w http.ResponseWriter, r *http.Request) 
 	return nil
 }
 
+// statsMaxAge is how old the shared sampler's previous reading may be and
+// still be differenced against. The Runtime page polls every ten seconds; past
+// this the CPU is reported as not ready instead of as a long average.
+const statsMaxAge = 30 * time.Second
+
+// maxStatsIDs bounds the ids query so one request cannot fan out into an
+// arbitrary number of stats reads.
+const maxStatsIDs = 64
+
+// handleContainerStatsAll reads one stats sample for the running containers,
+// or only for those named by the optional ids query: comma-separated container
+// ids, each the full id or a prefix of at least twelve characters.
 func (s *Server) handleContainerStatsAll(w http.ResponseWriter, r *http.Request) error {
-	list, err := s.modules.docker.ListContainers(r.Context(), false)
+	want, err := parseStatsIDs(r.URL.Query().Get("ids"))
+	if err != nil {
+		return err
+	}
+	// The daemon's plain listing: the table-oriented one inspects every
+	// running container for limits and uptime that nothing here reads.
+	list, err := s.modules.docker.ListRunning(r.Context())
 	if err != nil {
 		return s.dockerErr(err)
 	}
-	ids := make([]string, 0, len(list))
-	for _, c := range list {
-		if c.State == "running" {
-			ids = append(ids, c.ID)
-		}
-	}
 	// The shared sampler, not a fresh one: a single request has no previous
 	// sample of its own to difference against, and would answer 0% for every
-	// container. The recorder keeps this one warm.
-	stats, err := s.modules.dockerStats.Sample(r.Context(), ids)
+	// container. It is not the recorder's — that one keeps its own baseline —
+	// so the first call reports cpuReady=false, and so does one that follows
+	// the previous call by more than statsMaxAge.
+	stats, err := s.modules.dockerStats.Sample(r.Context(), selectStatsIDs(list, want))
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.JSON(w, http.StatusOK, stats)
 	return nil
+}
+
+// parseStatsIDs reads the ids query. An empty value means every container.
+func parseStatsIDs(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > maxStatsIDs {
+		return nil, httpx.BadRequest("ids names at most %d containers", maxStatsIDs)
+	}
+	for _, id := range parts {
+		if len(id) < 12 || len(id) > 64 || strings.Trim(id, "0123456789abcdef") != "" {
+			return nil, httpx.BadRequest("ids must be comma-separated container ids of at least 12 hex characters")
+		}
+	}
+	return parts, nil
+}
+
+// selectStatsIDs returns the full ids of the running containers, narrowed to
+// those matching one of want when it is set.
+func selectStatsIDs(list []dockerx.Container, want []string) []string {
+	ids := make([]string, 0, len(list))
+	for _, c := range list {
+		if c.State != "running" {
+			continue
+		}
+		if want != nil && !slices.ContainsFunc(want, func(w string) bool { return strings.HasPrefix(c.ID, w) }) {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // handleContainerStatsHistory answers what a container was doing before you
@@ -552,7 +616,11 @@ func (s *Server) handleContainerExec(w http.ResponseWriter, r *http.Request) err
 		return s.dockerErr(err)
 	}
 	p := httpx.MustPrincipal(r)
-	s.recordAudit(r, "docker.container.exec.open", detail.Name, map[string]any{"id": id})
+	// The shell and account are what make an exec session root-equivalent inside the
+	// container, so the trail names them rather than only the container.
+	s.recordAudit(r, "docker.container.exec.open", detail.Name, map[string]any{
+		"id": id, "cmd": r.URL.Query().Get("cmd"), "user": r.URL.Query().Get("user"),
+	})
 
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -700,10 +768,12 @@ func (s *Server) handleImagePrune(w http.ResponseWriter, r *http.Request) error 
 
 // handleVolumeList joins the volume list to the containers using each one.
 //
-// The join is what makes the delete button honest. Docker's own RefCount
-// counts running containers only, so a volume belonging to a stopped stack
-// reads as unused — and that is precisely the volume an operator prunes by
-// accident, along with the only copy of whatever was in it.
+// The join is what makes the delete button honest. Docker counts a stopped
+// container's mount as a use and its prune keeps that volume; what a prune
+// destroys is a volume nothing mounts at all — most often the data of a
+// stack taken down with `docker compose down`, which removed the containers
+// and left the volumes. Naming the users, running or not, is what lets the
+// page tell those apart.
 func (s *Server) handleVolumeList(w http.ResponseWriter, r *http.Request) error {
 	list, err := s.modules.docker.ListVolumesWithUsers(r.Context())
 	if err != nil {
@@ -754,6 +824,14 @@ func (s *Server) handleNetworkList(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return s.dockerErr(err)
 	}
+	// The dashboard's own project is told by the data directory its backend
+	// mounts; with no container listing it is unknown, and its networks are
+	// labelled as the Compose networks they also are.
+	self := ""
+	if containers, err := s.modules.docker.ListContainers(r.Context(), false); err == nil {
+		self = s.selfProject(containers)
+	}
+	s.annotateNetworkOwners(r.Context(), list, self)
 	httpx.JSON(w, http.StatusOK, list)
 	return nil
 }
@@ -767,25 +845,39 @@ func (s *Server) handleNetworkInspect(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return s.dockerErr(err)
 	}
+	self := ""
+	if containers, err := s.modules.docker.ListContainers(r.Context(), false); err == nil {
+		self = s.selfProject(containers)
+	}
+	networks := []dockerx.Network{n.Network}
+	s.annotateNetworkOwners(r.Context(), networks, self)
+	n.Owner = networks[0].Owner
+	for i := range n.Members {
+		n.Members[i].Dashboard = self != "" && n.Members[i].Stack == self
+	}
 	httpx.JSON(w, http.StatusOK, n)
 	return nil
 }
 
 func (s *Server) handleNetworkRemove(w http.ResponseWriter, r *http.Request) error {
 	id := httpx.URLParam(r, "id")
-	n, err := s.modules.docker.InspectNetwork(r.Context(), id)
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id)
 	if err != nil {
+		return err
+	}
+	// No typed phrase: a network holds no data. What a removal does break —
+	// a stopped container that names it, a deployment that owns it — is
+	// what the preview lists, and what it blocks is refused here too.
+	conflicts := s.removalConflicts(ctx, deps)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	if err := s.modules.docker.RemoveNetwork(ctx, deps.Network.ID); err != nil {
 		return s.dockerErr(err)
 	}
-	// No typed phrase: a network holds no data and Docker refuses to remove one
-	// that still has containers attached, so the mistake this would guard
-	// against is one the daemon already refuses.
-	if err := s.modules.docker.RemoveNetwork(r.Context(), id); err != nil {
-		return s.dockerErr(err)
-	}
-	// The name is worth more than the id in an audit trail, and it is the only
-	// reason this handler still inspects before removing.
-	httpx.SetAudit(r, "docker.network.remove", n.Name, map[string]any{"id": id})
+	httpx.SetAudit(r, "docker.network.remove", deps.Network.Name, map[string]any{"id": deps.Network.ID, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
@@ -892,8 +984,9 @@ func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 
 func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
 	opts := dockerx.PruneOptions{
-		Volumes:   r.URL.Query().Get("volumes") == "true",
-		AllImages: r.URL.Query().Get("allImages") == "true",
+		ImagesAndCacheOnly: r.URL.Query().Get("imagesAndCacheOnly") == "true",
+		Volumes:            r.URL.Query().Get("volumes") == "true",
+		AllImages:          r.URL.Query().Get("allImages") == "true",
 		// The build cache is the largest line on any server that builds, and
 		// until 0.6.4 no route in the product could touch it: the dashboard
 		// reported tens of gigabytes as reclaimable and had nothing to reclaim
@@ -902,13 +995,16 @@ func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
 		BuildCache:    r.URL.Query().Get("buildCache") == "true",
 		AllBuildCache: r.URL.Query().Get("allBuildCache") == "true",
 	}
+	if opts.ImagesAndCacheOnly && opts.Volumes {
+		return httpx.BadRequest("imagesAndCacheOnly cannot remove volumes")
+	}
 	reports, err := s.modules.docker.PruneAll(r.Context(), opts)
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.prune.all", "", map[string]any{
 		"volumes": opts.Volumes, "allImages": opts.AllImages,
-		"buildCache": opts.BuildCache, "reports": reports,
+		"buildCache": opts.BuildCache, "imagesAndCacheOnly": opts.ImagesAndCacheOnly, "reports": reports,
 	})
 	httpx.JSON(w, http.StatusOK, reports)
 	return nil

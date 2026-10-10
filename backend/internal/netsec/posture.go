@@ -39,6 +39,9 @@ type Posture struct {
 	// examine is not present on this host. A check that silently did not run
 	// looks exactly like a check that passed.
 	Skipped []string `json:"skipped"`
+	// Unknowns are the layers of exposure no check could see: provider
+	// policy, and nftables tables no adapter models.
+	Unknowns []PostureUnknown `json:"unknowns"`
 }
 
 // SecurityFinding is one thing worth telling the operator about how exposed
@@ -98,9 +101,12 @@ type CertSummary struct {
 // "this could not be established", which is different from a zero value and
 // is reported as a skipped check rather than a pass.
 type AssessInput struct {
-	Exposure  *Exposure
-	Firewall  *FirewallStatus
-	Fail2ban  *Fail2banStatus
+	Exposure *Exposure
+	Firewall *FirewallStatus
+	Fail2ban *Fail2banStatus
+	// CrowdSec is read for its enforcement verdict: decisions nothing
+	// enforces are a defence that only looks like one.
+	CrowdSec  *CrowdSecView
 	SSH       *SSHDConfig
 	Listeners []ExposedPort
 	// Network places each listener's address on its interface, which is
@@ -136,6 +142,13 @@ type AssessInput struct {
 	// prevent rather than one to reproduce.
 	PackageManager    string
 	SecurityFiltering bool
+	// Policy is the nftables ruleset's filtering chains, nil where it was not
+	// read. PublicAddress is a public address on one of this host's
+	// interfaces, empty for none, once PublicAddressRead says it was looked
+	// for.
+	Policy            *PolicyCoverage
+	PublicAddress     string
+	PublicAddressRead bool
 	Now               time.Time
 }
 
@@ -165,7 +178,7 @@ func Assess(in AssessInput) *Posture {
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
-	p := &Posture{Findings: []SecurityFinding{}, CheckedAt: in.Now.UTC(), Skipped: []string{}}
+	p := &Posture{Findings: []SecurityFinding{}, CheckedAt: in.Now.UTC(), Skipped: []string{}, Unknowns: assessUnknowns(in)}
 
 	p.add(assessExposure(in))
 	p.add(assessFirewall(in))
@@ -416,6 +429,7 @@ func assessIntrusion(in AssessInput) []SecurityFinding {
 			Advice: "Enable at least the sshd jail. A running fail2ban with no jails bans nobody.",
 		})
 	}
+	out = append(out, assessCrowdSecEnforcement(in.CrowdSec)...)
 	if !in.LoginRecordRead {
 		return append(out, SecurityFinding{
 			ID: "intrusion.no-record", Level: "notice", Area: "intrusion",
@@ -443,6 +457,40 @@ func assessIntrusion(in AssessInput) []SecurityFinding {
 		})
 	}
 	return out
+}
+
+// assessCrowdSecEnforcement turns an installed CrowdSec whose decisions are
+// not verifiably enforced into a finding. A partial verdict — proxies only —
+// is a notice: it is a real defence for HTTP, and only SSH is left out.
+func assessCrowdSecEnforcement(v *CrowdSecView) []SecurityFinding {
+	if v == nil || !v.Installed || v.Enforcement == nil {
+		return nil
+	}
+	e := v.Enforcement
+	switch e.State {
+	case EnforcementEnforcing:
+		return nil
+	case EnforcementPartial:
+		return []SecurityFinding{{
+			ID: "intrusion.crowdsec-partial", Level: "notice", Area: "intrusion",
+			Title:  "CrowdSec enforces decisions only at the proxy",
+			Detail: e.Summary,
+			Advice: "Install the firewall bouncer (crowdsec-firewall-bouncer-nftables) so a decision also drops SSH and every other port, not only the HTTP that passes through the proxy.",
+		}}
+	case EnforcementUnverified:
+		return []SecurityFinding{{
+			ID: "intrusion.crowdsec-unverified", Level: "notice", Area: "intrusion",
+			Title:  "CrowdSec enforcement could not be verified",
+			Detail: e.Summary,
+			Advice: "Open Intrusion prevention to see which evidence is missing. Until it can be read, treat the decisions as advice rather than as blocked traffic.",
+		}}
+	}
+	return []SecurityFinding{{
+		ID: "intrusion.crowdsec-unenforced", Level: "warning", Area: "intrusion",
+		Title:  "CrowdSec decisions are not being enforced",
+		Detail: e.Summary,
+		Advice: "A decision becomes a dropped connection only through a bouncer that keeps pulling. Start or register one — the firewall bouncer for every port — and check that its kernel set fills.",
+	}}
 }
 
 // countLabel says "at least" where the sample ran out, because a floor quoted
@@ -696,7 +744,8 @@ func ruleTarget(r Rule, backend Backend) (destination, ports string, ok bool) {
 		return "", "", isAnywhere(r.To)
 	}
 	to := strings.TrimSpace(r.To)
-	if strings.Contains(to, " on ") {
+	// A rule scoped to one device does not open the port everywhere.
+	if r.Interface != "" || strings.Contains(to, " on ") {
 		return "", "", false
 	}
 	if r.Port != "" {

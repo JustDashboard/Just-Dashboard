@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import type { FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
@@ -28,16 +27,13 @@ import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
   DeploymentHostnameSuggestion,
-  DeploymentOperations,
 } from "@/lib/types"
-import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
-import type { Tone } from "@/components/tone"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -67,9 +63,7 @@ import { useProject } from "@/components/deploy/project-context"
  * It was a framed card holding a framed box per hostname, each a bag of
  * labelled controls whose labels sat on two baselines, with the certificate
  * as two grey status lines and the port, bind address and two links in a
- * footnote under the card. Now the page opens on four readings — how many
- * names, how many the proxy actually routes here, the certificate that runs
- * out first, and where the proxy sends them — and each hostname is one row:
+ * footnote under the card. Now each hostname is one row:
  * the certificate's issuer drawn as itself (Let's Encrypt, from the issuer the
  * live release's certificate names), the name as a link to the site, its
  * route and certificate as readings with the days left, then the two
@@ -81,6 +75,12 @@ import { useProject } from "@/components/deploy/project-context"
  * the certificate check happens; an existing row is never retyped, only
  * toggled, reassigned or removed, so the sheet always describes a name the
  * operator is about to commit to rather than one already half-edited.
+ *
+ * The hostname is the largest word in its row, a rung above the toggles'
+ * labels, because it is what the row is; the readings under it share one
+ * size. What changes when a toggle is pressed — the issuer's mark, the route
+ * and certificate readings, a row arriving or leaving — rises into its new
+ * state rather than being repainted in place.
  */
 
 type DomainValue = DeploymentEnvironmentConfiguration["domains"][number]
@@ -96,147 +96,10 @@ export function DomainsSettings({
   environmentId: number
 }) {
   const state = useConfiguration(projectId, environmentId)
-  const project = useProject()
   return (
-    <SettingsPage
-      state={state}
-      readings={(configuration) => (
-        <DomainReadings configuration={configuration} operations={project.operations} />
-      )}
-    >
+    <SettingsPage state={state}>
       {(configuration) => <DomainsForm configuration={configuration} save={state.save} />}
     </SettingsPage>
-  )
-}
-
-/**
- * The four figures: the names, how many the proxy routes here, the
- * certificate that runs out first, and where the proxy sends the traffic. The
- * last is `warning` when the container is also published on every interface,
- * the Runtime tab's rule, because then the proxy is not the only way in — and
- * the notice under the figures says what to check.
- */
-function DomainReadings({
-  configuration,
-  operations,
-}: {
-  configuration: DeploymentEnvironmentConfiguration
-  operations?: DeploymentOperations
-}) {
-  const domains = configuration.domains
-  const runtime = configuration.runtime
-  const observed = operations?.domains.status === "available" ? operations.domains : undefined
-  const routeFor = (hostname: string) =>
-    observed?.domains.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
-  const routes = domains.map((domain) => ({ domain, route: routeFor(domain.hostname) }))
-
-  const https = domains.filter((domain) => domain.https).length
-  const guarded = domains.filter((domain) => domain.protection).length
-  const served = routes.filter(({ route }) => route?.route === "served").length
-  const wrong = routes.find(
-    ({ route }) => route?.route === "foreign" || route?.route === "conflict",
-  )
-  const unrouted = routes.find(({ route }) => route?.route !== "served")
-  const routedTone: Tone = wrong
-    ? "danger"
-    : unrouted
-      ? "warning"
-      : domains.length > 0
-        ? "success"
-        : "default"
-
-  const certificates = routes
-    .map(({ route }) => route)
-    .filter(
-      (route): route is DeploymentDomainRoute =>
-        Boolean(route) &&
-        (route!.certificate === "valid" ||
-          route!.certificate === "expiring" ||
-          route!.certificate === "expired"),
-    )
-  const expired = certificates.find((route) => route.certificate === "expired")
-  const soonest = certificates
-    .filter((route) => typeof route.certificateDaysLeft === "number")
-    .sort((a, b) => (a.certificateDaysLeft ?? 0) - (b.certificateDaysLeft ?? 0))[0]
-  const expiry = expired ?? soonest
-  const renewed = certificates.find((route) => route.certificateRenewedBy === "caddy")
-  const issuer = issuerProduct(expiry?.certificateIssuer)
-
-  const publicBind = runtime.bindAddress === "0.0.0.0" || runtime.bindAddress === "::"
-  const published = runtime.ports?.length
-    ? ` · also ${runtime.ports.map((port) => `${port.hostPort}→${port.containerPort}`).join(", ")}`
-    : ""
-
-  return (
-    <>
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Hostnames"
-          value={domains.length}
-          hint={
-            domains.length > 0
-              ? `${https} over HTTPS · ${guarded} behind a password`
-              : "The proxy has no name for it yet"
-          }
-        />
-        <StatTile
-          label="Routed"
-          value={observed ? `${served} of ${domains.length}` : "—"}
-          tone={observed ? routedTone : "default"}
-          hint={
-            !observed
-              ? (operations?.domains.reason ?? "Not observed yet")
-              : wrong
-                ? // The row names which host; the hint says who else answers.
-                  `${wrong.route!.route === "conflict" ? "Also served" : "Served"} by ${wrong.route!.servedBy ?? "another site"}`
-                : unrouted
-                  ? `${plural(domains.length - served, "name")} without a route`
-                  : domains.length > 0
-                    ? "Every name answers here"
-                    : undefined
-          }
-        />
-        <StatTile
-          label="Soonest expiry"
-          value={
-            expired
-              ? "Expired"
-              : soonest
-                ? plural(soonest.certificateDaysLeft ?? 0, "day")
-                : https === 0 && domains.length > 0
-                  ? "HTTP only"
-                  : "—"
-          }
-          tone={expired ? "danger" : soonest?.certificate === "expiring" ? "warning" : "default"}
-          trailing={issuer && <ProductGlyph id={issuer} className="size-4 align-[-3px]" />}
-          hint={
-            expiry
-              ? `${expiry.hostname}${issuer ? " · Let's Encrypt" : ""}`
-              : renewed
-                ? `${renewed.hostname} · renewed by Caddy`
-                : https > 0
-                  ? "No certificate observed yet"
-                  : undefined
-          }
-        />
-        <StatTile
-          label="Upstream"
-          value={runtime.internalPort ? `:${runtime.internalPort}` : "—"}
-          tone={publicBind && (runtime.hostPort ?? 0) > 0 ? "warning" : "default"}
-          hint={`${runtime.bindAddress || "127.0.0.1"} · host port ${runtime.hostPort || "dynamic"}${published}`}
-        />
-      </StatGrid>
-      {publicBind && (
-        <Notice tone="warning" title="This environment binds a public address" icon={Warning}>
-          Traffic on {runtime.bindAddress} reaches the container directly, ahead of Proxy. Confirm
-          the{" "}
-          <Link href="/security/firewall" className="underline underline-offset-4">
-            firewall
-          </Link>{" "}
-          allows only the traffic you expect before relying on it.
-        </Notice>
-      )}
-    </>
   )
 }
 
@@ -278,6 +141,8 @@ function DomainsForm({
 
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
+  const { bindAddress } = configuration.runtime
+  const publicBind = bindAddress === "0.0.0.0" || bindAddress === "::"
 
   const update = (index: number, next: Partial<DomainValue>) =>
     setDomains(domains.map((item, i) => (i === index ? { ...item, ...next } : item)))
@@ -287,12 +152,12 @@ function DomainsForm({
     notify.success("Domains saved")
   }
 
-  const onSave = async (event: FormEvent) => {
-    event.preventDefault()
+  const onSave = async () => {
     setSaving(true)
     setRowError(undefined)
     try {
-      await persist(domains)
+      await save({ domains })
+      return true
     } catch (error) {
       const index = error instanceof ApiError ? refusedIndex(error.field, "domains") : undefined
       if (error instanceof ApiError && index !== undefined) {
@@ -300,6 +165,7 @@ function DomainsForm({
       } else {
         notify.error("Could not save domains", error)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -346,7 +212,7 @@ function DomainsForm({
     <>
       <SettingForm
         name="Domains"
-        onSubmit={(event) => void onSave(event)}
+        onSave={onSave}
         dirty={draft.dirty}
         changes={draft.changes}
         saving={saving}
@@ -364,7 +230,7 @@ function DomainsForm({
               // this environment's own, named by its id.
               <Link
                 href={`/proxy/sites?site=${encodeURIComponent(observed.siteName)}`}
-                className="flex min-w-0 items-center gap-1 rounded-sm font-mono focus-ring hover:text-foreground hover:underline"
+                className="flex min-w-0 items-center gap-1 rounded-sm font-mono focus-ring transition-colors hover:text-foreground hover:underline"
               >
                 <span className="truncate">{observed.siteName}</span>
                 <ArrowUpRight aria-hidden className="size-3 shrink-0" />
@@ -380,6 +246,15 @@ function DomainsForm({
             )
           }
         >
+          {publicBind && (
+            <Notice tone="warning" title="This environment binds a public address" icon={Warning}>
+              Traffic on {bindAddress} reaches the container directly, ahead of Proxy. Make sure the{" "}
+              <Link href="/network/firewall" className="underline underline-offset-4">
+                firewall
+              </Link>{" "}
+              allows only the traffic you expect.
+            </Notice>
+          )}
           {domains.length === 0 && leaving.length === 0 ? (
             <EmptyState
               icon={Globe}
@@ -389,8 +264,11 @@ function DomainsForm({
           ) : (
             <ul aria-label="Domains" className="@container divide-y divide-hairline">
               {domains.map((domain, index) => (
+                // Keyed on the name alone (the server refuses a duplicate),
+                // so removing one row does not remount every row after it and
+                // make each one rise again.
                 <DomainRow
-                  key={`${domain.hostname}-${index}`}
+                  key={domain.hostname}
                   index={index}
                   domain={domain}
                   route={routeFor(domain.hostname)}
@@ -406,25 +284,25 @@ function DomainsForm({
                   onChange={(next) => update(index, next)}
                 />
               ))}
-              {leaving.map((route) => (
-                <li
-                  key={`leaving-${route.hostname}`}
-                  className="flex min-w-0 items-center gap-3 py-3 first:pt-0"
-                >
-                  <ProductLogo size="sm" fallback={LockOpen} className="opacity-60" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-body text-muted-foreground line-through">
-                    {route.hostname}
-                  </span>
-                  <Status
-                    tone="warning"
-                    label={
-                      saved.has(route.hostname.toLowerCase())
-                        ? "Removed · not saved"
-                        : "Removed · stops on the next deployment"
-                    }
-                  />
-                </li>
-              ))}
+              {leaving.map((route) => {
+                const removed = saved.has(route.hostname.toLowerCase())
+                  ? "Removed · not saved"
+                  : "Removed · stops on the next deployment"
+                return (
+                  <li
+                    key={`leaving-${route.hostname}`}
+                    className="flex min-w-0 animate-rise items-center gap-3 py-3 first:pt-0"
+                  >
+                    <ProductLogo size="sm" fallback={LockOpen} className="opacity-60" />
+                    <span className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground line-through">
+                      {route.hostname}
+                    </span>
+                    {/* Saving turns "not saved" into when it stops; the word
+                        rises into its new state rather than being repainted. */}
+                    <Status key={removed} tone="warning" label={removed} className="animate-rise" />
+                  </li>
+                )
+              })}
             </ul>
           )}
         </SettingSection>
@@ -493,47 +371,61 @@ function DomainRow({
   const setProtection = (next: Partial<NonNullable<DomainValue["protection"]>>) =>
     protection && onChange({ protection: { ...protection, ...next } })
 
+  const nextScheme = domain.https ? "Certificate on deploy" : "HTTP only on deploy"
+
   return (
-    <li className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[40rem]:grid-cols-[2rem_minmax(0,1fr)_auto_11rem_auto]">
-      <ProductLogo size="sm" id={issuer} fallback={domain.https ? LockClosed : LockOpen} />
+    <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[40rem]:grid-cols-[2rem_minmax(0,1fr)_auto_11rem_auto]">
+      {/* Keyed on what it draws, so pressing HTTPS swaps the issuer for the
+          open lock by rising into it rather than repainting in place. */}
+      <ProductLogo
+        key={issuer ?? (domain.https ? "https" : "http")}
+        size="sm"
+        id={issuer}
+        fallback={domain.https ? LockClosed : LockOpen}
+        className="animate-rise"
+      />
       <div className="min-w-0 space-y-1">
         <a
           href={`${scheme}://${host}/`}
           target="_blank"
           rel="noreferrer"
           aria-label={`Open ${host}`}
-          className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-body font-medium focus-ring hover:underline"
+          className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm font-mono text-sm font-medium focus-ring hover:underline"
         >
           <span className="truncate">{host}</span>
           <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
         </a>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          <Status tone={routeTone} label={routeLabel} />
+        {/* One size along the line: the days left and who renews it were
+            11px beside 12px readings, two baselines for one row of facts. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
           {/* The issuer is the row's mark, so the line carries the state and the
               days left and not the issuer's glyph a second time. */}
           {route && !unsaved && httpsChanging && (
-            <Status
-              tone="notice"
-              label={domain.https ? "Certificate on deploy" : "HTTP only on deploy"}
-            />
+            <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
           )}
-          {liveCertificate && <CertificateStatus domain={liveCertificate} />}
-          {liveCertificate &&
-            typeof liveCertificate.certificateDaysLeft === "number" &&
-            liveCertificate.certificateDaysLeft > 0 && (
-              <span
-                className={cn(
-                  "numeric text-hint",
-                  liveCertificate.certificate === "expiring"
-                    ? "text-warning"
-                    : "text-muted-foreground",
+          {/* One group, so turning HTTPS back on brings the live certificate's
+              readings back together rather than popping in one by one. */}
+          {liveCertificate && (
+            <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
+              <CertificateStatus domain={liveCertificate} />
+              {typeof liveCertificate.certificateDaysLeft === "number" &&
+                liveCertificate.certificateDaysLeft > 0 && (
+                  <span
+                    className={cn(
+                      "numeric",
+                      liveCertificate.certificate === "expiring"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {plural(liveCertificate.certificateDaysLeft, "day")} left
+                  </span>
                 )}
-              >
-                {plural(liveCertificate.certificateDaysLeft, "day")} left
-              </span>
-            )}
-          {liveCertificate?.certificateRenewedBy === "caddy" && (
-            <span className="text-hint text-muted-foreground">Renewed by Caddy</span>
+              {liveCertificate.certificateRenewedBy === "caddy" && (
+                <span className="text-muted-foreground">Renewed by Caddy</span>
+              )}
+            </span>
           )}
         </div>
       </div>
@@ -561,7 +453,10 @@ function DomainRow({
             className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
           >
             <LockClosed
-              className={cn("size-3.5", domain.https ? "text-brand" : "text-muted-foreground")}
+              className={cn(
+                "size-3.5 transition-colors",
+                domain.https ? "text-brand" : "text-muted-foreground",
+              )}
             />
             HTTPS
           </ToggleGroupItem>
@@ -570,7 +465,12 @@ function DomainRow({
             aria-label={`Password on ${host}`}
             className="h-11 gap-1.5 text-body data-[state=off]:text-muted-foreground sm:h-9"
           >
-            <Key className={cn("size-3.5", protection ? "text-brand" : "text-muted-foreground")} />
+            <Key
+              className={cn(
+                "size-3.5 transition-colors",
+                protection ? "text-brand" : "text-muted-foreground",
+              )}
+            />
             Password
           </ToggleGroupItem>
         </ToggleGroup>
@@ -599,13 +499,19 @@ function DomainRow({
                   onChange={(event) => setProtection({ username: event.target.value })}
                 />
               </Field>
+              {/* The rule is what is needed while typing, lit as it is met;
+                  that an empty field keeps the saved one is the placeholder's
+                  "Unchanged", and the rest is behind ⓘ. */}
               <Field
                 label="Password"
                 htmlFor={`domain-password-${index}`}
+                info="Visitors are asked for this user name and password before the site. Left empty, a saved password stays as it is."
                 hint={
-                  protection.hash
-                    ? "Leave empty to keep the current password."
-                    : "At least 8 characters. Visitors are asked for it before the site."
+                  <span aria-live="polite">
+                    <FieldCheck met={(protection.password ?? "").length >= 8}>
+                      At least 8 characters
+                    </FieldCheck>
+                  </span>
                 }
               >
                 <Input
@@ -624,7 +530,7 @@ function DomainRow({
         </div>
       )}
       {error && (
-        <p role="alert" className="col-span-full pl-11 text-hint text-destructive">
+        <p role="alert" className="col-span-full animate-rise pl-11 text-hint text-destructive">
           {error}
         </p>
       )}
@@ -658,12 +564,17 @@ const METHOD_PRODUCT: Partial<
  * The name and whether it is served over HTTPS are one field (§7's
  * `InputGroup`), as they are on `/deploy/new`'s public address; the check is
  * the button at its end rather than a "Checking…" line under it, and what the
- * check found is a word at the label's edge. Only the case that asks for a
+ * check found is a word at the label's edge, with how a certificate will be
+ * ordered as the field's own line under it. Only the case that asks for a
  * decision — automatic HTTPS that cannot be confirmed — is a notice; that a
  * certificate is ready, or will be issued, is a fact nobody has to act on
  * (§14). Where the server says which address the name must point at, the
  * record to create is drawn as one line to copy, with whether it already
  * does.
+ *
+ * That the record has to point here before the check means anything is
+ * behind the field's ⓘ: it is read once, and as a hint it sat under the field
+ * until the check and then vanished, pulling everything under it up a line.
  */
 function AddDomainPanel({
   open,
@@ -719,6 +630,7 @@ function AddDomainPanel({
   const answer = https && matches && suggestion ? certificateReading(suggestion) : undefined
   const method = matches ? suggestion?.certificateMethod : undefined
   const glyph = method ? METHOD_PRODUCT[method] : undefined
+  const ordered = https && suggestion && !suggestion.covered ? method : undefined
   const record = matches && suggestion?.address ? `A  ${typed}  →  ${suggestion.address}` : ""
   const incomplete = guarded && (!username.trim() || password.length < 8)
 
@@ -772,12 +684,30 @@ function AddDomainPanel({
         <Field
           label="Hostname"
           htmlFor="add-domain-hostname"
+          info="Point a DNS record for the name at this server first. Check reads where it points and whether a certificate can be issued for it."
           // Once checked, what the check found is the Status at the label's
-          // edge, the record under the field and the method's note — the
+          // edge, the method under the field and the record under that — the
           // server's sentence would be all three again.
-          hint={matches && suggestion ? undefined : "Point a record at this server, then check it."}
+          hint={
+            ordered && (
+              <span key={ordered} className="inline-flex animate-rise items-center gap-1.5">
+                {glyph && <ProductGlyph id={glyph} className="size-3" />}
+                <span>
+                  Ordered over the{" "}
+                  {ordered === "caddy" ? "managed Caddy ingress" : `${ordered} challenge`}
+                </span>
+              </span>
+            )
+          }
           trailing={
-            answer && <Status tone={answer.tone} label={answer.label} className="animate-rise" />
+            answer && (
+              <Status
+                key={answer.label}
+                tone={answer.tone}
+                label={answer.label}
+                className="animate-rise"
+              />
+            )
           }
         >
           <InputGroup>
@@ -807,20 +737,24 @@ function AddDomainPanel({
         </Field>
 
         {record && (
-          <div className="min-w-0 animate-rise space-y-1.5">
+          // Keyed on the record, so a second check that names another
+          // address rises in as the new answer it is.
+          <div key={record} className="min-w-0 animate-rise space-y-1.5">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <p className="text-body font-medium">DNS record</p>
               {suggestion?.resolves !== undefined && (
                 <Status
+                  key={String(suggestion.resolves)}
                   tone={suggestion.resolves ? "running" : "warning"}
                   label={suggestion.resolves ? "Points here" : "Not pointing here yet"}
+                  className="animate-rise"
                 />
               )}
             </div>
+            {/* The record is what gets copied into a DNS panel, so it is set
+                at the well's own 12px rather than shrunk to a hint's 11. */}
             <div className="flex min-w-0 items-center gap-1">
-              <Well className="min-w-0 flex-1 py-2 font-mono text-hint break-all whitespace-pre-wrap">
-                {record}
-              </Well>
+              <Well className="min-w-0 flex-1 py-2 break-all whitespace-pre-wrap">{record}</Well>
               <IconAction
                 label="Copy the record"
                 onClick={() => void copyText(`${typed}. A ${suggestion?.address}`, "Record copied")}
@@ -831,17 +765,13 @@ function AddDomainPanel({
           </div>
         )}
 
-        {https && matches && suggestion && !suggestion.covered && method && (
-          <FormNote className="flex items-start gap-1.5">
-            {glyph && <ProductGlyph id={glyph} className="mt-px" />}
-            <span>
-              Ordered over the{" "}
-              {method === "caddy" ? "managed Caddy ingress" : `${method} challenge`}
-            </span>
-          </FormNote>
-        )}
         {https && matches && suggestion && !suggestion.covered && !method && (
-          <Notice tone="warning" icon={Warning} title="Automatic HTTPS needs attention">
+          <Notice
+            tone="warning"
+            icon={Warning}
+            title="Automatic HTTPS needs attention"
+            className="animate-rise"
+          >
             {suggestion.certificateIssue ?? "Certificate readiness could not be confirmed."}
           </Notice>
         )}
@@ -862,7 +792,17 @@ function AddDomainPanel({
                   onChange={(event) => setUsername(event.target.value)}
                 />
               </Field>
-              <Field label="Password" htmlFor="add-domain-password" hint="At least 8 characters.">
+              {/* Lit as it is met, because it is also why Add domain is still
+                  off: the button waits for a user name and this. */}
+              <Field
+                label="Password"
+                htmlFor="add-domain-password"
+                hint={
+                  <span aria-live="polite">
+                    <FieldCheck met={password.length >= 8}>At least 8 characters</FieldCheck>
+                  </span>
+                }
+              >
                 <Input
                   id="add-domain-password"
                   type="password"

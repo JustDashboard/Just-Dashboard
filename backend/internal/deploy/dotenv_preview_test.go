@@ -86,15 +86,17 @@ func TestPreviewDotenvImportJudgesEveryNameAndWritesNothing(t *testing.T) {
 	}{
 		{"A=1\nB='open", []string{"runtime"}, "line 2"},
 		{"A=1\n", []string{"everywhere"}, "scope"},
-		{"ALIAS=${{variable.MISSING}}\n", []string{"runtime"}, "MISSING"},
 		{"# only a comment\n", []string{"runtime"}, "empty"},
 	} {
 		if _, err := preview(whole.dotenv, whole.scopes...); !errors.Is(err, ErrInvalidVariable) || !strings.Contains(err.Error(), whole.want) {
 			t.Errorf("preview(%q) error = %v, want the import's refusal naming %q", whole.dotenv, err, whole.want)
 		}
 	}
-	if _, err := preview("ALIAS=${{variable.SAME}}\n", "runtime"); err != nil {
-		t.Fatalf("a reference to a stored variable was refused: %v", err)
+	for _, literal := range []string{"${{variable.MISSING}}", "${{variable.SAME}}", "${{credential.unrelated}}"} {
+		judged, err := preview("ALIAS="+literal+"\n", "runtime")
+		if err != nil || !slices.Equal(judged.Variables, []DotenvImportVerdict{{Name: "ALIAS", Line: 1, Change: "added"}}) {
+			t.Fatalf("literal reference-shaped text was refused: %+v, %v", judged, err)
+		}
 	}
 
 	variables, err := fixture.plans.ListVariables(ctx, projectID, environmentID)
@@ -107,4 +109,77 @@ func TestPreviewDotenvImportJudgesEveryNameAndWritesNothing(t *testing.T) {
 	if value, err := fixture.plans.RevealVariable(ctx, projectID, environmentID, "VALUE"); err != nil || value.Value != "old" {
 		t.Fatalf("VALUE after previews = %+v, %v, want the stored value untouched", value, err)
 	}
+	literal := "${{variable.MISSING}}"
+	imported, err := fixture.plans.ImportDotenv(ctx, projectID, environmentID, "operator", DotenvImportRequest{Revision: seeded.DesiredRevision, Dotenv: "ALIAS=" + literal + "\n", Sensitivity: "secret", Scopes: []string{"runtime"}})
+	if err != nil {
+		t.Fatal("previewed literal import refused", err)
+	}
+	opened, err := fixture.plans.OpenScopedVariables(ctx, environmentID, "runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, value := range opened {
+		if value.Name == "ALIAS" {
+			found = true
+			if value.Value != literal || value.ValueMode != "literal" {
+				t.Fatal("dotenv import resolved literal text as authority")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("previewed literal was not imported")
+	}
+	if _, err := fixture.plans.PutVariable(ctx, projectID, environmentID, "EXPLICIT_ALIAS", "operator", VariableWriteRequest{Revision: imported.DesiredRevision, Reference: literal, Sensitivity: "secret", Scopes: []string{"runtime"}}); !errors.Is(err, ErrInvalidVariable) || !strings.Contains(err.Error(), "MISSING") {
+		t.Fatal("explicit reference to a missing variable was accepted", err)
+	}
+}
+
+func TestPreviewDotenvImportReportsHistoricalReferenceBecomingLiteral(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	projectID, environmentID := insertConfigurationFixture(t, fixture)
+	base := "one"
+	seeded, err := fixture.plans.PutVariable(t.Context(), projectID, environmentID, "BASE", "operator", VariableWriteRequest{Revision: 1, Value: &base, Sensitivity: "secret", Scopes: []string{"runtime"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal := "${{variable.BASE}}"
+	tx, err := fixture.store.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := fixture.plans.writeVariableRevisionTx(t.Context(), tx, environmentID, "LEGACY", literal, "secret", []string{"runtime"}, "historical operator", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	assertOpened := func(expected, mode string) {
+		t.Helper()
+		opened, err := fixture.plans.OpenScopedVariables(t.Context(), environmentID, "runtime")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range opened {
+			if value.Name == "LEGACY" {
+				if value.Value != expected || value.ValueMode != mode {
+					t.Fatal("historical reference intent was not preserved")
+				}
+				return
+			}
+		}
+		t.Fatal("historical variable disappeared")
+	}
+	assertOpened("one", "")
+	request := DotenvImportRequest{Revision: seeded.DesiredRevision, Dotenv: "LEGACY=" + literal + "\n", Sensitivity: "secret", Scopes: []string{"runtime"}}
+	preview, err := fixture.plans.PreviewDotenvImport(t.Context(), projectID, environmentID, request)
+	if err != nil || !slices.Equal(preview.Variables, []DotenvImportVerdict{{Name: "LEGACY", Line: 1, Change: "changed"}}) {
+		t.Fatal("preview missed historical reference becoming literal", preview, err)
+	}
+	assertOpened("one", "")
+	if _, err := fixture.plans.ImportDotenv(t.Context(), projectID, environmentID, "operator", request); err != nil {
+		t.Fatal(err)
+	}
+	assertOpened(literal, "literal")
 }

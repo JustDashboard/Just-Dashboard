@@ -162,6 +162,11 @@ type SourceIdentity struct {
 	Services          []string        `json:"services,omitempty"`
 	CredentialID      int64           `json:"credentialId,omitempty"`
 	Observed          json.RawMessage `json:"observed,omitempty"`
+	// Local marks an image that exists only on this server — a Compose
+	// project's own build, a tag made by hand — so Digest is its local image
+	// id rather than a registry manifest, and a release takes it from the
+	// daemon instead of pulling it.
+	Local bool `json:"local,omitempty"`
 }
 
 type DetectionConfidence string
@@ -679,6 +684,7 @@ type RuntimeMount struct {
 
 type PlannedVariable struct {
 	Name        string   `json:"name"`
+	ValueMode   string   `json:"valueMode,omitempty"`
 	Sensitivity string   `json:"sensitivity"`
 	Scopes      []string `json:"scopes"`
 	Required    bool     `json:"required,omitempty"`
@@ -1410,6 +1416,9 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(variable.Name, "invalid or duplicate planned variable %q", variable.Name)
 		}
 		seenVariables[variable.Name] = true
+		if variable.ValueMode != "" && variable.ValueMode != "literal" && variable.ValueMode != "reference" {
+			return invalidField(variable.Name, "invalid variable value mode")
+		}
 		if variable.Sensitivity != "plain" && variable.Sensitivity != "secret" {
 			return invalidField(variable.Name, "invalid sensitivity for %s", variable.Name)
 		}

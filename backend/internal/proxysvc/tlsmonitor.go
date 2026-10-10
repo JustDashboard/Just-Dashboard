@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -20,19 +21,75 @@ import (
 // WatchedEndpoint is one watched name and port, and the address to reach it
 // at when that is not the name's own ("" for DNS).
 type WatchedEndpoint struct {
-	ID        int64
-	Domain    string
-	Port      int
-	IP        string
+	ID     int64
+	Domain string
+	Port   int
+	IP     string
+	// Kind is what the check asks: WatchTLS, a handshake and its
+	// certificate, or WatchTCP, a network probe that only connects.
+	Kind      string
 	CheckedAt time.Time
 }
 
-// WatchCheck is what one check of an endpoint found. Cert carries a failed
-// handshake's reason in its Error, as CheckEndpoint returns it.
+// Watch kinds.
+const (
+	WatchTLS = "tls"
+	WatchTCP = "tcp"
+)
+
+// WatchCheck is what one check of an endpoint found: Cert for a TLS watch,
+// carrying a failed handshake's reason in its Error as CheckEndpoint returns
+// it, or Probe for a TCP one.
 type WatchCheck struct {
 	EndpointID int64
 	CheckedAt  time.Time
 	Cert       *Certificate
+	Probe      *ProbeCheck
+}
+
+// ProbeCheck is one TCP connection a network probe made, or failed to.
+type ProbeCheck struct {
+	OK bool `json:"ok"`
+	// Address is the address dialled: the watch's own, or the first the
+	// name resolved to.
+	Address string `json:"address,omitempty"`
+	// Ms is how long the connection took to open.
+	Ms int64 `json:"ms,omitempty"`
+	// State is connected, refused, timeout, unresolvable or error.
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
+}
+
+// CheckTCP opens one TCP connection to the endpoint, at ip when it names
+// one, and closes it: whether something accepts connections there, and how
+// fast. It sends nothing over the connection.
+func CheckTCP(ctx context.Context, domain, ip string, port int) (*ProbeCheck, error) {
+	host := domain
+	if ip != "" {
+		host = ip
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	start := time.Now()
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		check := &ProbeCheck{State: "error", Error: err.Error()}
+		var dnsErr *net.DNSError
+		switch {
+		case errors.As(err, &dnsErr):
+			check.State = "unresolvable"
+		case isTimeout(err):
+			check.State, check.Error = "timeout", "No answer to the connection within 5 seconds."
+		case errors.Is(err, syscall.ECONNREFUSED):
+			check.State = "refused"
+		}
+		return check, nil
+	}
+	check := &ProbeCheck{OK: true, State: "connected", Address: conn.RemoteAddr().String(), Ms: time.Since(start).Milliseconds()}
+	conn.Close()
+	return check, nil
 }
 
 // WatchStore is where the monitor reads its endpoints and keeps what it
@@ -59,6 +116,8 @@ type TLSMonitor struct {
 	store WatchStore
 	Now   func() time.Time
 	Check func(ctx context.Context, domain, ip string, port int) (*Certificate, error)
+	// Probe is a network probe's check, CheckTCP outside tests.
+	Probe func(ctx context.Context, domain, ip string, port int) (*ProbeCheck, error)
 	// Tick is how often the loop looks for endpoints that are due, which is
 	// finer than any interval so a changed interval takes effect within it.
 	Tick time.Duration
@@ -73,7 +132,7 @@ type TLSMonitor struct {
 
 func NewTLSMonitor(store WatchStore) *TLSMonitor {
 	return &TLSMonitor{
-		store: store, Now: time.Now, Check: CheckEndpointAt, Tick: time.Minute,
+		store: store, Now: time.Now, Check: CheckEndpointAt, Probe: CheckTCP, Tick: time.Minute,
 		pass: make(chan struct{}, 1),
 	}
 }
@@ -168,13 +227,19 @@ func (m *TLSMonitor) CheckEndpoints(ctx context.Context, endpoints []WatchedEndp
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			cert, err := m.Check(ctx, e.Domain, e.IP, e.Port)
+			check := WatchCheck{EndpointID: e.ID}
+			var err error
+			if e.Kind == WatchTCP {
+				check.Probe, err = m.Probe(ctx, e.Domain, e.IP, e.Port)
+			} else {
+				check.Cert, err = m.Check(ctx, e.Domain, e.IP, e.Port)
+			}
 			if err != nil {
 				return
 			}
-			at := m.Now().UTC().Truncate(time.Second)
+			check.CheckedAt = m.Now().UTC().Truncate(time.Second)
 			mu.Lock()
-			checked = append(checked, WatchCheck{EndpointID: e.ID, CheckedAt: at, Cert: cert})
+			checked = append(checked, check)
 			mu.Unlock()
 		}()
 	}

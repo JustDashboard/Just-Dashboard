@@ -48,7 +48,10 @@ export function parseRemote(remote: string | undefined): RemoteOrigin | undefine
     const colon = raw.indexOf(":")
     const slash = raw.indexOf("/")
     if (colon > 0 && (slash === -1 || colon < slash)) {
-      host = raw.slice(0, colon).replace(/^[^@]*@/, "").toLowerCase()
+      host = raw
+        .slice(0, colon)
+        .replace(/^[^@]*@/, "")
+        .toLowerCase()
       path = raw.slice(colon + 1)
     }
   }
@@ -176,4 +179,65 @@ export function assignPulls(
     out[repo.path] = { ...entry, pulls: entry.pulls.filter(drawnHere) }
   }
   return out
+}
+
+/**
+ * The checkouts the page draws as repository cards, and the linked worktrees
+ * it lists in a section of their own.
+ *
+ * A worktree is a second working directory of one repository — the same
+ * history, another branch checked out. Drawn as a card of its own on the
+ * shelf it read as a second repository with the first one's name; drawn
+ * inside its repository's card it made that card, and through the grid's
+ * equal rows every card beside it, as tall as its longest list. So the cards
+ * are repositories, each counting its worktrees, and the worktrees are one
+ * list under the shelves, each naming the repository it belongs to — one with
+ * no main checkout listed (outside the roots, deleted from under it) included.
+ */
+export function splitWorktrees(repos: GitRepo[]): {
+  cards: GitRepo[]
+  worktrees: GitRepo[]
+  /** How many worktrees each main checkout has, by its path. */
+  counts: Record<string, number>
+} {
+  const cards: GitRepo[] = []
+  const worktrees: GitRepo[] = []
+  const counts: Record<string, number> = {}
+  for (const repo of repos) {
+    if (repo.worktree && repo.main !== repo.path) {
+      worktrees.push(repo)
+      if (repo.main) counts[repo.main] = (counts[repo.main] ?? 0) + 1
+    } else {
+      cards.push(repo)
+    }
+  }
+  worktrees.sort(
+    (a, b) => (a.main ?? "").localeCompare(b.main ?? "") || a.path.localeCompare(b.path),
+  )
+  return { cards, worktrees, counts }
+}
+
+/** Where a worktree sits, said from its main checkout: `.worktrees/fix-x`, not the whole path. */
+export function worktreePlace(worktree: GitRepo, main: string): string {
+  const prefix = main.replace(/\/$/, "") + "/"
+  return worktree.path.startsWith(prefix) ? worktree.path.slice(prefix.length) : worktree.path
+}
+
+/** The forges whose repository page is `https://<host>/<owner>/<name>`. */
+const FORGE_HOSTS = /^(www\.)?(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org)$/
+
+/**
+ * The repository a checkout pushes to, as the forge names it — `Wayy01/api` on
+ * github.com — with its page where the forge's address shape is known. An
+ * scp-style or ssh remote has no page of its own, but the repository on a
+ * known forge still does.
+ */
+export function forgeRepository(
+  remote: string | undefined,
+): { host: string; slug: string; url?: string } | undefined {
+  const origin = parseRemote(remote)
+  if (!origin?.host || !origin.owner) return undefined
+  const slug = `${origin.owner}/${origin.name}`
+  const host = origin.host.replace(/^www\./, "")
+  return { host, slug, url: FORGE_HOSTS.test(origin.host) ? `https://${host}/${slug}` : undefined }
 }

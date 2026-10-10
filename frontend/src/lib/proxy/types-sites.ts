@@ -308,3 +308,41 @@ export type NpmImportResult = {
   reloadError?: string
   reload?: ProxyReload
 }
+
+/** One of a site's application-layer controls as its file sets it. */
+export type PolicyControl = {
+  id: "rate-limit" | "conn-limit" | "proxy-cache" | "static-cache" | "http2" | "http3"
+  title: string
+  configured: boolean
+  setting?: string
+  /** The running build's: built-in, module (built with it), missing, unknown. */
+  support: "built-in" | "module" | "missing" | "unknown"
+  paths?: string[]
+}
+
+/** GET /proxy/sites/{name}/policy — the site's service policy. */
+export type ServicePolicy = {
+  site: string
+  file: string
+  engine?: string
+  controls: PolicyControl[]
+}
+
+/** What measuring one control found. */
+export type ControlCheck = {
+  id: PolicyControl["id"]
+  title: string
+  state: "verified" | "not-effective" | "not-measured" | "not-configured"
+  detail: string
+  evidence?: string[]
+}
+
+/** POST /proxy/sites/{name}/controls/verify — one measurement. */
+export type ControlsVerification = {
+  site: string
+  url: string
+  checkedAt: string
+  requests: number
+  policy: ServicePolicy
+  checks: ControlCheck[]
+}

@@ -1,0 +1,4 @@
+=== RUN   TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit
+--- PASS: TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit (2.73s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	3.961s

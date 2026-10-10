@@ -132,9 +132,20 @@ func (s *Service) ListUsers(ctx context.Context) ([]*User, error) {
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string, role Role, mustChange bool) (*User, error) {
-	// The name as typed is the one the account shows as; the lower-cased
-	// form is only the key it signs in with.
-	displayName, err := normaliseDisplayName(username)
+	return s.CreateUserWithDisplayName(ctx, username, "", password, role, mustChange)
+}
+
+// CreateUserWithDisplayName validates both names before inserting the account.
+// An omitted display name keeps the spelling typed for the sign-in name.
+func (s *Service) CreateUserWithDisplayName(ctx context.Context, username, displayName, password string, role Role, mustChange bool) (*User, error) {
+	typedName, err := normaliseDisplayName(username)
+	if err != nil {
+		return nil, err
+	}
+	if displayName == "" {
+		displayName = typedName
+	}
+	displayName, err = normaliseDisplayName(displayName)
 	if err != nil {
 		return nil, err
 	}
@@ -217,28 +228,38 @@ type Profile struct {
 // dashboard and lower-cased like every lookup; a rename that collides with
 // another account is refused rather than silently adjusted.
 func (s *Service) SetProfile(ctx context.Context, userID int64, p Profile) error {
+	p, err := p.normalised()
+	if err != nil {
+		return err
+	}
+	if p.Username == nil && p.DisplayName == nil {
+		return nil
+	}
+	_, err = s.st.DB.ExecContext(ctx, `UPDATE users SET
+		username = COALESCE(?, username), display_name = COALESCE(?, display_name) WHERE id = ?`,
+		p.Username, p.DisplayName, userID)
+	if err != nil && p.Username != nil && strings.Contains(err.Error(), "UNIQUE") {
+		return fmt.Errorf("user %q already exists", *p.Username)
+	}
+	return err
+}
+
+func (p Profile) normalised() (Profile, error) {
 	if p.Username != nil {
 		name, err := normaliseUsername(*p.Username)
 		if err != nil {
-			return err
+			return Profile{}, err
 		}
-		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET username = ? WHERE id = ?`, name, userID); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
-				return fmt.Errorf("user %q already exists", name)
-			}
-			return err
-		}
+		p.Username = &name
 	}
 	if p.DisplayName != nil {
 		name, err := normaliseDisplayName(*p.DisplayName)
 		if err != nil {
-			return err
+			return Profile{}, err
 		}
-		if _, err := s.st.DB.ExecContext(ctx, `UPDATE users SET display_name = ? WHERE id = ?`, name, userID); err != nil {
-			return err
-		}
+		p.DisplayName = &name
 	}
-	return nil
+	return p, nil
 }
 
 // MaxAvatarBytes bounds a stored picture. The client resizes to a small
@@ -384,9 +405,15 @@ func (s *Service) DeleteUser(ctx context.Context, userID int64) error {
 
 // guardLastAdmin refuses changes that would leave the dashboard with no way in.
 func (s *Service) guardLastAdmin(ctx context.Context, userID int64) error {
+	return guardLastAdmin(ctx, s.st.DB, userID)
+}
+
+func guardLastAdmin(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, userID int64) error {
 	var role string
 	var disabled int
-	err := s.st.DB.QueryRowContext(ctx, `SELECT role, disabled FROM users WHERE id = ?`, userID).Scan(&role, &disabled)
+	err := db.QueryRowContext(ctx, `SELECT role, disabled FROM users WHERE id = ?`, userID).Scan(&role, &disabled)
 	if err == sql.ErrNoRows {
 		return ErrNotFound
 	}
@@ -397,7 +424,7 @@ func (s *Service) guardLastAdmin(ctx context.Context, userID int64) error {
 		return nil
 	}
 	var others int
-	if err := s.st.DB.QueryRowContext(ctx,
+	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0 AND id != ?`, userID).Scan(&others); err != nil {
 		return err
 	}

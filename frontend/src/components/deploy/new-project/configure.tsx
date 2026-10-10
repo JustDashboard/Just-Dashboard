@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Check } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
@@ -17,6 +17,7 @@ import type {
 } from "@/lib/types"
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { BorderBeam } from "@/components/ui/border-beam"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
@@ -31,7 +32,8 @@ import {
   validateConfiguration,
   variablesWithoutScope,
 } from "@/components/deploy/deployment-defaults"
-import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
+import { PlanRail } from "@/components/deploy/new-project/plan-rail"
+import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
 import { StepVariables } from "@/components/deploy/new-project/step-variables"
@@ -44,7 +46,6 @@ import {
   type PlanSection,
 } from "@/components/deploy/new-project/plan-sections"
 import {
-  adoptImport,
   commitDraft,
   configurationForSave,
   withHeldDomainVariables,
@@ -72,13 +73,22 @@ import {
 } from "@/components/deploy/new-project/draft"
 import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
 
+/**
+ * The rail of the plan and the step's fields beside it, held to the window
+ * from `xl`: the rail scrolls itself, and when a step has more settings than
+ * the window has room for it is the fields that scroll — between the question
+ * and the command, which stay where the reader left them.
+ */
+const LAYOUT =
+  "grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)]"
+
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
 }
 
 /**
  * The configure half of `/deploy/new`, for every source from a picked
- * repository to an adopted container — and, since this pass, four screens
+ * repository to a reviewed template — and, since this pass, four screens
  * rather than one.
  *
  * One screen carried the source controls, the name, the type, a ten-field
@@ -342,7 +352,6 @@ export function Configure({
 
   const configuration = flow.configuration
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
-  const isImport = flow.source.kind === "import"
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
@@ -728,22 +737,19 @@ export function Configure({
       const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
       if (outstanding.length) return
 
-      const commit = isImport
-        ? await adoptImport(checkedDraft.draft, acknowledged, flow.importPreview?.unsupported ?? [])
-        : await commitDraft(
-            checkedDraft.draft,
-            acknowledged,
-            // Only a Git source polls a branch, so only a Git source has a
-            // policy to record; anything else keeps the server's defaults.
-            isGitSource ? gitPolicy : undefined,
-          )
+      const commit = await commitDraft(
+        checkedDraft.draft,
+        acknowledged,
+        // Only Git sources poll a branch and need a watch policy.
+        isGitSource ? gitPolicy : undefined,
+      )
       onStepChange("done")
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
       })
 
-      if (operation === "deploy" && !isImport) {
+      if (operation === "deploy") {
         const run = await enqueueDeploy(
           commit.projectId,
           commit.environmentId,
@@ -847,64 +853,98 @@ export function Configure({
     }
   }
 
-  if (created)
-    return (
-      /* The outcome lands on the same focused surface the plan was decided on
-         (§17), not on a framed `Panel` borrowed from the reading register —
-         the sequence ends where it was being worked. Its name is the page's
-         `h1`, which is where the question was: a panel header repeating it
-         would be the same sentence twice. */
-      <FlowPanel>
-        <FlowPanelBody className="space-y-4">
-          {failure ? (
-            <ErrorState error={failure} />
-          ) : (
-            <p className="text-body">Starting the first release…</p>
-          )}
-          <p className="text-body text-muted-foreground">
-            Your project, configuration and environment are saved. Open the deployment to check its
-            run history and continue.
-          </p>
-        </FlowPanelBody>
-        <FlowActions>
-          <Button asChild className="h-11 sm:h-9">
-            <Link href={`/deploy/${created.projectId}/deployments`}>
-              Open deployment
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
-        </FlowActions>
-      </FlowPanel>
-    )
-
   const errors = validateConfiguration(configuration, flow.profile)
   const blockers = preflight ? blockingFindings(preflight.findings) : []
   const warnings = preflight ? warningFindings(preflight.findings) : []
   const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
   const last = current === "review"
+  const variableCount = [...environmentNames].filter(
+    (name) => !configuration.variables.some((variable) => variable.name === name),
+  ).length
+  const groups = planGroups({
+    flow,
+    branch: isGitSource ? branch : undefined,
+    errors,
+    variableCount,
+    checking: busy === "check",
+    findings: preflight?.findings,
+    automatic: isGitSource ? gitPolicy.automatic : undefined,
+  })
+  const openRow = (row: PlanRow) => (row.section ? openSection(row.section) : goto(row.step))
+  /* The plan read down, beside the fields from `xl` and after them below it:
+     stacked on a phone, the drawing came first and the question's first field
+     started two-thirds of the way down every step — the same summary scrolled
+     past four times. It is a reading of what the fields say, so it follows
+     them and the command. */
+  const rail = (
+    <aside
+      aria-label="The plan"
+      data-slot="plan-rail-column"
+      className="min-w-0 xl:col-start-1 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto"
+    >
+      <PlanRail flow={flow} groups={groups} current={current} onOpen={openRow} />
+    </aside>
+  )
+
+  if (created)
+    return (
+      <div className={LAYOUT}>
+        {/* The outcome lands on the same focused surface the plan was decided
+            on (§17), not on a framed `Panel` borrowed from the reading
+            register — the sequence ends where it was being worked. Its name
+            is the page's `h1`, which is where the question was: a panel
+            header repeating it would be the same sentence twice. */}
+        <FlowPanel className="min-w-0 xl:col-start-2 xl:row-start-1 xl:self-start">
+          <FlowPanelBody className="space-y-4">
+            {failure ? (
+              <ErrorState error={failure} />
+            ) : (
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background">
+                  <Check aria-hidden className="size-5 text-success" />
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-title font-semibold tracking-tight">{flow.name}</p>
+                  <TextShimmer className="text-body">Starting the first release…</TextShimmer>
+                </div>
+              </div>
+            )}
+            <p className="text-body text-muted-foreground">
+              Your project, configuration and environment are saved. Open the deployment to check
+              its run history and continue.
+            </p>
+          </FlowPanelBody>
+          <FlowActions>
+            <Button asChild className="h-11 sm:h-9">
+              <Link href={`/deploy/${created.projectId}/deployments`}>
+                Open deployment
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </FlowActions>
+        </FlowPanel>
+        {rail}
+      </div>
+    )
 
   return (
-    /* The form on the left and the plan it is building on the right: every
-       field changes the drawing beside it, so what a project *is* — a source,
-       a build, a container, a name — is on screen while it is being decided
-       rather than discovered afterwards on the overview. It is also how a
-       four-step sequence stays one thing: the drawing does not change when
-       the step does, and each of its nodes goes to the step that decides it.
-
-       Both are held to the window: the drawing stays beside the fields, and
-       when a step has more settings than the window has room for it is the
-       fields that scroll — between the question and the command, which stay
-       where the reader left them. */
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
+    /* The plan on the left and the step's fields beside it, the run page's
+       rail and inspector: every field changes the row that reads it, so what
+       a project *is* — a source, a build, a container, a name — is on screen
+       while it is being decided rather than discovered afterwards on the
+       overview. It is also how a four-step sequence stays one thing: the rail
+       does not change when the step does, and each of its rows goes to the
+       step that decides it. */
+    <div className={LAYOUT}>
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
       <fieldset disabled={Boolean(busy) || branchBusy} className="contents">
         {/* The one surface on this screen that carries depth (§16): the fields
-            are what the reader is deciding, and the drawing beside them is a
-            reading of what they already say. Giving the drawing an edge too
-            would be two foregrounds, which is none. */}
-        <FlowPanel className="relative min-w-0 xl:col-start-1 xl:row-start-1 xl:max-h-full xl:min-h-0 xl:self-start">
+            are what the reader is deciding, and the rail beside them is a
+            reading of what they already say. Giving the rail an edge too would
+            be two foregrounds, which is none. */}
+        <FlowPanel className="relative min-w-0 xl:col-start-2 xl:row-start-1 xl:max-h-full xl:min-h-0 xl:self-start">
           {/* §17 pass 7: the surface says its own work is in flight. A save,
               a re-detect and a preflight all disable the fieldset, and a form
               that greys out with no other answer reads as one that stopped
@@ -970,11 +1010,6 @@ export function Configure({
                 branch={isGitSource ? branch : undefined}
                 gitPolicy={gitPolicy}
                 onGitPolicyChange={setGitPolicy}
-                variableCount={
-                  [...environmentNames].filter(
-                    (name) => !configuration.variables.some((variable) => variable.name === name),
-                  ).length
-                }
                 suppliedVariables={[...environmentNames]}
                 findings={preflight?.findings ?? []}
                 checking={busy === "check"}
@@ -997,9 +1032,7 @@ export function Configure({
             note={
               !last
                 ? undefined
-                : isImport
-                  ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-                  : "Deploy saves the plan, applies the environment, and starts the release."
+                : "Deploy saves the plan, applies the environment, and starts the release."
             }
             secondary={
               <>
@@ -1011,7 +1044,7 @@ export function Configure({
                 >
                   {current === "project" ? "Change source" : "Back"}
                 </Button>
-                {last && !isImport && (
+                {last && (
                   <Button
                     variant="ghost"
                     className="h-11 sm:h-9"
@@ -1033,13 +1066,11 @@ export function Configure({
                 disabled={Boolean(busy)}
               >
                 <ArrowRight className="size-4" />
-                {isImport
-                  ? "Adopt workload"
-                  : blockers.length
-                    ? "Re-check and deploy"
-                    : outstanding.length
-                      ? "Acknowledge, then deploy"
-                      : "Deploy"}
+                {blockers.length
+                  ? "Re-check and deploy"
+                  : outstanding.length
+                    ? "Acknowledge, then deploy"
+                    : "Deploy"}
               </Button>
             ) : (
               <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>
@@ -1050,22 +1081,7 @@ export function Configure({
           </FlowActions>
         </FlowPanel>
 
-        {/* After the fields in the document, beside them from `xl`: stacked on
-            a phone, the drawing came first and the question's first field
-            started two-thirds of the way down every step — the same summary
-            scrolled past four times. It is a reading of what the fields say,
-            so it follows them and the command. */}
-        <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto">
-          <PlanWiring
-            profile={flow.profile}
-            source={flow.source}
-            sourceLabel={flow.sourceLabel}
-            branch={isGitSource ? branch : undefined}
-            framework={flow.candidate?.framework}
-            configuration={configuration}
-            onOpenSection={openSection}
-          />
-        </aside>
+        {rail}
       </fieldset>
     </div>
   )

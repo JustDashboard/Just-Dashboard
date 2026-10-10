@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "@playwright/test"
-import { deployment, json, mockProject, now, project } from "./deploy-fixture"
+import {
+  deployment,
+  expectSaved,
+  json,
+  mockProject,
+  now,
+  project,
+  saveSettings,
+} from "./deploy-fixture"
 
 /**
  * Settings → General's "Source" form: changing a committed project's
@@ -116,15 +124,17 @@ test.describe("Source setting card", () => {
     await expect(card.getByRole("combobox", { name: "Credential" })).toHaveText("GitHub PAT")
     await expect(card.getByLabel("Include Git LFS objects")).toBeChecked()
     await expect(card.getByLabel("Include Git submodules")).not.toBeChecked()
-    // The head says how the source is reached, beside the repository's link.
-    await expect(card.getByText("Git URL", { exact: true })).toBeVisible()
+    // How it is reached is the URL field's to say: a plain URL is read with
+    // the credential picked under it, so the head carries no "Git URL" tag.
+    await expect(card.getByText("Git URL", { exact: true })).toHaveCount(0)
+    await expect(card.getByText(/Read through the GitHub App/)).toHaveCount(0)
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("source-1280.png"), fullPage: true })
 
     await card.getByLabel("Branch or tag").fill("release/1.0")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     expect(puts.at(-1)).toEqual({
       revision: 3,
@@ -221,8 +231,8 @@ test.describe("Source setting card", () => {
     // Editing something else on the card must not itself convert a connected
     // repository into a bare URL — only editing the URL field does that.
     await card.getByLabel("Branch or tag").fill("release/2.0")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     expect(puts.at(-1)).toEqual({
       revision: 3,
@@ -258,8 +268,8 @@ test.describe("Source setting card", () => {
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
     await card.getByLabel("Repository URL").fill("https://gitlab.com/acme/mirror.git")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const body = puts.at(-1)
     expect(body).toMatchObject({ mode: "git_url", url: "https://gitlab.com/acme/mirror.git" })
@@ -304,7 +314,9 @@ test.describe("Source setting card", () => {
 
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
-    await card.getByRole("button", { name: "Save" }).click()
+    // Save is the page's bar, which is there once something is edited.
+    await card.getByLabel("Branch or tag").fill("release/9")
+    await saveSettings(page)
     await expect(card.getByText("The branch could not be found on the remote.")).toBeVisible()
     await expect(page.getByText("Could not update source")).toHaveCount(0)
   })
@@ -328,7 +340,8 @@ test.describe("Source setting card", () => {
 
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
-    await card.getByRole("button", { name: "Save" }).click()
+    await card.getByLabel("Branch or tag").fill("release/9")
+    await saveSettings(page)
     await expect(card.getByText("Unknown credential.")).toBeVisible()
     await expect(page.getByText("Could not update source")).toHaveCount(0)
   })
@@ -367,11 +380,6 @@ test.describe("Source setting card", () => {
     await expect(card.getByLabel("Platform")).toBeVisible()
     await expect(card.getByRole("combobox", { name: "Credential" })).toHaveText("Registry login")
     await expect(card.getByLabel("Repository URL")).toHaveCount(0)
-    await expect(
-      card.getByText(
-        "A project keeps its source kind. Start a new project to move from an image to a repository.",
-      ),
-    ).toBeVisible()
   })
 
   test("a read-only role sees the source but no Save button", async ({ page }) => {

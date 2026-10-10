@@ -1,0 +1,10 @@
+{
+  "source": "379a43fb",
+  "binary": "dns-filter-native-379a43fb-preparation.test",
+  "binary_sha256": "130afaa39afe51ad7433b51574e174a3c4826e47eebcaa38a39e8f2fdc19a564",
+  "compile_log": "compile-379a43fb-preparation.log",
+  "compile_seconds": 5.12,
+  "compile_exit": 0,
+  "native_executed": false,
+  "scope": "preparation before later Pi membership/client corrections; no engine proof"
+}

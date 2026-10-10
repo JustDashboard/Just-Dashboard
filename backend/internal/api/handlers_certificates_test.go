@@ -184,8 +184,14 @@ func TestCertbotJobsRefuseToRunTwice(t *testing.T) {
 	if final := waitForJob(t, s, running.ID); final.Status != jobs.StatusSucceeded {
 		t.Fatalf("the first job = %+v", final)
 	}
-	if w := c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com","dryRun":true}`, nil); w.Code != http.StatusAccepted {
+	w = c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com","dryRun":true}`, nil)
+	if w.Code != http.StatusAccepted {
 		t.Fatalf("renew after the first finished = %d: %s", w.Code, w.Body.String())
+	}
+	// The job reads the certbot directories the test swapped in; letting it
+	// outlive the test races their restoration.
+	if final := waitForJob(t, s, decodeJob(t, w.Body.Bytes()).ID); final.Status != jobs.StatusSucceeded {
+		t.Fatalf("the second job = %+v", final)
 	}
 }
 
@@ -729,10 +735,18 @@ exit 0
 	return n
 }
 
+// calls are the commands nginx was given, less `nginx -V`: a reload reads
+// the build to find the master it was sent to, which changes nothing.
 func (n fakeNginx) calls(t *testing.T) string {
 	t.Helper()
 	raw, _ := os.ReadFile(n.log)
-	return string(raw)
+	var kept []string
+	for _, line := range strings.SplitAfter(string(raw), "\n") {
+		if line != "nginx -V\n" {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "")
 }
 
 // enabledSite is an enabled nginx site naming certificate.

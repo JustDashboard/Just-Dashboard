@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "go",
+    "test",
+    "-race",
+    "./internal/dnsservice",
+    "./internal/dnsservice/testdata/native-dns-decisions",
+    "-run",
+    "Test(Finite|MalformedQuestions|FramesAnd|DNSDomainDecision)",
+    "-count=1",
+    "-v",
+    "-timeout=120s"
+  ],
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-decision-restart-endpoint/backend",
+  "environment": {
+    "GOTOOLCHAIN": "go1.26.8",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "TMPDIR": "/home/ubuntu/jd-de-t",
+    "JD_DNS_DOMAIN_DECISIONS_LIVE": "0",
+    "JD_DNS_SERVICES_LIVE_ENGINE": ""
+  },
+  "exit_code": 0,
+  "elapsed_seconds": 14.812,
+  "raw_sha256": "2d0328c904f29b6fdfb112ea4de1c188b5a0182e0de459034e2c32e686b9051e",
+  "native_dispatch": false
+}

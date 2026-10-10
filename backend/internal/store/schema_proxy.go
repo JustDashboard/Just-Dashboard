@@ -149,28 +149,8 @@ CREATE TABLE IF NOT EXISTS acme_eab (
 
 -- --- lane G: TLS report & monitoring ---
 
--- Watched TLS endpoints. watched_domains holds one row per name, so watching
--- mail.example.com on 993 replaced it on 443. An endpoint is a name, a port
--- and an address to reach the name at ('' for the name's own), and keeps its
--- last live check: only an administrator's visit runs one, and everyone else
--- reads what it found and when.
-CREATE TABLE IF NOT EXISTS watched_endpoints (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  domain      TEXT NOT NULL,
-  port        INTEGER NOT NULL DEFAULT 443,
-  ip          TEXT NOT NULL DEFAULT '',
-  created_at  INTEGER NOT NULL,
-  checked_at  INTEGER NOT NULL DEFAULT 0,
-  certificate TEXT NOT NULL DEFAULT '',
-  UNIQUE(domain, port, ip)
-);
-
--- The watch list as watched_domains had it. This runs on every boot and
--- brings back nothing removed since, because removing an endpoint removes
--- its watched_domains row as well; watched_domains is otherwise left as it
--- was, for a downgrade to find.
-INSERT OR IGNORE INTO watched_endpoints(domain, port, ip, created_at)
-  SELECT domain, port, '', created_at FROM watched_domains;
+-- Watched endpoints and their checks are in schema (store.go): they gained
+-- columns after shipping, which addedColumns brings to them before this runs.
 
 -- Every TLS report, so the page opens on the last one and says what changed
 -- since the one before. report is the scan as the page reads it; the other
@@ -189,16 +169,5 @@ CREATE TABLE IF NOT EXISTS tls_scans (
 );
 CREATE INDEX IF NOT EXISTS idx_tls_scans_target ON tls_scans(domain, port, checked_at);
 
--- Every check of a watched endpoint, by the schedule or an administrator,
--- so a row can show how its days left moved and when its certificate
--- changed. Kept to 2000 per endpoint and 90 days.
-CREATE TABLE IF NOT EXISTS watched_checks (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  endpoint_id INTEGER NOT NULL REFERENCES watched_endpoints(id) ON DELETE CASCADE,
-  checked_at  INTEGER NOT NULL,
-  days_left   INTEGER,
-  fingerprint TEXT NOT NULL DEFAULT '',
-  error       TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_watched_checks_endpoint ON watched_checks(endpoint_id, checked_at);
+
 `

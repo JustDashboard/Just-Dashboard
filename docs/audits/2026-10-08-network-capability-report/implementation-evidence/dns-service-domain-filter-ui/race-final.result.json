@@ -1,0 +1,67 @@
+{
+  "product_source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+  "head_at_start": "ec0563be",
+  "exit_code": 0,
+  "wall_seconds": 133.231,
+  "raw_sha256": "212701c7eca9625339653f2c266821d9dfffc8a9f87a266c227d9954275a1b14",
+  "argv": [
+    "go",
+    "test",
+    "-race",
+    "./internal/dnsservice",
+    "./internal/api",
+    "-run",
+    "^TestDNS(DomainFilter|Filter|ServiceAPIPrivateCapabilitiesSealingAndAudit|ServiceSealsCredentialsAndKeepsReadOnlyClosed|ServiceConsumesConcurrentPlanExactlyOnceAndRetainsReadback|NativeTLSIdentityRedirectAndProxyBoundary|ProvisionAllEngineSealingSingleUseAndOwnedLifecycle)",
+    "-count=1",
+    "-timeout=300s"
+  ],
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/backend",
+  "environment": {
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "GOTOOLCHAIN": "go1.26.8",
+    "TMPDIR": "/home/ubuntu/jd-df-t"
+  },
+  "backend_sources_unchanged": true,
+  "package_seconds": {
+    "internal/dnsservice": 127.484,
+    "internal/api": 4.575
+  },
+  "selection": {
+    "record": "race-selection.log",
+    "command_kind": "list only; no test execution",
+    "selected_by_package": {
+      "github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice": [
+        "TestDNSDomainFilterClosedEngineSemantics",
+        "TestDNSDomainFilterReviewedAddRemovePreservesNativePolicy",
+        "TestDNSDomainFilterFreshRawDriftAndLastReadRefusal",
+        "TestDNSDomainFilterUnknownDuplicateDisabledAndMissingRemovalRefuse",
+        "TestDNSDomainFilterUncertainNativeReplyAndForeignReadbackNeverReplay",
+        "TestDNSDomainFilterRetainedIntentGenerationAndExpiryRefuse",
+        "TestDNSDomainFilterGroupBoundsAndUnsupportedSelectedShapeRefuse",
+        "TestDNSDomainFilterAdGuardPreservesBlankCommentsAndRefusesModifiedTarget",
+        "TestDNSDomainFilterMalformedNativeIdentityNeverBecomesEmptyOrGroupZero",
+        "TestDNSDomainFilterJSONGroupsRejectNullAndKeepExplicitEmpty",
+        "TestDNSDomainFilterVersionBoundsAndCancellationRefuseWithoutEffects",
+        "TestDNSFilterAdGuardNativeMetadataAndRawDrift",
+        "TestDNSFilterMissingMalformedAndBoundsRemainUnknown",
+        "TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds",
+        "TestDNSFilterPiHoleGroupElementsRequireActualIntegers",
+        "TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields",
+        "TestDNSFilterAdGuardRuleElementsRequireActualStrings",
+        "TestDNSFilterTechnitiumPinnedNullAndUnsupportedScopes",
+        "TestDNSFilterVersionCancellationAndConnectionGeneration",
+        "TestDNSFilterCancellationDuringNativeRequestAndUnavailableReadOnly",
+        "TestDNSNativeTLSIdentityRedirectAndProxyBoundary",
+        "TestDNSProvisionAllEngineSealingSingleUseAndOwnedLifecycle",
+        "TestDNSServiceSealsCredentialsAndKeepsReadOnlyClosed",
+        "TestDNSServiceConsumesConcurrentPlanExactlyOnceAndRetainsReadback"
+      ],
+      "github.com/Wayy01/Just-Dashboard/backend/internal/api": [
+        "TestDNSDomainFilterAPIPrivateRetainedCurrentAndDestructiveApply",
+        "TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit"
+      ]
+    },
+    "total": 26
+  }
+}

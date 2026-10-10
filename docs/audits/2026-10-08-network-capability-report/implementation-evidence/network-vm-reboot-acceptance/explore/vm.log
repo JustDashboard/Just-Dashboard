@@ -1,0 +1,60 @@
+/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/vm-prerequisites/ubuntu-24.04-minimal-cloudimg-amd64.img: OK
+image: /home/ubuntu/Just-Dashboard-net-vm-artifacts/vm/overlay.qcow2
+file format: qcow2
+virtual size: 8 GiB (8589934592 bytes)
+disk size: 196 KiB
+cluster_size: 65536
+backing file: /home/ubuntu/Just-Dashboard-network-native-managers-artifacts/vm-prerequisites/ubuntu-24.04-minimal-cloudimg-amd64.img
+backing file format: qcow2
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: /home/ubuntu/Just-Dashboard-net-vm-artifacts/vm/overlay.qcow2
+    protocol type: file
+    file length: 192 KiB (197120 bytes)
+    disk size: 196 KiB
+2026-10-09T19:54:51Z prepared overlay, seed and ephemeral key
+2026-10-09T20:51:24Z QEMU started as PID 3257565
+2026-10-09T20:53:28Z rebooting guest (boot 2a97c777-401a-4fcf-9f8d-8c6e4eeba793)
+2026-10-09T20:55:48Z guest rebooted (boot 2a97c777-401a-4fcf-9f8d-8c6e4eeba793 -> 79a3b0e5-f0f7-4cec-acc1-a8092ae79bf8)
+2026-10-09T20:57:49Z rebooting guest (boot 79a3b0e5-f0f7-4cec-acc1-a8092ae79bf8)
+2026-10-09T21:00:18Z guest rebooted (boot 79a3b0e5-f0f7-4cec-acc1-a8092ae79bf8 -> dc14b39a-e271-460a-9baf-808ec99712d2)
+2026-10-09T21:02:30Z rebooting guest (boot dc14b39a-e271-460a-9baf-808ec99712d2)
+2026-10-09T21:04:56Z guest rebooted (boot dc14b39a-e271-460a-9baf-808ec99712d2 -> 887b64d6-063d-4f95-babd-9d29e781f87c)
+2026-10-09T21:06:25Z rebooting guest (boot 887b64d6-063d-4f95-babd-9d29e781f87c)
+2026-10-09T21:06:53Z guest rebooted (boot 887b64d6-063d-4f95-babd-9d29e781f87c -> 58a0a4dc-35b5-476d-8f1a-827a8333fe63)
+2026-10-09T23:29:29Z rebooting guest (boot 58a0a4dc-35b5-476d-8f1a-827a8333fe63)
+2026-10-09T23:29:58Z guest rebooted (boot 58a0a4dc-35b5-476d-8f1a-827a8333fe63 -> 04a7b20d-9fc2-4d8a-af72-eec2ca5daec9)
+2026-10-09T23:36:43Z rebooting guest (boot 04a7b20d-9fc2-4d8a-af72-eec2ca5daec9)
+2026-10-09T23:37:12Z guest rebooted (boot 04a7b20d-9fc2-4d8a-af72-eec2ca5daec9 -> 8c7b60a9-06a8-4759-8aba-1aa5a47e3f8b)
+2026-10-09T23:39:11Z rebooting guest (boot 8c7b60a9-06a8-4759-8aba-1aa5a47e3f8b)
+2026-10-09T23:39:41Z guest rebooted (boot 8c7b60a9-06a8-4759-8aba-1aa5a47e3f8b -> 2152bd0f-5ecd-4347-abed-f9ced414bfa0)
+2026-10-09T23:40:04Z rebooting guest (boot 2152bd0f-5ecd-4347-abed-f9ced414bfa0)
+2026-10-09T23:40:34Z guest rebooted (boot 2152bd0f-5ecd-4347-abed-f9ced414bfa0 -> b21e1c10-d281-41ac-8d31-0457ace47bf1)
+2026-10-10T00:17:45Z rebooting guest (boot b21e1c10-d281-41ac-8d31-0457ace47bf1)
+2026-10-10T00:18:25Z guest rebooted (boot b21e1c10-d281-41ac-8d31-0457ace47bf1 -> 877f2244-9be2-4eed-b36a-7aacaf706bff)
+2026-10-10T00:41:07Z rebooting guest (boot 877f2244-9be2-4eed-b36a-7aacaf706bff)
+2026-10-10T00:41:29Z guest rebooted (boot 877f2244-9be2-4eed-b36a-7aacaf706bff -> 60cbffc7-b996-4a42-93cd-afc97e0b1cd9)
+2026-10-10T00:42:27Z rebooting guest (boot 60cbffc7-b996-4a42-93cd-afc97e0b1cd9)
+2026-10-10T00:42:49Z guest rebooted (boot 60cbffc7-b996-4a42-93cd-afc97e0b1cd9 -> c2f179c6-ea82-4adf-8091-f289044aaf71)
+2026-10-10T00:49:00Z rebooting guest (boot c2f179c6-ea82-4adf-8091-f289044aaf71)
+2026-10-10T00:49:21Z guest rebooted (boot c2f179c6-ea82-4adf-8091-f289044aaf71 -> 752c686f-b760-4e55-8d43-7a785716d6a5)
+2026-10-10T00:49:30Z rebooting guest (boot 752c686f-b760-4e55-8d43-7a785716d6a5)
+2026-10-10T00:49:54Z guest rebooted (boot 752c686f-b760-4e55-8d43-7a785716d6a5 -> 09dbf7ea-1273-4e86-bf06-1633812ba0cd)
+2026-10-10T00:50:06Z rebooting guest (boot 09dbf7ea-1273-4e86-bf06-1633812ba0cd)
+2026-10-10T00:50:31Z guest rebooted (boot 09dbf7ea-1273-4e86-bf06-1633812ba0cd -> d8beee61-a2bc-4035-b573-7891022c697d)
+2026-10-10T00:50:47Z rebooting guest (boot d8beee61-a2bc-4035-b573-7891022c697d)
+2026-10-10T00:51:07Z guest rebooted (boot d8beee61-a2bc-4035-b573-7891022c697d -> 67a2c0e6-e4b0-409d-b29c-279bc5224649)
+2026-10-10T00:51:28Z rebooting guest (boot 67a2c0e6-e4b0-409d-b29c-279bc5224649)
+2026-10-10T00:51:48Z guest rebooted (boot 67a2c0e6-e4b0-409d-b29c-279bc5224649 -> 820cd6e8-f8dc-401a-83c1-5e1ba7278b3e)
+2026-10-10T00:51:55Z rebooting guest (boot 820cd6e8-f8dc-401a-83c1-5e1ba7278b3e)
+2026-10-10T00:52:16Z guest rebooted (boot 820cd6e8-f8dc-401a-83c1-5e1ba7278b3e -> f6d6fda8-c847-42da-a007-ce960b0a42b8)
+2026-10-10T00:55:06Z rebooting guest (boot f6d6fda8-c847-42da-a007-ce960b0a42b8)
+2026-10-10T00:55:25Z guest rebooted (boot f6d6fda8-c847-42da-a007-ce960b0a42b8 -> df43c498-5595-419b-9c14-5409b9245d23)
+2026-10-10T00:55:55Z QEMU 3257565 stopped
+2026-10-10T00:55:55Z removed overlay, seed and ephemeral key; logs kept in /home/ubuntu/Just-Dashboard-net-vm-artifacts/logs

@@ -1,0 +1,17 @@
+Fri Oct  9 18:26:35 UTC 2026
+753fb35c096506e04e7c1b5384e0ce238e9493ec
+Engine 29.8.1 API 1.56
+JD_DOCKER_NETWORK_LIVE=1 go test ./internal/dockerx -run '^TestLive(NetworkDependencyPreviewsAgainstTheEngine|NetworkDriverCatalogueAndIgnoredOption)$' -count=1 -v
+=== RUN   TestLiveNetworkDependencyPreviewsAgainstTheEngine
+    network_dependencies_live_test.go:227: the Engine removed a network a stopped container named, and the container then failed to start: Error response from daemon: failed to set up container networking: network jd-netdeps-7fb18cfd44f88c41-dormant not found
+    network_dependencies_live_test.go:229: native previews: disconnect warned of peers and the last network, connect warned of a shared name, the reviewed prune kept the network a stopped container names, removal preview listed it
+    network_dependencies_live_test.go:146: cleanup verified: no network or container labelled jd.network-dependencies=7fb18cfd44f88c41 remains
+--- PASS: TestLiveNetworkDependencyPreviewsAgainstTheEngine (7.26s)
+=== RUN   TestLiveNetworkDriverCatalogueAndIgnoredOption
+    network_drivers_live_test.go:56: native catalogue: swarm=inactive manager=false pluginsRead=true drivers=6 plugin drivers=[]
+    network_drivers_live_test.go:108: the Engine accepted the undocumented option "com.docker.network.bridge.mtu" and the owned bridge br-d18ee3557ce8 kept MTU 1500
+    network_drivers_live_test.go:91: cleanup verified: no network labelled jd.network-driver-options=9501481d0243b38d remains
+--- PASS: TestLiveNetworkDriverCatalogueAndIgnoredOption (0.14s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	7.409s
+owned networks left: 0 + 0; owned containers left: 0

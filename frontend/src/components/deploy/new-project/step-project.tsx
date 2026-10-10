@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { Fragment, useEffect, useRef } from "react"
 import type {
   DeploymentBuildMethod,
   DeploymentDraftSource,
@@ -14,6 +14,9 @@ import { OptionList, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { ProductGlyph, frameworkProduct } from "@/components/product-logo"
+import { FileIcon } from "@/components/files/file-icon"
+import { CODE, ShellWords } from "@/components/deploy/run-evidence"
+import { cn } from "@/lib/utils"
 import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -196,19 +199,37 @@ export function StepProject({
    * the commands and the directories, which is also the pair most likely to
    * be wrong on a monorepo.
    */
+  const buildCommands = [configuration.build.buildCommand, configuration.build.startCommand].filter(
+    (command): command is string => Boolean(command),
+  )
+  const buildPlaces = [
+    configuration.build.outputDirectory && `serves ${configuration.build.outputDirectory}`,
+    configuration.build.rootDirectory && `in ${configuration.build.rootDirectory}`,
+  ].filter(Boolean)
+  // The commands as the shell will read them, coloured the way the run page
+  // colours the ones it ran — they are the pair most likely to be wrong on a
+  // monorepo, and a word in grey reads the same as a word in a sentence.
   const buildFacts =
-    configuration.build.method === "dockerfile"
-      ? `${configuration.build.dockerfile || "Dockerfile"}${
-          configuration.build.target ? ` · stage ${configuration.build.target}` : ""
-        }`
-      : [
-          configuration.build.buildCommand,
-          configuration.build.startCommand,
-          configuration.build.outputDirectory && `serves ${configuration.build.outputDirectory}`,
-          configuration.build.rootDirectory && `in ${configuration.build.rootDirectory}`,
-        ]
-          .filter(Boolean)
-          .join(" · ") || "Detected defaults"
+    configuration.build.method === "dockerfile" ? (
+      <>
+        <code className={cn("font-mono", CODE.path)}>
+          {configuration.build.dockerfile || "Dockerfile"}
+        </code>
+        {configuration.build.target && ` · stage ${configuration.build.target}`}
+      </>
+    ) : buildCommands.length + buildPlaces.length > 0 ? (
+      <>
+        {buildCommands.map((command, index) => (
+          <Fragment key={index}>
+            {index > 0 && " · "}
+            <ShellWords command={command} />
+          </Fragment>
+        ))}
+        {buildPlaces.map((place) => ` · ${place}`)}
+      </>
+    ) : (
+      "Detected defaults"
+    )
 
   const extraFacts =
     [
@@ -437,12 +458,31 @@ export function StepProject({
             checked rather than taken on trust: which lockfile matched, which
             script starts the server. */}
         {(flow.candidate?.evidence?.length ?? 0) > 0 && (
-          <Disclosure quiet summary="What detection read">
-            <ul className="space-y-1 text-hint">
+          <Disclosure
+            quiet
+            summary={`What detection read · ${flow.candidate!.evidence.length} ${
+              flow.candidate!.evidence.length === 1 ? "file" : "files"
+            }`}
+          >
+            {/* Each file drawn as what it is — npm's for a package.json, Bun's
+                for its lockfile, Docker's for a Dockerfile — so the evidence
+                behind a default is found by its mark rather than by reading a
+                column of paths. */}
+            <ul aria-label="What detection read" className="min-w-0 space-y-1.5">
               {flow.candidate!.evidence.map((item, index) => (
-                <li key={`${item.path}-${index}`} className="min-w-0 break-words">
-                  <span className="font-mono">{item.path}</span>
-                  <span className="text-muted-foreground"> — {item.reason}</span>
+                <li key={`${item.path}-${index}`} className="flex min-w-0 items-start gap-2.5">
+                  <FileIcon
+                    entry={{
+                      name: item.path.split("/").at(-1) || item.path,
+                      isDir: false,
+                      isSymlink: false,
+                    }}
+                    className="size-5"
+                  />
+                  <span className="min-w-0 text-hint leading-5 break-words">
+                    <code className={cn("font-mono", CODE.path)}>{item.path}</code>
+                    <span className="text-muted-foreground"> — {item.reason}</span>
+                  </span>
                 </li>
               ))}
             </ul>

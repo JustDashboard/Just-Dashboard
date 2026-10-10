@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { HOST_LOG_SOURCES, mockHostLogs } from "./host-logs-fixture"
+import { loaded } from "./network-fixture"
 
 /**
  * The Security section against a mocked API: every page renders its readings
@@ -455,10 +456,99 @@ async function mockSecurity(
         return json(route, options.firewall ?? firewall)
       case "/firewall/apps":
         return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
+      case "/firewall/history":
+        return json(route, { events: [], limits: [] })
+      case "/firewall/access":
+        return json(route, { backend: "ufw", checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: "ufw", findings: [], checks: [] })
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/security/boundary":
+        return json(route, {
+          checkedAt: new Date().toISOString(),
+          allowlist: ["127.0.0.1/32", "100.64.0.0/10"],
+          client: "100.110.34.9",
+          caddyPort: 8443,
+          sshPorts: ["22"],
+          tailnetIp: "100.110.34.31",
+          previewMin: 21000,
+          previewMax: 21999,
+          checks: [
+            {
+              id: "ingress",
+              state: "held",
+              title: "Caddy is the only routable listener",
+              detail: "Caddy holds port 8443 on 100.110.34.31:8443, 127.0.0.1:8443.",
+            },
+            {
+              id: "allowlist",
+              state: "held",
+              title: "The allowlist admits this session before sign-in",
+              detail: "100.110.34.9 is inside the allowlist that runs before authentication.",
+            },
+            {
+              id: "tailnet",
+              state: "held",
+              title: "The tailnet path is up",
+              detail: "tailscale0 is up with 100.110.34.31.",
+            },
+            {
+              id: "ssh",
+              state: "held",
+              title: "SSH answers for a tunnel",
+              detail: "Port 22 is listening.",
+            },
+            {
+              id: "previews",
+              state: "broken",
+              title: "Previews stay tailnet-only",
+              detail:
+                "Preview ports outside the boundary: 21001 is funnelled or serves something other than a loopback port.",
+            },
+          ],
+        })
+      case "/fail2ban/sshd/policy":
+        return json(route, {
+          name: "sshd",
+          rule: "5 failures within 10 minutes earn a 10-minute ban",
+          values: [
+            { key: "bantime", running: "600" },
+            { key: "findtime", running: "600" },
+            { key: "maxretry", running: "5" },
+          ],
+          watches: { kind: "files", files: ["/var/log/auth.log"] },
+          actions: [
+            {
+              name: "iptables-multiport",
+              kind: "firewall",
+              enforces: true,
+              allPorts: false,
+              ports: ["ssh"],
+              words: "drops a banned address on ssh in the firewall",
+            },
+          ],
+          coverage: { service: "sshd", listening: ["22"], covered: ["22"], uncovered: [] },
+          ignoreSelf: true,
+          ignoreIp: ["127.0.0.0/8"],
+          findings: [],
+        })
+      case "/security/blocks":
+        return json(route, {
+          entries: [],
+          distinct: 0,
+          duplicated: 0,
+          covered: 0,
+          communityOnly: 0,
+          truncated: false,
+          engines: [
+            { engine: "fail2ban", read: true, count: 0 },
+            { engine: "crowdsec", read: false, count: 0, note: "not read" },
+            { engine: "firewall", read: true, count: 0 },
+          ],
+        })
       case "/fail2ban/sshd/config":
         return json(route, {
           name: "sshd",
@@ -496,13 +586,12 @@ async function mockSecurity(
 
 const PAGES = [
   "/security",
-  "/security/firewall",
+  "/network/firewall",
   "/security/ssh",
   "/security/intrusion",
-  "/security/connections",
+  "/network/connections",
   "/security/logins",
-  "/security/network",
-  "/security/tools",
+  "/network/tools",
 ] as const
 
 /**
@@ -524,7 +613,7 @@ async function framedNonTables(page: Page) {
 test("the overview reads as readings, findings and how the panel is reached", async ({ page }) => {
   await mockSecurity(page)
   await page.goto("/security")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   // The identity line: the way in drawn as itself, the grade, the allowlist,
   // the address this browser came from, and the posture's verdict at its end.
@@ -534,7 +623,15 @@ test("the overview reads as readings, findings and how the panel is reached", as
   await expect(identity.getByText("Tailscale only")).toBeVisible()
   await expect(identity.getByText("100.110.34.9", { exact: true })).toBeVisible()
   await expect(identity.getByText("Needs attention")).toBeVisible()
-  await expect(identity).toContainText("7 checks")
+  await expect(identity).toContainText("100.64.0.0/10")
+
+  // The seven checks the verdict is made of: a warning on SSH, a notice on
+  // the firewall, security updates not run, and the rest passed.
+  const checks = page.getByRole("region", { name: "Checks" })
+  await expect(checks).toContainText("4 of 7 checks passed")
+  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toBeEnabled()
+  await expect(checks.getByRole("button", { name: "Updates: Not checked" })).toBeDisabled()
+  await expect(checks.getByRole("button", { name: "Exposure: Passed" })).toBeDisabled()
 
   // Five tiles, each a destination with a figure read from its own poll.
   // Scoped to the grid: the sidebar and the section strip link to the same
@@ -563,6 +660,29 @@ test("the overview reads as readings, findings and how the panel is reached", as
   )
   await expect(grid.getByRole("link", { name: "Logins", exact: true })).toContainText("1 session")
 
+  // The ways onto the machine: the internet's through the firewall, fail2ban
+  // and sshd, and this browser's through the allowlist.
+  const ways = page.getByRole("list", { name: "The ways onto this machine" })
+  await expect(ways).toContainText("ufw")
+  await expect(ways).toContainText("deny inbound")
+  await expect(ways).toContainText(":22")
+  await expect(ways).toContainText(":443")
+  await expect(ways).toContainText("2 banned now")
+  await expect(ways).toContainText("SSH accepts passwords")
+  await expect(ways).toContainText("Tailscale only")
+  await expect(ways.locator('img[src="/logos/fail2ban.webp"]')).toHaveCount(1)
+
+  // A check's segment narrows the findings to its area, and lets it go.
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await checks.getByRole("button", { name: "SSH: 1 warning" }).click()
+  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Show every area" }).click()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+
   // The findings, with the remedy the dashboard can carry out as a button.
   // The finding's row, not the SSH tile's hint, which quotes the same title.
   await page.getByRole("button", { name: /SSH accepts passwords/ }).click()
@@ -573,7 +693,7 @@ for (const path of PAGES) {
   test(`${path} keeps non-table Panels plain`, async ({ page }) => {
     await mockSecurity(page)
     await page.goto(path)
-    await page.waitForLoadState("networkidle")
+    await loaded(page)
     // A dialog or sheet may frame itself, and so may a table (§2); any other
     // block in the page's flow may not.
     expect(await framedNonTables(page), `framed non-table blocks on ${path}`).toEqual([])
@@ -582,7 +702,7 @@ for (const path of PAGES) {
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
     await mockSecurity(page)
     await page.goto(path)
-    await page.waitForLoadState("networkidle")
+    await loaded(page)
     const unnamed = await page.evaluate(() => {
       const bad: string[] = []
       for (const el of document.querySelectorAll<HTMLElement>("button, [role='button']")) {
@@ -604,8 +724,8 @@ test("the firewall page opens on its defaults and offers the controls that set t
   page,
 }) => {
   await mockSecurity(page)
-  await page.goto("/security/firewall")
-  await page.waitForLoadState("networkidle")
+  await page.goto("/network/firewall")
+  await loaded(page)
 
   const grid = page.locator("[data-slot=stat-grid]")
   await expect(grid.getByText("Rules", { exact: true })).toBeVisible()
@@ -616,14 +736,31 @@ test("the firewall page opens on its defaults and offers the controls that set t
   await expect(page.getByRole("button", { name: "Add rule" })).toBeVisible()
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeChecked()
   await expect(page.getByRole("row").filter({ hasText: "repeat offender" })).toBeVisible()
+
+  // The rules folded by where they lead: each port admitted, and the default
+  // for everything else. The rule list ends on that default as well.
+  const inbound = page.getByRole("list", { name: "How a connection from outside is answered" })
+  await expect(inbound).toContainText("SSH")
+  await expect(inbound).toContainText(":22")
+  await expect(inbound).toContainText("HTTPS")
+  await expect(inbound).toContainText("1 address denied by name")
+  await expect(inbound).toContainText("deny by default")
+  await expect(page.getByRole("row").last()).toContainText("Everything else")
+  await page.getByRole("textbox", { name: "Filter rules" }).fill("offender")
+  await expect(page.getByRole("row").filter({ hasText: "Everything else" })).toHaveCount(0)
 })
 
 test("ssh changes are staged as a page state and applied together", async ({ page }) => {
   await mockSecurity(page)
   await page.goto("/security/ssh")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("Passwords")
+  // The doors a login can take, drawn from the draft.
+  const doors = page.getByRole("list", { name: "How a login reaches a shell" })
+  await expect(doors).toContainText(":22")
+  await expect(doors).toContainText("accepted — a guessed one is a shell")
+  await expect(doors).toContainText("keys only")
+  await expect(doors).toContainText("2 keys")
   await expect(page.getByText("held by ssh.socket")).toBeVisible()
   await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
 
@@ -631,10 +768,18 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
     .getByRole("radiogroup", { name: "Password authentication" })
     .getByRole("radio", { name: "no" })
     .click()
-  await expect(page.getByText("pending", { exact: true })).toBeVisible()
+  await expect(page.getByText("edited", { exact: true })).toBeVisible()
+  await expect(doors.getByText("accepted — a guessed one is a shell")).toHaveCount(0)
+  // The section holding it says so, and the apply bar names what changed.
+  await expect(page.getByText("Edited", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("1 unsaved change", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: /^Edited/ }).click()
+  await expect(page.getByRole("radiogroup", { name: "Password authentication" })).toBeVisible()
+  await expect(page.getByLabel("Attempts per connection")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Test and apply" })).toBeVisible()
   await page.getByRole("button", { name: "Discard" }).click()
   await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
+  await expect(doors).toContainText("accepted — a guessed one is a shell")
 })
 
 test("a jail's sheet bans an address by hand and the tuning offers the caller's own", async ({
@@ -643,7 +788,7 @@ test("a jail's sheet bans an address by hand and the tuning offers the caller's 
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/security/intrusion")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("Banned now")
   // fail2ban as its own mark, and each jail a card that opens its sheet.
@@ -673,7 +818,7 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/security/intrusion")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   const row = page.getByRole("row").filter({ hasText: "203.0.113.9" }).first()
   await row.getByRole("button", { name: "Block at the firewall" }).click()
@@ -683,7 +828,7 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
 
   await row.getByRole("button", { name: "More actions" }).click()
   await page.getByRole("menuitem", { name: /Who owns this address/ }).click()
-  await expect(page).toHaveURL(/\/security\/tools\?tool=asn&target=203\.0\.113\.9/)
+  await expect(page).toHaveURL(/\/network\/tools\?tool=asn&target=203\.0\.113\.9/)
   // Arriving narrows the page to the one tool, with the address filled in.
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveValue("203.0.113.9")
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveCount(1)
@@ -697,10 +842,10 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
 
 test("connections offers a block only for an address that is not private", async ({ page }) => {
   await mockSecurity(page)
-  await page.goto("/security/connections")
-  await page.waitForLoadState("networkidle")
+  await page.goto("/network/connections")
+  await loaded(page)
 
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("1 from the internet")
+  await expect(tile(page, "From the internet")).toContainText(/From the internet1\D/)
   const internet = page.getByRole("row").filter({ hasText: "203.0.113.50" })
   await expect(internet.getByRole("button", { name: "Block at the firewall" })).toBeVisible()
   const tailnet = page.getByRole("row").filter({ hasText: "100.110.34.9" })
@@ -716,7 +861,7 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/security/logins")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("2312")
   const row = page.getByRole("row").filter({ hasText: "203.0.113.9" })
@@ -726,32 +871,6 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
   await expect
     .poll(() => mutations.find((m) => m.path === "/firewall/rules")?.body)
     .toEqual({ action: "deny", direction: "in", from: "203.0.113.9", comment: "failed logins" })
-})
-
-test("the network page leads with what faces the internet", async ({ page }) => {
-  await mockSecurity(page)
-  await page.goto("/security/network")
-  await page.waitForLoadState("networkidle")
-
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("eth0")
-  await expect(
-    page.locator("[data-slot=stat-tile]").filter({ hasText: "Public addresses" }),
-  ).toContainText("eth0")
-  // Docker's devices are folded away until asked for.
-  await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toHaveCount(0)
-  await page.getByRole("radio", { name: /Everything/ }).click()
-  await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toBeVisible()
-  // Each device drawn as what made it: the tunnel as Tailscale, the bridge as Docker.
-  const devices = page.getByRole("table").first()
-  await expect(
-    devices
-      .getByRole("row")
-      .filter({ hasText: "tailscale0" })
-      .locator('img[src="/logos/tailscale.svg"]'),
-  ).toHaveCount(1)
-  await expect(
-    devices.getByRole("row").filter({ hasText: "docker0" }).locator('img[src="/logos/docker.svg"]'),
-  ).toHaveCount(1)
 })
 
 /** A figure in the page's one grid, by its name. */
@@ -766,12 +885,15 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
 }) => {
   const logs = await mockSecurity(page)
   await page.goto("/security/ssh")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
-  // One grid (§15): the settings' four facts, then what the log says the
-  // last day made of them.
+  // One grid (§15): what the log says the last day made of the doors drawn
+  // above it, whose first line carries the same day's failures.
   await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(4)
+  await expect(page.getByRole("list", { name: "How a login reaches a shell" })).toContainText(
+    "8 failed attempts today",
+  )
   await expect(tile(page, "Accepted logins")).toContainText("2")
   // Wrong passwords, unknown accounts and a connection that ran out of tries.
   await expect(tile(page, "Failed attempts")).toContainText("8")
@@ -864,7 +986,7 @@ test("without the admin capability the ssh page says so and reads no auth data",
 }) => {
   const logs = await mockSecurity(page, [], { session: readonly })
   await page.goto("/security/ssh")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   await expect(page.getByText("SSH needs the admin capability")).toBeVisible()
   await expect(page.getByLabel("Log lines")).toHaveCount(0)
@@ -910,8 +1032,8 @@ test("the firewall page reads what its rules did, with the day's counts in its g
   const logs = await mockSecurity(page, mutations, {
     firewall: { ...firewall, logging: "on (low)" },
   })
-  await page.goto("/security/firewall")
-  await page.waitForLoadState("networkidle")
+  await page.goto("/network/firewall")
+  await loaded(page)
 
   await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(7)
@@ -956,7 +1078,7 @@ test("with no ufw.log the firewall's drops are read from kern.log, then the kern
     firewall: { ...firewall, logging: "on (low)" },
     sources: HOST_LOG_SOURCES.filter((s) => s.id !== "file:/var/log/ufw.log"),
   })
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   const lines = page.getByLabel("Log lines")
   await expect(lines.getByText("rate limited", { exact: true }).first()).toBeVisible()
   // kern.log is the kernel lens's on the server, and the page asks the
@@ -985,7 +1107,7 @@ test("a host with neither file reads the firewall's drops from the kernel ring",
       (s) => s.id !== "file:/var/log/ufw.log" && s.id !== "file:/var/log/kern.log",
     ),
   })
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   await expect(
     page.getByLabel("Log lines").getByText("rate limited", { exact: true }).first(),
   ).toBeVisible()
@@ -998,8 +1120,8 @@ test("with logging off the firewall log points at the control that turns it on",
   page,
 }) => {
   const logs = await mockSecurity(page)
-  await page.goto("/security/firewall")
-  await page.waitForLoadState("networkidle")
+  await page.goto("/network/firewall")
+  await loaded(page)
 
   await expect(page.getByText("ufw is not logging")).toBeVisible()
   // Zeroes that mean "not recorded" are not drawn as readings.
@@ -1015,7 +1137,7 @@ test("intrusion's activity is fail2ban's own log, strikes and repeat offenders i
 }) => {
   const logs = await mockSecurity(page)
   await page.goto("/security/intrusion")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
@@ -1069,15 +1191,11 @@ test("with no fail2ban.log the activity is read from its unit's journal", async 
 test.describe("with no hover available", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
 
-  for (const path of [
-    "/security/connections",
-    "/security/logins",
-    "/security/intrusion",
-  ] as const) {
+  for (const path of ["/network/connections", "/security/logins", "/security/intrusion"] as const) {
     test(`row controls on ${path} are reachable without a pointer`, async ({ page }) => {
       await mockSecurity(page)
       await page.goto(path)
-      await page.waitForLoadState("networkidle")
+      await loaded(page)
       const hidden = await page.evaluate(() => {
         const bad: string[] = []
         for (const el of document.querySelectorAll<HTMLElement>(
@@ -1114,9 +1232,9 @@ test.describe("screenshots", () => {
         test(`${path} at ${width}`, async ({ page }) => {
           await mockSecurity(page)
           await page.goto(path)
-          await page.waitForLoadState("networkidle")
+          await loaded(page)
           await page.waitForTimeout(400)
-          const name = path.replace(/^\/security\/?/, "") || "overview"
+          const name = path.replace(/^\/(security|network)\/?/, "") || "overview"
           await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })
           // The shell owns scrolling, so a full-page shot captures only the
           // first screen. Walk the remaining content without changing layout.
@@ -1138,7 +1256,7 @@ test.describe("screenshots", () => {
       }
       test(`rule and jail dialogs at ${width}`, async ({ page }) => {
         await mockSecurity(page)
-        await page.goto("/security/firewall")
+        await page.goto("/network/firewall")
         await page.getByRole("button", { name: "Add rule", exact: true }).click()
         await expect(page.getByRole("dialog")).toBeVisible()
         await expect(page.getByRole("button", { name: "Add rule", exact: true })).toBeInViewport()
@@ -1190,7 +1308,7 @@ test("reverting an SSH setting removes the pending change", async ({ page }) => 
 test("a source-only firewall deny stays editable and preserves its source", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   await page
     .getByRole("row")
     .filter({ hasText: "repeat offender" })
@@ -1211,7 +1329,7 @@ test("the rule builder shows the service warning and requires a deliberate sourc
 }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   await page.getByRole("button", { name: "Add rule", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("combobox", { name: "Service", exact: true }).click()
@@ -1240,17 +1358,19 @@ test("limited readers see no SSH, diagnostic, firewall or failed-login mutations
       },
     },
   })
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   await expect(page.getByRole("button", { name: "Add rule", exact: true })).toHaveCount(0)
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toHaveCount(0)
   await page.goto("/security/logins")
   await expect(page.getByRole("radio", { name: "Failed", exact: true })).toHaveCount(0)
   await page.goto("/security/ssh")
   await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
-  await page.goto("/security/tools")
+  await page.goto("/network/tools")
   await expect(
-    page.getByText("Diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need the admin capability", { exact: true }),
   ).toBeVisible()
+  await expect(page.getByText("calculated in this browser", { exact: true })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveCount(0)
 })
 
 for (const [path, endpoint, reply, message] of [
@@ -1277,7 +1397,7 @@ for (const width of [390, 1280, 1720]) {
       await page.setViewportSize({ width, height: 1000 })
       await mockSecurity(page)
       await page.goto(path)
-      await page.waitForLoadState("networkidle")
+      await loaded(page)
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       )
@@ -1318,7 +1438,7 @@ test("diagnostics retain drafts and finish requests while another tool is select
       output: `${body.tool} result for ${body.target}`,
     })
   })
-  await page.goto("/security/tools")
+  await page.goto("/network/tools")
   await page.getByRole("textbox", { name: "Target", exact: true }).fill("example.com")
   expect(requests).toEqual([])
   await page.getByRole("button", { name: "Run", exact: true }).click()
@@ -1344,7 +1464,7 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
 }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
-  await page.goto("/security/tools?tool=dns&target=first.example.com")
+  await page.goto("/network/tools?tool=dns&target=first.example.com")
   await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
     "first.example.com",
   )
@@ -1352,7 +1472,7 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
     window.history.pushState(
       null,
       "",
-      "/security/tools?tool=dns&target=second.example.com&record=MX",
+      "/network/tools?tool=dns&target=second.example.com&record=MX",
     ),
   )
   await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
@@ -1361,7 +1481,7 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
   await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
   await page.getByRole("textbox", { name: "Target", exact: true }).fill("saved.example.com")
   await page.evaluate(() =>
-    window.history.pushState(null, "", "/security/tools?tool=ping&target=third.example.com"),
+    window.history.pushState(null, "", "/network/tools?tool=ping&target=third.example.com"),
   )
   await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
     "third.example.com",
@@ -1374,10 +1494,22 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
   expect(mutations).toEqual([])
 })
 
+test("the overview reads the access boundary and names the part that broke", async ({ page }) => {
+  await mockSecurity(page)
+  await page.goto("/security")
+  const boundary = page.locator("[data-slot=panel]").filter({ hasText: "Access boundary" })
+  await expect(boundary).toContainText("4 of 5 held")
+  await expect(boundary).toContainText("Caddy is the only routable listener")
+  await expect(boundary.getByRole("listitem").filter({ hasText: "Previews stay" })).toContainText(
+    "broken",
+  )
+  await expect(boundary).toContainText("21001 is funnelled")
+})
+
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
   await page.getByRole("switch", { name: "Firewall enabled" }).click()
   await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
@@ -1396,4 +1528,69 @@ test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
     page.getByRole("dialog").getByRole("button", { name: "Test and apply", exact: true }),
   ).toBeEnabled()
   expect(mutations).toEqual([])
+})
+
+test("workspace: security filters are shareable and Back restores the previous question", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  await page.goto("/network/connections")
+  const query = page.getByRole("textbox", { name: "Filter connections" })
+  await query.fill("203.0.113.50")
+  await expect(page).toHaveURL(/q=203\.0\.113\.50/)
+  await query.fill("100.110.34.9")
+  await expect(page).toHaveURL(/q=100\.110\.34\.9/)
+  await page.goBack()
+  await expect(query).toHaveValue("203.0.113.50")
+  await expect(page.locator("[data-workspace-item]")).toHaveCount(1)
+  await page.reload()
+  await expect(query).toHaveValue("203.0.113.50")
+  await query.press("Escape")
+  await expect(query).toHaveValue("")
+  await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
+})
+
+/**
+ * The verdict says what its checks could not see: provider policy always,
+ * since no provider adapter exists, and an nftables table no adapter models.
+ * Neither is a finding, and a clean list beside them does not say "passed".
+ */
+test("the posture names the layers its checks could not see", async ({ page }) => {
+  await mockSecurity(page, [], {
+    overrides: {
+      "/security/posture": {
+        ...posture,
+        status: "ok",
+        skipped: [],
+        findings: [],
+        unknowns: [
+          {
+            id: "unknown.provider",
+            layer: "provider",
+            title: "Provider policy is not visible",
+            detail:
+              "No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen. This host has no public address on any interface, so traffic from the internet reaches it only through a provider's translation.",
+          },
+          {
+            id: "unknown.nftables",
+            layer: "nftables",
+            title: "Foreign nftables decisions are not modeled",
+            detail:
+              "1 chain outside the firewall adapter can drop or redirect inbound traffic with rules this check does not evaluate: inet crowdsec crowdsec-chain (input hook, policy accept).",
+            subjects: ["inet crowdsec crowdsec-chain (input hook, policy accept)"],
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security")
+  const unseen = page.getByRole("region", { name: "Not seen by these checks" })
+  await expect(unseen.getByText("Provider policy is not visible", { exact: true })).toBeVisible()
+  await expect(unseen.getByText(/reaches it only through a provider's translation/)).toBeVisible()
+  await expect(
+    unseen.getByText("Foreign nftables decisions are not modeled", { exact: true }),
+  ).toBeVisible()
+  await expect(unseen.getByText(/inet crowdsec crowdsec-chain/)).toBeVisible()
+  await expect(page.getByText("No findings in the layers these checks can see")).toBeVisible()
+  await expect(page.getByText("All security checks passed")).toHaveCount(0)
 })

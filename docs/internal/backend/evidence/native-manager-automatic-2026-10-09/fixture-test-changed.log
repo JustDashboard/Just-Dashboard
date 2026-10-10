@@ -1,0 +1,3 @@
+Against 48f0d05c2fd1fd5ef1ef0d2af8196fcb4389152f: 2 changed files.
+Go packages: ./internal/netx
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.022s

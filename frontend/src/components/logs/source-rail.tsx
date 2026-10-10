@@ -59,6 +59,11 @@ const GROUPS: {
   { kind: "app", label: "Applications", icon: FileText },
 ]
 
+/** The glyph a source that is no product keeps on its tile: its group's. */
+export function kindIcon(kind: LogSource["kind"]) {
+  return GROUPS.find((g) => g.kind === kind || g.also?.includes(kind))?.icon
+}
+
 /** Where the Requests group goes among them: before the web server's raw files. */
 const REQUESTS_BEFORE = GROUPS.findIndex((group) => group.kind === "nginx")
 
@@ -374,7 +379,6 @@ function SourceRow({
   selected: boolean
   onSelect: () => void
 }) {
-  const group = GROUPS.find((g) => g.kind === source.kind || g.also?.includes(source.kind))
   // A stack is what it runs: its services' products overlapping, as the
   // Docker page draws a project (§14), the one it is named for whole.
   const stack = source.kind === "stack" && source.images?.length ? source.images : undefined
@@ -398,7 +402,11 @@ function SourceRow({
           ring={selected ? "ring-accent" : "ring-card group-hover:ring-row-hover"}
         />
       ) : (
-        <ProductLogo id={sourceProduct(source, platform)} size="sm" fallback={group?.icon} />
+        <ProductLogo
+          id={sourceProduct(source, platform)}
+          size="sm"
+          fallback={kindIcon(source.kind)}
+        />
       )}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">

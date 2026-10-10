@@ -3,10 +3,25 @@
 import { useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { post } from "@/lib/api"
+import { copyText } from "@/lib/clipboard"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { PM2Daemon, PM2StartRequest } from "@/lib/types"
-import { Field, FieldRow, FormNote, OptionList, OptionRow, Statement } from "@/components/form"
+import { useMetrics } from "@/hooks/use-metrics"
+import {
+  ChoiceCard,
+  ChoiceCardHint,
+  ChoiceCardTitle,
+  ChoiceGrid,
+  ProductCard,
+} from "@/components/choice-card"
+import { ShellWords } from "@/components/deploy/run-evidence"
+import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import { ChartActivity, Copy, Terminal } from "@/components/icons"
 import { Modal } from "@/components/modal"
+import { Well } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -19,25 +34,43 @@ import {
 
 type Mode = "fork" | "cluster" | "max"
 
-const INTERPRETERS = [
-  { value: "auto", label: "Decide from the file" },
-  { value: "node", label: "node" },
-  { value: "bash", label: "bash" },
-  { value: "python3", label: "python3" },
-  { value: "php", label: "php" },
-  { value: "none", label: "None — run the file itself" },
+/**
+ * What PM2 may run the file with, each as the product it is. "Decide from the
+ * file" is PM2's own default, and "None" runs the file as a program.
+ */
+const INTERPRETERS: { value: string; label: string; detail: string; product?: string }[] = [
+  { value: "auto", label: "From the file", detail: "node for .js, else its shebang" },
+  { value: "node", label: "Node.js", detail: "node", product: "nodejs" },
+  { value: "python3", label: "Python", detail: "python3", product: "python" },
+  { value: "bash", label: "Bash", detail: "bash", product: "shellscript" },
+  { value: "php", label: "PHP", detail: "php", product: "php" },
+  { value: "none", label: "None", detail: "run the file itself" },
 ]
 
 const ECOSYSTEM = /\.(config\.(c|m)?js|json|ya?ml)$/i
 
+/** What a script path will most likely run as, before PM2 is asked: the mark beside the field. */
+function scriptProduct(path: string, interpreter: string): string | undefined {
+  const chosen = INTERPRETERS.find((i) => i.value === interpreter)
+  if (chosen?.product) return chosen.product
+  if (ECOSYSTEM.test(path)) return "pm2"
+  if (/\.(c|m)?[jt]sx?$/i.test(path)) return "nodejs"
+  if (/\.py$/i.test(path)) return "python"
+  if (/\.sh$/i.test(path)) return "shellscript"
+  if (/\.php$/i.test(path)) return "php"
+  return undefined
+}
+
 /**
  * Registering a program with PM2 from here rather than from a shell.
  *
- * Every field is one argument of `pm2 start`, and the statement under the
- * form is the command that will run — so the dialog can be learned from, and
- * so nothing is hidden about what it does. Pointing it at an ecosystem file
- * hands the file to PM2 whole, because that file already says everything the
- * other fields would.
+ * Every field is one argument of `pm2 start`, and the command under the form
+ * is the one that will run, coloured as a command is — so the dialog can be
+ * learned from, and so nothing is hidden about what it does. What runs it and
+ * how many copies are choices of a kind, so they are cards with their marks
+ * (§16) rather than two selects. Pointing it at an ecosystem file hands the
+ * file to PM2 whole, because that file already says everything the other
+ * fields would.
  */
 export function PM2StartDialog({
   open,
@@ -50,6 +83,8 @@ export function PM2StartDialog({
   onOpenChange: (open: boolean) => void
   onStarted: () => void
 }) {
+  const { snapshot } = useMetrics()
+  const coreCount = snapshot?.cpu?.cores || snapshot?.cpu?.perCore?.length || 0
   // Kept for the tab while the dialog is open; the page forgets it on close.
   const [account, setAccount] = useSessionState(
     "processes.pm2.start.account",
@@ -68,6 +103,7 @@ export function PM2StartDialog({
 
   const chosenAccount = account || daemons[0]?.account || ""
   const ecosystem = ECOSYSTEM.test(script.trim())
+  const product = scriptProduct(script.trim(), ecosystem ? "auto" : interpreter)
   const scriptError =
     script.trim() && !script.trim().startsWith("/") ? "An absolute path on the server." : undefined
   const nameError =
@@ -145,12 +181,18 @@ export function PM2StartDialog({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      title="Start an application"
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <ProductLogo id="pm2" size="sm" />
+          <span className="truncate">Start an application</span>
+        </span>
+      }
       description="Register a script or an ecosystem file with PM2 and run it"
       size="lg"
       footer={
         <>
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+          <FormNote className="mr-auto">Not in the startup list until it is saved.</FormNote>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button size="sm" disabled={!valid || busy} onClick={() => void submit()}>
@@ -159,64 +201,72 @@ export function PM2StartDialog({
         </>
       }
     >
-      <div className="space-y-4">
-        <FieldRow>
+      <div className="space-y-6">
+        <FormSection title="What to run">
           <Field
-            label="Account"
-            htmlFor="pm2-account"
-            hint="Whose PM2 runs it. The script runs as this user."
+            label="Script or ecosystem file"
+            htmlFor="pm2-script"
+            hint="A JavaScript, shell or Python file, or an ecosystem.config.js that describes several applications."
+            error={scriptError}
           >
-            <Select value={chosenAccount} onValueChange={setAccount}>
-              <SelectTrigger id="pm2-account" size="sm" className="w-full">
-                <SelectValue placeholder="Account" />
-              </SelectTrigger>
-              <SelectContent>
-                {daemons.map((d) => (
-                  <SelectItem key={d.account} value={d.account}>
-                    {d.account}
-                    <span className="text-muted-foreground">{d.home}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex min-w-0 items-center gap-2">
+              {/* What the path will run as, redrawn as it is typed. */}
+              <ProductLogo
+                key={product ?? "none"}
+                id={product}
+                size="sm"
+                fallback={Terminal}
+                className="animate-rise"
+              />
+              <Input
+                id="pm2-script"
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                placeholder="/srv/api/dist/server.js"
+                className="font-mono"
+                spellCheck={false}
+              />
+            </div>
           </Field>
-          <Field
-            label="Name"
-            htmlFor="pm2-name"
-            hint={
-              ecosystem
-                ? "Only this application from the file; blank starts them all."
-                : "How PM2 lists it. Blank uses the file name."
-            }
-            error={nameError}
-          >
-            <Input
-              id="pm2-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="api"
-            />
-          </Field>
-        </FieldRow>
-        <Field
-          label="Script or ecosystem file"
-          htmlFor="pm2-script"
-          hint="A JavaScript, shell or Python file, or an ecosystem.config.js that describes several applications."
-          error={scriptError}
-        >
-          <Input
-            id="pm2-script"
-            value={script}
-            onChange={(e) => setScript(e.target.value)}
-            placeholder="/srv/api/dist/server.js"
-            className="font-mono"
-            spellCheck={false}
-          />
-        </Field>
-
-        {!ecosystem && (
-          <>
-            <FieldRow>
+          <FieldRow>
+            {daemons.length > 1 && (
+              <Field
+                label="Account"
+                htmlFor="pm2-account"
+                hint="Whose PM2 runs it. The script runs as this user."
+              >
+                <Select value={chosenAccount} onValueChange={setAccount}>
+                  <SelectTrigger id="pm2-account" size="sm" className="w-full">
+                    <SelectValue placeholder="Account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {daemons.map((d) => (
+                      <SelectItem key={d.account} value={d.account} hint={d.home}>
+                        {d.account}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            <Field
+              label="Name"
+              htmlFor="pm2-name"
+              hint={
+                ecosystem
+                  ? "Only this application from the file; blank starts them all."
+                  : `How PM2 lists it. Blank uses the file name.${daemons.length === 1 ? ` Runs as ${chosenAccount}.` : ""}`
+              }
+              error={nameError}
+            >
+              <Input
+                id="pm2-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="api"
+              />
+            </Field>
+            {!ecosystem && (
               <Field
                 label="Working directory"
                 htmlFor="pm2-cwd"
@@ -232,108 +282,140 @@ export function PM2StartDialog({
                   spellCheck={false}
                 />
               </Field>
+            )}
+          </FieldRow>
+        </FormSection>
+
+        {ecosystem ? (
+          <Notice title="An ecosystem file">
+            It says how each of its applications runs — the interpreter, the workers, the limits —
+            so PM2 is handed the file and nothing else.
+          </Notice>
+        ) : (
+          <>
+            <FormSection title="Run with">
+              <ChoiceGrid columns={3} role="group" aria-label="Interpreter">
+                {INTERPRETERS.map((option) => (
+                  <ProductCard
+                    key={option.value}
+                    product={option.product}
+                    fallback={option.value === "none" ? Terminal : ChartActivity}
+                    label={option.label}
+                    detail={option.detail}
+                    mono={option.value !== "auto" && option.value !== "none"}
+                    selected={interpreter === option.value}
+                    onClick={() => setInterpreter(option.value)}
+                  />
+                ))}
+              </ChoiceGrid>
+            </FormSection>
+
+            <FormSection title="How many">
+              <ChoiceGrid columns={3} role="group" aria-label="Mode">
+                <ChoiceCard selected={mode === "fork"} onClick={() => setMode("fork")}>
+                  <ChoiceCardTitle>One process</ChoiceCardTitle>
+                  <ChoiceCardHint>Fork mode. Any interpreter.</ChoiceCardHint>
+                </ChoiceCard>
+                <ChoiceCard selected={mode === "cluster"} onClick={() => setMode("cluster")}>
+                  <ChoiceCardTitle>A cluster</ChoiceCardTitle>
+                  <ChoiceCardHint>Workers sharing one port. Node only.</ChoiceCardHint>
+                </ChoiceCard>
+                <ChoiceCard selected={mode === "max"} onClick={() => setMode("max")}>
+                  <ChoiceCardTitle>One per core</ChoiceCardTitle>
+                  <ChoiceCardHint>
+                    {coreCount > 0
+                      ? `${plural(coreCount, "worker")} on this host.`
+                      : "As many workers as cores."}
+                  </ChoiceCardHint>
+                </ChoiceCard>
+              </ChoiceGrid>
+              <FieldRow>
+                {mode === "cluster" && (
+                  <Field
+                    label="Instances"
+                    htmlFor="pm2-instances"
+                    hint="Workers in the cluster."
+                    error={instancesError}
+                  >
+                    <Input
+                      id="pm2-instances"
+                      type="number"
+                      min={2}
+                      max={128}
+                      value={instances}
+                      onChange={(e) => setInstances(e.target.value)}
+                      className="font-mono"
+                    />
+                  </Field>
+                )}
+                <Field
+                  label="Memory limit"
+                  htmlFor="pm2-memory"
+                  hint="Restart when it grows past this. Blank is no limit."
+                  error={memoryError}
+                >
+                  <Input
+                    id="pm2-memory"
+                    value={memory}
+                    onChange={(e) => setMemory(e.target.value.toUpperCase())}
+                    placeholder="300M"
+                    className="font-mono"
+                  />
+                </Field>
+              </FieldRow>
+            </FormSection>
+
+            <FormSection title="Options">
               <Field
-                label="Interpreter"
-                htmlFor="pm2-interpreter"
-                hint="PM2 picks node for .js and the shebang otherwise."
-              >
-                <Select value={interpreter} onValueChange={setInterpreter}>
-                  <SelectTrigger id="pm2-interpreter" size="sm" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {INTERPRETERS.map((i) => (
-                      <SelectItem key={i.value} value={i.value}>
-                        {i.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </FieldRow>
-            <FieldRow columns={3}>
-              <Field
-                label="Mode"
-                htmlFor="pm2-mode"
-                hint="Cluster shares one port across workers; Node only."
-              >
-                <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
-                  <SelectTrigger id="pm2-mode" size="sm" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fork">One process</SelectItem>
-                    <SelectItem value="cluster">Cluster of…</SelectItem>
-                    <SelectItem value="max">One worker per CPU</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label="Instances"
-                htmlFor="pm2-instances"
-                hint="Workers in the cluster."
-                error={instancesError}
+                label="Arguments"
+                htmlFor="pm2-args"
+                hint="Passed to the script, split on spaces. Quoting is not interpreted."
               >
                 <Input
-                  id="pm2-instances"
-                  type="number"
-                  min={2}
-                  max={128}
-                  value={instances}
-                  onChange={(e) => setInstances(e.target.value)}
-                  disabled={mode !== "cluster"}
+                  id="pm2-args"
+                  value={args}
+                  onChange={(e) => setArgs(e.target.value)}
+                  placeholder="--port 3000"
                   className="font-mono"
+                  spellCheck={false}
                 />
               </Field>
-              <Field
-                label="Memory limit"
-                htmlFor="pm2-memory"
-                hint="Restart when it grows past this. Blank is no limit."
-                error={memoryError}
-              >
-                <Input
-                  id="pm2-memory"
-                  value={memory}
-                  onChange={(e) => setMemory(e.target.value.toUpperCase())}
-                  placeholder="300M"
-                  className="font-mono"
+              <OptionList>
+                <OptionRow
+                  title="Restart when files change"
+                  hint="PM2 watches the working directory. Meant for development; on a server it restarts on every deploy and every log write inside the tree."
+                  checked={watch}
+                  onCheckedChange={setWatch}
                 />
-              </Field>
-            </FieldRow>
-            <Field
-              label="Arguments"
-              htmlFor="pm2-args"
-              hint="Passed to the script, split on spaces. Quoting is not interpreted."
-            >
-              <Input
-                id="pm2-args"
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                placeholder="--port 3000"
-                className="font-mono"
-                spellCheck={false}
-              />
-            </Field>
-            <OptionList>
-              <OptionRow
-                title="Restart when files change"
-                hint="PM2 watches the working directory. Meant for development; on a server it restarts on every deploy and every log write inside the tree."
-                checked={watch}
-                onCheckedChange={setWatch}
-              />
-            </OptionList>
+              </OptionList>
+            </FormSection>
           </>
         )}
 
-        <Statement
-          label="Command"
-          sql={command}
-          placeholder="Name a script and the command PM2 will run appears here."
-        />
-        <FormNote>
-          The application is not in the startup list until it is saved. Save it from the menu once
-          it runs the way you want.
-        </FormNote>
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex min-h-6 items-center justify-between gap-3">
+            <p className="eyebrow">Command</p>
+            {command && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => void copyText(command, "Command copied")}
+              >
+                <Copy />
+                Copy
+              </Button>
+            )}
+          </div>
+          <Well className="max-h-44 text-hint leading-relaxed break-all whitespace-pre-wrap">
+            {command ? (
+              <ShellWords command={command} />
+            ) : (
+              <span className="text-muted-foreground italic">
+                Name a script and the command PM2 will run appears here.
+              </span>
+            )}
+          </Well>
+        </div>
       </div>
     </Modal>
   )

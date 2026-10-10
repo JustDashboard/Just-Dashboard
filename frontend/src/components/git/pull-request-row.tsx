@@ -2,22 +2,17 @@
 
 import { External } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
-import { previewStatus, pullChecksTone } from "@/lib/pull-requests"
+import { previewStatus } from "@/lib/pull-requests"
 import type { DeploymentPreview, GitPullRequest } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ChoiceRow } from "@/components/flow"
 import { BranchChip, ForgeFace } from "@/components/git/marks"
+import { ChecksMark, CommentCount, PullStateMark, ReviewMark } from "@/components/git/pull-state"
 import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { VerbActions, type Verb } from "@/components/verbs"
-
-const CHECKS_LABEL: Record<string, string> = {
-  success: "checks passed",
-  failure: "checks failed",
-  pending: "checks running",
-}
 
 /** The preview's address, in a tab of its own: a tailnet URL is another origin. */
 export function openPreview(preview: DeploymentPreview) {
@@ -31,8 +26,10 @@ export function openPreview(preview: DeploymentPreview) {
  * Overview, under the repository it deploys — because both lists answer the
  * same question, *which of these is worth testing*, and a reader moving
  * between the two pages should not have to learn the answer's shape twice.
- * Who opened it, what it is, where it goes, how its checks stand and where
- * its preview is; the verbs in the actions slot, declared by the caller,
+ * Who opened it and whether it is open, merged or closed — the state glyph a
+ * forge prints in front of the title, in its colour — what it is, where it
+ * goes, how its checks stand and where its preview is; the verbs in the
+ * actions slot, declared by the caller,
  * since which of them a surface may offer depends on what the surface knows.
  *
  * A `ChoiceRow` rather than the workspace's compact pull-request line: on
@@ -76,20 +73,15 @@ export function PullRequestRow({
     <>
       {pull.draft && <Tag>draft</Tag>}
       {pull.fork && <Tag tone="warning">fork</Tag>}
-      {pull.checks && CHECKS_LABEL[pull.checks] && (
-        <Status
-          className={cn("text-hint", compact && "max-md:hidden")}
-          tone={pullChecksTone(pull)}
-          label={CHECKS_LABEL[pull.checks]}
-        />
+      {!compact && (
+        <span className="max-md:hidden">
+          <ReviewMark review={pull.review} />
+        </span>
       )}
-      {!compact && pull.review === "approved" && (
-        <Status className="text-hint max-md:hidden" tone="running" label="approved" />
-      )}
-      {!compact && pull.review === "changes_requested" && (
-        <Status className="text-hint max-md:hidden" tone="danger" label="changes requested" />
-      )}
+      {!compact && <CommentCount count={pull.comments} />}
+      <ChecksMark checks={pull.checks} label={!compact} />
       {status && <Status className="text-hint" tone={status.tone} label={status.label} />}
+      {compact && <ForgeFace login={pull.author} provider="github" size="xs" />}
       {reachable &&
         built &&
         (compact ? (
@@ -109,7 +101,20 @@ export function PullRequestRow({
     <ChoiceRow
       index={index}
       className={cn(compact && "min-h-10 px-2.5 py-1.5", className)}
-      leading={<ForgeFace login={pull.author} provider="github" size={compact ? "xs" : "sm"} />}
+      leading={
+        compact ? (
+          <PullStateMark pull={pull} />
+        ) : (
+          // The author's face, with the request's state in the tile's corner
+          // the way a run's state sits on its step's tile.
+          <span className="relative shrink-0">
+            <ForgeFace login={pull.author} provider="github" size="sm" />
+            <span className="absolute -right-1 -bottom-1 rounded-sm bg-(--panel-ground,var(--background)) p-px">
+              <PullStateMark pull={pull} className="size-3.5" />
+            </span>
+          </span>
+        )
+      }
       title={
         <>
           <span className="numeric text-muted-foreground">#{pull.number}</span> {pull.title}

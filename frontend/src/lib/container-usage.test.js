@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { containerRates, containerRateLabel } from "./container-usage"
+import {
+  appendLive,
+  bucketLive,
+  byteScale,
+  containerRates,
+  containerRateLabel,
+  cpuScale,
+  liveRow,
+  LIVE_WINDOW_MS,
+  peakOf,
+} from "./container-usage"
 
 function sample(second, bytes) {
   return {
@@ -99,5 +109,131 @@ describe("container traffic rates", () => {
     expect(rates.tx).toBeNull()
     expect(rates.read).toBeNull()
     expect(rates.interfaces).toEqual([])
+  })
+})
+
+describe("the live window", () => {
+  test("a row carries each direction's rate on its own, never their sum", () => {
+    const row = liveRow(sample(1, 1600), sample(0, 1000))
+    expect(row.netRx).toBe(600)
+    expect(row.netTx).toBe(1200)
+    expect(row.cpu).toBe(150)
+    expect(row.mem).toBe(100)
+    expect(row.pids).toBe(12)
+  })
+
+  test("the first frame and a frame Docker had no CPU interval for are breaks, not zeros", () => {
+    const first = liveRow(sample(0, 1000))
+    expect(first.netRx).toBeNull()
+    expect(first.netTx).toBeNull()
+    expect(liveRow({ ...sample(1, 1000), cpuReady: false }, sample(0, 1000)).cpu).toBeNull()
+  })
+
+  test("frames append in order and a repeated or older frame changes nothing", () => {
+    let rows = appendLive([], sample(0, 1000))
+    rows = appendLive(rows, sample(1, 1500), sample(0, 1000))
+    expect(rows.map((row) => row.netRx)).toEqual([null, 500])
+    expect(appendLive(rows, sample(1, 1500), sample(1, 1500))).toBe(rows)
+    expect(appendLive(rows, sample(0, 1000), sample(1, 1500))).toBe(rows)
+  })
+
+  test("a stall opens a gap instead of a line across the time nobody measured", () => {
+    let rows = appendLive([], sample(0, 1000))
+    rows = appendLive(rows, sample(1, 1500), sample(0, 1000))
+    rows = appendLive(rows, sample(40, 9000), sample(1, 1500))
+    expect(rows).toHaveLength(4)
+    expect(rows[2].cpu).toBeNull()
+    expect(rows[2].netRx).toBeNull()
+    expect(rows[2].ts).toBeGreaterThan(rows[1].ts)
+    expect(rows[3].netRx).toBeNull()
+  })
+
+  test("rows older than the window fall off the front", () => {
+    const seconds = LIVE_WINDOW_MS / 1000
+    let rows = []
+    let previous
+    for (let second = 0; second <= seconds + 30; second += 1) {
+      const frame = sample(second, 1000 + second * 10)
+      rows = appendLive(rows, frame, previous)
+      previous = frame
+    }
+    expect(rows).toHaveLength(seconds + 1)
+    expect(rows.at(-1).ts - rows[0].ts).toBe(LIVE_WINDOW_MS)
+    expect(rows.every((row) => row.netRx === 10)).toBe(true)
+  })
+})
+
+describe("the live window in buckets", () => {
+  const row = (second, cpu, netRx = 100) => ({
+    t: "",
+    at: "",
+    ts: 1_800_000_000_000 + second * 1000,
+    cpu,
+    cpuPeak: null,
+    mem: 200,
+    memPeak: null,
+    netRx,
+    netTx: null,
+    blockRead: null,
+    blockWrite: null,
+    pids: 12,
+  })
+
+  test("a bucket is the mean of its frames, with the highest of them as its peak", () => {
+    const rows = bucketLive([row(0, 10), row(1, 30), row(2, 20), row(5, 4)], 5000)
+    expect(rows).toHaveLength(2)
+    expect(rows[0].cpu).toBe(20)
+    expect(rows[0].cpuPeak).toBe(30)
+    expect(rows[0].mem).toBe(200)
+    expect(rows[0].pidsPeak).toBe(12)
+    expect(rows[1].cpu).toBe(4)
+  })
+
+  test("a bucket is stamped with its newest frame, so the chart ends on the last reading", () => {
+    const rows = bucketLive([row(0, 1), row(3, 1), row(6, 1)], 5000)
+    expect(rows.map((one) => one.ts)).toEqual([row(3, 1).ts, row(6, 1).ts])
+  })
+
+  test("breaks are skipped inside a bucket, and a bucket of nothing but breaks stays one", () => {
+    const rows = bucketLive([row(0, null, null), row(1, 8, null), row(5, null, null)], 5000)
+    expect(rows[0].cpu).toBe(8)
+    expect(rows[0].netRx).toBeNull()
+    expect(rows[0].netRxPeak).toBeNull()
+    expect(rows[1].cpu).toBeNull()
+    expect(rows[1].cpuPeak).toBeNull()
+  })
+
+  test("an empty window is empty", () => {
+    expect(bucketLive([])).toEqual([])
+  })
+})
+
+describe("chart scales", () => {
+  test("a byte axis ends on a round figure above the peak and ticks at its quarters", () => {
+    const MB = 1024 * 1024
+    expect(byteScale(3.1 * MB)).toEqual({
+      domain: [0, 4 * MB],
+      ticks: [0, MB, 2 * MB, 3 * MB, 4 * MB],
+    })
+    expect(byteScale(8 * MB).domain[1]).toBe(12 * MB)
+    expect(byteScale(200 * 1024).domain[1]).toBe(256 * 1024)
+    expect(byteScale(0).domain[1]).toBe(1024)
+  })
+
+  test("the processor axis keeps an idle container's hundredths readable and grows by cores", () => {
+    expect(cpuScale(0.2)).toEqual({ domain: [0, 1], ticks: [0, 0.25, 0.5, 0.75, 1] })
+    expect(cpuScale(37).domain[1]).toBe(40)
+    expect(cpuScale(95).domain[1]).toBe(200)
+    expect(cpuScale(350).domain[1]).toBe(400)
+  })
+
+  test("a peak reads every named series and ignores breaks", () => {
+    const rows = [
+      { netRx: 10, netTx: null, netRxPeak: 40 },
+      { netRx: null, netTx: 25, netRxPeak: null },
+    ]
+    expect(peakOf(rows, ["netRx", "netTx"])).toBe(25)
+    expect(peakOf(rows, ["netRx", "netTx", "netRxPeak"])).toBe(40)
+    expect(peakOf([], ["netRx"])).toBe(0)
   })
 })

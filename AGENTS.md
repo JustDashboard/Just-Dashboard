@@ -56,6 +56,8 @@ changed frontend files, `tsc --noEmit`, `bun test src`, `go build ./...` and `go
 packages, the Go tests beside each changed file, and the browser specs that open a page the change
 renders, with `design-system.spec.ts` for any UI change. The header of the script says how each is
 picked. Use it while working and again before a pull request. There is no separate full gate.
+Set `JD_BROWSER_WORKERS=1` when concurrent worktrees leave little memory for browser workers;
+without this override, the existing Playwright configuration controls concurrency.
 
 `bun test src` is the fast layer over the pure logic in `src/lib` and `src/components`, usually in well
 under a second. Anything expressible there belongs there rather than in a browser spec.

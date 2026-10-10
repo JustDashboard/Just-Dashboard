@@ -1,11 +1,11 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { FormEvent } from "react"
 import { Clock, External } from "@/components/icons"
 import { ApiError, get, put } from "@/lib/api"
-import { relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -25,7 +25,6 @@ import { BranchChip, ShortSha } from "@/components/git/marks"
 import { Detail, DetailList } from "@/components/page"
 import { ProductGlyph, hostProduct, imageProduct } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -54,7 +53,6 @@ import {
   SettingsPage,
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
@@ -70,9 +68,12 @@ import { applyDetectionChanges } from "@/components/deploy/settings/detection-ch
  * under it would draw it twice. Each figure the old "Project" card repeated
  * moved beside the control that sets it: the source, repository and branch to
  * the Source head; when the project was created and what kind it is to the
- * Name head; the release strategy to the Runtime page's Releases reading;
- * whether it deploys itself, how often it looks, when it last did and what
- * it watches to the Automatic deployment head.
+ * Name head; the release strategy to the Runtime page's Releases section;
+ * whether it deploys itself to the Automatic deployment head, and how often
+ * it looks, when it last did and what it watches to that section's picture.
+ *
+ * What a field needs while it is typed stays under it; the reasoning behind a
+ * field is behind its ⓘ, so the page reads as heads, fields and switches.
  */
 
 const NAME_ERROR =
@@ -179,20 +180,19 @@ function NameForm({
   const [refused, setRefused] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setRefused(false)
     if (!DEPLOYMENT_NAME.test(value)) {
       setError(NAME_ERROR)
       setRefused(true)
-      return
+      return false
     }
     setError(undefined)
     setSaving(true)
     try {
       await put(`/deploy/${projectId}`, { name: value })
-      notify.success("Project renamed")
       onSaved()
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409 && caught.code === "name_taken") {
         setError("That name is already used by another project")
@@ -200,6 +200,7 @@ function NameForm({
       } else {
         notify.error("Could not rename project", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -208,7 +209,7 @@ function NameForm({
   return (
     <SettingForm
       name="Project name"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -225,12 +226,11 @@ function NameForm({
         id="name"
         title="Name"
         state={
-          <span className="block space-y-1">
-            <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-              <ProjectMark deployment={deployment} product={product} size="xs" />
-              <span className="truncate">{WORKLOAD_LABELS[deployment.profile]}</span>
-            </span>
-            <span className="block">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <ProjectMark deployment={deployment} product={product} size="xs" />
+            <span className="text-foreground">{WORKLOAD_LABELS[deployment.profile]}</span>
+            <span aria-hidden>·</span>
+            <span>
               created{" "}
               <time dateTime={record.createdAt} title={timestamp(record.createdAt)}>
                 {relativeTime(record.createdAt)}
@@ -243,7 +243,7 @@ function NameForm({
         <Field
           label="Project name"
           htmlFor="project-name"
-          hint="Used in URLs, container labels and release history."
+          info="Used in URLs, container labels and release history."
           error={error}
         >
           <InputGroup>
@@ -475,8 +475,7 @@ function SourceForm({
   // screen is a guess and the reader is told rather than left to assume it.
   const needsReentry = isGit ? !prefillUrl : !source || !source.image
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setSaving(true)
     setFieldErrors({})
     setFormError(undefined)
@@ -531,8 +530,8 @@ function SourceForm({
         image: value.image.trim(),
         platform: value.platform.trim(),
       })
-      notify.success("Source updated", { description: "The next deployment builds from it." })
       onSaved()
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.field) {
         setFieldErrors({ [caught.field]: caught.message })
@@ -544,6 +543,7 @@ function SourceForm({
       } else {
         notify.error("Could not update source", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -564,7 +564,7 @@ function SourceForm({
   return (
     <SettingForm
       name="Source"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -593,7 +593,6 @@ function SourceForm({
               }
               branch={identity?.ref ?? source?.ref ?? sourceRef}
               revision={identity?.revision ?? deployment.sourceRevision}
-              mode={source?.mode}
               repoPath={repoPath}
             />
           ) : (
@@ -631,12 +630,21 @@ function SourceForm({
             <Field
               label="Repository URL"
               htmlFor="source-url"
+              info="HTTPS or SSH, with no password or token in it. A connected GitHub repository is read through the App; any other URL is read with the saved credential you pick."
               hint={
-                needsReentry
-                  ? "Enter the repository again."
-                  : "HTTPS or SSH; do not embed a password or token."
+                needsReentry ? (
+                  "Enter the repository again."
+                ) : throughApp ? (
+                  // The App's installation is the credential a connected
+                  // repository is read with; the picker lists tokens and keys,
+                  // so it had nothing to show here but an empty trigger.
+                  <span className="inline-flex items-center gap-1.5">
+                    <ProductGlyph id="github" className="size-3" />
+                    Read through the GitHub App&rsquo;s installation
+                  </span>
+                ) : undefined
               }
-              error={fieldErrors.url}
+              error={fieldErrors.url ?? (throughApp ? fieldErrors.credentialId : undefined)}
             >
               <InputGroup>
                 <InputGroupAddon align="inline-start">
@@ -659,7 +667,12 @@ function SourceForm({
               <Field label="Branch or tag" htmlFor="source-ref" error={fieldErrors.ref}>
                 <InputGroup>
                   <InputGroupAddon align="inline-start">
-                    <SourceBranch aria-hidden />
+                    {/* The branch's own hue, as the git views draw it, so the
+                        same name is the same colour wherever it is read. */}
+                    <SourceBranch
+                      aria-hidden
+                      style={value.ref ? { color: hueFor(value.ref, LANES) } : undefined}
+                    />
                   </InputGroupAddon>
                   <InputGroupInput
                     id="source-ref"
@@ -677,7 +690,7 @@ function SourceForm({
               <Field
                 label="Root directory"
                 htmlFor="source-subdirectory"
-                hint="Empty builds from the repository root."
+                info="Empty builds from the repository root."
                 error={fieldErrors.subdirectory}
               >
                 <InputGroup>
@@ -698,28 +711,7 @@ function SourceForm({
                 </InputGroup>
               </Field>
             </FieldRow>
-            {throughApp ? (
-              // The App's installation is the credential a connected
-              // repository is read with; the picker lists tokens and keys,
-              // so it had nothing to show here but an empty trigger. A fact,
-              // not a field: a <label> over it would name no control.
-              <div className="min-w-0 space-y-1.5">
-                <p className="text-body leading-none font-medium">Credential</p>
-                <p className="flex min-h-9 items-center gap-2 text-body">
-                  <ProductGlyph id="github" />
-                  Read through the GitHub App&rsquo;s installation
-                </p>
-                {fieldErrors.credentialId ? (
-                  <p role="alert" className="text-hint leading-relaxed text-destructive">
-                    {fieldErrors.credentialId}
-                  </p>
-                ) : (
-                  <p className="text-hint leading-relaxed text-muted-foreground">
-                    A different URL above is read with a saved credential instead.
-                  </p>
-                )}
-              </div>
-            ) : (
+            {!throughApp && (
               <Field
                 label="Credential"
                 htmlFor="source-credential"
@@ -775,12 +767,7 @@ function SourceForm({
               </InputGroup>
             </Field>
             <FieldRow>
-              <Field
-                label="Platform"
-                htmlFor="source-platform"
-                hint="os/arch, such as linux/amd64."
-                error={fieldErrors.platform}
-              >
+              <Field label="Platform" htmlFor="source-platform" error={fieldErrors.platform}>
                 <Input
                   id="source-platform"
                   value={value.platform}
@@ -813,24 +800,19 @@ function SourceForm({
             </FieldRow>
           </>
         )}
-        <FormNote>
-          A project keeps its source kind. Start a new project to move from an image to a
-          repository.
-        </FormNote>
       </SettingSection>
     </SettingForm>
   )
 }
 
-const MODE_WORD: Partial<Record<DeploymentDraftSource["mode"], string>> = {
-  connected_repository: "GitHub App",
-  git_url: "Git URL",
-}
-
 /**
  * A Git source as its head reads it: the forge's mark and the repository,
- * which opens its page; the branch and the commit the configuration resolved
- * to; how it is reached; and where the checkout lives on this server.
+ * which opens its page, on one line with the branch and the commit the
+ * configuration resolved to; and where the checkout lives on this server.
+ *
+ * How it is reached is not said here: the URL field under the head says
+ * whether the GitHub App reads it, and a small-caps "Git URL" beside a URL
+ * was the same fact again at 10px.
  */
 function GitSourceState({
   product,
@@ -838,7 +820,6 @@ function GitSourceState({
   repository,
   branch,
   revision,
-  mode,
   repoPath,
 }: {
   product: string
@@ -846,7 +827,6 @@ function GitSourceState({
   repository?: string
   branch?: string
   revision?: string
-  mode?: DeploymentDraftSource["mode"]
   repoPath: string
 }) {
   const page = repositoryPage(remote)
@@ -857,24 +837,23 @@ function GitSourceState({
     </>
   )
   return (
-    <span className="block space-y-1.5">
-      {page ? (
-        <a
-          href={page}
-          target="_blank"
-          rel="noreferrer"
-          className="flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
-        >
-          {name}
-          <External aria-hidden className="size-3 shrink-0" />
-        </a>
-      ) : (
-        <span className="flex min-w-0 items-center gap-1.5">{name}</span>
-      )}
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <span className="block space-y-1">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {page ? (
+          <a
+            href={page}
+            target="_blank"
+            rel="noreferrer"
+            className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm focus-ring transition-colors hover:text-foreground"
+          >
+            {name}
+            <External aria-hidden className="size-3 shrink-0" />
+          </a>
+        ) : (
+          <span className="flex min-w-0 items-center gap-1.5">{name}</span>
+        )}
         {branch && <BranchChip branch={branch} className="max-w-40" />}
         <ShortSha sha={revision} />
-        {mode && MODE_WORD[mode] && <Tag>{MODE_WORD[mode]}</Tag>}
       </span>
       {repoPath && (
         <span className="block truncate font-mono" title={repoPath}>
@@ -998,12 +977,8 @@ function AutomaticDeployment({
   )
   if (watch.loading && !watch.data) {
     return (
-      <SettingSection
-        id="automatic-deployment"
-        title="Automatic deployment"
-        state={<Skeleton className="h-2.5 w-40" />}
-      >
-        <Skeleton className="h-28 w-full rounded-xl" />
+      <SettingSection id="automatic-deployment" title="Automatic deployment">
+        <Skeleton className="h-44 w-full rounded-xl" />
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-9 w-full" />
       </SettingSection>
@@ -1118,10 +1093,8 @@ function AutomaticDeploymentForm({
 
   const included = linesOf(include).length
   const excluded = linesOf(exclude).length
-  const decision = watch.reason ? DECISIONS[watch.reason] : undefined
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setSaving(true)
     try {
       await put(`/deploy/${projectId}/environments/${environmentId}/git-policy`, {
@@ -1134,10 +1107,11 @@ function AutomaticDeploymentForm({
       // The globs went out one per line, trimmed; the draft takes that shape
       // too, or a blank line left in would read as an edit the save did not make.
       patch({ include: linesOf(include).join("\n"), exclude: linesOf(exclude).join("\n") })
-      notify.success("Deployment policy saved")
       onSaved()
+      return true
     } catch (error) {
       notify.error("Could not save deployment policy", error)
+      return false
     } finally {
       setSaving(false)
     }
@@ -1146,7 +1120,7 @@ function AutomaticDeploymentForm({
   return (
     <SettingForm
       name="Automatic deployment"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1154,51 +1128,20 @@ function AutomaticDeploymentForm({
       onDiscard={draft.discard}
       applies="immediately"
     >
+      {/* No state line under the title: the branch, how often it is read,
+          when it last was and the path filters are all drawn in the picture
+          right under it, and saying them twice was most of the old head. */}
       <SettingSection
         id="automatic-deployment"
         title="Automatic deployment"
-        state={
-          <span className="block space-y-1">
-            {/* How often it looks is the picture's Watch node. */}
-            <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-              {watch.branch && <BranchChip branch={watch.branch} className="max-w-40" />}
-              {watch.checkedAt && (
-                <span>
-                  checked{" "}
-                  <time dateTime={watch.checkedAt} title={timestamp(watch.checkedAt)}>
-                    {relativeTime(watch.checkedAt)}
-                  </time>
-                </span>
-              )}
-            </span>
-            {(included > 0 || excluded > 0) && (
-              <span className="block">
-                {included > 0 ? (
-                  <>
-                    <span className="numeric">{included}</span> {included === 1 ? "path" : "paths"}{" "}
-                    watched
-                  </>
-                ) : (
-                  "every path watched"
-                )}
-                {excluded > 0 && (
-                  <>
-                    {" · "}
-                    <span className="numeric">{excluded}</span> excluded
-                  </>
-                )}
-              </span>
-            )}
-          </span>
-        }
         status={
-          <span className="flex flex-col items-start gap-1">
-            <Status tone={tone} label={label} />
-            {stale && <Status key="stale" tone="warning" label="Not refreshing" />}
-            {decision && <Status key={watch.reason} tone={decision.tone} label={decision.label} />}
-            {decision && <span className="block">{decision.sentence}</span>}
+          <>
+            <Status key={label} tone={tone} label={label} className="animate-rise" />
+            {stale && (
+              <Status key="stale" tone="warning" label="Not refreshing" className="animate-rise" />
+            )}
             {settingStatus({ dirty: draft.dirty })}
-          </span>
+          </>
         }
       >
         <AutoDeployPicture
@@ -1206,7 +1149,8 @@ function AutomaticDeploymentForm({
           automatic={automatic}
           product={product}
           repository={repository}
-          filters={included}
+          included={included}
+          excluded={excluded}
           projectName={projectName}
         />
         <OptionList>
@@ -1219,34 +1163,34 @@ function AutomaticDeploymentForm({
           >
             {/* Only automatic deployments read these, so they live under the
                 switch that turns them on rather than beside it (§7). */}
+            {/* "One glob per line" is said by the placeholders, which hold two
+                lines each; the rest is the paragraph wanted once, behind ⓘ. */}
             <FieldRow columns={2}>
               <Field
                 label="Include paths"
                 htmlFor="git-policy-include"
-                hint="One glob per line · empty watches everything"
-                info="Polling and push webhooks compare the complete Git changes since the last attempted deployment. Use directory/** for a directory and everything in it."
+                info="One glob per line; empty watches everything. Polling and push webhooks compare the complete Git changes since the last attempted deployment. Use directory/** for a directory and everything in it."
               >
                 <Textarea
                   id="git-policy-include"
                   value={include}
                   onChange={(event) => patch({ include: event.target.value })}
                   readOnly={!canEdit}
-                  placeholder="services/api/**"
+                  placeholder={"services/api/**\npackages/shared/**"}
                   className="min-h-20 font-mono sm:text-xs"
                 />
               </Field>
               <Field
                 label="Exclude paths"
                 htmlFor="git-policy-exclude"
-                hint="Wins over include"
-                info="A change that matches both lists is ignored."
+                info="One glob per line. Exclude wins: a change that matches both lists is ignored."
               >
                 <Textarea
                   id="git-policy-exclude"
                   value={exclude}
                   onChange={(event) => patch({ exclude: event.target.value })}
                   readOnly={!canEdit}
-                  placeholder="docs/**"
+                  placeholder={"docs/**\n**/*.md"}
                   className="min-h-20 font-mono sm:text-xs"
                 />
               </Field>
@@ -1286,28 +1230,42 @@ function AutomaticDeploymentForm({
 
 /**
  * How a push reaches a deployment: the repository, the watch that reads its
- * branch, and the project it deploys.
+ * branch, and the project it deploys — and, under them, what the watch decided
+ * the last time it looked.
  *
  * The lines say what the policy does, in the vocabulary every other wiring
  * picture uses: a pulse travels while pushes deploy by themselves, the line
  * is still while deployments are manual, and dashed — amber where something
  * is wrong — while there is nothing to carry yet (no first deployment) or the
  * watch cannot read the branch. It is drawn from the draft, so turning the
- * switch off stills the line before anything is saved.
+ * switch off stills the line before anything is saved, and the project's mark
+ * and its line of detail rise into their new state rather than swapping.
+ *
+ * On the page's own ground rather than in a frame, as the GitHub App's
+ * picture on Credentials is: the dot grid fades out towards its edges, so the
+ * picture has a middle and needs no border to read as one thing — a framed
+ * box was the one container left on a page of hairlines.
+ *
+ * The last decision is a line under the drawing at the size of the rest of
+ * the picture's words. It used to sit in the section head's status slot,
+ * which sets no size of its own, so its sentence rendered at the page's 16px —
+ * the largest text in the section, and none of it a heading.
  */
 function AutoDeployPicture({
   watch,
   automatic,
   product,
   repository,
-  filters,
+  included,
+  excluded,
   projectName,
 }: {
   watch: DeploymentGitWatch
   automatic: boolean
   product: string
   repository?: string
-  filters: number
+  included: number
+  excluded: number
   projectName: string
 }) {
   const project = useProject()
@@ -1319,119 +1277,152 @@ function AutoDeployPicture({
   const broken = UNAVAILABLE.includes(watch.status)
   const waiting = watch.status === "awaiting_first_deployment"
   const carries = automatic && !broken && !waiting && watch.status !== "not_applicable"
+  const decision = watch.reason ? DECISIONS[watch.reason] : undefined
+  const filters = [included > 0 && plural(included, "path"), excluded > 0 && `${excluded} excluded`]
+    .filter(Boolean)
+    .join(" · ")
+  const reach = !automatic
+    ? "only when you press Deploy"
+    : waiting
+      ? "after its first deployment"
+      : broken
+        ? "paused until the branch reads"
+        : "each matching commit"
 
   return (
-    <SettingPicture
-      label="How a push reaches a deployment"
-      containerRef={container}
-      lines={
-        <>
-          <AnimatedBeam
-            containerRef={container}
-            fromRef={sourceMark}
-            toRef={watchMark}
-            still={!carries}
-            dashed={broken}
-            tone={broken ? "warning" : "default"}
-            duration={2.6}
-          />
-          <AnimatedBeam
-            containerRef={container}
-            fromRef={watchMark}
-            toRef={projectMark}
-            still={!carries}
-            dashed={broken || waiting || !automatic}
-            tone={broken ? "warning" : "default"}
-            duration={2.6}
-            delay={0.8}
-          />
-        </>
-      }
-      start={[
-        <WireNode
-          key="source"
-          nodeRef={sourceMark}
-          align="end"
-          mark={
-            <WireMark tone="logo" size="md">
-              <ProductGlyph id={product} />
-            </WireMark>
-          }
-          eyebrow="Repository"
-          title={<span className="block truncate">{repository ?? "Repository"}</span>}
-          hint={
-            watch.branch && (
-              <span className="mt-0.5 inline-flex max-w-full">
-                <BranchChip branch={watch.branch} className="max-w-40" />
-              </span>
-            )
-          }
-        />,
-      ]}
-      startLabel={
-        filters > 0 && (
-          <WireLabel lit={carries} className="bottom-1/2 mb-2">
-            {filters} {filters === 1 ? "path" : "paths"}
-          </WireLabel>
-        )
-      }
-      middle={
-        <WireNode
-          nodeRef={watchMark}
-          align="center"
-          mark={
-            broken ? (
-              <WireMark tone="warning" size="md">
-                <Clock />
-              </WireMark>
-            ) : (
-              <WireMark size="md">
-                <Clock />
-              </WireMark>
-            )
-          }
-          eyebrow="Watch"
-          title={
-            broken
-              ? "Cannot read the branch"
-              : watch.status === "not_applicable"
-                ? "No branch to poll"
-                : `Every ${watch.intervalSeconds} s`
-          }
+    <div className="relative animate-rise py-6">
+      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
+      <div ref={container} className="relative">
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={sourceMark}
+          toRef={watchMark}
+          still={!carries}
+          dashed={broken}
+          tone={broken ? "warning" : "default"}
+          duration={2.6}
         />
-      }
-      end={
-        <WireNode
-          nodeRef={projectMark}
-          align="start"
-          // The project as itself, as the Automation and Databases pictures
-          // draw it: the brand is this dashboard, not a project it deploys.
-          mark={
-            automatic && !broken ? (
-              <span className="flex size-11 items-center justify-center">
-                <ProjectMark deployment={deployment} product={project.product} size="md" />
-              </span>
-            ) : (
-              <WirePlaceholder
-                size="md"
-                product={project.product}
-                fallback={WORKLOAD_GLYPH[deployment.profile]}
-              />
-            )
-          }
-          eyebrow="Deploys"
-          title={<span className="block truncate">{projectName}</span>}
-          hint={
-            !automatic
-              ? "only when you press Deploy"
-              : waiting
-                ? "after its first deployment"
-                : broken
-                  ? "paused until the branch reads"
-                  : "each matching commit"
-          }
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={watchMark}
+          toRef={projectMark}
+          still={!carries}
+          dashed={broken || waiting || !automatic}
+          tone={broken ? "warning" : "default"}
+          duration={2.6}
+          delay={0.8}
         />
-      }
-    />
+        {/* Wide, the marks stand in one row and the watch's words hang under
+            it, so the lines run level; narrow, they stand in one column with
+            the words to their right and the lines run down the marks. */}
+        <ol
+          aria-label="How a push reaches a deployment"
+          className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(3rem,0.5fr)_auto_minmax(3rem,0.5fr)_minmax(0,1fr)] lg:items-center lg:gap-0 lg:pb-16"
+        >
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={sourceMark}
+              align="end"
+              mark={
+                <WireMark tone="logo">
+                  <ProductGlyph id={product} />
+                </WireMark>
+              }
+              eyebrow="Repository"
+              title={<span className="block truncate">{repository ?? "Repository"}</span>}
+              hint={
+                watch.branch && (
+                  <span className="mt-1 inline-flex max-w-full">
+                    <BranchChip branch={watch.branch} className="max-w-40" />
+                  </span>
+                )
+              }
+            />
+          </li>
+          <li aria-hidden className="relative hidden self-stretch lg:block">
+            {filters && (
+              <WireLabel lit={carries} className="bottom-1/2 mb-2">
+                {filters}
+              </WireLabel>
+            )}
+          </li>
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={watchMark}
+              align="center"
+              mark={
+                <WireMark tone={broken ? "warning" : "neutral"}>
+                  <Clock />
+                </WireMark>
+              }
+              eyebrow="Watch"
+              title={
+                broken
+                  ? "Cannot read the branch"
+                  : watch.status === "not_applicable"
+                    ? "No branch to poll"
+                    : `Every ${watch.intervalSeconds} s`
+              }
+              hint={
+                watch.checkedAt && (
+                  <>
+                    checked{" "}
+                    <time dateTime={watch.checkedAt} title={timestamp(watch.checkedAt)}>
+                      {relativeTime(watch.checkedAt)}
+                    </time>
+                  </>
+                )
+              }
+            />
+          </li>
+          <li aria-hidden className="hidden lg:block" />
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={projectMark}
+              align="start"
+              // The project as itself, as the Automation and Databases pictures
+              // draw it: the brand is this dashboard, not a project it deploys.
+              mark={
+                automatic && !broken ? (
+                  <span
+                    key="deploys"
+                    className="flex size-14 animate-rise items-center justify-center"
+                  >
+                    <ProjectMark deployment={deployment} product={project.product} size="lg" />
+                  </span>
+                ) : (
+                  <WirePlaceholder
+                    key="paused"
+                    product={project.product}
+                    fallback={WORKLOAD_GLYPH[deployment.profile]}
+                    className="animate-rise"
+                  />
+                )
+              }
+              eyebrow="Deploys"
+              title={<span className="block truncate">{projectName}</span>}
+              hint={
+                <span key={reach} className="block animate-rise">
+                  {reach}
+                </span>
+              }
+            />
+          </li>
+        </ol>
+      </div>
+      {decision && (
+        <div
+          key={watch.reason}
+          className="relative mt-5 flex animate-rise flex-wrap items-center gap-x-2 gap-y-1 text-xs lg:justify-center"
+        >
+          <Status tone={decision.tone} label={decision.label} />
+          <span
+            className={decision.tone === "warning" ? "text-foreground" : "text-muted-foreground"}
+          >
+            {decision.sentence}
+          </span>
+        </div>
+      )}
+    </div>
   )
 }

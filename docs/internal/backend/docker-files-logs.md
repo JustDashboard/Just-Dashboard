@@ -13,6 +13,110 @@ the latest pair and cannot block collection. The final unsubscribe cancels the s
 snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
 opt into a request-scoped inventory/inspection snapshot; it never survives that request.
 
+### Network creation
+
+`POST /docker/networks/` requires `service.control` and is audited. `NetworkSpec` accepts the legacy
+`subnet`, `gateway` and `ipRange` fields or an additive `ipam` array, never both. Each pool contains a
+canonical IPv4 or IPv6 subnet with optional gateway and allocation range inside it. IPv6 pools require
+`ipv6: true`; up to sixteen pools are accepted and pools in one request must not overlap. The Engine
+receives every pool and remains responsible for driver availability and conflicts with existing
+networks. Names and metadata are validated before calling it. Labels and options have at most 32
+entries, 256-byte keys, 4096-byte values and 16 KiB total per map.
+
+Custom drivers and any driver options require `system.admin`, including options for `bridge`.
+`host`, `none` and `null` are existing system networks and cannot be created here. Manually supplied
+`io.just-dashboard.*` and `com.docker.compose.*` labels are refused so a manual network cannot claim
+deployment or Compose ownership. A supplied pool containing the connection's observed client address
+is refused with `409 would_lock_you_out`. This guard does not prove absence of conflicts with other
+host, VPN or provider routes.
+
+The creation dialog keeps the simple name/internal/subnet path and exposes driver, gateway, allocation
+range, attachable, IPv6 pools, labels and driver options under Advanced settings. Non-administrators
+can create ordinary bridge networks but do not see driver or option controls. It checks explicit pools
+against the last listed Docker networks, retains the draft after an Engine refusal, and disables
+creation after an inventory read failure until a successful refresh. The internal-network setting
+does not claim isolation for containers also attached to another network.
+
+Focused coverage is `network_spec_test.go`, `docker_network_spec_test.go`,
+`network-create-reading.test.js` and `docker-network-create.spec.ts`. Engine-wire tests inspect both
+address families after creation; browser tests cover mobile/desktop payloads, refusals, stale inventory
+and role-specific controls. These fixtures do not constitute native driver or provider acceptance.
+
+`GET /docker/networks/drivers` reads the Engine's driver catalogue when asked
+(`dockerx.NetworkDrivers`: `/info`'s network plugins and `/plugins` with the `networkdriver`
+capability). Each driver is `builtin` or `plugin`, creatable or refused with a reason — `host`/`null`
+are network modes, `overlay` needs this Engine to be a swarm manager, a disabled plugin is refused —
+and built-in drivers carry the option keys Docker documents. Creation checks the same catalogue before
+the Engine is asked (`api.checkNetworkDriver`): a driver this Engine lacks, a refused one, or a
+macvlan/ipvlan `parent` that is not a host device answers `400 driver_unavailable`; any driver but
+`bridge` is refused with `503 drivers_unread` when the catalogue cannot be read. The form suggests the
+creatable drivers, says why one is refused, labels a plugin's options as passed through unchecked, and
+names option keys a built-in driver does not document, which Docker silently ignores. A plugin driver
+is still only as good as the installed plugin; no third-party plugin is installed or accepted here.
+
+### Network ownership, dependencies and guarded changes
+
+Every listed and inspected network carries `owner` (`dockerx.OwnerOfNetwork`, from its labels):
+`system`, `dashboard` (the dashboard's own Compose project, told by the data directory its backend
+mounts — `proxysvc.SelfProject`), `database-link` and `deployment` (managed labels with the
+environment joined to its project's name while it exists), `compose` or `manual`. A failed container
+listing no longer reads as an unused network: the list sets `membersKnown: false` with
+`membersError`, and the detail sets `membersError` and per-member `unread` when a member's inspect
+failed. Members carry their other networks (the containers joining this network to the rest),
+`ingress` for the shared public Caddy (`dockerx.IsIngressContainer`: the provisioned label or name, or an
+adopted Caddy publishing 80 and 443 on every interface) and `dashboard` for the dashboard's own.
+
+Changes are previewed from one fresh reading (`dockerx.NetworkDependencies`: verbose network inspect,
+every container including stopped ones, every network, and an inspect per member and per candidate; a
+failed container or network listing fails the reading, `503 dependencies_unread`, rather than
+reporting no dependents). The pure previews return conflicts at three levels — `block` (refused by the
+mutation as well, `409 network_conflict`), `warn` (a consequence the dialog confirms, recorded as
+`acknowledged` in the audit entry) and `info`:
+
+- `GET /docker/networks/{id}/connect?container=&alias=` (`PreviewConnect`): already attached,
+  host/none/`container:` network modes, a swarm network without `--attachable`, an alias the resolver
+  cannot answer, aliases on the default bridge, every IPv4 pool full (members counted in the pool
+  their address is in) and the dashboard's own network are
+  blocks; a name another member already answers to (Docker returns both), overlapping ranges with the
+  candidate's other networks and attaching to a deployment's or database-link network are warnings.
+- `GET /docker/networks/{id}/disconnect?container=` (`PreviewDisconnect`): the dashboard's own
+  containers, the shared ingress and a database-link network's members are refused; the last network,
+  published ports carried on this network, peers that lose the member's names and a deployment's
+  network are warnings; Compose putting it back is a note. An endpoint whose container the Engine says
+  no longer exists is a stale endpoint, removable with `force`; one whose container was merely unread
+  is refused.
+- `GET /docker/networks/{id}/removal` (`PreviewRemove` plus the dashboard's records): system networks,
+  running members, the dashboard's own stack and a deployment's network whose environment still exists
+  are refused, as is the swarm's routing-mesh network; stopped containers that still name the network
+  (the Engine removes it anyway, and they then fail to start — shown natively below) and shared IPAM
+  reservations still recording it as owner — or reservations that could not be read — are warnings;
+  Compose recreating it and an orphaned managed network are notes. An unreadable deployment record
+  counts as existing.
+- `GET /docker/networks/prune` (`PruneCandidates`): every local network the Engine's own prune would
+  take (swarm networks are their managers'), each `removable` only when nothing blocks or warns. `POST /docker/networks/prune` with `{ids}` removes
+  exactly those reviewed IDs that are still removable now and reports the rest as `skipped`; without
+  ids it removes every removable network. It never runs the Engine's prune. The disk page's cleanup
+  category and the global sweep remove the same removable set (`removableNetworks`), treating every
+  managed network as its deployment's.
+
+The UI draws the owner on each card and in the detail, offers attach on any local network (the old
+non-attachable hint was a swarm-only rule applied to bridges) but not on the dashboard's own, shows no
+detach control for the dashboard's containers or the ingress, and previews every attach (as the draft
+changes, keeping the draft when the preview fails), detach, removal and prune before confirming; a
+refused confirmation reads the preview again and stays disabled until the new reading lands. The
+mutations act on the full ID the reference resolved to, and audit it.
+`docker_network_dependencies_test.go`, `network_dependencies_test.go`, `network_drivers_test.go` and
+`docker-network-maturity.spec.ts` cover these.
+
+The Engine-wire fixture `JD_DOCKER_NETWORK_LIVE=1 go test ./internal/dockerx -run
+'^TestLiveNetworkDependencyPreviewsAgainstTheEngine$' -count=1 -v` creates two uniquely labelled
+internal /28 bridges in free benchmarking space and three owned containers from a cached
+`python:3.11-slim`, runs the previews and the reviewed prune over them, then removes the owned dormant
+network to show the Engine removing a network a stopped container names and that container failing to
+start. Cleanup removes only objects carrying its run's label and verifies none remain.
+
+### Containers and inventory
+
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on
   the historical accident of which fields the daemon could change after creation, and rendering them as a
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
@@ -23,7 +127,9 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   create fails and the operator has nothing where their service was — so the old container is renamed
   aside (`<name>_jd_replaced_<random>`), restored if anything later fails, and removed only once the replacement
   runs. Compose-managed containers are refused with `ErrComposeManaged`. `UpdateResources` is separate
-  because limits genuinely can change in place.
+  because limits genuinely can change in place. `UpdateRestartPolicy` also uses an Engine update,
+  preserves the running process, and refuses Compose ownership and incompatible auto-remove settings.
+  The service-control route is `PATCH /docker/containers/{id}/restart-policy`; mutations are audited.
 - **`render.go` keeps the form from being a black box**: a spec back into the `docker run` line and the
   compose service, rendered **on the server** so "what does this spec mean" has one implementation. The
   YAML is hand-written, not marshalled — key order carries meaning and a marshaller would sort it into
@@ -74,6 +180,8 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   it reads the buffered past, so an event recorded between the two is sent rather than lost — one
   recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
   service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+  `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
+  nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
   `/logs/*` routes (see [Logs](#logs)). `GET /docker/containers/{id}/logs`, its `/logs/stream` and
   `GET /docker/stacks/{name}/logs/stream` are gone: a second reader of the same lines with no lens and no
@@ -101,6 +209,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
 - **`cleanup.go` replaces one word covering five sweeps.** Each category reports what it holds, what
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
   Volumes are always listed and never recommended; selecting them still uses ordinary confirmation.
+- **A volume's standing follows the daemon's own rule.** `ListVolumesWithUsers` joins every
+  container's mounts, running or stopped, and each listed volume says what its driver options mount
+  (`mountType`: nfs, cifs, bind, or custom) without carrying the options — a CIFS `o=` holds the
+  share's password, so the options stay on the inspect route. Docker's prune removes only local
+  volumes without options that nothing references: a stopped container's volume is kept, and what a
+  prune takes is what `docker compose down` or a container removed without `-v` left behind. The
+  Volumes page reads the list again before it names that set, and compares the prune's report with
+  it afterwards, because the reference count it would otherwise trust is cached.
 - **Authorization uses effective container resources.** Creation and recreation validate the selected
   spec, including a spec reused from an existing container. Limited accounts may use plain local
   volumes; references to existing named volumes are inspected first. Custom drivers or driver options
@@ -124,7 +240,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   from a shell.
 - **Efficiency rules that are load-bearing**: `ListContainers` carries `Mounts` (the Engine summary
   already has them); membership joins for volumes, networks and images, and image-reference discovery
-  use the summary without fetching unused inspection fields. The history recorder reads the enriched
+  use the summary without fetching unused inspection fields. The network listing carries each member's
+  address from the same summary — `Network.Endpoints` (container id and name, IPv4 and IPv6 with their
+  prefix, MAC) and `Network.Gateway` — kept off the containers socket (`Container.Endpoints` is
+  `json:"-"`); the summary has no aliases, so the names a member answers to beyond its own are
+  `NetworkDetail`'s, which inspects. A network's inspect lists endpoints, and a stopped container holds
+  none, so `NetworkDetail` adds every container the summary places on the network that the inspect
+  left out — without an address, with its state and aliases — and counts it: Docker removes a network
+  whose members are all stopped, and they then fail to start. The history recorder reads the enriched
   listing because it persists explicit memory budgets, including a limit equal to host RAM, which the
   stats response alone cannot distinguish from an unlimited container. The shared live table sampler
   reuses the inventory it already collected and samples those IDs without another listing.
@@ -136,13 +259,25 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   `ListRunning` is the Engine's list of running containers mapped with no inspect at all, for the ports
   page, which asks every fifteen seconds only which container a published port belongs to.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
-  enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
+  enrichment, so a deployment detail read inspects only its matching running containers.
+  `ListContainersWithLastRun` is the same listing that also inspects the matching stopped ones, for the
+  exit code, OOM verdict and restart count the Runtime services carry (`Container.Restarts`, `Exited`,
+  `WasOOMKilled`, none of them on the listing's wire); only the runtime services read asks for it, so the
+  cleanup and recovery paths that share the labelled listing pay nothing for it. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
   and marks the rows it did not inspect (`Inspected`) so the UI never renders an absence as an answer.
   It also inspects any container, stopped or not, that the Engine lists by bare `sha256:…` id — which it
   does once the container's tag has moved on to a newer pull — and reports the name from the container's
   own config instead, as `Inspect` does. An id named no product, so every page drew such a container as
   Docker's whale and database discovery (which reads the engine off the name) skipped it.
+  `GET /docker/containers/stats` reads `ListRunning` rather than the enriched listing and samples through
+  the shared `StatsSampler`, which is **not** the recorder's. Its `WithMaxAge(30s)` drops a previous
+  sample older than the bound, so CPU is a recent interval or `cpuReady: false` (the first call, or one
+  after a gap), never an average over however long ago anyone last asked. A call that names only some
+  containers keeps the others' baselines until they pass the bound, so two pages polling different
+  projects do not erase each other's. The optional `ids` query
+  (comma-separated, full container ids or prefixes of at least 12 hex characters, at most 64; a bad
+  value is a 400) restricts the stats reads to those running containers; the response shape is unchanged.
   Writable-layer sizes ride along on the stats sampler from the shared disk cache, rather than a
   separate layer walk per sample, so "grew 6.4 GB today" is a measurement rather than a guess.
 - **Disk accounting has bounded staleness.** One client shares a disk walk between concurrent cold
@@ -180,7 +315,8 @@ the [CLI calculations](https://github.com/docker/cli/blob/master/cli/command/con
 `stats_test.go`, `metrics/container_usage_test.go`, the store migration test and
 `frontend/src/lib/container-usage.test.js` pin conversion, availability and rate boundaries. Browser
 coverage lives in `docker-ui.spec.ts`, including pause/reconnect, stale data, disabled retention,
-host networking, stopped containers and desktop/phone layouts.
+host networking, stopped containers and desktop/phone layouts; `container-page.spec.ts` covers the
+Overview's readings off the same stream.
 For read-only acceptance against a running container, run from `backend/`:
 `JD_DOCKER_STATS_CONTAINER=<id> go test ./internal/dockerx -run '^TestLiveContainerUsageStream$' -count=1 -v`.
 The test opens the existing stats stream, reconciles totals and memory, and checks cancellation;
@@ -206,10 +342,12 @@ basename. A copy error leaves an existing regular destination intact.
 the a.txt already there. `Move` also refuses a directory into its own subtree with a sentence rather
 than rename's EINVAL, and treats a move onto itself as a no-op. `Touch` and `Mkdir` are the "New file"
 and "New folder" verbs and refuse an existing path the same way (`Mkdir` still creates missing
-parents). Uploads go through `Upload`, which writes to a temporary sibling and renames into place the
-way `Write` does: an interrupted transfer never leaves a truncated file, an existing file keeps its
-owner and mode across the replacement (which is what lets the image editor save over a picture the
-web server owns), and `?overwrite=true` is what permits the replacement at all. The handler sends one
+parents). Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
+without overwrite, a no-replace rename (or a hard link where unsupported) claims the destination only
+if it is still free after the transfer; with overwrite, a rename replaces it. An interrupted transfer
+never leaves a truncated file. An existing file keeps its owner and mode across the replacement
+(which is what lets the image editor save over a picture the web server owns), and `?overwrite=true`
+is what permits the replacement at all. The handler sends one
 request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
@@ -244,11 +382,26 @@ two-gigabyte log.
 - **`find.go`** is the fuzzy finder (`search.go` is the literal/regex one, optionally grepping contents).
   Subsequence matching scored so the basename beats directories, a run beats scattered characters, a
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16
-  offsets**. Bounded three ways (time, visits, matches) and it *says* when it stopped early — a fuzzy
-  search that quietly answers from a third of the disk is worse than one that admits it.
+  offsets**. Where the typed term occurs as a run in the name, that run is scored too and the better
+  kept, with a bonus, so `promo` finds `…-Promo.mp4` above `proxy-tls-monitor.spec.ts`. The walk is
+  **breadth first**: depth first spent its budget inside the first large directory it met and never
+  reached a shallow match beside it. Bounded three ways (time, visits, matches) and it *says* when it
+  stopped early (`truncated`) — a fuzzy search that quietly answers from a third of the disk is worse
+  than one that admits it — while `total` counts the matches before the best `limit` were kept, which
+  is a ranking rather than a partial walk.
+- **`search.go`** pins the search directory inside an allowed `os.Root`, walks without following
+  symlinks, and opens only regular files with a nonblocking flag and an opened-file stat. Content
+  scans are limited to 4 MiB per file, 100,000 visits, twelve directory levels and the requested hit
+  limit; binary files and generated/system directories are skipped. The palette requests
+  `detailed=true`, which returns every matching line plus `hits`, `truncated`, `visited`, `unreadable`
+  and `elapsedMs`, under a three-second deadline. Snippets centre on the first match and carry UTF-16
+  ranges for literal and regex highlighting. `hidden=false` skips dotfiles; invalid regex is a 400.
+  Callers without `detailed=true` retain the hit array and first matching line per file.
 - **`places.go`**: `Home` prefers `$HOME`, then `/root`, then a single account under `/home`, then the
   first configured root — every candidate checked through `Resolve`, because a shortcut landing outside
-  the roots is worse than no shortcut. `Complete` treats a trailing separator as "inside this directory"
+  the roots is worse than no shortcut. A notable place's `name` is what it holds (*Configuration*,
+  *Websites*, *Logs*, *Apps*, *Served files*, *Local software*, *Temporary*); its `hint` keeps the
+  longer description. `Complete` treats a trailing separator as "inside this directory"
   and anything else as a component being typed; dotfiles appear only once a dot is typed.
 - **`Usage`** accumulates per-child totals in the *same* bounded walk (forty children would otherwise be
   forty-one walks) and reports `Truncated` rather than quoting a partial total. A symlink counts as the
@@ -279,15 +432,44 @@ after the filesystem operation has succeeded.
 Frontend `components/files/`: the page is **one framed workbench** with no page header above it — a
 strip across the top carrying where you are (a compact folder button for the global colour, the
 path and its star) and every page command (Find, content search, refresh, the view, arrange, the GitHub
-account, New, Upload, and the toggles for the two side columns), then a sidebar, the listing and an
+account, New, Upload, and the toggles for the two side columns), grouped into outlined boxes
+(design-system §14), then a sidebar, the listing and an
 inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
 sidebar (`files-sidebar.tsx`) has no header of its own and is a fixed list the way a desktop file
-manager's is, not a folder tree:
-the server's places (home, the roots, the accounts, the notable directories), then the starred folders,
-then the recent ones, each a drop target, with the browsed folder marked when it is one of them. It does
-not change as the listing walks into folders — the walking happens in the listing. `destinations` in
-`places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike, and draws each
-place as what it is (`PlaceMark`: `/` as the host's distribution, a home as a folder with a house in it).
+manager's is, not a folder tree, in four sections that fold and stay folded (`files.sidebar.folded`):
+**Home** (the dashboard's home and the accounts), **Starred**, **This server** (`/` as *File system*,
+then the notable directories) and **Recent**, each row one line and a drop target, with the browsed
+folder marked when it is one of them. It does not change as the listing walks into folders — the
+walking happens in the listing. `placeSections` in `places-menu.tsx` builds that list once for the
+sidebar and for the phone's menu alike, and draws each place as what it is (`PlaceMark`: `/` as the
+host's distribution, a home as a folder with a house in it).
+
+The search palette (`quick-open.tsx`) searches *This folder*, *Home* or *Everywhere*. Home is
+`homeFor` the folder (`search.ts`): the account home it is inside, else the one account's home on a
+one-account server, else the dashboard's own — the same home the strip's house button goes to. It used
+to be the dashboard's `$HOME` alone, so on the usual install "From home" searched `/root` while the
+operator was browsing `/home/ubuntu`.
+
+Folder navigation uses native browser history (`use-folder-navigation.ts`, `navigation.ts`). Each
+visit pushes a `?path=` address, so browser Back/Forward and mouse history buttons traverse folders;
+the toolbar and Alt+Left/Right or Cmd+brackets use the same history. The initial home or remembered
+folder replaces its address without creating an extra visit. History survives reload, a new visit
+after Back drops the forward branch, and exhausted folder history lets browser Back leave Files.
+The Parent control, Backspace, Alt+Up and Left in details view use a parent within the server's roots;
+Right in details view enters a folder. During loading, the places response supplies the root limits.
+The tab remembers up to 40 folder visits: available selections, the active item, view and scroll.
+State is saved as interaction happens; a stable history listener restores listing keyboard focus
+without stealing focus from a toolbar control. Removed entries cannot remain selected or inspected.
+
+`keyboard.ts` scopes the page and path-bar shortcuts to Files, leaving text fields, composition,
+open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. F5/Ctrl/Cmd+R
+refreshes only the folder; a modified hard refresh keeps the browser's behavior. Ctrl/Cmd+F opens
+name search; Ctrl/Cmd+Shift+N creates a folder, Ctrl/Cmd+Shift+. toggles hidden files and Ctrl/Cmd+Space
+toggles the active item. Name typing jumps through entries, repeated letters cycle matches, and
+tile arrows follow the actual rendered columns. Escape clears the selection/active item before
+canceling the internal clipboard. The footer's Files shortcuts control (also `?`) opens
+`shortcuts-dialog.tsx`. New keyboard mutation paths invoke the existing guarded operations.
+
 `file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
 lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon
 set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else the
@@ -299,31 +481,69 @@ is large enough. `folder-colour.tsx` is the picker — swatches in the inspector
 behind the strip's small folder button for all folders — and `file-actions.tsx` offers the individual
 choice as a submenu on every folder's menu and on the
 background menu for the folder being browsed. The inspector (`preview-panel.tsx`) opens on the thing
-large — the picture, the video, or its folder or page — with its name, kind and colour under it, and
-describes the folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
+large — the picture or video on a stage, or its folder or page — with its name, its extension in the
+format's colour, its kind and size, a folder's colour swatches, and its verbs: the one most people
+want named and wide (Edit, View, Open folder, or Download for a binary or archive) beside glyphs for
+the rest (View, Crop, Download, Checksum). Under that, grouped sections: what is inside (the text
+head, the PDF, the archive, a folder's folder and file counts with Measure size and its largest
+entries as a `BarList`), Details (modified with the date, size with the byte count, lines, language,
+owner and group, a link's target), Access (the mode as an owner/group/everyone grid and in one
+sentence, `access.ts`), and Location (the path as crumbs to walk up, with Copy path). It describes the
+folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
 row and a tile alike (images lazily, a video only once it scrolls into view, and playing muted under the
 pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
-row's overflow button, the tile's, and the right-click menu (`ui/context-menu.tsx`, one root over the
+listing's context menu (`ui/context-menu.tsx`, one root over the
 listing that reads the row from `data-entry-path`); the space between rows gets the folder's verbs.
 `dnd.ts` makes folder rows, sidebar places, crumbs and starred folders drop targets for paths dragged from
-the listing (Ctrl or Alt copies) and for files from the desktop. `uploads.tsx` is the queue — one
+the listing (Ctrl or Alt copies) and for files from the desktop. The listing itself has no overflow
+dots: right-click, Shift+F10 on an entry's name or touch long-press opens its menu. A plain click
+inspects, double-click or Enter opens, and after the first checkbox/modifier selection a plain click
+anywhere on an entry toggles it. Checkbox clicks also establish the Shift-range anchor.
+`selection.ts` holds range and rectangle hit testing; `use-marquee.ts` captures background mouse
+gestures in scroll-content coordinates, selects intersecting entries in either direction, preserves
+the initial selection with Ctrl/Cmd/Shift and scrolls at the listing's edges. Release commits; Escape,
+pointer cancellation or loss restores the snapshot; a background click clears. Touch scrolling and
+native entry dragging remain available. A drag carries the selected group (or just an unselected
+source), draws a compact count preview, fades its sources and highlights accepting folders; a folder
+never advertises a drop into itself or its descendants. After a successful move, the inspector clears
+an entry moved away (including a descendant of a moved folder); copies and failed moves retain it.
+Selection and clipboard actions are animated
+foot overlays with reduced-motion support, leaving the listing's layout unchanged. The grid leaves
+metadata to the inspector and details view; all tile sizes use compact fixed columns and 4px gaps.
+`uploads.tsx` is the queue — one
 `XMLHttpRequest` per file for progress, three at a time, folders walked through the entries API so a
 dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`
 asks once per operation (replace, keep both, skip) before an upload, move or paste touches a name that
 is taken; "keep both" is `photo (2).jpg` for a transfer and `photo copy.jpg` for a duplicate.
 `media-viewer.tsx` is the full-screen look (a `Modal` at `size="full"`): pictures fit or 1:1, video,
 audio, PDF through a blob, and the same head or archive listing the inspector shows for anything else;
-Space in the listing opens it, the arrows walk the folder's files. The editor gains a full-screen toggle
-and a diff review of the draft against the disk (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few
-million cells) drawn by the git page's `DiffView`. The listing polls every twenty seconds and refetches
+Space in the listing opens it, the arrows walk the folder's files. Text and image editors open beside
+that listing. **Open full editor** transfers the current draft in memory to `/files/editor`, which
+shares the same editor controls beside a collapsible `FileTree`, which unfolds the current file's
+ancestors; on a phone the tree opens over the editor. Contents are never put in browser storage. Monaco exposes Find, Replace, commands, undo/redo,
+formatting, language, indentation, wrap, minimap and font size, with a cursor/UTF-8 size status and a
+diff review (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few million cells) drawn by `DiffView`.
+Content-search results reveal their matching line. `quick-open.tsx` shares one keyboard palette for
+names (Ctrl/Cmd+P) and contents (Ctrl/Cmd+Shift+F), with immediate current-listing name matches,
+cancelled stale requests, hidden/case/regex controls, a wider scope and explicit partial/error states.
+The palette keeps a fixed viewport-bounded frame, with independently scrolling results and reserved
+footer space for partial/unreadable notices. The search input has no active border or outline; the
+caret, selected result and keyboard navigation carry its state. Results fade in and out without
+resizing the frame; exiting rows immediately become inert and hidden from assistive technology, and
+reduced motion shows each state immediately. A failed disk request leaves current-listing matches
+available. The listing polls every twenty seconds and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
 delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
 **the sidebar's tree waits for `/files/places`** before mounting, since it caches and would keep showing
 the refusal from listing a root it cannot. The image editor commits each operation to a **new canvas**
-rather than a live parameter pipeline — that is what makes undo a stack of bitmaps and why "rotate, crop,
-rotate again" behaves the way it looks; saving goes through the ordinary upload route with
-`overwrite=true`, so owner and mode survive.
+rather than a live parameter pipeline, with bounded undo/redo, original comparison, zoom, resizing,
+rotation, flips and live brightness/contrast/saturation. `react-image-crop` supplies touch and keyboard
+crop handles and aspect-ratio constraints; native canvas operations stay local to the browser. Save
+bakes live adjustments into PNG/JPEG/WebP, preserving `.jpeg` when applicable. The ordinary upload
+route gets `overwrite=true` only for the source path, preserving owner and mode; a copy refuses an
+occupied name. Both editors guard closing a dirty sheet. The full workspace guards file changes,
+links, unload and cancelable browser-history traversal (see `frontend/shell-design.md`).
 
 Large listings keep every filename and metadata cell mounted: native find, sorting, filtering, range
 selection and select-all still address the complete directory. One shared intersection observer defers
@@ -334,6 +554,11 @@ The listing API still returns the complete directory; these rendering savings do
 reads or response bytes.
 
 ## Logs
+
+The host Logs frontend records sources, modes, run handoffs and settled searches in browser history.
+Back/Forward restores the question and its in-memory record/following state; match controls and local
+read refresh operate in the current pane. [Workspace interactions](../frontend/workspace-interactions.md)
+defines identity, storage and keyboard rules; discovery, search and stream routes retain their guards.
 
 `logsx` + `handlers_logs.go` were three products wearing one page: the grep box and level chips applied
 to *file* tails only, `/logs/search` and `/logs/logrotate` had no caller, export ignored the filter, and
@@ -512,11 +737,18 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. The workspace is one pane, and its chrome is at most three
-rows above the lines: a strip naming the source, with its facts beside the name (`source-facts.tsx`:
-kind, path, rotated set, size and state, giving way by the strip's own width rather than the window's)
-and the views as `tabClasses` buttons with `aria-pressed` — **Live**, **History**, **Insights**, then the
-page's own views — with the page's actions, Export among them, at its end; `filter-bar.tsx` with the one
+`log-workspace.tsx`, a hairline between them. Over the frame the page reads as a deployment's Logs page
+does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
+`HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
+rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
+line (`RecordIdentity`) — and under it the lens's readings as tiles (`LensReadings`) where five fit
+across and the console keeps its height, a window at least 1280 by 800; on a smaller one they are the
+counts on the lens row's chips instead. The workspace is one pane, and its chrome is at most three
+rows above the lines: a strip of the views as `tabClasses` buttons with `aria-pressed` — **Live**,
+**History**, **Insights**, then the page's own views — which on the logs page (`name={null}`) is the
+rail toggle and the views from its leading edge, and on a service page names the source with its facts
+beside the name (`SourceFacts`, giving way by the strip's own width rather than the window's) and the
+page's actions, Export among them, before the views; `filter-bar.tsx` with the one
 filter, the window and the journal unit inline and the exclusion, context, archives, boot and a
 **Read as** select (Auto, naming the detected lens; each lens; None) behind "More"; and `lens-bar.tsx`
 only when the lens has something to offer or a predicate is on. The histogram sits over History's lines,
@@ -602,11 +834,12 @@ moves to a source in another lens, unless the reader changed them. `insights.tsx
 filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
 the measure's ladder where it is milliseconds, each group as a ranked table and the log's patterns last.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
-distinct count asks on its own (`lib/log-insights.ts`), read again each minute and independent of the
-filter on screen, over the lens's window — or, in Insights, over the window the reader picked
-(`readingsWindowOf`), so the tiles and the figures under them are of one stretch of time; a page with a
-`StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it draws, and the
-rest are not searched for) and hands them to the pane (`answeredBy`).
+distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
+and independent of the filter on screen and of the view, so they hold still while the reader moves
+between Live, History and Insights; each figure counts up as it lands (`NumberTicker`) and glides to the
+next minute's. Insights draws none of its own, which would be a second answer over another window. A
+page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
+draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 
 **`service-logs.tsx` is the one thing a page that shows a service's log embeds** — a database's server
 log, a container's output, a site's access log, a unit's journal — so no page sends the reader to
@@ -674,3 +907,54 @@ failures report the retained original's parking name.
 
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
+
+## Actionable Docker findings
+
+Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
+Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
+interruption and loss of logs/writable-layer data. Compose configuration remedies open the owning stack
+so the source configuration can be changed durably. Storage and reachability actions focus the relevant
+container tab; findings without an automatic remedy can still open configuration evidence. Permission
+fallbacks name inspection instead of claiming an unavailable mutation. Group and singleton dismissals
+use the same finding-kind key; Rescan restores them without changing the server diagnosis.
+
+The resource editor uses the backend's **PATCH** route. RAM-only updates preserve existing swap
+headroom (including explicitly unlimited swap); previously unset swap gets Docker's equal-RAM swap
+allowance. Explicit combined limits are kept. Empty, negative and overflowing updates are refused;
+Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
+keep the running PID and start timestamp.
+
+A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
+entry already returned by that validated directory listing. An explicit click or deselection overrides
+the URL's initial selection. Paths still pass through the existing file service boundary.
+
+Standalone Configuration offers local preparation for readiness commands, image version/digest pins,
+port bindings, privileged mode and Docker socket mounts, plus the full supported replacement spec.
+Only administrators edit it because it includes credentials and host settings. Preview renders the
+reviewed spec; application readiness is not promised. Applying requires destructive capability and
+reviewed confirmation, reports Engine warnings and navigates to the returned replacement ID. Auto-remove
+containers cannot use this replacement path. Supported settings are carried through; Inspect remains the
+source for additional Engine options. Compose remedies open `?tab=compose&remedy=` with a service-level
+example, then use the existing validation/save/deploy workflow. Live limits link the owning file too.
+Removing Just Dashboard's required socket/host access is explicitly described as breaking its controls.
+
+Docker diagnosis reports unread inspections, disk accounting and log files in `silences`; running
+containers with unread inspections increment runtime `unknown`, rather than `noHealthcheck`. The
+Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
+and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
+its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.
+
+### Advanced network native acceptance
+
+`JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`
+uses the actual local Engine. The opt-in fixture requires `ip` and a locally cached
+`python:3.11-slim`; it never pulls, starts a public listener or publishes a port. It reads both
+families of host routes and existing Docker pools, then selects nonoverlapping benchmarking/ULA
+pools for a uniquely labeled internal bridge. It verifies exact IPv4/IPv6 subnets, gateways and
+allocation ranges, driver/MTU option, labels, attachable/internal/IPv6 flags, native overlap refusal,
+and one owned full-ID container's both-family addresses and alias through disconnect/reconnect.
+Cleanup rechecks exact names/labels/IDs and never prunes or touches another workload. The fixture
+creates only its own temporary host bridge/routes through Docker; it does not edit existing ones.
+
+This establishes the supported native bridge path. Third-party drivers/options still depend on
+installed Engine plugins and native support; a fixture does not establish provider connectivity.

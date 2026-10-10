@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { get, ApiError } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import {
@@ -14,7 +14,14 @@ import {
   type MetricsWindow,
   type RangeKey,
 } from "@/lib/metrics-range"
-import type { Health, MetricEvent, MetricsHistory, StorageHistory } from "@/lib/types"
+import type { MetricEvent, MetricsHistory, StorageHistory } from "@/lib/types"
+
+function useMetricsRefresh(refresh: () => void) {
+  useEffect(() => {
+    window.addEventListener("jd:metrics-refresh", refresh)
+    return () => window.removeEventListener("jd:metrics-refresh", refresh)
+  }, [refresh])
+}
 
 export type HistoryState = {
   history: MetricsHistory | undefined
@@ -57,11 +64,13 @@ export function useMetricsHistory(win: MetricsWindow): HistoryState {
   // Polling is paused on a hidden tab by usePoll, so a dashboard left open in
   // a background tab does not keep asking the server it is monitoring for a
   // week of history every five minutes.
-  const { data, error, loading } = usePoll<MetricsHistory | undefined>(
+  const { data, error, loading, refresh } = usePoll<MetricsHistory | undefined>(
     fetcher,
     enabled ? windowRefreshMs(win) : 0,
     [signature],
   )
+
+  useMetricsRefresh(refresh)
 
   const disabled = error instanceof ApiError && error.code === "metrics_history_disabled"
   return {
@@ -102,13 +111,15 @@ export function useStorageHistory(win: MetricsWindow): StorageState {
     [signature],
   )
 
-  const { data, error, loading } = usePoll<StorageHistory | undefined>(
+  const { data, error, loading, refresh } = usePoll<StorageHistory | undefined>(
     fetcher,
     // Capacity is not a live figure. Refreshing it on the charts' cadence
     // would be four requests a minute for a line that moves in hours.
     enabled ? Math.max(windowRefreshMs(win), 60_000) : 0,
     [signature],
   )
+
+  useMetricsRefresh(refresh)
 
   const disabled = error instanceof ApiError && error.code === "metrics_history_disabled"
   return {
@@ -146,39 +157,20 @@ export function useMetricEvents(win: MetricsWindow): MetricEvent[] {
     [signature],
   )
 
-  const { data } = usePoll<MetricEvent[]>(
+  const { data, refresh } = usePoll<MetricEvent[]>(
     fetcher,
     // Events are cheap but they are not live data, and a zoomed window is a
     // fixed span in the past that never needs re-reading at all.
     win.from !== undefined ? 0 : Math.max(spec.refreshMs, 30_000),
     [signature],
   )
+  useMetricsRefresh(refresh)
   return data ?? EMPTY_EVENTS
 }
 
 // Module-level so a component reading events does not see a fresh array
 // identity every render and re-run whatever depends on it.
 const EMPTY_EVENTS: MetricEvent[] = []
-
-/**
- * The server's verdict on the host.
- *
- * Polled rather than streamed: the checks read an hour of recorded history to
- * tell a spike from a trend, which is not work to repeat on every 2s frame. A
- * minute is fast enough for a condition that is, by construction, sustained.
- */
-export function useHealth(intervalMs = 60_000): {
-  health: Health | undefined
-  error: Error | undefined
-  loading: boolean
-} {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => get<Health>("/system/health", undefined, signal),
-    [],
-  )
-  const { data, error, loading } = usePoll<Health>(fetcher, intervalMs, [])
-  return { health: data, error, loading }
-}
 
 /**
  * The chosen window, remembered across reloads.

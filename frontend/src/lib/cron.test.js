@@ -22,6 +22,8 @@ describe("describing a schedule", () => {
     expect(describeCron("0 9 * * 1-5")).toBe("At 09:00 on weekdays")
     expect(describeCron("0 0 1 * *")).toBe("At 00:00 on the 1st of every month")
     expect(describeCron("0 0 1 1 *")).toBe("At 00:00 on the 1st in January")
+    expect(describeCron("5-55/10 * * * *")).toBe("Every 10 minutes from :05")
+    expect(describeCron("0,7,14,21,30,37,44 9 * * *")).toBe("7 times a day")
     expect(describeCron("0 8,20 * * *")).toBe("Every day at 08:00 and 20:00")
     expect(describeCron("@daily")).toBe("Every day at 00:00")
     expect(describeCron("@reboot")).toBe("Once, when the server boots")

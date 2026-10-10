@@ -1,0 +1,250 @@
+# 2026-10-09T23:26:58Z on 49a4658d
+# go test -count=1 -v (selected new and touched tests)
+=== RUN   TestSSHTunnelPeersFindTheSessionBehindALocalForward
+--- PASS: TestSSHTunnelPeersFindTheSessionBehindALocalForward (0.00s)
+=== RUN   TestRoutingRefusalsReadWellForAnSSHPeerClient
+--- PASS: TestRoutingRefusalsReadWellForAnSSHPeerClient (0.01s)
+=== RUN   TestSSHChangeWaitsForAFreshResponseAndKeepsAConfirmedConfiguration
+--- PASS: TestSSHChangeWaitsForAFreshResponseAndKeepsAConfirmedConfiguration (0.01s)
+=== RUN   TestUnconfirmedSSHChangeIsRestoredByTheHostWithoutTheBackend
+--- PASS: TestUnconfirmedSSHChangeIsRestoredByTheHostWithoutTheBackend (0.01s)
+=== RUN   TestBootRecoveryOfAnSSHChangeDoesNotWaitOnSSHJobs
+--- PASS: TestBootRecoveryOfAnSSHChangeDoesNotWaitOnSSHJobs (0.01s)
+=== RUN   TestFailedSSHApplyIsRestoredImmediately
+--- PASS: TestFailedSSHApplyIsRestoredImmediately (0.01s)
+=== RUN   TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog
+=== RUN   TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/immediate
+=== RUN   TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/no_independent_recovery
+=== RUN   TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/arming_fails
+=== RUN   TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/another_pending_change
+--- PASS: TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog (0.02s)
+    --- PASS: TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/immediate (0.00s)
+    --- PASS: TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/no_independent_recovery (0.00s)
+    --- PASS: TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/arming_fails (0.01s)
+    --- PASS: TestSSHChangeAcceptsOnlyAPendingOwnerAndAnArmedWatchdog/another_pending_change (0.01s)
+=== RUN   TestSSHJournalRefusesForeignFilesAndCommands
+=== RUN   TestSSHJournalRefusesForeignFilesAndCommands/file
+=== RUN   TestSSHJournalRefusesForeignFilesAndCommands/command
+=== RUN   TestSSHJournalRefusesForeignFilesAndCommands/tool
+=== RUN   TestSSHJournalRefusesForeignFilesAndCommands/owner
+--- PASS: TestSSHJournalRefusesForeignFilesAndCommands (0.03s)
+    --- PASS: TestSSHJournalRefusesForeignFilesAndCommands/file (0.01s)
+    --- PASS: TestSSHJournalRefusesForeignFilesAndCommands/command (0.01s)
+    --- PASS: TestSSHJournalRefusesForeignFilesAndCommands/tool (0.01s)
+    --- PASS: TestSSHJournalRefusesForeignFilesAndCommands/owner (0.01s)
+=== RUN   TestSSHChangeStatusKeepsSnapshotsOutOfTheAPI
+--- PASS: TestSSHChangeStatusKeepsSnapshotsOutOfTheAPI (0.01s)
+=== RUN   TestSSHRecoveryRunsInTheStandaloneHelperAfterTheBackendDies
+--- PASS: TestSSHRecoveryRunsInTheStandaloneHelperAfterTheBackendDies (0.07s)
+=== RUN   TestSSHRecoveryProcessFixture
+--- PASS: TestSSHRecoveryProcessFixture (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.188s
+=== RUN   TestMergeBlocksFoldsEnginesByAddressAndNamesCoveringRanges
+--- PASS: TestMergeBlocksFoldsEnginesByAddressAndNamesCoveringRanges (0.00s)
+=== RUN   TestMergeBlocksSaysWhichEnginesWereNotRead
+--- PASS: TestMergeBlocksSaysWhichEnginesWereNotRead (0.00s)
+=== RUN   TestBlockPrefixCanonicalisesMappedAndHostForms
+--- PASS: TestBlockPrefixCanonicalisesMappedAndHostForms (0.00s)
+=== RUN   TestBoundaryHoldsOnATailnetHost
+--- PASS: TestBoundaryHoldsOnATailnetHost (0.00s)
+=== RUN   TestBoundaryNamesEachWayItBreaks
+=== RUN   TestBoundaryNamesEachWayItBreaks/sshd_moved_off_its_socket
+=== RUN   TestBoundaryNamesEachWayItBreaks/preview_funnelled
+=== RUN   TestBoundaryNamesEachWayItBreaks/backend_on_a_routable_address
+=== RUN   TestBoundaryNamesEachWayItBreaks/sockets_unreadable
+=== RUN   TestBoundaryNamesEachWayItBreaks/tailscale_down
+=== RUN   TestBoundaryNamesEachWayItBreaks/serve_unreadable
+=== RUN   TestBoundaryNamesEachWayItBreaks/tunnel_session
+=== RUN   TestBoundaryNamesEachWayItBreaks/rewritten_address
+=== RUN   TestBoundaryNamesEachWayItBreaks/nothing_on_the_dashboard's_port
+--- PASS: TestBoundaryNamesEachWayItBreaks (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/sshd_moved_off_its_socket (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/preview_funnelled (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/backend_on_a_routable_address (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/sockets_unreadable (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/tailscale_down (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/serve_unreadable (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/tunnel_session (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/rewritten_address (0.00s)
+    --- PASS: TestBoundaryNamesEachWayItBreaks/nothing_on_the_dashboard's_port (0.00s)
+=== RUN   TestABanIsJudgedAgainstTheSessionTheAllowlistAndPreviews
+--- PASS: TestABanIsJudgedAgainstTheSessionTheAllowlistAndPreviews (0.00s)
+=== RUN   TestAFirewallRuleIsJudgedByThePortsItReaches
+--- PASS: TestAFirewallRuleIsJudgedByThePortsItReaches (0.00s)
+=== RUN   TestAnSSHChangeIsJudgedForTheTunnel
+--- PASS: TestAnSSHChangeIsJudgedForTheTunnel (0.00s)
+=== RUN   TestBoundaryComparisonNamesWhatWasLost
+--- PASS: TestBoundaryComparisonNamesWhatWasLost (0.00s)
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/engine_stopped
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/no_bouncer
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/last_pull_an_hour_ago
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/never_pulled
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/revoked_key
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/bouncer_unit_stopped
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/no_set_in_the_kernel
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/set_nobody_drops_on
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/empty_set_beside_decisions
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/kernel_unreadable
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/proxy_only
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/unknown_kind
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/firewall_enforcing
+=== RUN   TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/nothing_to_drop_yet
+--- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/engine_stopped (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/no_bouncer (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/last_pull_an_hour_ago (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/never_pulled (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/revoked_key (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/bouncer_unit_stopped (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/no_set_in_the_kernel (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/set_nobody_drops_on (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/empty_set_beside_decisions (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/kernel_unreadable (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/proxy_only (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/unknown_kind (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/firewall_enforcing (0.00s)
+    --- PASS: TestEnforcementIsClaimedOnlyFromAFreshPullAndAKernelDrop/nothing_to_drop_yet (0.00s)
+=== RUN   TestBouncerEvidenceDatesPullsAndClassifiesKinds
+--- PASS: TestBouncerEvidenceDatesPullsAndClassifiesKinds (0.00s)
+=== RUN   TestParseCrowdSecTableCountsSetsAndHookedDrops
+--- PASS: TestParseCrowdSecTableCountsSetsAndHookedDrops (0.00s)
+=== RUN   TestIPSetModeReadsEntriesAndTheDropRule
+--- PASS: TestIPSetModeReadsEntriesAndTheDropRule (0.00s)
+=== RUN   TestCrowdSecViewReportsEnforcementFromTheKernel
+--- PASS: TestCrowdSecViewReportsEnforcementFromTheKernel (0.00s)
+=== RUN   TestCrowdSecViewDoesNotClaimProtectionWhenTheBouncerListFails
+--- PASS: TestCrowdSecViewDoesNotClaimProtectionWhenTheBouncerListFails (0.00s)
+=== RUN   TestCrowdSecReadsDecisionsAlertsAndBouncers
+--- PASS: TestCrowdSecReadsDecisionsAlertsAndBouncers (0.00s)
+=== RUN   TestCrowdSecWithNothingInForce
+--- PASS: TestCrowdSecWithNothingInForce (0.00s)
+=== RUN   TestCrowdSecIgnoresWarningsBeforeTheJSON
+--- PASS: TestCrowdSecIgnoresWarningsBeforeTheJSON (0.00s)
+=== RUN   TestCrowdSecReportsAFailedCommandAndKeepsTheRest
+--- PASS: TestCrowdSecReportsAFailedCommandAndKeepsTheRest (0.00s)
+=== RUN   TestCrowdSecNotInstalled
+--- PASS: TestCrowdSecNotInstalled (0.00s)
+=== RUN   TestParseActionListReadsEveryAction
+--- PASS: TestParseActionListReadsEveryAction (0.00s)
+=== RUN   TestJailPolicyReadsTheRunningServer
+--- PASS: TestJailPolicyReadsTheRunningServer (0.00s)
+=== RUN   TestJailPolicyExplainsActionsCoverageAndDrift
+--- PASS: TestJailPolicyExplainsActionsCoverageAndDrift (0.00s)
+=== RUN   TestJailDropInIsReadForOneSection
+--- PASS: TestJailDropInIsReadForOneSection (0.00s)
+=== RUN   TestJailPolicyRefusesABadJailName
+--- PASS: TestJailPolicyRefusesABadJailName (0.00s)
+=== RUN   TestFirewalldPolicy
+--- PASS: TestFirewalldPolicy (0.00s)
+=== RUN   TestIPTablesPolicyArrivesInTheSharedWords
+--- PASS: TestIPTablesPolicyArrivesInTheSharedWords (0.00s)
+=== RUN   TestParseDefaultPolicy
+--- PASS: TestParseDefaultPolicy (0.00s)
+=== RUN   TestParseDefaultPolicyIgnoresJunk
+--- PASS: TestParseDefaultPolicyIgnoresJunk (0.00s)
+=== RUN   TestSetDefaultPolicyRejectsBadInput
+--- PASS: TestSetDefaultPolicyRejectsBadInput (0.00s)
+=== RUN   TestAssessSoftensAnExposedPortBehindADenyPolicy
+--- PASS: TestAssessSoftensAnExposedPortBehindADenyPolicy (0.00s)
+=== RUN   TestGradePortIsThePosturesLevel
+--- PASS: TestGradePortIsThePosturesLevel (0.00s)
+=== RUN   TestPostureTakesCrowdSecEnforcementNotItsRunningState
+--- PASS: TestPostureTakesCrowdSecEnforcementNotItsRunningState (0.00s)
+=== RUN   TestBannerGrabReadsABanner
+--- PASS: TestBannerGrabReadsABanner (0.00s)
+=== RUN   TestSocketDropInClearsTheInheritedListenList
+--- PASS: TestSocketDropInClearsTheInheritedListenList (0.00s)
+=== RUN   TestIncludesDropIns
+--- PASS: TestIncludesDropIns (0.00s)
+=== RUN   TestApplyDirectivesWritesAHeaderForANewDropIn
+--- PASS: TestApplyDirectivesWritesAHeaderForANewDropIn (0.00s)
+=== RUN   TestSSHPlanNamesEveryFileItWrites
+--- PASS: TestSSHPlanNamesEveryFileItWrites (0.00s)
+=== RUN   TestSSHApplyResultFailureCoversWhatDidNotTakeEffect
+--- PASS: TestSSHApplyResultFailureCoversWhatDidNotTakeEffect (0.00s)
+=== RUN   TestLatestCaptureReadsTheNewestStatsEvent
+--- PASS: TestLatestCaptureReadsTheNewestStatsEvent (0.00s)
+=== RUN   TestAfPacketInterfacesAreReadAndRewrittenLineForLine
+--- PASS: TestAfPacketInterfacesAreReadAndRewrittenLineForLine (0.00s)
+=== RUN   TestQueueRulesAreReadWithTheirFailOpenFlag
+--- PASS: TestQueueRulesAreReadWithTheirFailOpenFlag (0.00s)
+=== RUN   TestInlineEvidenceSaysWhetherAStoppedSuricataCutsTraffic
+--- PASS: TestInlineEvidenceSaysWhetherAStoppedSuricataCutsTraffic (0.00s)
+=== RUN   TestSuricataViewCarriesItsSetup
+--- PASS: TestSuricataViewCarriesItsSetup (0.00s)
+=== RUN   TestPlanSuricataInterfaceRefusesWhatCannotCapture
+--- PASS: TestPlanSuricataInterfaceRefusesWhatCannotCapture (0.01s)
+=== RUN   TestApplySuricataInterfaceTestsRestartsAndRestores
+=== RUN   TestApplySuricataInterfaceTestsRestartsAndRestores/applied
+=== RUN   TestApplySuricataInterfaceTestsRestartsAndRestores/rejected_by_suricata_-T
+=== RUN   TestApplySuricataInterfaceTestsRestartsAndRestores/did_not_come_back
+--- PASS: TestApplySuricataInterfaceTestsRestartsAndRestores (0.01s)
+    --- PASS: TestApplySuricataInterfaceTestsRestartsAndRestores/applied (0.00s)
+    --- PASS: TestApplySuricataInterfaceTestsRestartsAndRestores/rejected_by_suricata_-T (0.00s)
+    --- PASS: TestApplySuricataInterfaceTestsRestartsAndRestores/did_not_come_back (0.00s)
+=== RUN   TestUpdateRulesAndStartReportWhatTheHostDid
+--- PASS: TestUpdateRulesAndStartReportWhatTheHostDid (0.00s)
+=== RUN   TestSuricataReadsStateAndAlerts
+--- PASS: TestSuricataReadsStateAndAlerts (0.00s)
+=== RUN   TestSuricataAlertsCarryNoPayload
+--- PASS: TestSuricataAlertsCarryNoPayload (0.00s)
+=== RUN   TestSuricataStopsAtTheNewestHundred
+--- PASS: TestSuricataStopsAtTheNewestHundred (0.00s)
+=== RUN   TestSuricataReadsOnlyTheTailOfAHugeLog
+--- PASS: TestSuricataReadsOnlyTheTailOfAHugeLog (0.05s)
+=== RUN   TestSuricataRefusedPath
+--- PASS: TestSuricataRefusedPath (0.00s)
+=== RUN   TestSuricataLogNotWrittenYet
+--- PASS: TestSuricataLogNotWrittenYet (0.00s)
+=== RUN   TestSuricataMode
+=== RUN   TestSuricataMode/debian's_defaults_beside_its_af-packet_unit
+=== RUN   TestSuricataMode/a_queue_on_the_command_line_beats_the_defaults
+=== RUN   TestSuricataMode/no_command_line,_defaults_say_nfqueue
+=== RUN   TestSuricataMode/a_unit_expanding_the_defaults
+=== RUN   TestSuricataMode/no_defaults_file,_-q_on_the_command_line
+=== RUN   TestSuricataMode/no_defaults_file,_af-packet_on_the_command_line
+=== RUN   TestSuricataMode/nothing_says
+--- PASS: TestSuricataMode (0.00s)
+    --- PASS: TestSuricataMode/debian's_defaults_beside_its_af-packet_unit (0.00s)
+    --- PASS: TestSuricataMode/a_queue_on_the_command_line_beats_the_defaults (0.00s)
+    --- PASS: TestSuricataMode/no_command_line,_defaults_say_nfqueue (0.00s)
+    --- PASS: TestSuricataMode/a_unit_expanding_the_defaults (0.00s)
+    --- PASS: TestSuricataMode/no_defaults_file,_-q_on_the_command_line (0.00s)
+    --- PASS: TestSuricataMode/no_defaults_file,_af-packet_on_the_command_line (0.00s)
+    --- PASS: TestSuricataMode/nothing_says (0.00s)
+=== RUN   TestSuricataNotInstalledOrStopped
+--- PASS: TestSuricataNotInstalledOrStopped (0.00s)
+=== RUN   TestTrafficPolicyUsesDirectionFamilyAndSource
+--- PASS: TestTrafficPolicyUsesDirectionFamilyAndSource (0.00s)
+=== RUN   TestTrafficPolicyOpaqueSelectorsStayUnknown
+--- PASS: TestTrafficPolicyOpaqueSelectorsStayUnknown (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	0.129s
+=== RUN   TestTCPWindowJudgesRetransmitsDropsAndFailures
+--- PASS: TestTCPWindowJudgesRetransmitsDropsAndFailures (0.00s)
+=== RUN   TestTCPWindowStaysQuietForNormalTraffic
+--- PASS: TestTCPWindowStaysQuietForNormalTraffic (0.00s)
+=== RUN   TestLatencyIsANoticeOnlyWhenSlowAndWellAboveTheHour
+--- PASS: TestLatencyIsANoticeOnlyWhenSlowAndWellAboveTheHour (0.00s)
+=== RUN   TestNetworkAreaCarriesTheTCPReading
+--- PASS: TestNetworkAreaCarriesTheTCPReading (0.48s)
+=== RUN   TestRecordedTCPSeriesAreNullBeforeTheyWereSampled
+--- PASS: TestRecordedTCPSeriesAreNullBeforeTheyWereSampled (0.02s)
+=== RUN   TestProbesAreCitedBesideNetworkFindingsAndAloneSayTheTroubleIsBeyond
+--- PASS: TestProbesAreCitedBesideNetworkFindingsAndAloneSayTheTroubleIsBeyond (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/metrics	0.521s
+=== RUN   TestLatencyAndBusy
+--- PASS: TestLatencyAndBusy (0.00s)
+=== RUN   TestTCPCountersAreReadByColumnName
+--- PASS: TestTCPCountersAreReadByColumnName (0.00s)
+=== RUN   TestTCPRatesAreDeltasAndRefuseCountersThatWentBack
+--- PASS: TestTCPRatesAreDeltasAndRefuseCountersThatWentBack (0.00s)
+=== RUN   TestLatencySummaryIsNearestRankAndSaysWhenNothingWasMeasured
+--- PASS: TestLatencySummaryIsNearestRankAndSaysWhenNothingWasMeasured (0.00s)
+=== RUN   TestSockDiagFindsAnEstablishedConnectionsRTT
+--- PASS: TestSockDiagFindsAnEstablishedConnectionsRTT (0.01s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo	0.020s

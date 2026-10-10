@@ -47,11 +47,40 @@ export type ProxyValidation = {
 }
 
 /**
- * What POST /proxy/reload answers: the config test it ran first, and whether
- * the engine took the signal. A reload the test refuses is a 422 whose body
- * carries the test beside the error.
+ * What nginx's master showed of a reload, read from its processes, sockets
+ * and error log rather than from `nginx -s reload` exiting 0.
+ *
+ * - `loaded`: every worker serving started after the signal, each file the
+ *   change wrote still holds it, and nginx holds the change's sockets.
+ * - `refused`: the master logged `error` and serves what it had before.
+ * - `unconfirmed`: not seen taking it up within the wait; `note` says what.
+ * - `unchecked`: the running nginx could not be read; `note` says why.
  */
-export type ProxyReloadResult = { validation: ProxyValidation; reloaded: boolean; output: string }
+export type LoadProof = {
+  state: "loaded" | "refused" | "unconfirmed" | "unchecked"
+  master?: number
+  workers?: number
+  loadedAt?: string
+  files?: { path: string; digest: string; held: boolean }[]
+  /** "port 80/tcp", "127.0.0.1:8443/tcp": the sockets the change asks for. */
+  listens?: string[]
+  listening?: boolean
+  error?: string
+  note?: string
+}
+
+/**
+ * What POST /proxy/reload answers: the config test it ran first, whether the
+ * engine took the signal and, for nginx, whether its master loaded what it
+ * read. A reload the test refuses is a 422 whose body carries the test
+ * beside the error; one the master refuses is a 502 `load_refused`.
+ */
+export type ProxyReloadResult = {
+  validation: ProxyValidation
+  reloaded: boolean
+  output: string
+  loadProof?: LoadProof
+}
 
 /**
  * The engine's most recent test of the files on disk, whichever command ran

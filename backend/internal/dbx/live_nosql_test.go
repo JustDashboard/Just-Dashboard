@@ -12,9 +12,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Live tests for the two engines that are not SQL. Same contract as the SQL
-// ones: default to a local instance, skip with a useful message when it is not
-// there.
+// Live tests for the two engines that are not SQL. MongoDB keeps the contract
+// of the SQL ones: default to a local instance, skip with a useful message
+// when it is not there. Redis has no default; liveRedis says why.
 
 func liveMongo(t *testing.T) (*mongo.Client, string) {
 	t.Helper()
@@ -27,18 +27,28 @@ func liveMongo(t *testing.T) (*mongo.Client, string) {
 		t.Skipf("MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (%v)", err)
 	}
 	t.Cleanup(func() { client.Disconnect(context.Background()) })
+	// The database the connection string names, so two checkouts sharing a
+	// server do not share a collection.
+	if info, err := ParseDSN(DriverMongo, dsn); err == nil && info.Database != "" {
+		return client, info.Database
+	}
 	return client, "jdtest"
 }
 
 func liveRedis(t *testing.T) *redis.Client {
 	t.Helper()
+	// No default. These tests write, and an address nobody chose — the port
+	// every Redis listens on — is as likely to be somebody's real data as a
+	// fixture.
 	dsn := os.Getenv("JD_TEST_REDIS_DSN")
 	if dsn == "" {
-		dsn = "redis://127.0.0.1:6379/0"
+		t.Skip("set JD_TEST_REDIS_DSN to run this")
 	}
-	client, err := RedisClient(context.Background(), dsn, 0)
+	// The database the connection string names, not database 0: the fixture
+	// is shared and each run is given a database of its own.
+	client, err := RedisClient(context.Background(), dsn, RedisDSNDatabase)
 	if err != nil {
-		t.Skipf("Redis unreachable — set JD_TEST_REDIS_DSN to run these (%v)", err)
+		t.Skipf("Redis unreachable at JD_TEST_REDIS_DSN (%v)", err)
 	}
 	t.Cleanup(func() { client.Close() })
 	return client
@@ -267,6 +277,23 @@ func TestLiveMongo(t *testing.T) {
 	})
 }
 
+// redisTestSet writes one value in the shape the key routes first took: field
+// carries a hash field's name, a list position or a sorted-set score, and a
+// ttl of zero says nothing about the expiry.
+func redisTestSet(ctx context.Context, client *redis.Client, key, typ, field, value string, ttl int64) error {
+	v := RedisBytes(value)
+	w := RedisWrite{Key: RedisBytes(key), Type: typ, Value: &v}
+	if field != "" {
+		f := RedisBytes(field)
+		w.Field = &f
+	}
+	if ttl > 0 {
+		w.TTL = &ttl
+	}
+	_, err := RedisWriteValue(ctx, client, nil, w)
+	return err
+}
+
 func TestLiveRedis(t *testing.T) {
 	client := liveRedis(t)
 	ctx := context.Background()
@@ -283,8 +310,8 @@ func TestLiveRedis(t *testing.T) {
 
 	t.Run("string_roundtrip", func(t *testing.T) {
 		key := prefix + "greeting"
-		if err := RedisSet(ctx, client, key, "string", "", "hello", 60); err != nil {
-			t.Fatalf("RedisSet: %v", err)
+		if err := redisTestSet(ctx, client, key, "string", "", "hello", 60); err != nil {
+			t.Fatalf("write: %v", err)
 		}
 		v, err := RedisGet(ctx, client, key)
 		if err != nil {
@@ -298,8 +325,9 @@ func TestLiveRedis(t *testing.T) {
 		}
 		// Clearing a TTL must persist the key, not delete it — EXPIRE with a
 		// non-positive value would remove it outright.
-		if err := RedisExpire(ctx, client, key, -1); err != nil {
-			t.Fatalf("RedisExpire: %v", err)
+		never := int64(-1)
+		if _, err := RedisSetExpiry(ctx, client, RedisBytes(key), RedisExpiry{Seconds: &never}); err != nil {
+			t.Fatalf("RedisSetExpiry: %v", err)
 		}
 		v, err = RedisGet(ctx, client, key)
 		if err != nil {
@@ -312,10 +340,10 @@ func TestLiveRedis(t *testing.T) {
 
 	t.Run("hash_members", func(t *testing.T) {
 		key := prefix + "user:1"
-		if err := RedisSet(ctx, client, key, "hash", "name", "Ann", 0); err != nil {
+		if err := redisTestSet(ctx, client, key, "hash", "name", "Ann", 0); err != nil {
 			t.Fatalf("hash set: %v", err)
 		}
-		if err := RedisSet(ctx, client, key, "hash", "city", "Oslo", 0); err != nil {
+		if err := redisTestSet(ctx, client, key, "hash", "city", "Oslo", 0); err != nil {
 			t.Fatalf("hash set 2: %v", err)
 		}
 		v, err := RedisGet(ctx, client, key)
@@ -325,7 +353,7 @@ func TestLiveRedis(t *testing.T) {
 		if v.Hash["name"] != "Ann" || v.Hash["city"] != "Oslo" {
 			t.Errorf("hash = %v", v.Hash)
 		}
-		if _, err := RedisDeleteMember(ctx, client, key, "hash", "city"); err != nil {
+		if _, err := RedisRemoveMembers(ctx, client, RedisRemoval{Key: RedisBytes(key), Type: "hash", Members: []RedisBytes{"city"}}); err != nil {
 			t.Fatalf("delete hash field: %v", err)
 		}
 		v, _ = RedisGet(ctx, client, key)
@@ -337,12 +365,12 @@ func TestLiveRedis(t *testing.T) {
 	t.Run("list_members", func(t *testing.T) {
 		key := prefix + "queue"
 		for _, item := range []string{"one", "two", "three"} {
-			if err := RedisSet(ctx, client, key, "list", "", item, 0); err != nil {
+			if err := redisTestSet(ctx, client, key, "list", "", item, 0); err != nil {
 				t.Fatalf("list append: %v", err)
 			}
 		}
 		// An index in the field position replaces that entry in place.
-		if err := RedisSet(ctx, client, key, "list", "1", "TWO", 0); err != nil {
+		if err := redisTestSet(ctx, client, key, "list", "1", "TWO", 0); err != nil {
 			t.Fatalf("list set by index: %v", err)
 		}
 		v, _ := RedisGet(ctx, client, key)
@@ -351,7 +379,8 @@ func TestLiveRedis(t *testing.T) {
 		}
 		// Redis has no delete-by-index; the sentinel dance must leave the list
 		// shorter and free of the sentinel.
-		if _, err := RedisDeleteMember(ctx, client, key, "list", "0"); err != nil {
+		head := int64(0)
+		if _, err := RedisRemoveMembers(ctx, client, RedisRemoval{Key: RedisBytes(key), Type: "list", Index: &head}); err != nil {
 			t.Fatalf("delete list entry: %v", err)
 		}
 		v, _ = RedisGet(ctx, client, key)
@@ -359,7 +388,7 @@ func TestLiveRedis(t *testing.T) {
 			t.Fatalf("list after delete = %v, want 2 entries", v.List)
 		}
 		for _, e := range v.List {
-			if strings.Contains(e, "__jd_deleted__") {
+			if strings.Contains(string(e), "\x00jd:") {
 				t.Errorf("sentinel leaked into the list: %v", v.List)
 			}
 		}
@@ -371,11 +400,11 @@ func TestLiveRedis(t *testing.T) {
 	t.Run("set_and_zset_members", func(t *testing.T) {
 		skey := prefix + "tags"
 		for _, m := range []string{"red", "green"} {
-			if err := RedisSet(ctx, client, skey, "set", "", m, 0); err != nil {
+			if err := redisTestSet(ctx, client, skey, "set", "", m, 0); err != nil {
 				t.Fatalf("set add: %v", err)
 			}
 		}
-		if _, err := RedisDeleteMember(ctx, client, skey, "set", "red"); err != nil {
+		if _, err := RedisRemoveMembers(ctx, client, RedisRemoval{Key: RedisBytes(skey), Type: "set", Members: []RedisBytes{"red"}}); err != nil {
 			t.Fatalf("set remove: %v", err)
 		}
 		v, _ := RedisGet(ctx, client, skey)
@@ -384,17 +413,17 @@ func TestLiveRedis(t *testing.T) {
 		}
 
 		zkey := prefix + "scores"
-		if err := RedisSet(ctx, client, zkey, "zset", "10", "ann", 0); err != nil {
+		if err := redisTestSet(ctx, client, zkey, "zset", "10", "ann", 0); err != nil {
 			t.Fatalf("zadd: %v", err)
 		}
-		if err := RedisSet(ctx, client, zkey, "zset", "20", "bo", 0); err != nil {
+		if err := redisTestSet(ctx, client, zkey, "zset", "20", "bo", 0); err != nil {
 			t.Fatalf("zadd 2: %v", err)
 		}
 		v, _ = RedisGet(ctx, client, zkey)
 		if len(v.ZSet) != 2 || v.ZSet[0].Member != "ann" || v.ZSet[0].Score != 10 {
 			t.Errorf("zset = %+v", v.ZSet)
 		}
-		if _, err := RedisDeleteMember(ctx, client, zkey, "zset", "ann"); err != nil {
+		if _, err := RedisRemoveMembers(ctx, client, RedisRemoval{Key: RedisBytes(zkey), Type: "zset", Members: []RedisBytes{"ann"}}); err != nil {
 			t.Fatalf("zrem: %v", err)
 		}
 		v, _ = RedisGet(ctx, client, zkey)
@@ -405,17 +434,22 @@ func TestLiveRedis(t *testing.T) {
 
 	t.Run("create_and_rename", func(t *testing.T) {
 		key := prefix + "fresh"
-		if err := RedisCreateKey(ctx, client, key, "string", "", "v", 0); err != nil {
-			t.Fatalf("RedisCreateKey: %v", err)
+		create := func(value string) error {
+			v := RedisBytes(value)
+			_, err := RedisWriteValue(ctx, client, nil, RedisWrite{Key: RedisBytes(key), Value: &v, Create: true})
+			return err
+		}
+		if err := create("v"); err != nil {
+			t.Fatalf("create: %v", err)
 		}
 		// Creating over an existing key must be refused rather than clobber it.
-		if err := RedisCreateKey(ctx, client, key, "string", "", "other", 0); err == nil {
+		if err := create("other"); err == nil {
 			t.Error("expected create over an existing key to be refused")
 		}
 		target := prefix + "renamed"
 		client.Del(ctx, target)
-		if err := RedisRename(ctx, client, key, target); err != nil {
-			t.Fatalf("RedisRename: %v", err)
+		if err := RedisRenameKey(ctx, client, RedisBytes(key), RedisBytes(target), false); err != nil {
+			t.Fatalf("RedisRenameKey: %v", err)
 		}
 		if n, _ := client.Exists(ctx, target).Result(); n != 1 {
 			t.Error("renamed key not found at its new name")
@@ -423,7 +457,7 @@ func TestLiveRedis(t *testing.T) {
 		// Renaming onto an occupied name must be refused, not silently overwrite.
 		other := prefix + "occupied"
 		client.Set(ctx, other, "keepme", 0)
-		if err := RedisRename(ctx, client, target, other); err == nil {
+		if err := RedisRenameKey(ctx, client, RedisBytes(target), RedisBytes(other), false); err == nil {
 			t.Error("expected rename onto an existing key to be refused")
 		}
 		if got, _ := client.Get(ctx, other).Result(); got != "keepme" {
@@ -432,16 +466,16 @@ func TestLiveRedis(t *testing.T) {
 	})
 
 	t.Run("scan_and_databases", func(t *testing.T) {
-		page, err := RedisScan(ctx, client, prefix+"*", 0, 100)
+		page, err := RedisScanKeys(ctx, client, nil, RedisScanOptions{Pattern: prefix + "*", Count: 100})
 		if err != nil {
-			t.Fatalf("RedisScan: %v", err)
+			t.Fatalf("RedisScanKeys: %v", err)
 		}
 		if len(page.Keys) == 0 {
 			t.Fatal("scan found no seeded keys")
 		}
 		byName := map[string]RedisKey{}
 		for _, k := range page.Keys {
-			byName[k.Key] = k
+			byName[string(k.Key)] = k
 		}
 		if q, ok := byName[prefix+"queue"]; ok {
 			if q.Type != "list" || q.Size != 2 {
@@ -461,7 +495,7 @@ func TestLiveRedis(t *testing.T) {
 	})
 }
 
-// TestLiveRedisScanFindsASelectiveMatch is the bug the loop in RedisScan
+// TestLiveRedisScanFindsASelectiveMatch is the bug the loop in RedisScanKeys
 // exists for.
 //
 // SCAN's COUNT is a hint about how many slots to examine, not how many keys to
@@ -485,18 +519,27 @@ func TestLiveRedisScanFindsASelectiveMatch(t *testing.T) {
 		}
 	})
 
-	page, err := RedisScan(ctx, client, "jdscan:needle", 0, 100)
-	if err != nil {
-		t.Fatalf("RedisScan: %v", err)
+	// Once as a glob, which has to be searched for, and once as a bare name,
+	// which is looked up.
+	for _, pattern := range []string{"jdscan:needl?", "jdscan:needle"} {
+		page, err := RedisScanKeys(ctx, client, nil, RedisScanOptions{Pattern: pattern, Count: 100})
+		if err != nil {
+			t.Fatalf("RedisScanKeys(%s): %v", pattern, err)
+		}
+		if len(page.Keys) != 1 || page.Keys[0].Key != "jdscan:needle" {
+			t.Fatalf("%s matches one key and returned %d: %+v", pattern, len(page.Keys), page.Keys)
+		}
 	}
-	if len(page.Keys) != 1 || page.Keys[0].Key != "jdscan:needle" {
-		t.Fatalf("a pattern matching one key returned %d: %+v", len(page.Keys), page.Keys)
+	// A name that is not there is an empty page and the end of the search.
+	none, err := RedisScanKeys(ctx, client, nil, RedisScanOptions{Pattern: "jdscan:absent", Count: 100})
+	if err != nil || len(none.Keys) != 0 || !none.Done {
+		t.Fatalf("a name with no key = %+v, %v", none, err)
 	}
 
 	// And the ordinary case still pages rather than returning the keyspace.
-	broad, err := RedisScan(ctx, client, "jdscan:*", 0, 50)
+	broad, err := RedisScanKeys(ctx, client, nil, RedisScanOptions{Pattern: "jdscan:*", Count: 50})
 	if err != nil {
-		t.Fatalf("RedisScan(broad): %v", err)
+		t.Fatalf("RedisScanKeys(broad): %v", err)
 	}
 	if len(broad.Keys) < 50 {
 		t.Errorf("a broad pattern returned %d keys, want a full page of 50", len(broad.Keys))

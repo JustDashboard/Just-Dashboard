@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Bell, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import type {
   CertbotState,
   DefaultSite,
@@ -17,11 +19,9 @@ import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { FindingList } from "@/components/finding-list"
-import { Status } from "@/components/status-dot"
+import { FactDot } from "@/components/metrics/host-identity"
+import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -36,13 +36,11 @@ import {
 import { EngineLog } from "@/components/proxy/engine-log"
 import { useEngineControl } from "@/components/proxy/engine-control"
 import { EngineFailure } from "@/components/proxy/engine-failure"
-import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
+import { PARTICIPLE, engineRun } from "@/components/proxy/engine-lifecycle"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { useServedDrift } from "@/components/proxy/served-drift"
-import { ProductGlyph, ProductLogo } from "@/components/product-logo"
-import { certificateProduct, siteProduct } from "@/components/proxy/marks"
-import { RoutePath } from "@/components/proxy/route-path"
-import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { engineProduct } from "@/components/proxy/marks"
+import { RouteMark, ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { isParked } from "@/components/proxy/site-order"
 import {
   CONFIG_TEST,
@@ -65,13 +63,17 @@ import {
 } from "@/components/proxy/freshness"
 import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overview-routes"
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
-import { busiestItems, trafficHref, trafficLabel } from "@/components/proxy/site-traffic"
-import { errorFinding } from "@/components/proxy/site-errors"
+import { trafficLabel } from "@/components/proxy/site-traffic"
 import { AlertsPanel } from "@/components/proxy/alerts-panel"
 import { ProxyFindings } from "@/components/proxy/finding-triage"
 import { RecentChanges } from "@/components/proxy/activity"
 import { frontDoorLine, frontDoors } from "@/components/proxy/front-door"
 import { unproxiedApps } from "@/components/proxy/suggest"
+import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
+import { portsHref } from "@/components/proxy/ports-list"
+import { routeMap, routeVerdict, siteBackend } from "@/components/proxy/route-map"
+import { RoutePicture } from "@/components/proxy/route-picture"
+import { OverviewBand } from "@/components/proxy/overview-band"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -83,21 +85,42 @@ function readable<T>(poll: PollState<Reading<T>>): Reading<T> | undefined {
   return poll.error ? undefined : poll.data
 }
 
-/**
- * A tile's hint when its source failed. The reason is in Needs attention and,
- * for a pointer resting on the tile, in the hint's own tooltip.
- */
-function Unread({ error }: { error: Error }) {
-  return <span title={errorMessage(error)}>{"couldn't read"}</span>
+/** One of the engine line's facts about what it serves. */
+type Fact = {
+  key: string
+  href: string
+  text?: string
+  title?: string
+  tone?: "warning" | "danger"
+  error?: Error
 }
-import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
-import { portsHref } from "@/components/proxy/ports-list"
+
+const RUN_TONE: Record<ReturnType<typeof engineRun>, DotTone> = {
+  running: "running",
+  stopped: "stopped",
+  changing: "warning",
+}
 
 /**
- * Readings first, then the engine and its commands. Routes own the wide column;
- * findings and expiry share the rail so a list of warnings never pushes every route off screen.
- * The engine's own log closes the page, read here rather than on the Logs page, because this is
- * where "why is the proxy unhappy" is asked.
+ * The engine first, as the line every reading page opens on, then the proxy
+ * drawn as what it does: the domains it answers for wired through it to the
+ * applications behind them, each the product it is, the wires carrying the
+ * hour's traffic. Under the picture the readings — where the hour's requests
+ * went, how long every certificate has left, what nginx complained about, and
+ * nginx's own counters — then the routes in the wide column with what needs
+ * attention in the rail. The engine's own log closes the page, read here
+ * rather than on the Logs page, because this is where "why is the proxy
+ * unhappy" is asked.
+ *
+ * It opened on four tiles — sites, certificates, streams, internet-facing
+ * ports — over a column of routes that each drew the engine's logo, and the
+ * operator found it still. Each figure went where it is said better (§15,
+ * pass 2): all four are facts in the engine's line, each a link to its page
+ * and each saying "couldn't read" with the reason when its source failed;
+ * the sites are the picture's Domains lane and the Routes head's count, the
+ * certificates the Certificates block's runway and its count of those that
+ * need attention, and the internet-facing ports the front door under the
+ * engine in the picture.
  */
 export default function ProxyOverviewPage() {
   const {
@@ -271,50 +294,24 @@ export default function ProxyOverviewPage() {
     () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error || c.staging),
     [certificates],
   )
-  // The certificates as a reading rather than a count. `share` is life left
-  // against the longest term on this host, floored at the ninety days certbot
-  // issues for, so a host whose certificates are all nearly due reads as a run
-  // of short bars instead of one full-length bar the rest are measured against.
-  const certExpiry = useMemo<BarListItem[]>(() => {
-    const all = certificates ?? []
-    const horizon = Math.max(...all.map((c) => c.daysLeft), 90)
-    return [...all]
-      .sort((a, b) => a.daysLeft - b.daysLeft)
-      .slice(0, 8)
-      .map((cert) => {
-        const wrong = Boolean(cert.error) || cert.expired || Boolean(cert.staging)
-        const product = certificateProduct(cert)
-        return {
-          key: cert.path,
-          label: cert.name,
-          mark: product ? <ProductGlyph id={product} /> : undefined,
-          mono: false,
-          // The figure column is a fixed width and does not truncate, so the
-          // reading is a word rather than the sentence the finding carries.
-          value: cert.error
-            ? "error"
-            : cert.expired
-              ? "expired"
-              : cert.staging
-                ? "test"
-                : `${cert.daysLeft}d`,
-          share: cert.daysLeft / horizon,
-          signal: wrong || cert.expiring ? 1 : 0,
-          tone: wrong ? "danger" : "warning",
-          // Contract with the Certificates page, which opens the certificate
-          // a ?cert= link names; the page itself is the destination either way.
-          title: `Show ${cert.name} in Certificates`,
-          onClick: () => router.push(`/proxy/certificates?cert=${encodeURIComponent(cert.path)}`),
-          // Where it came from, because certbot renews itself and an imported
-          // file does not — which is what the days left mean differently.
-          hint: cert.selfSigned
-            ? "self-signed"
-            : cert.source.startsWith("nginx:")
-              ? "site"
-              : cert.source,
-        }
-      })
-  }, [certificates, router])
+  // The proxy drawn as what it does, and each route's far end as the thing
+  // that answers there. A port list that failed only leaves those unnamed.
+  const picture = useMemo(
+    () =>
+      routeMap({
+        vhosts: sites ?? [],
+        listeners: listeners ?? [],
+        upstreams: upstreamReport,
+        traffic: siteTraffic,
+      }),
+    [sites, listeners, upstreamReport, siteTraffic],
+  )
+  const backends = useMemo(
+    () =>
+      new Map((sites ?? []).map((v) => [v.name, siteBackend(v, listeners ?? [], upstreamReport)])),
+    [sites, listeners, upstreamReport],
+  )
+  const verdict = useMemo(() => routeVerdict(sites ?? [], upstreamReport), [sites, upstreamReport])
   const renewal = readable(certbot)?.value
   const unreadable = useMemo(() => {
     const failed: [ProxySource, Error | undefined][] = [
@@ -406,6 +403,75 @@ export default function ProxyOverviewPage() {
     control.pending === "start" || control.pending === "restart" || control.pending === "stop"
       ? PARTICIPLE[control.pending]
       : undefined
+  // The engine's state in its tile's corner in the picture: a unit's, or a
+  // running ingress container's, and nothing claimed for one not read.
+  const engineTone: DotTone = engine.unit
+    ? engine.unit.activeState === "failed"
+      ? "danger"
+      : RUN_TONE[engineRun(engine.unit)]
+    : status.ingressContainer && !engine.error
+      ? "running"
+      : "unknown"
+
+  // The four figures the tiles held, as facts after the engine's own: each
+  // opens its page, and one whose source failed says so with the reason.
+  const certTone: Fact["tone"] = badCerts.some((c) => c.expired || c.error || c.staging)
+    ? "danger"
+    : badCerts.length > 0
+      ? "warning"
+      : undefined
+  const facts: Fact[] = [
+    {
+      key: "sites",
+      href: "/proxy/sites",
+      error: vhosts.error,
+      text: sites && `${plural(hosts.length, "site")}, ${onTls} on TLS`,
+    },
+    ...(disabled > 0 && sites
+      ? [
+          {
+            key: "disabled",
+            href: "/proxy/sites",
+            text: `${disabled} disabled`,
+            tone: "warning" as const,
+          },
+        ]
+      : []),
+    {
+      key: "certificates",
+      href: "/proxy/certificates",
+      error: certs.error,
+      text:
+        certificates &&
+        (badCerts.length > 0
+          ? `${plural(certificates.length, "certificate")}, ${badCerts.length} ${badCerts.length === 1 ? "needs" : "need"} attention`
+          : plural(certificates.length, "certificate")),
+      tone: certTone,
+    },
+    {
+      key: "streams",
+      href: "/proxy/streams",
+      error: streams.error,
+      text:
+        streamStatus &&
+        (streamStatus.streams.length > 0 && !streamStatus.included
+          ? `${plural(streamStatus.streams.length, "stream")}, not read by nginx`
+          : plural(streamStatus.streams.length, "stream")),
+      tone:
+        streamStatus && streamStatus.streams.length > 0 && !streamStatus.included
+          ? ("warning" as const)
+          : undefined,
+    },
+    {
+      key: "ports",
+      // The ports page's own split, so the figure clicked through is on that page.
+      href: portsHref({ reach: "internet" }),
+      error: ports.error,
+      text: listeners && `${plural(reach.internet, "port")} internet-facing`,
+      title: listeners && privateNetworksHint(reach),
+    },
+  ]
+  const inventory = facts.filter((fact) => fact.error || fact.text)
 
   return (
     <Page className="animate-rise">
@@ -431,106 +497,6 @@ export default function ProxyOverviewPage() {
       />
       {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
-      <StatGrid columns={4} dense>
-        <StatLink href="/proxy/sites" label="Sites">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Sites"
-            value={<Figure settled={!vhosts.loading}>{sites ? hosts.length : undefined}</Figure>}
-            hint={
-              vhosts.error ? (
-                <Unread error={vhosts.error} />
-              ) : sites ? (
-                disabled > 0 ? (
-                  `${onTls} on TLS · ${disabled} disabled`
-                ) : (
-                  `${onTls} on TLS`
-                )
-              ) : undefined
-            }
-            tone={vhosts.error || disabled > 0 ? "warning" : "default"}
-          />
-        </StatLink>
-        <StatLink href="/proxy/certificates" label="Certificates">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Certificates"
-            value={
-              <Figure settled={!certs.loading}>
-                {certificates ? certificates.length : undefined}
-              </Figure>
-            }
-            hint={
-              certs.error ? (
-                <Unread error={certs.error} />
-              ) : certificates ? (
-                badCerts.length > 0 ? (
-                  `${badCerts.length} need attention`
-                ) : certificates.length > 0 ? (
-                  "all valid"
-                ) : (
-                  "none issued"
-                )
-              ) : undefined
-            }
-            tone={
-              badCerts.some((c) => c.expired || c.error || c.staging)
-                ? "danger"
-                : certs.error || badCerts.length
-                  ? "warning"
-                  : "default"
-            }
-          />
-        </StatLink>
-        <StatLink href="/proxy/streams" label="Streams">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Streams"
-            value={
-              <Figure settled={!streams.loading}>
-                {streamStatus ? streamStatus.streams.length : undefined}
-              </Figure>
-            }
-            hint={
-              streams.error ? (
-                <Unread error={streams.error} />
-              ) : streamStatus ? (
-                streamStatus.streams.length === 0 ? (
-                  "nothing forwarded"
-                ) : streamStatus.included ? (
-                  "read by nginx"
-                ) : (
-                  "not read by nginx"
-                )
-              ) : undefined
-            }
-            tone={
-              streams.error ||
-              (streamStatus && streamStatus.streams.length > 0 && !streamStatus.included)
-                ? "warning"
-                : "default"
-            }
-          />
-        </StatLink>
-        <StatLink href={portsHref({ reach: "internet" })} label="Internet-facing ports">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Internet-facing"
-            value={
-              <Figure settled={!ports.loading}>{listeners ? reach.internet : undefined}</Figure>
-            }
-            hint={
-              ports.error ? (
-                <Unread error={ports.error} />
-              ) : listeners ? (
-                privateNetworksHint(reach)
-              ) : undefined
-            }
-            tone={ports.error ? "warning" : "default"}
-          />
-        </StatLink>
-      </StatGrid>
-
       <EngineIdentity
         status={status}
         unit={engine.unit}
@@ -543,6 +509,29 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
+        inventory={inventory.map((fact) => (
+          <Fragment key={fact.key}>
+            <FactDot />
+            {fact.error ? (
+              <span className="font-medium text-warning" title={errorMessage(fact.error)}>
+                {`couldn't read ${fact.key}`}
+              </span>
+            ) : (
+              <Link
+                href={fact.href}
+                title={fact.title}
+                className={cn(
+                  "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                  fact.tone === "danger" && "font-medium text-destructive",
+                  fact.tone === "warning" && "font-medium text-warning",
+                )}
+              >
+                {fact.text}
+              </Link>
+            )}
+          </Fragment>
+        ))}
+        verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
         actions={
           admin &&
           hasEngine && (
@@ -562,19 +551,6 @@ export default function ProxyOverviewPage() {
 
       <EngineExtras status={status} admin={admin} onChanged={refreshAll} />
 
-      {doors && (
-        <p className="flex flex-wrap items-baseline gap-x-2 text-hint text-muted-foreground">
-          Front door
-          <Link
-            href="/proxy/ports"
-            className="font-mono text-foreground hover:underline"
-            title="Who answers on ports 80 and 443 off this machine"
-          >
-            {frontDoorLine(doors)}
-          </Link>
-        </p>
-      )}
-
       {engine.unit?.activeState === "failed" && !underWay && (
         <EngineFailure
           engine={control.engine}
@@ -583,6 +559,37 @@ export default function ProxyOverviewPage() {
           busy={control.pending}
         />
       )}
+
+      {/* The picture needs the sites; while they are read it holds its
+          height, and a failure is said once, where the routes are. */}
+      {hasEngine &&
+        (vhosts.loading ? (
+          <Skeleton className="h-72 w-full" />
+        ) : (
+          picture.domains.length > 0 && (
+            <RoutePicture
+              map={picture}
+              engine={status.nginx ? "nginx" : "Caddy"}
+              engineMark={engineProduct(status)}
+              engineTone={engineTone}
+              engineHint={doors && <span className="font-mono">{frontDoorLine(doors)}</span>}
+            />
+          )
+        ))}
+
+      <OverviewBand
+        nginx={status.nginx}
+        traffic={{ sites: siteTraffic, error: traffic.error }}
+        certificates={{
+          list: certificates,
+          loading: certs.loading,
+          error: certs.error,
+          onRetry: certs.refresh,
+          certbot: status.certbot,
+        }}
+        errors={{ report: errorReport, error: nginxErrors.error }}
+        productOf={(site) => backends.get(site)?.product}
+      />
 
       {status.nginx && <LiveTraffic admin={admin} />}
 
@@ -637,32 +644,45 @@ export default function ProxyOverviewPage() {
             ) : (
               // Every row here is a site to open, which is the case §16 names:
               // a list of destinations becomes a `ChoiceList` and gets the edge,
-              // on a reading page as much as on a flow one. It read as a listing
-              // while it was the same row the tables below it use for values.
+              // on a reading page as much as on a flow one. Each leads with
+              // what its visitors reach, the engine in the tile's corner.
               <ChoiceList aria-label="Sites" className="animate-rise">
                 {routes.shown.map((vhost) => {
                   const target = routeTarget(vhost)
                   const reached = upstreamsOf(upstreamReport, vhost.path)
                   const load = vhost.kind === "nginx" ? trafficBySite.get(vhost.name) : undefined
+                  const backend = backends.get(vhost.name) ?? siteBackend(vhost, [])
                   return (
                     <ChoiceRow
                       key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
                       href={target.href}
                       verb={target.verb}
-                      className="gap-4 p-4"
-                      leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
+                      className="gap-3 p-3.5"
+                      leading={<RouteMark vhost={vhost} backend={backend} />}
                       title={<span className="text-title">{vhost.name}</span>}
-                      description={routeKind(vhost)}
+                      description={
+                        backend.kind === "app"
+                          ? `${routeKind(vhost)} → ${backend.name}`
+                          : routeKind(vhost)
+                      }
                       trailing={<ServingStatus vhost={vhost} />}
                     >
-                      <RoutePath
-                        source={vhost.serverNames.join(", ") || "Default host"}
-                        destination={vhost.upstreams.join(", ") || "Served by configuration"}
-                      />
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-hint text-muted-foreground">
                         <SiteTLS vhost={vhost} />
+                        <span className="flex min-w-0 items-center gap-1.5 font-mono">
+                          <span className="truncate">
+                            {vhost.serverNames.join(", ") || "Default host"}
+                          </span>
+                          <ArrowRight aria-hidden className="size-3 shrink-0" />
+                          <span className="truncate text-foreground">
+                            {vhost.upstreams.join(", ") ||
+                              (backend.kind === "files"
+                                ? backend.address
+                                : "Served by configuration")}
+                          </span>
+                        </span>
                         {load && <span className="numeric">{trafficLabel(load)}</span>}
-                        <span className="font-mono">{vhost.listen.join(" · ")}</span>
+                        <span className="ml-auto font-mono">{vhost.listen.join(" · ")}</span>
                       </div>
                       {reached.length > 0 && (
                         <ul aria-label="Upstreams" className="space-y-1 text-hint">
@@ -688,9 +708,8 @@ export default function ProxyOverviewPage() {
 
         <div className="min-w-0 space-y-8">
           {/* A titled list on the page, not a box, for the reason the host
-          overview's health list is: the findings are the first thing to read
-          after the figures, and a frame around them opened the page with a
-          stack of containers. */}
+          overview's health list is: a frame around it would open the rail
+          with a container. */}
           <Panel plain>
             <PanelHeader title="Needs attention" />
             <PanelBody>
@@ -754,130 +773,6 @@ export default function ProxyOverviewPage() {
           )}
 
           {admin && <RecentChanges />}
-
-          {status.nginx && (
-            <Panel plain>
-              <PanelHeader
-                title="Busiest sites"
-                actions={
-                  <Link
-                    href="/proxy/traffic"
-                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    Traffic <ArrowRight className="size-3" />
-                  </Link>
-                }
-              />
-              <PanelBody flush>
-                {traffic.error ? (
-                  <p
-                    className="text-hint text-muted-foreground"
-                    title={errorMessage(traffic.error)}
-                  >
-                    {"Couldn't read the sites' access logs."}
-                  </p>
-                ) : !siteTraffic ? (
-                  <div className="space-y-3 py-1">
-                    <Skeleton className="h-4 w-48" />
-                    <Skeleton className="h-4 w-40" />
-                  </div>
-                ) : (
-                  <BarList
-                    className="animate-rise"
-                    items={busiestItems(
-                      siteTraffic.filter((t) => t.status === "available"),
-                      (site) => router.push(trafficHref(site)),
-                      5,
-                    )}
-                    emptyLabel="No site writes an access log the dashboard can read."
-                  />
-                )}
-              </PanelBody>
-            </Panel>
-          )}
-
-          {status.nginx && (
-            <Panel plain>
-              <PanelHeader
-                title="Recent nginx errors"
-                actions={
-                  <Link
-                    href="/proxy/traffic?view=errors"
-                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    Error log <ArrowRight className="size-3" />
-                  </Link>
-                }
-              />
-              <PanelBody>
-                {nginxErrors.error ? (
-                  <p
-                    className="text-hint text-muted-foreground"
-                    title={errorMessage(nginxErrors.error)}
-                  >
-                    {"Couldn't read nginx's error log."}
-                  </p>
-                ) : !errorReport ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-56" />
-                    <Skeleton className="h-4 w-40" />
-                  </div>
-                ) : (
-                  <div className="animate-rise">
-                    {errorReport.note ? (
-                      <p className="text-hint text-muted-foreground">{errorReport.note}</p>
-                    ) : (
-                      <FindingList
-                        findings={errorReport.groups.slice(0, 4).map(errorFinding)}
-                        emptyLabel="No errors in the last hour"
-                      />
-                    )}
-                  </div>
-                )}
-              </PanelBody>
-            </Panel>
-          )}
-
-          {/* The four figures above count the certificates; none of them says
-            which one runs out first, and that is the reading somebody opens a
-            certificate list for. §7: the meter's track behind each name, the
-            figure at the right, and a signal segment for the share that is
-            wrong. */}
-          <Panel plain>
-            <PanelHeader
-              title="Certificate expiry"
-              actions={
-                certExpiry.length > 0 && (
-                  <Link
-                    href="/proxy/certificates"
-                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    All certificates <ArrowRight className="size-3" />
-                  </Link>
-                )
-              }
-            />
-            <PanelBody flush>
-              {certs.loading ? (
-                <div className="space-y-3 py-1">
-                  <Skeleton className="h-4 w-48" />
-                  <Skeleton className="h-4 w-56" />
-                </div>
-              ) : certs.error ? (
-                <ErrorState error={certs.error} onRetry={certs.refresh} className="mt-2" />
-              ) : (
-                <BarList
-                  className="animate-rise"
-                  items={certExpiry}
-                  emptyLabel={
-                    status.certbot
-                      ? "Nothing issued yet — issue a certificate from the Certificates tab."
-                      : "No certificates were found on this host."
-                  }
-                />
-              )}
-            </PanelBody>
-          </Panel>
         </div>
       </div>
 
@@ -924,19 +819,5 @@ function Freshness({
         Refresh
       </Button>
     </>
-  )
-}
-
-/**
- * A tile's figure that rises once its own poll settles — swapping the key
- * between skeleton and value remounts it — so the four fill in rather than
- * flickering from bone to number.
- */
-function Figure({ settled, children }: { settled: boolean; children: React.ReactNode }) {
-  if (!settled) return <Skeleton className="my-1.5 h-5 w-12" />
-  return (
-    <span key="figure" className="inline-block animate-rise">
-      {children ?? "—"}
-    </span>
   )
 }

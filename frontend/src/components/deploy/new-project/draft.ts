@@ -25,7 +25,7 @@ import type {
 } from "@/lib/types"
 
 /** The five ways into a new project — the source strip's own tab keys. */
-export type SourceTabKey = "git" | "image" | "template" | "database" | "compose"
+export type SourceTabKey = "git" | "image" | "template" | "database"
 
 /**
  * The draft state machine every source drives the same way.
@@ -38,13 +38,6 @@ export type SourceTabKey = "git" | "image" | "template" | "database" | "compose"
  * preflight, and committing. One place drives the API so five sources cannot
  * disagree about the sequence.
  */
-
-export type ImportPreview = {
-  name: string
-  unsupported: string[]
-  warnings: string[]
-  wouldChange: string[]
-}
 
 export type DraftCommitResult = {
   projectId: number
@@ -166,23 +159,6 @@ export async function discardAbandoned(id: string | undefined) {
   }
 }
 
-export async function previewImport(source: DeploymentDraftSource) {
-  return post<ImportPreview>("/deploy/import/preview", source)
-}
-
-export async function adoptImport(
-  draft: DeploymentDraft,
-  acknowledgedWarnings: string[],
-  acknowledgedUnsupported: string[],
-) {
-  return post<DraftCommitResult>("/deploy/import/adopt", {
-    draftId: draft.id,
-    revision: draft.revision,
-    acknowledgedWarnings,
-    acknowledgedUnsupported,
-  })
-}
-
 export async function importEnvironment(
   projectId: number,
   environmentId: number,
@@ -275,7 +251,7 @@ export type InspectOutcome = {
  * One shape for all five sources rather than one state tree per source: a
  * source tab's only job is to fill this in and hand it up, and Configure
  * never has to ask which tab it came from except for the three things that
- * genuinely differ (`sourceLabel`, `githubRepo`, `importPreview`).
+ * genuinely differ (`sourceLabel`, `githubRepo`).
  */
 export type ConfigureFlow = {
   name: string
@@ -290,8 +266,6 @@ export type ConfigureFlow = {
   /** Set when the repository came from the signed-in GitHub account: feeds the branch Select. */
   githubRepo?: string
   hostname?: DeploymentHostnameSuggestion
-  /** Carried from the existing-workload tab through to the final adopt call. */
-  importPreview?: ImportPreview
 }
 
 /**
@@ -723,7 +697,7 @@ export async function inspectAndPrepare(
   name: string,
   profile: WorkloadProfile,
   initialSource: DeploymentDraftSource,
-  extra: { sourceLabel: string; githubRepo?: string; importPreview?: ImportPreview },
+  extra: { sourceLabel: string; githubRepo?: string },
 ): Promise<ConfigureFlow> {
   let source = initialSource
   let result = await inspectSource(name, profile, source)

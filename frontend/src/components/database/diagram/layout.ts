@@ -1,8 +1,12 @@
 import dagre from "@dagrejs/dagre"
 import type { Edge, Node } from "@xyflow/react"
-import type { DbGraphColumn, DbGraphTable, DbSchemaGraph } from "@/lib/types"
-import type { DiagramDetail, DiagramDirection, DiagramSpacing } from "./memory"
-import { HEADER_HEIGHT, NODE_WIDTH, NOTE_HEIGHT, ROW_HEIGHT } from "./table-node"
+import {
+  NODE_WIDTH,
+  nodeHeight,
+  visibleColumns,
+  type DiagramDetail,
+} from "@/components/database/diagram/geometry"
+import type { DbGraphTable, DbSchemaGraph } from "@/components/database/diagram/types"
 
 /**
  * Where the tables go.
@@ -13,16 +17,20 @@ import { HEADER_HEIGHT, NODE_WIDTH, NOTE_HEIGHT, ROW_HEIGHT } from "./table-node
  * deterministic, so a schema has *a* shape that somebody can learn — and once
  * they have moved a table, that position is theirs and outranks dagre's.
  *
- * Heights are computed rather than measured because the node renders at a size
- * this file decides — a header, a row per visible column, a note. Handing
- * dagre a wrong height is what produces boxes overlapping the edges beneath
- * them, and it is invisible until a table has thirty columns.
+ * A table is its `id` throughout — the schema and the name together. Two
+ * schemas may each hold an `orders`; keyed by the name alone they were one
+ * node, one position and one note between them.
  */
+export type DiagramDirection = "LR" | "TB"
+export type DiagramSpacing = "compact" | "comfortable"
+
 export type LayoutOptions = {
   direction: DiagramDirection
   detail: DiagramDetail
   spacing: DiagramSpacing
+  /** Ids of the tables kept off the canvas. */
   hidden: Set<string>
+  /** Notes by table id: a table with one is a row taller. */
   notes: Record<string, string>
 }
 
@@ -31,23 +39,6 @@ const SPACING = {
   comfortable: { nodesep: 56, ranksep: 160 },
 } as const
 
-/** The columns a table draws at this level of detail. */
-export function visibleColumns(table: DbGraphTable, detail: DiagramDetail): DbGraphColumn[] {
-  if (detail === "names") return []
-  if (detail === "keys")
-    return table.columns.filter((c) => c.primaryKey || c.foreignKey || c.unique)
-  return table.columns
-}
-
-/** The node's height, as the node component will draw it. */
-export function nodeHeight(table: DbGraphTable, detail: DiagramDetail, note?: string): number {
-  const shown = visibleColumns(table, detail).length
-  // The "n more columns" row takes space too; a names-only table draws none.
-  const more = detail === "keys" && shown < table.columns.length ? 1 : 0
-  const rows = detail === "names" ? 0 : Math.max(1, shown + more)
-  return HEADER_HEIGHT + rows * ROW_HEIGHT + (note ? NOTE_HEIGHT : 0)
-}
-
 export type Placed = { nodes: Node[]; positions: Map<string, { x: number; y: number }> }
 
 /**
@@ -55,7 +46,7 @@ export type Placed = { nodes: Node[]; positions: Map<string, { x: number; y: num
  * moved. `applyPositions` reconciles the two.
  */
 export function layoutGraph(graph: DbSchemaGraph, opts: LayoutOptions): Placed {
-  const tables = graph.tables.filter((t) => !opts.hidden.has(t.name))
+  const tables = graph.tables.filter((t) => !opts.hidden.has(t.id))
   return place(tables, graph.edges, opts)
 }
 
@@ -75,8 +66,8 @@ function place(
     marginy: 32,
   })
 
-  const present = new Set(tables.map((t) => t.name))
-  const heightOf = (t: DbGraphTable) => nodeHeight(t, opts.detail, opts.notes[t.name])
+  const present = new Set(tables.map((t) => t.id))
+  const heightOf = (t: DbGraphTable) => nodeHeight(t, opts.detail, opts.notes[t.id])
 
   // Tables with no relationships at all are laid out separately.
   //
@@ -86,23 +77,21 @@ function place(
   // to view at ten per cent zoom, which is a diagram of nothing. They are
   // packed into a grid below the connected graph instead, where they are still
   // findable and cost almost no space.
-  const connectedNames = new Set<string>()
+  const connectedIds = new Set<string>()
   for (const e of allEdges) {
-    if (present.has(e.fromTable) && present.has(e.toTable) && e.fromTable !== e.toTable) {
-      connectedNames.add(e.fromTable)
-      connectedNames.add(e.toTable)
+    if (present.has(e.from) && present.has(e.to) && e.from !== e.to) {
+      connectedIds.add(e.from)
+      connectedIds.add(e.to)
     }
   }
-  const connected = tables.filter((t) => connectedNames.has(t.name))
-  const isolated = tables.filter((t) => !connectedNames.has(t.name))
+  const connected = tables.filter((t) => connectedIds.has(t.id))
+  const isolated = tables.filter((t) => !connectedIds.has(t.id))
 
-  for (const t of connected) g.setNode(t.name, { width: NODE_WIDTH, height: heightOf(t) })
+  for (const t of connected) g.setNode(t.id, { width: NODE_WIDTH, height: heightOf(t) })
   // Only edges between tables that are both present, or dagre invents a node
   // for the missing end and lays out a box that is never drawn.
   for (const e of allEdges) {
-    if (present.has(e.fromTable) && present.has(e.toTable) && e.fromTable !== e.toTable) {
-      g.setEdge(e.fromTable, e.toTable)
-    }
+    if (present.has(e.from) && present.has(e.to) && e.from !== e.to) g.setEdge(e.from, e.to)
   }
   dagre.layout(g)
 
@@ -111,11 +100,11 @@ function place(
   let maxY = 0
 
   for (const t of connected) {
-    const laid = g.node(t.name)
+    const laid = g.node(t.id)
     // dagre reports the centre; React Flow positions by the top-left corner.
     const x = laid.x - laid.width / 2
     const y = laid.y - laid.height / 2
-    positions.set(t.name, { x, y })
+    positions.set(t.id, { x, y })
     maxY = Math.max(maxY, y + laid.height)
     nodes.push(node(t, x, y, laid.height))
   }
@@ -138,7 +127,7 @@ function place(
     const h = heightOf(t)
     rowHeight = Math.max(rowHeight, h)
     const x = 32 + col * (NODE_WIDTH + gap)
-    positions.set(t.name, { x, y: rowTop })
+    positions.set(t.id, { x, y: rowTop })
     nodes.push(node(t, x, rowTop, h))
   })
 
@@ -147,7 +136,7 @@ function place(
 
 function node(t: DbGraphTable, x: number, y: number, height: number): Node {
   return {
-    id: t.name,
+    id: t.id,
     type: "table",
     position: { x, y },
     data: { table: t },
@@ -185,7 +174,8 @@ export function applyPositions(
     bottom = Math.max(bottom, n.position.y + (n.height ?? 0))
     left = Math.min(left, n.position.x)
   }
-  const tables = graph.tables.filter((t) => unplaced.some((n) => n.id === t.name))
+  const waiting = new Set(unplaced.map((n) => n.id))
+  const tables = graph.tables.filter((t) => waiting.has(t.id))
   const block = place(tables, graph.edges, opts)
   let top = Infinity
   let blockLeft = Infinity
@@ -201,34 +191,72 @@ export function applyPositions(
   return out
 }
 
+/** The handle an edge lands on: a column's row on one side of its table, or the header. */
+export function handleId(table: string, column: string, side: "left" | "right", end: "s" | "t") {
+  return `${table}\u0000${column}\u0000${side}.${end}`
+}
+
+/**
+ * Which side each relation leaves its table by, as one string: it changes
+ * only when a table crosses to the other side of one it relates to. Edges are
+ * rebuilt when this changes and not on every frame of a drag.
+ */
+export function edgeSides(graph: DbSchemaGraph, nodes: Node[]): string {
+  const at = new Map(nodes.map((n) => [n.id, n.position.x]))
+  let sides = ""
+  for (const e of graph.edges) {
+    const from = at.get(e.from)
+    const to = at.get(e.to)
+    sides += from === undefined || to === undefined ? "-" : to >= from ? "f" : "b"
+  }
+  return sides
+}
+
 /**
  * The foreign keys, anchored to the columns they relate.
  *
  * The side an edge leaves by is chosen from where the two tables actually are
  * now, not where the layout first put them: anchoring every edge to the right
  * of its source sends half of them backwards around the outside of the diagram
- * the moment a table is dragged to the other side.
+ * the moment a table is dragged to the other side. `sides` is `edgeSides` for
+ * the same graph: one letter per relation.
  */
-export function buildEdges(graph: DbSchemaGraph, nodes: Node[], detail: DiagramDetail): Edge[] {
-  const at = new Map(nodes.map((n) => [n.id, n.position]))
-  return graph.edges
-    .filter((e) => at.has(e.fromTable) && at.has(e.toTable))
-    .map((e, i) => {
-      const from = at.get(e.fromTable)!
-      const to = at.get(e.toTable)!
-      const forward = to.x >= from.x
-      // At names-only detail there are no column rows to land on, so the
-      // edge attaches to the header instead.
-      const fromCol = detail === "names" ? "" : e.fromColumn
-      const toCol = detail === "names" ? "" : e.toColumn
-      return {
+export function buildEdges(graph: DbSchemaGraph, sides: string, detail: DiagramDetail): Edge[] {
+  const tables = new Map(graph.tables.map((t) => [t.id, t]))
+  // An edge lands on its column's row where that row is drawn, and on the
+  // table's header where it is not: at names-only detail, and at keys-only
+  // for a column that is no key. An edge naming a handle that does not exist
+  // is dropped without a word, so the header is the answer, not nothing.
+  const drawn = (id: string, column: string) => {
+    const table = tables.get(id)
+    return table && visibleColumns(table, detail).some((c) => c.name === column) ? column : ""
+  }
+  return graph.edges.flatMap((e, i) => {
+    const side = sides[i]
+    if (side !== "f" && side !== "b") return []
+    const forward = side === "f"
+    const fromCol = drawn(e.from, e.fromColumn)
+    const toCol = drawn(e.to, e.toColumn)
+    return [
+      {
         id: `${e.name}-${i}`,
-        source: e.fromTable,
-        target: e.toTable,
-        sourceHandle: `${e.fromTable}.${fromCol}.${forward ? "right" : "left"}.s`,
-        targetHandle: `${e.toTable}.${toCol}.${forward ? "left" : "right"}.t`,
+        source: e.from,
+        target: e.to,
+        sourceHandle: handleId(e.from, fromCol, forward ? "right" : "left", "s"),
+        targetHandle: handleId(e.to, toCol, forward ? "left" : "right", "t"),
         type: "relation",
         data: { relation: e },
-      }
-    })
+      },
+    ]
+  })
+}
+
+/** The ids of everything one table touches, in both directions, itself included. */
+export function neighbourhood(graph: DbSchemaGraph, id: string): Set<string> {
+  const near = new Set<string>([id])
+  for (const e of graph.edges) {
+    if (e.from === id) near.add(e.to)
+    if (e.to === id) near.add(e.from)
+  }
+  return near
 }

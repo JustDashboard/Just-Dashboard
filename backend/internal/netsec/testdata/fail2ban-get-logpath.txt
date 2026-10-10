@@ -1,0 +1,2 @@
+Current monitored log file(s):
+`- /var/log/nginx-error.log

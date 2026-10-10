@@ -217,6 +217,9 @@ type watchedCheck struct {
 	DaysLeft    *int64    `json:"daysLeft,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Error       string    `json:"error,omitempty"`
+	// Ms is a network probe's connect time; zero for a TLS check and for a
+	// probe that did not connect.
+	Ms int64 `json:"ms,omitempty"`
 }
 
 // handleWatchedHistory is one endpoint's recent checks, oldest first.
@@ -234,8 +237,8 @@ func (s *Server) handleWatchedHistory(w http.ResponseWriter, r *http.Request) er
 		return httpx.Internal(err)
 	}
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT checked_at, days_left, fingerprint, error FROM (
-		   SELECT id, checked_at, days_left, fingerprint, error FROM watched_checks
+		`SELECT checked_at, days_left, fingerprint, error, ms FROM (
+		   SELECT id, checked_at, days_left, fingerprint, error, ms FROM watched_checks
 		    WHERE endpoint_id = ? ORDER BY checked_at DESC, id DESC LIMIT ?)
 		 ORDER BY checked_at, id`, id, storedHistoryLimit)
 	if err != nil {
@@ -247,7 +250,7 @@ func (s *Server) handleWatchedHistory(w http.ResponseWriter, r *http.Request) er
 		var c watchedCheck
 		var at int64
 		var days sql.NullInt64
-		if err := rows.Scan(&at, &days, &c.Fingerprint, &c.Error); err != nil {
+		if err := rows.Scan(&at, &days, &c.Fingerprint, &c.Error, &c.Ms); err != nil {
 			return httpx.Internal(err)
 		}
 		c.CheckedAt = time.Unix(at, 0).UTC()
@@ -311,7 +314,7 @@ func (ws watchStore) WatchInterval(ctx context.Context) (time.Duration, error) {
 
 func (ws watchStore) WatchedEndpoints(ctx context.Context) ([]proxysvc.WatchedEndpoint, error) {
 	rows, err := ws.s.Store.DB.QueryContext(ctx,
-		`SELECT id, domain, port, ip, checked_at FROM watched_endpoints`)
+		`SELECT id, domain, port, ip, kind, checked_at FROM watched_endpoints`)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +323,7 @@ func (ws watchStore) WatchedEndpoints(ctx context.Context) ([]proxysvc.WatchedEn
 	for rows.Next() {
 		var e proxysvc.WatchedEndpoint
 		var at int64
-		if err := rows.Scan(&e.ID, &e.Domain, &e.Port, &e.IP, &at); err != nil {
+		if err := rows.Scan(&e.ID, &e.Domain, &e.Port, &e.IP, &e.Kind, &at); err != nil {
 			return nil, err
 		}
 		if at > 0 {
@@ -339,23 +342,44 @@ func (ws watchStore) SaveWatchChecks(ctx context.Context, checks []proxysvc.Watc
 	defer tx.Rollback()
 	oldest := time.Now().Add(-checkRetention).Unix()
 	for _, c := range checks {
-		cert, err := json.Marshal(c.Cert)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE watched_endpoints SET checked_at = ?, certificate = ? WHERE id = ?`,
-			c.CheckedAt.Unix(), string(cert), c.EndpointID); err != nil {
-			return err
-		}
-		// An endpoint removed while its check was out is not brought back
-		// as history pointing at nothing.
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO watched_checks(endpoint_id, checked_at, days_left, fingerprint, error)
-			 SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM watched_endpoints WHERE id = ?)`,
-			c.EndpointID, c.CheckedAt.Unix(), daysLeft(c.Cert), c.Cert.Fingerprint, c.Cert.Error,
-			c.EndpointID); err != nil {
-			return err
+		if c.Probe != nil {
+			probe, err := json.Marshal(c.Probe)
+			if err != nil {
+				return err
+			}
+			// A probe that a TLS watch took over while it was out is not
+			// saved: the row would read as checked, and its first handshake
+			// would wait a whole interval.
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE watched_endpoints SET checked_at = ?, probe = ? WHERE id = ? AND kind = 'tcp'`,
+				c.CheckedAt.Unix(), string(probe), c.EndpointID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO watched_checks(endpoint_id, checked_at, error, ms)
+				 SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM watched_endpoints WHERE id = ? AND kind = 'tcp')`,
+				c.EndpointID, c.CheckedAt.Unix(), c.Probe.Error, c.Probe.Ms, c.EndpointID); err != nil {
+				return err
+			}
+		} else {
+			cert, err := json.Marshal(c.Cert)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE watched_endpoints SET checked_at = ?, certificate = ? WHERE id = ?`,
+				c.CheckedAt.Unix(), string(cert), c.EndpointID); err != nil {
+				return err
+			}
+			// An endpoint removed while its check was out is not brought
+			// back as history pointing at nothing.
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO watched_checks(endpoint_id, checked_at, days_left, fingerprint, error)
+				 SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM watched_endpoints WHERE id = ?)`,
+				c.EndpointID, c.CheckedAt.Unix(), daysLeft(c.Cert), c.Cert.Fingerprint, c.Cert.Error,
+				c.EndpointID); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM watched_checks WHERE endpoint_id = ? AND (checked_at < ? OR id NOT IN (

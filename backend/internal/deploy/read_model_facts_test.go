@@ -9,6 +9,7 @@ import (
 	"time"
 
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // seedFactsDeployment writes one production deployment with the given source
@@ -133,7 +134,7 @@ func seedFactsDeployment(
 // of it is read by the statements the fleet already performs.
 func TestFleetSummaryNamesSourceBuildAndImages(t *testing.T) {
 	t.Parallel()
-	base, err := basestore.Open(t.TempDir())
+	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,6 +315,29 @@ func TestRunListsPlaceARunInFlightAtItsCurrentStep(t *testing.T) {
 	}
 }
 
+// A Stop runs start_candidate against the live release, and a list showing it
+// in flight says so rather than "Start new release".
+func TestRunListsNameAStopsStepForTheLiveRelease(t *testing.T) {
+	t.Parallel()
+	fixture := newOrchestrationFixture(t)
+	environmentID := fixture.addEnvironment(t, "production", EnvironmentProduction)
+	run := fixture.enqueue(t, environmentID, func(req *RunRequest) {
+		req.Operation = OperationStop
+		req.Steps = []StepKey{StepStartCandidate, StepRecordRelease, StepNotify}
+	})
+	if _, err := fixture.store.DB.Exec(`UPDATE deploy_steps SET status = 'running' WHERE run_id = ? AND step_key = 'start_candidate'`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	runs, _, err := fixture.runs.ProjectRunsFiltered(context.Background(), fixture.projectID, RunListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &CurrentStep{Key: StepStartCandidate, Label: "Stop live release", State: StepRunning}
+	if len(runs) != 1 || !reflect.DeepEqual(runs[0].CurrentStep, want) {
+		t.Fatalf("stop run list = %#v", runs)
+	}
+}
+
 func TestStepLabelsNameEveryStep(t *testing.T) {
 	t.Parallel()
 	for _, key := range append(append([]StepKey(nil), DefaultStepKeys...), StepLegacyPipeline) {
@@ -327,7 +351,7 @@ func TestStepLabelsNameEveryStep(t *testing.T) {
 // a live deployment is not in it.
 func TestArchivedDeploymentFactsReadEveryArchivedProject(t *testing.T) {
 	t.Parallel()
-	base, err := basestore.Open(t.TempDir())
+	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

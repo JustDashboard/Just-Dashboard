@@ -1,0 +1,979 @@
+package netx
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Limits on a fetched list. The cap is on the body as sent, so a feed that
+// answers with a gigabyte costs sixteen megabytes of this process's time and
+// no more.
+const (
+	maxFeedBytes             = 16 << 20
+	maxListEntries           = 500_000
+	maxManualList            = 10_000
+	maxCountries             = 30
+	blocklistStaleAfter      = 24 * time.Hour
+	blocklistRefreshInterval = 15 * time.Minute
+	maxSignatureBytes        = 4096
+
+	// A feed's networks are somebody else's idea of what to drop, and a feed
+	// that has gone wrong, or been tampered with, would otherwise take the
+	// server off the internet. An entry shorter than a /8 (a /19 in IPv6) is
+	// not a bad network but a region, and a feed whose IPv4 networks add up to
+	// more than a sixteenth of the address space is not a blocklist.
+	feedMinBitsV4      = 8
+	feedMinBitsV6      = 19
+	feedMaxV4Addresses = 1 << 28
+)
+
+// httpClient fetches feeds and country zones. A variable so tests point it at
+// a server of their own; the real one follows at most three redirects, which
+// is what a feed behind a CDN needs and what a loop of them cannot exceed.
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) > 3 {
+			return errors.New("the feed redirected more than three times")
+		}
+		// A feed is a list of what to drop. Over plain http anyone on the
+		// path could hand back a list that drops the operator's own networks,
+		// and a redirect from https to http is that same downgrade.
+		if req.URL.Scheme != "https" {
+			return errors.New("the feed redirected to a plain-http address")
+		}
+		return nil
+	},
+}
+
+// The country zone files ipdeny publishes, aggregated so a country is
+// thousands of lines rather than tens of thousands. Variables so a test can
+// stand a server of its own behind them.
+var (
+	ipdenyV4 = "https://www.ipdeny.com/ipblocks/data/aggregated/%s-aggregated.zone"
+	ipdenyV6 = "https://www.ipdeny.com/ipv6/ipaddresses/aggregated/%s-aggregated.zone"
+)
+
+// FeedPreset is a feed the page offers by name.
+type FeedPreset struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	Description string `json:"description"`
+}
+
+// feedPresets are the feeds with a name. Both are the networks no legitimate
+// traffic should come from; the lists are small enough to be dropped without
+// thought and are kept up by their maintainers.
+var feedPresets = []FeedPreset{
+	{
+		ID: "spamhaus-drop", Name: "Spamhaus DROP",
+		URL:         "https://www.spamhaus.org/drop/drop.txt",
+		Description: "Networks Spamhaus has found hijacked or run by spammers and cybercriminals. A few hundred entries, very few false positives.",
+	},
+	{
+		ID: "firehol-level1", Name: "FireHOL level 1",
+		URL:         "https://iplists.firehol.org/files/firehol_level1.netset",
+		Description: "FireHOL's no-false-positives list, folding Spamhaus DROP, DShield and several botnet trackers into one. Private and reserved ranges in it are skipped.",
+	},
+}
+
+// neverBlock are the ranges a fetched list may not take, however its feed
+// lists them. FireHOL's level 1 carries the bogons — 10/8, 192.168/16, the
+// carrier-grade 100.64/10 Tailscale lives in — and a prerouting drop on them
+// would cut off every Docker container, LAN client and tailnet peer. The
+// trusted set protects the operator, not the machines behind the host.
+var neverBlock = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
+	netip.MustParsePrefix("::1/128"),
+}
+
+func overlaps(a, b netip.Prefix) bool {
+	return a.Contains(b.Addr()) || b.Contains(a.Addr())
+}
+
+// parseFeed reads a feed's text: one network per line, optionally followed by
+// a comment (Spamhaus writes "1.10.16.0/20 ; SBL256894"), or a JSON object per
+// line with a "cidr" (Spamhaus's newer form). Lines that are neither are
+// skipped, not fatal: a feed gaining a header line must not stop the list
+// being loaded. skipped counts them, and the networks it dropped for being
+// private or reserved.
+func parseFeed(data []byte) (nets []netip.Prefix, skipped int) {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "{") {
+			var o struct {
+				CIDR string `json:"cidr"`
+			}
+			if json.Unmarshal([]byte(line), &o) != nil {
+				skipped++
+				continue
+			}
+			line = o.CIDR
+		}
+		if i := strings.IndexAny(line, "#;"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		p, err := ParsePrefix(fields[0])
+		if err != nil || p.Bits() == 0 {
+			skipped++
+			continue
+		}
+		p = p.Masked()
+		reserved := false
+		for _, never := range neverBlock {
+			if overlaps(p, never) {
+				reserved = true
+				break
+			}
+		}
+		if reserved {
+			skipped++
+			continue
+		}
+		nets = append(nets, p)
+	}
+	return nets, skipped
+}
+
+// fetch reads one URL, bounded in time, redirects and size. A body over the
+// cap is refused, not cut off: half a feed loaded as if it were the whole is
+// a list that silently stops protecting.
+func fetch(ctx context.Context, url string) ([]byte, int, error) {
+	r, err := fetchHTTP(ctx, url, nil, maxFeedBytes)
+	return r.body, r.status, err
+}
+
+type httpFetch struct {
+	body         []byte
+	status       int
+	etag         string
+	lastModified string
+}
+
+// fetchHTTP is fetch with request headers (a feed's validators) and its own
+// size cap; a 304 answers with no body and no error.
+func fetchHTTP(ctx context.Context, url string, headers map[string]string, limit int) (httpFetch, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return httpFetch{}, err
+	}
+	if req.URL.Scheme != "https" {
+		return httpFetch{}, fmt.Errorf("%s is not an https address; lists are fetched over https only", url)
+	}
+	req.Header.Set("User-Agent", "just-dashboard-blocklist")
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return httpFetch{}, fmt.Errorf("fetching %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	out := httpFetch{status: resp.StatusCode, etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified")}
+	if resp.StatusCode == http.StatusNotModified && len(headers) > 0 {
+		return out, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)) // drained so the connection can be reused
+		return out, fmt.Errorf("%s answered %s", url, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if err != nil {
+		return out, fmt.Errorf("reading %s: %w", url, err)
+	}
+	if len(body) > limit {
+		return out, fmt.Errorf("%s is larger than %d MB; a list that size is not a blocklist this host should load", url, maxFeedBytes>>20)
+	}
+	out.body = body
+	return out, nil
+}
+
+// fetchOptions are what a refresh knows from the last one.
+type fetchOptions struct {
+	// etag and lastModified ask a feed to answer 304 when nothing changed.
+	etag, lastModified string
+	signatureURL       string
+	publicKey          string
+}
+
+// fetchResult is a fetched list and where it came from.
+type fetchResult struct {
+	nets      []netip.Prefix
+	sources   []BlocklistSource
+	unchanged bool
+}
+
+func sourceOf(url string, r httpFetch, now time.Time, nets, skipped int) BlocklistSource {
+	sum := sha256.Sum256(r.body)
+	return BlocklistSource{
+		URL: url, Status: "ok", FetchedAt: now, Bytes: len(r.body), SHA256: hex.EncodeToString(sum[:]),
+		Networks: nets, Skipped: skipped, ETag: r.etag, LastModified: r.lastModified,
+	}
+}
+
+// verifyFeedSignature checks a detached Ed25519 signature over the exact
+// bytes fetched, against the operator's pinned key. The signature file holds
+// the 64-byte signature in base64 or hex.
+func verifyFeedSignature(ctx context.Context, body []byte, signatureURL, publicKey string) error {
+	key, err := decodeFeedKey(publicKey)
+	if err != nil {
+		return err
+	}
+	r, err := fetchHTTP(ctx, signatureURL, nil, maxSignatureBytes)
+	if err != nil {
+		return fmt.Errorf("fetching the feed's signature: %w", err)
+	}
+	text := strings.TrimSpace(string(r.body))
+	sig, err := base64.StdEncoding.DecodeString(text)
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		if raw, herr := hex.DecodeString(text); herr == nil && len(raw) == ed25519.SignatureSize {
+			sig = raw
+		} else {
+			return errors.New("the feed's signature is not a 64-byte Ed25519 signature in base64 or hex")
+		}
+	}
+	if !ed25519.Verify(key, body, sig) {
+		return errors.New("the feed's signature does not verify against the pinned public key; the list was not changed")
+	}
+	return nil
+}
+
+func decodeFeedKey(publicKey string) (ed25519.PublicKey, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(publicKey))
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("the public key is a 32-byte Ed25519 key in base64")
+	}
+	return ed25519.PublicKey(key), nil
+}
+
+// fetchList gets the networks of a country or feed list, merged.
+func fetchList(ctx context.Context, kind string, countries []string, url string) ([]netip.Prefix, error) {
+	r, err := fetchListWith(ctx, kind, countries, url, fetchOptions{})
+	return r.nets, err
+}
+
+// fetchListWith gets a list with its provenance. A country has an IPv4 zone
+// and usually an IPv6 one; a country with no IPv6 zone is a 404 there, which
+// is information and not a failure. A feed with validators may answer that
+// nothing changed; a signed feed is used only when its signature verifies.
+func fetchListWith(ctx context.Context, kind string, countries []string, url string, opt fetchOptions) (fetchResult, error) {
+	var all []netip.Prefix
+	var res fetchResult
+	now := time.Now().UTC()
+	switch kind {
+	case "feed":
+		headers := map[string]string{}
+		if opt.etag != "" || opt.lastModified != "" {
+			headers["If-None-Match"], headers["If-Modified-Since"] = opt.etag, opt.lastModified
+		}
+		r, err := fetchHTTP(ctx, url, headers, maxFeedBytes)
+		if err != nil {
+			return res, err
+		}
+		if r.status == http.StatusNotModified {
+			res.unchanged = true
+			res.sources = []BlocklistSource{{URL: url, Status: "unchanged", FetchedAt: now, ETag: opt.etag, LastModified: opt.lastModified}}
+			return res, nil
+		}
+		if opt.signatureURL != "" {
+			if err := verifyFeedSignature(ctx, r.body, opt.signatureURL, opt.publicKey); err != nil {
+				return res, err
+			}
+		}
+		nets, skipped := parseFeed(r.body)
+		kept := 0
+		for _, p := range nets {
+			if (p.Addr().Is4() && p.Bits() < feedMinBitsV4) || (p.Addr().Is6() && p.Bits() < feedMinBitsV6) {
+				skipped++
+				continue
+			}
+			all = append(all, p)
+			kept++
+		}
+		src := sourceOf(url, r, now, kept, skipped)
+		src.Signed = opt.signatureURL != ""
+		res.sources = append(res.sources, src)
+	case "country":
+		for _, cc := range countries {
+			for _, family := range []string{"4", "6"} {
+				zone := fmt.Sprintf(ipdenyV4, cc)
+				if family == "6" {
+					zone = fmt.Sprintf(ipdenyV6, cc)
+				}
+				r, err := fetchHTTP(ctx, zone, nil, maxFeedBytes)
+				switch {
+				case err == nil:
+				case r.status == http.StatusNotFound && family == "6":
+					res.sources = append(res.sources, BlocklistSource{URL: zone, Country: cc, Family: "ipv6", Status: "absent", FetchedAt: now})
+					continue
+				case r.status == http.StatusNotFound:
+					return res, fmt.Errorf("there is no address list for the country %q", strings.ToUpper(cc))
+				default:
+					return res, err
+				}
+				nets, skipped := parseFeed(r.body)
+				all = append(all, nets...)
+				src := sourceOf(zone, r, now, len(nets), skipped)
+				src.Country, src.Family = cc, "ipv"+family
+				res.sources = append(res.sources, src)
+			}
+		}
+	}
+	merged := mergePrefixes(all)
+	if len(merged) == 0 {
+		return res, errors.New("the list held no networks this host could use")
+	}
+	if kind == "feed" {
+		var covered uint64
+		for _, p := range merged {
+			if p.Addr().Is4() {
+				covered += 1 << (32 - p.Bits())
+			}
+		}
+		if covered > feedMaxV4Addresses {
+			return res, fmt.Errorf("the feed's IPv4 networks cover %d million addresses, more than a sixteenth of the internet. A list that wide is not a list of bad networks, and loading it would cut this server off from much of the world", covered>>20)
+		}
+	}
+	if len(merged) > maxListEntries {
+		return res, fmt.Errorf("the list holds %d networks; more than %d is too many to load as one set", len(merged), maxListEntries)
+	}
+	res.nets = merged
+	return res, nil
+}
+
+// blocklistDiff compares a list's new networks with the ones it had. Without
+// a readable previous cache there is nothing to compare against.
+func blocklistDiff(before []netip.Prefix, baseline bool, after []netip.Prefix, at time.Time) *BlocklistDiff {
+	d := &BlocklistDiff{At: at, Baseline: baseline}
+	if !baseline {
+		d.Added = len(after)
+		return d
+	}
+	had := map[netip.Prefix]bool{}
+	for _, p := range before {
+		had[p] = true
+	}
+	has := map[netip.Prefix]bool{}
+	for _, p := range after {
+		has[p] = true
+		if !had[p] {
+			d.Added++
+			if len(d.AddedSample) < 8 {
+				d.AddedSample = append(d.AddedSample, p.String())
+			}
+		}
+	}
+	for _, p := range before {
+		if !has[p] {
+			d.Removed++
+			if len(d.RemovedSample) < 8 {
+				d.RemovedSample = append(d.RemovedSample, p.String())
+			}
+		}
+	}
+	return d
+}
+
+// blocklistRefreshChoices are the schedules a fetched list may keep.
+var blocklistRefreshChoices = map[string]time.Duration{
+	"6h": 6 * time.Hour, "12h": 12 * time.Hour, "24h": 24 * time.Hour,
+	"72h": 72 * time.Hour, "168h": 168 * time.Hour, "manual": 0,
+}
+
+// refreshEvery is a list's schedule; zero is manual only.
+func refreshEvery(bl BlocklistSpec) time.Duration {
+	if d, ok := blocklistRefreshChoices[bl.Refresh]; ok {
+		return d
+	}
+	return blocklistStaleAfter
+}
+
+// refreshBackoff is how long a failing list waits before the next try:
+// doubling from fifteen minutes, never longer than its schedule.
+func refreshBackoff(bl BlocklistSpec) time.Duration {
+	if bl.Failures == 0 {
+		return 0
+	}
+	wait := 15 * time.Minute << min(bl.Failures-1, 8)
+	if every := refreshEvery(bl); every > 0 && wait > every {
+		wait = every
+	}
+	return wait
+}
+
+// nextRefresh is when the scheduler will next fetch a list, nil for one it
+// never fetches on its own.
+func nextRefresh(bl BlocklistSpec) *time.Time {
+	every := refreshEvery(bl)
+	if bl.Kind == "manual" || !bl.Enabled || every == 0 {
+		return nil
+	}
+	next := bl.Refreshed.Add(every)
+	if bl.Refreshed.IsZero() {
+		next = time.Now().UTC()
+	}
+	if bl.Failures > 0 {
+		if retry := bl.LastAttempt.Add(refreshBackoff(bl)); retry.Before(next) || next.Before(bl.LastAttempt) {
+			next = retry
+		}
+	}
+	return &next
+}
+
+// refreshDue reports whether a list should be fetched at now.
+func refreshDue(bl BlocklistSpec, now time.Time) bool {
+	every := refreshEvery(bl)
+	if !bl.Enabled || bl.Kind == "manual" || every == 0 {
+		return false
+	}
+	// A clock that moved backwards past the last attempt does not stall
+	// the list: it is retried.
+	if bl.Failures > 0 && !now.Before(bl.LastAttempt) && now.Sub(bl.LastAttempt) < refreshBackoff(bl) {
+		return false
+	}
+	if bl.Failures > 0 {
+		return true
+	}
+	return bl.Refreshed.IsZero() || now.Sub(bl.Refreshed) >= every
+}
+
+// writeBlocklistCache stores a fetched list, one network per line.
+func writeBlocklistCache(dir string, id int, nets []netip.Prefix) error {
+	return writeFileAtomic(blocklistFile(dir, id), blocklistCacheBytes(nets), 0o644)
+}
+
+func blocklistCacheBytes(nets []netip.Prefix) []byte {
+	var b bytes.Buffer
+	for _, p := range nets {
+		b.WriteString(p.String())
+		b.WriteByte('\n')
+	}
+	return b.Bytes()
+}
+
+// BlocklistRequest is the body of a list's create and update.
+type BlocklistRequest struct {
+	Name string `json:"name"`
+	// Kind is manual, country or feed; fixed once the list exists.
+	Kind string `json:"kind"`
+	// Entries are a manual list's networks or addresses.
+	Entries []string `json:"entries"`
+	// Countries are ISO 3166-1 alpha-2 codes.
+	Countries []string `json:"countries"`
+	// URL is a feed's address; Preset names one of the offered feeds
+	// instead.
+	URL     string `json:"url"`
+	Preset  string `json:"preset"`
+	Enabled *bool  `json:"enabled"`
+	// Refresh is a fetched list's schedule: 6h, 12h, 24h, 72h, 168h or
+	// manual; empty keeps the existing one (daily for a new list).
+	Refresh string `json:"refresh"`
+	// SignatureURL and PublicKey make a custom feed verify a detached
+	// Ed25519 signature on every fetch.
+	SignatureURL string `json:"signatureUrl"`
+	PublicKey    string `json:"publicKey"`
+}
+
+// buildBlocklist validates a request into the fields of a spec entry. It
+// reads nothing from the host; fetching is the caller's.
+func buildBlocklist(req BlocklistRequest, kind, client string) (BlocklistSpec, error) {
+	bl := BlocklistSpec{Kind: kind}
+	if req.Kind != "" && req.Kind != kind {
+		return bl, fmt.Errorf("a %s list cannot become a %s list; make a new one", kind, req.Kind)
+	}
+	switch kind {
+	case "manual":
+		if len(req.Entries) == 0 {
+			return bl, errors.New("a manual list needs at least one network or address")
+		}
+		if len(req.Entries) > maxManualList {
+			return bl, fmt.Errorf("a manual list holds at most %d entries; use a feed for more", maxManualList)
+		}
+		var nets []netip.Prefix
+		for _, raw := range req.Entries {
+			p, err := ParsePrefix(raw)
+			if err != nil {
+				return bl, err
+			}
+			if p.Bits() == 0 {
+				return bl, fmt.Errorf("%s is every address on the internet; a list that drops it drops everything", p)
+			}
+			nets = append(nets, p.Masked())
+		}
+		nets = mergePrefixes(nets)
+		if addr, err := ParseAddr(client); err == nil {
+			for _, p := range nets {
+				if p.Contains(addr) {
+					return bl, guarded("%s contains your own address (%s), so this list would cut you off from the dashboard. Take it out of the list.", p, addr)
+				}
+			}
+		}
+		for _, p := range nets {
+			bl.Entries = append(bl.Entries, p.String())
+		}
+		bl.Count = len(nets)
+	case "country":
+		if len(req.Countries) == 0 {
+			return bl, errors.New("choose at least one country")
+		}
+		seen := map[string]bool{}
+		for _, raw := range req.Countries {
+			cc, err := ValidCountry(raw)
+			if err != nil {
+				return bl, err
+			}
+			if !seen[cc] {
+				seen[cc] = true
+				bl.Countries = append(bl.Countries, cc)
+			}
+		}
+		if len(bl.Countries) > maxCountries {
+			return bl, fmt.Errorf("a list covers at most %d countries", maxCountries)
+		}
+		sort.Strings(bl.Countries)
+	case "feed":
+		url := req.URL
+		if req.Preset != "" {
+			found := false
+			for _, p := range feedPresets {
+				if p.ID == req.Preset {
+					url, found = p.URL, true
+					if strings.TrimSpace(req.Name) == "" {
+						req.Name = p.Name
+					}
+				}
+			}
+			if !found {
+				return bl, fmt.Errorf("%q is not a feed this dashboard offers", req.Preset)
+			}
+		}
+		u, err := ParseFeedURL(url)
+		if err != nil {
+			return bl, err
+		}
+		if !strings.HasPrefix(u, "https://") {
+			return bl, errors.New("a feed is fetched over https; an http address could be answered by anyone on the way with a list that drops your own networks")
+		}
+		bl.URL = u
+		sigURL, key := strings.TrimSpace(req.SignatureURL), strings.TrimSpace(req.PublicKey)
+		switch {
+		case sigURL == "" && key == "":
+		case req.Preset != "":
+			return bl, errors.New("this feed does not publish a signature; signatures are for feeds you name yourself")
+		case sigURL == "" || key == "":
+			return bl, errors.New("a signed feed needs both the signature address and the public key")
+		default:
+			su, err := ParseFeedURL(sigURL)
+			if err != nil || !strings.HasPrefix(su, "https://") {
+				return bl, errors.New("the signature is fetched over https")
+			}
+			if _, err := decodeFeedKey(key); err != nil {
+				return bl, err
+			}
+			bl.SignatureURL, bl.PublicKey = su, key
+		}
+	default:
+		return bl, errors.New("a list is manual, a country or a feed")
+	}
+	name, err := CleanLabel(req.Name, 64)
+	if err != nil {
+		return bl, err
+	}
+	if refresh := strings.TrimSpace(req.Refresh); refresh != "" {
+		if kind == "manual" {
+			return bl, errors.New("a manual list is never fetched, so it has no schedule")
+		}
+		if _, ok := blocklistRefreshChoices[refresh]; !ok {
+			return bl, errors.New("the schedule is 6h, 12h, 24h, 72h, 168h or manual")
+		}
+		bl.Refresh = refresh
+	}
+	bl.Name = name
+	bl.Enabled = true
+	return bl, nil
+}
+
+// AddBlocklist creates a list. A country or feed list is fetched first and
+// refused if the fetch fails: a list saved empty would look like protection
+// and be none.
+func (s *Service) AddBlocklist(ctx context.Context, req BlocklistRequest, client, actor string) (BlocklistView, error) {
+	bl, err := buildBlocklist(req, strings.ToLower(strings.TrimSpace(req.Kind)), client)
+	if err != nil {
+		return BlocklistView{}, err
+	}
+	if req.Enabled != nil {
+		bl.Enabled = *req.Enabled
+	}
+	var fetched []netip.Prefix
+	if bl.Kind != "manual" {
+		// Outside the lock: a country is up to sixty requests, and holding
+		// every other change to the network for that long is not a price
+		// anyone should pay for a list that has not been saved yet.
+		r, err := fetchListWith(ctx, bl.Kind, bl.Countries, bl.URL, fetchOptions{signatureURL: bl.SignatureURL, publicKey: bl.PublicKey})
+		if err != nil {
+			return BlocklistView{}, err
+		}
+		fetched = r.nets
+		bl.Count, bl.Refreshed, bl.LastAttempt, bl.Sources = len(fetched), time.Now().UTC(), time.Now().UTC(), r.sources
+		bl.LastDiff = blocklistDiff(nil, false, fetched, bl.Refreshed)
+	}
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
+		s.trustClientBy(next, client, actor, "")
+		bl.ID, bl.Made = next.takeID(), gwStamp(actor)
+		if fetched != nil {
+			if err := stage(bl.ID, fetched); err != nil {
+				return false, fmt.Errorf("saving the list: %w", err)
+			}
+		}
+		next.Blocklists = append(next.Blocklists, bl)
+		return false, nil
+	})
+	if err != nil {
+		return BlocklistView{}, err
+	}
+	return s.blocklistViewByID(ctx, bl.ID, client)
+}
+
+// UpdateBlocklist changes a list: its name, whether it is enabled, and its
+// contents — the entries of a manual list, the countries or address of a
+// fetched one, which are fetched again.
+func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequest, client, actor string) (BlocklistView, error) {
+	cur, err := s.loadSpec()
+	if err != nil {
+		return BlocklistView{}, err
+	}
+	var existing *BlocklistSpec
+	for i := range cur.Blocklists {
+		if cur.Blocklists[i].ID == id {
+			existing = &cur.Blocklists[i]
+		}
+	}
+	if existing == nil {
+		return BlocklistView{}, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	}
+	// The pinned key stays when an edit names the same signature without
+	// repeating it; a different signature address needs its key.
+	if sig := strings.TrimSpace(req.SignatureURL); sig != "" && sig == existing.SignatureURL && strings.TrimSpace(req.PublicKey) == "" {
+		req.PublicKey = existing.PublicKey
+	}
+	upd, err := buildBlocklist(req, existing.Kind, client)
+	if err != nil {
+		return BlocklistView{}, err
+	}
+	if req.Refresh == "" {
+		upd.Refresh = existing.Refresh
+	}
+	var fetched []netip.Prefix
+	var sources []BlocklistSource
+	refetch := upd.Kind != "manual" && (!sameStrings(upd.Countries, existing.Countries) || upd.URL != existing.URL || upd.SignatureURL != existing.SignatureURL || upd.PublicKey != existing.PublicKey)
+	if refetch {
+		r, err := fetchListWith(ctx, upd.Kind, upd.Countries, upd.URL, fetchOptions{signatureURL: upd.SignatureURL, publicKey: upd.PublicKey})
+		if err != nil {
+			return BlocklistView{}, err
+		}
+		fetched, sources = r.nets, r.sources
+	}
+	before, beforeHealth := blocklistData(filepath.Join(s.paths.Dir, "lists"), *existing)
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
+		s.trustClientBy(next, client, actor, "")
+		for i := range next.Blocklists {
+			bl := &next.Blocklists[i]
+			if bl.ID != id {
+				continue
+			}
+			if bl.URL != existing.URL || !sameStrings(bl.Countries, existing.Countries) {
+				return false, errors.New("the blocklist changed while this edit was being prepared; reload it and try again")
+			}
+			bl.Name = upd.Name
+			if req.Enabled != nil {
+				bl.Enabled = *req.Enabled
+			}
+			switch bl.Kind {
+			case "manual":
+				now := time.Now().UTC()
+				nets, _ := blocklistData("", BlocklistSpec{Kind: "manual", Entries: upd.Entries})
+				bl.LastDiff = blocklistDiff(before, beforeHealth.Status == "ready", nets, now)
+				bl.Entries, bl.Count = upd.Entries, upd.Count
+			default:
+				bl.Countries, bl.URL, bl.Refresh = upd.Countries, upd.URL, upd.Refresh
+				bl.SignatureURL, bl.PublicKey = upd.SignatureURL, upd.PublicKey
+				if fetched != nil {
+					if err := stage(id, fetched); err != nil {
+						return false, fmt.Errorf("saving the list: %w", err)
+					}
+					now := time.Now().UTC()
+					bl.LastDiff = blocklistDiff(before, beforeHealth.Status == "ready", fetched, now)
+					bl.Count, bl.Refreshed, bl.Error, bl.Sources = len(fetched), now, "", sources
+					bl.LastAttempt, bl.Failures = now, 0
+				}
+			}
+			return false, nil
+		}
+		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	})
+	if err != nil {
+		return BlocklistView{}, err
+	}
+	return s.blocklistViewByID(ctx, id, client)
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// DeleteBlocklist removes a list and its cache.
+func (s *Service) DeleteBlocklist(ctx context.Context, id int, client string) error {
+	err := s.mutateGateway(ctx, func(old, next *Spec) (bool, error) {
+		for i, bl := range next.Blocklists {
+			if bl.ID == id {
+				next.Blocklists = append(next.Blocklists[:i], next.Blocklists[i+1:]...)
+				// Its own exceptions have nothing left to except from.
+				kept := next.Exceptions[:0]
+				for _, e := range next.Exceptions {
+					if e.Scope != "blocklist:"+strconv.Itoa(id) {
+						kept = append(kept, e)
+					}
+				}
+				next.Exceptions = kept
+				s.trustClient(next, client)
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	})
+	if err == nil {
+		_ = os.Remove(blocklistFile(filepath.Join(s.paths.Dir, "lists"), id)) // a cache of a list that no longer exists
+		forgetBlocklist(filepath.Join(s.paths.Dir, "lists"), id)
+	}
+	return err
+}
+
+// RefreshBlocklist fetches a fetched list again and reloads the table with
+// it. A failure keeps the list as it was, and says why on the list. A feed
+// that answers 304 to its validators, while the cache is healthy, records a
+// refresh without changing the cache or reloading anything.
+func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
+	cur, err := s.loadSpec()
+	if err != nil {
+		return err
+	}
+	var bl BlocklistSpec
+	found := false
+	for _, b := range cur.Blocklists {
+		if b.ID == id {
+			bl, found = b, true
+		}
+	}
+	switch {
+	case !found:
+		return fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	case bl.Kind == "manual":
+		return errors.New("a manual list is what you typed; there is nothing to fetch")
+	}
+	before, health := blocklistData(filepath.Join(s.paths.Dir, "lists"), bl)
+	opt := fetchOptions{signatureURL: bl.SignatureURL, publicKey: bl.PublicKey}
+	if bl.Kind == "feed" && health.Status == "ready" && len(bl.Sources) == 1 {
+		opt.etag, opt.lastModified = bl.Sources[0].ETag, bl.Sources[0].LastModified
+	}
+	r, err := fetchListWith(ctx, bl.Kind, bl.Countries, bl.URL, opt)
+	if err != nil {
+		s.recordBlocklistError(ctx, id, err)
+		return err
+	}
+	if r.unchanged {
+		return s.recordBlocklistUnchanged(ctx, bl, r.sources[0])
+	}
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
+		for i := range next.Blocklists {
+			b := &next.Blocklists[i]
+			if b.ID != id {
+				continue
+			}
+			if b.Kind != bl.Kind || b.URL != bl.URL || !sameStrings(b.Countries, bl.Countries) || b.SignatureURL != bl.SignatureURL || b.PublicKey != bl.PublicKey {
+				return false, errors.New("the blocklist changed while it was being fetched; refresh it again")
+			}
+			if err := stage(id, r.nets); err != nil {
+				return false, fmt.Errorf("saving the list: %w", err)
+			}
+			now := time.Now().UTC()
+			b.LastDiff = blocklistDiff(before, health.Status == "ready", r.nets, now)
+			b.Count, b.Refreshed, b.Error, b.Sources = len(r.nets), now, "", r.sources
+			b.LastAttempt, b.Failures = now, 0
+			return false, nil
+		}
+		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	})
+	if err != nil {
+		s.recordBlocklistError(ctx, id, err)
+	}
+	return err
+}
+
+// recordBlocklistUnchanged notes a 304: the cache and the loaded set stay,
+// only the fetch metadata moves.
+func (s *Service) recordBlocklistUnchanged(ctx context.Context, fetched BlocklistSpec, src BlocklistSource) error {
+	return s.writeBlocklistMetadata(ctx, fetched.ID, func(b *BlocklistSpec) bool {
+		if b.URL != fetched.URL || b.Kind != fetched.Kind {
+			return false
+		}
+		now := time.Now().UTC()
+		b.Refreshed, b.LastAttempt, b.Failures, b.Error = now, now, 0, ""
+		if len(b.Sources) == 1 {
+			b.Sources[0].Status, b.Sources[0].FetchedAt = src.Status, now
+		}
+		b.LastDiff = &BlocklistDiff{At: now, Baseline: true}
+		return true
+	})
+}
+
+// recordBlocklistError writes why a refresh failed onto the list, so the page
+// shows it where the list is, and counts the failure for the scheduler's
+// backoff. The list itself — its cache and what is loaded — is untouched.
+func (s *Service) recordBlocklistError(ctx context.Context, id int, cause error) {
+	if err := s.writeBlocklistMetadata(ctx, id, func(b *BlocklistSpec) bool {
+		msg := cause.Error()
+		if len(msg) > 300 {
+			msg = msg[:300] + "…"
+		}
+		b.Error, b.LastAttempt = msg, time.Now().UTC()
+		b.Failures++
+		return true
+	}); err != nil {
+		s.log.Error("recording a blocklist refresh failure", "list", id, "err", err)
+	}
+}
+
+// writeBlocklistMetadata changes fetch metadata in the spec without
+// rendering or reloading: metadata does not change desired enforcement.
+// Re-rendering here would make cache loss prevent its own failure from being
+// recorded, or accidentally replace a still-loaded last-good set. It shares
+// the host recovery lock and leaves an unresolved journal alone.
+func (s *Service) writeBlocklistMetadata(ctx context.Context, id int, edit func(*BlocklistSpec) bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		return err
+	}
+	defer unlockChange(lock)
+	if pending, readErr := readChange(s.paths.Dir); readErr == nil && !changeTerminal(pending.Phase) {
+		return nil
+	}
+	sp, err := s.loadSpec()
+	if err != nil {
+		return err
+	}
+	next := sp.clone()
+	for i := range next.Blocklists {
+		if next.Blocklists[i].ID != id {
+			continue
+		}
+		if !edit(&next.Blocklists[i]) {
+			return nil
+		}
+		b, err := json.MarshalIndent(next, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeNetworkFile(s.specPath(), append(b, '\n'), 0o600)
+	}
+	return nil
+}
+
+// StartBlocklistRefresh refreshes every enabled fetched list on its own
+// schedule (daily unless changed), checking every quarter hour, for as long as
+// ctx lives, and sweeps expired protection exceptions every half minute. The
+// first check is a minute after start, so a host that was down for days
+// catches up without the dashboard's own start-up waiting on the network.
+func (s *Service) StartBlocklistRefresh(ctx context.Context) {
+	go s.refreshLoop(ctx, time.Minute, blocklistRefreshInterval)
+	go s.expiryLoop(ctx, 30*time.Second)
+}
+
+// refreshLoop checks after first and then every interval, and returns when ctx
+// does.
+func (s *Service) refreshLoop(ctx context.Context, first, every time.Duration) {
+	timer := time.NewTimer(first)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			s.refreshStale(ctx, time.Now())
+			timer.Reset(every)
+		}
+	}
+}
+
+// refreshStale refreshes each enabled fetched list that its schedule makes
+// due, one at a time. A list that fails stays due, and is tried again after
+// a backoff that doubles with each failure up to its schedule.
+func (s *Service) refreshStale(ctx context.Context, now time.Time) {
+	sp, err := s.loadSpec()
+	if err != nil {
+		s.log.Error("reading the spec to refresh blocklists", "err", err)
+		return
+	}
+	for _, bl := range sp.Blocklists {
+		if ctx.Err() != nil {
+			return
+		}
+		if !refreshDue(bl, now) {
+			continue
+		}
+		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		err := s.RefreshBlocklist(fetchCtx, bl.ID)
+		cancel()
+		if err != nil {
+			s.log.Warn("blocklist refresh failed", "list", bl.ID, "name", bl.Name, "err", err)
+		}
+	}
+}
+
+// Blocklist reads one list as the page shows it.
+func (s *Service) Blocklist(ctx context.Context, id int, client string) (BlocklistView, error) {
+	return s.blocklistViewByID(ctx, id, client)
+}

@@ -1,0 +1,23 @@
+=== RUN   TestLiveDriftObservesCLIChangesWithoutRepairingNativeObjects
+--- PASS: TestLiveDriftObservesCLIChangesWithoutRepairingNativeObjects (0.12s)
+=== RUN   TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline
+    drift_repair_live_test.go:29: open testdata/gateway-ruleset-ufw.json: no such file or directory
+--- FAIL: TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline (0.07s)
+=== RUN   TestLiveShapingBatchLoadsAndReadsBack
+--- PASS: TestLiveShapingBatchLoadsAndReadsBack (0.52s)
+=== RUN   TestLiveShapingLeavesAClsactQueueAlone
+--- PASS: TestLiveShapingLeavesAClsactQueueAlone (0.31s)
+=== RUN   TestLiveShapingVerifiesEveryRequestedParameter
+--- PASS: TestLiveShapingVerifiesEveryRequestedParameter (0.31s)
+=== RUN   TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree
+--- PASS: TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree (0.09s)
+=== RUN   TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad
+    shaping_sqm_congestion_live_test.go:179: Congestion observations (local scope; no universal performance assertion): {"legacy":{"durationSeconds":5.016269489000024,"tcpFlows":4,"tcpBytes":[2823600,221544,2648392,221544],"throughputMbit":9.433432574499342,"udpSent":74,"udpReplies":74,"medianMillis":64.08823850006229,"p95Millis":89.94259499991131,"receivedDscp":[46]},"legacyPolicerKbit":10000,"scope":"two disposable namespaces; 10 Mbit/s HTB + 256000-byte FIFO bottleneck; four saturated TCP downloads marked DSCP 0/8/46/34 plus 46-marked UDP echo; 2s warmup + 5s samples per mode; no BBR change","sqm":{"durationSeconds":5.003872685000033,"tcpFlows":4,"tcpBytes":[1510264,356208,1495784,1492888],"throughputMbit":7.762218274744083,"udpSent":240,"udpReplies":240,"medianMillis":9.172072499950445,"p95Millis":22.657867999896553,"receivedDscp":[0]},"sqmKbit":9000,"sqmQueue":{"kind":"cake","dev":"","handle":"ca11:","parent":"","root":true,"options":{"ack-filter":"disabled","atm":"noatm","bandwidth":1125000,"diffserv":"diffserv3","flowmode":"dual-dsthost","fwmark":"0","ingress":true,"mpu":64,"nat":false,"overhead":22,"raw":false,"rtt":100000,"split_gso":true,"wash":true},"bytes":7265380,"packets":5042,"drops":416,"overlimits":6652,"requeues":0,"backlog":0}}
+--- PASS: TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad (14.66s)
+=== RUN   TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate
+--- PASS: TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate (1.31s)
+=== RUN   TestLiveSQMOwnershipRecoveryAndColdRestore
+--- PASS: TestLiveSQMOwnershipRecoveryAndColdRestore (0.97s)
+=== RUN   TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline
+--- PASS: TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline (0.39s)
+FAIL

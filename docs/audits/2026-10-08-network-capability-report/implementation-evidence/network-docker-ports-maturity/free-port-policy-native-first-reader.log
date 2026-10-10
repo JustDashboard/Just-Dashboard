@@ -1,0 +1,23 @@
+Fri Oct  9 18:18:59 UTC 2026
+working tree after 8af59d8b (loopback searches skip inbound policy)
+sudo -n env JD_PORT_POLICY_LIVE=1 jd-api.test -test.run ^TestLiveFreePortPolicyOnThisHost$ -test.v
+=== RUN   TestLiveFreePortPolicyOnThisHost
+    ports_reservations_live_test.go:20: source deployments  checked       0 active
+    ports_reservations_live_test.go:20: source previews     checked       21000–21999
+    ports_reservations_live_test.go:20: source ephemeral    checked       32768–60999
+    ports_reservations_live_test.go:20: source firewall     checked       ufw, 25 rules
+    ports_reservations_live_test.go:20: source gateway      checked       0 configured
+    ports_reservations_live_test.go:20: source provider     not_supplied  No provider adapter is configured, so ports a provider reserves or its firewall refuses are unknown.
+    ports_reservations_live_test.go:29: firewall passes over 11 ports; first: 80 ufw rule 4 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     80 ufw rule 4 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     443 ufw rule 5 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     3000 ufw rule 6 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5432 ufw rule 11 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5435 ufw rule 12 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     5439 ufw rule 13 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     8000 ufw rule 2 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:32:     8080 ufw rule 7 admits it from anywhere, so whatever binds it is reachable from there at once
+    ports_reservations_live_test.go:29: previews passes over 1000 ports; first: 21000 reserved for pull request previews' tailnet addresses (21000–21999)
+    ports_reservations_live_test.go:29: ephemeral passes over 28232 ports; first: 32768 inside the kernel's ephemeral range (32768–60999), which outgoing connections are given ports from
+--- PASS: TestLiveFreePortPolicyOnThisHost (1.02s)
+PASS

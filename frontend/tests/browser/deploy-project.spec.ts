@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import {
   deployment,
+  expectSaved,
   forkPullRequest,
   healthyOperations,
   json,
@@ -11,6 +12,7 @@ import {
   projectPullRequests,
   pullRequest,
   run,
+  saveSettings,
   user,
 } from "./deploy-fixture"
 import type { DeploymentRuntimeServices } from "../../src/lib/types"
@@ -202,6 +204,20 @@ test("the deployments tab reports delivery figures with their basis and window",
   await expect(page.getByText("mean over 2 recovered failures", { exact: true })).toBeVisible()
   await expect(page.getByText(/Health gate failed/)).toBeVisible()
   await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(31)
+  // Release time is drawn on the same days as the releases, against a scale
+  // it names: the slowest day at the top and the window's median ruled across.
+  const durations = page.getByTestId("insights-durations")
+  await expect(durations.locator("li")).toHaveCount(31)
+  await expect(page.getByText("median 1m 35s", { exact: true })).toBeVisible()
+  await expect(durations.locator("li").first()).toHaveAttribute(
+    "title",
+    "2026-08-04: 1m 35s, median of 1 successful release",
+  )
+  await expect(durations.locator("li").nth(1)).toHaveAttribute(
+    "title",
+    "2026-08-05: no successful release",
+  )
+  await expect(page.getByText(/^3 failed releases · last /)).toBeVisible()
 
   // A reason for failing narrows the list below to the failed runs, and each
   // status chip counts what it would show.
@@ -218,6 +234,7 @@ test("the deployments tab reports delivery figures with their basis and window",
   await page.getByRole("option", { name: "Last 7 days" }).click()
   await expect(page.getByText("67%", { exact: true })).toBeVisible()
   await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(8)
+  await expect(page.getByTestId("insights-durations").locator("li")).toHaveCount(8)
 
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 })
@@ -226,6 +243,61 @@ test("the deployments tab reports delivery figures with their basis and window",
     ).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`deployments-${width}.png`), fullPage: true })
   }
+})
+
+test("a window nothing succeeded in draws no release time, and a lone cause no bar", async ({
+  page,
+}) => {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/insights**", (route) =>
+    json(route, {
+      projectId: 7,
+      windowDays: 30,
+      generatedAt: now,
+      runs: 2,
+      succeeded: 0,
+      failed: 2,
+      rolledBack: 0,
+      cancelled: 0,
+      successRate: 0,
+      failureStreak: 2,
+      medianDurationSeconds: 0,
+      p95DurationSeconds: 0,
+      deploysPerWeek: 0,
+      meanRecoverySeconds: 0,
+      recoveredFailures: 0,
+      lastFailureAt: now,
+      daily: Array.from({ length: 31 }, (_, index) => ({
+        date: `2026-08-${String(1 + index).padStart(2, "0")}`,
+        succeeded: 0,
+        failed: index === 30 ? 2 : 0,
+        cancelled: 0,
+        medianDurationSeconds: 0,
+      })),
+      topFailures: [{ code: "build_failed", count: 2 }],
+    }),
+  )
+  await page.goto("/deploy/7/deployments")
+  await expect(page.getByTestId("insights-daily").locator("li")).toHaveCount(31)
+  // A day with no successful release has no duration: thirty-one of them are
+  // not a chart of zeros, and the reading says why it is empty.
+  await expect(page.getByTestId("insights-durations")).toHaveCount(0)
+  await expect(page.getByText("no release succeeded in this window", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("no failure followed by a success yet", { exact: true }),
+  ).toBeVisible()
+
+  // One cause is every failure, so it is named with its count and still
+  // narrows the list — a full bar beside nothing compared nothing.
+  const failures = page.getByRole("heading", { name: "Why releases failed" }).locator("../..")
+  await expect(failures.locator("[data-slot=bar-list]")).toHaveCount(0)
+  const cause = failures.getByRole("button", { name: "Show the failed deployments" })
+  await expect(cause).toHaveText(/Build failed\s*×2/)
+  await cause.click()
+  await expect(page.getByRole("button", { name: /^Failed/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
 })
 
 // The base fixture's single run is still mid-flight and carries no release
@@ -485,7 +557,9 @@ test("a legacy project's commit rollback uses ordinary confirmation", async ({ p
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/86$/)
 })
 
-test("the console tab opens a shell inside the live release container", async ({ page }) => {
+test("the console tab opens the default shell with only actions and fullscreen", async ({
+  page,
+}, testInfo) => {
   const runtime: DeploymentRuntimeServices = {
     status: "available",
     observedAt: now,
@@ -511,12 +585,38 @@ test("the console tab opens a shell inside the live release container", async ({
     ],
   }
   await mockProject(page, { normalized: true, runtime })
-  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/exec/, () => {})
-  await page.goto("/deploy/7/console")
-  await expect(page.getByText("jd-e12-r20 · deployment shell")).toBeVisible()
-  await page.getByRole("combobox", { name: "Console container" }).click()
-  await page.getByRole("option", { name: "jd-e12-r19" }).click()
-  await expect(page.getByText("jd-e12-r19 · deployment shell")).toBeVisible()
+  const socketUrls: URL[] = []
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/exec/, (socket) => {
+    socketUrls.push(new URL(socket.url()))
+  })
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    socketUrls.length = 0
+    await page.goto("/deploy/7/console")
+    await expect(page.getByText("jd-e12-r20 · deployment shell")).toBeVisible()
+    await expect
+      .poll(() => socketUrls.at(-1)?.pathname)
+      .toBe("/api/v1/docker/containers/abc123/exec")
+    expect(socketUrls.at(-1)?.searchParams.has("cmd")).toBe(false)
+    expect(socketUrls.at(-1)?.searchParams.has("user")).toBe(false)
+    await expect(page.getByRole("combobox", { name: "Shell", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("combobox", { name: "Run as", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("combobox", { name: "Console container" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^Search scrollback/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Send a saved command" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Terminal settings" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Terminal actions" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Fullscreen", exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`console-${width}.png`), fullPage: true })
+  }
+
+  await page.getByRole("button", { name: "Terminal actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Save scrollback" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Fullscreen", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Leave fullscreen (Esc)" })).toBeVisible()
+  await page.getByRole("button", { name: "Leave fullscreen (Esc)" }).click()
+  await expect(page.getByRole("button", { name: "Fullscreen", exact: true })).toBeVisible()
 
   await mockProject(page, {
     normalized: true,
@@ -980,8 +1080,8 @@ test("a setting saved on its own page marks that page in the rail without a relo
 
   const runtimeCard = page.getByRole("form", { name: "Runtime" })
   await runtimeCard.getByLabel("Memory limit").fill("512")
-  await runtimeCard.getByRole("button", { name: "Save" }).click()
-  await expect(page.getByText("Runtime settings saved")).toBeVisible()
+  await saveSettings(page)
+  await expectSaved(page)
   await expect(rail.getByRole("img", { name: "Changes pending" })).toBeVisible({ timeout: 15_000 })
 })
 

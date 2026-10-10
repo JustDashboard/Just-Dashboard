@@ -1,0 +1,38 @@
+{
+  "base": "3e0c20161b721de9f769a13439b9813f3f7dfed3",
+  "head": "b1840c2fc2e52d01e80618a09ed4c33d94694c25",
+  "fixtureCommit": "1d63d9646625846043da8345e149a024c4d36c0e",
+  "raceBinary": {
+    "path": "out/native-v6-assembly/netx-auto.test",
+    "sha256": "63c41e0cbdab33b18f89a96b1fdbe80282c9c0e71df5d3d69a7a371ea4bda0cf"
+  },
+  "files": {
+    "backend/internal/netx/native_manager_auto_live_test.go": {
+      "sha256": "543f7f1cc53be196ad0caabac013bc4d59073ace26ec495334d1c5f265b8df6f"
+    },
+    "backend/internal/netx/native_manager_read.go": {
+      "sha256": "97a1cb72e4669345fe57f62643fb1866e04a68b562b168e8a7656943d31aa053",
+      "matchesProductionBase": true
+    },
+    "backend/internal/netx/native_manager_nm_loaded.go": {
+      "sha256": "234323fffd9d8b27d145a694c901109497147271d5f2d760c6af1fc0c83b2935",
+      "matchesProductionBase": true
+    },
+    "backend/internal/netx/native_manager_profile_guard.go": {
+      "sha256": "c5f34255b7cc12df15a4925ae967d4e1bca86792a06ac0470dd2dae314f8b03c",
+      "matchesProductionBase": true
+    },
+    "backend/internal/netx/native_manager_recovery.go": {
+      "sha256": "cb74c296df28a805c7da7bfb16cd7bf1ff5811547ee9b7400a2367121f35e9fb",
+      "matchesProductionBase": true
+    },
+    "backend/internal/netx/native_manager_strategy.go": {
+      "sha256": "35e387f42216deba435ebdf77a9095aa394eb496ad7d129dcd267e5968c96a98",
+      "matchesProductionBase": true
+    },
+    "backend/internal/netx/native_manager_epoch.go": {
+      "sha256": "a6d17161df8150c6242fafd6cd36699f1e6ed13b1478df890268c2244f28c122",
+      "matchesProductionBase": true
+    }
+  }
+}

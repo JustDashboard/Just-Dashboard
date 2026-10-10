@@ -29,6 +29,9 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{name}/pages/{page}", s.handle(s.handleSitePageGet))
 	// The size of the cache and where it is; nothing of what is in it.
 	r.Method(http.MethodGet, "/{name}/cache", s.handle(s.handleSiteCacheGet))
+	// The site's controls as its file sets them, which the site read
+	// already shows every account.
+	r.Method(http.MethodGet, "/{name}/policy", s.handle(s.handleSitePolicy))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// Preview renders and touches nothing, but it lives inside the
@@ -41,6 +44,9 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/preflight", s.handle(s.handleSitePreflight))
 		r.Method(http.MethodPost, "/", s.handle(s.handleSiteApply))
 		r.Method(http.MethodPut, "/{name}/pages/{page}", s.handle(s.handleSitePagePut))
+		// Measuring sends requests to the site's application through this
+		// nginx, as the request tester does.
+		r.Method(http.MethodPost, "/{name}/controls/verify", s.handle(s.handleSiteControlsVerify))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{name}", s.handle(s.handleSiteDelete))
 			// Maintenance takes the site away from its visitors, the
@@ -264,6 +270,13 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 			})
 			return httpx.Err(http.StatusConflict, "name_conflict", proxysvc.ConflictSummary(res.Conflicts))
 		}
+		var refused *proxysvc.SiteLoadRefusedError
+		if errors.As(err, &refused) {
+			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+				"result": "rolled-back", "bindError": refused.BindError,
+			})
+			return httpx.Err(http.StatusConflict, "load_refused", refused.Error())
+		}
 		return mapProxyError(err)
 	}
 	detail := map[string]any{
@@ -272,6 +285,9 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	if res.ReloadError != "" {
 		detail["reloadError"] = res.ReloadError
+	}
+	if res.LoadProof != nil {
+		detail["load"] = res.LoadProof.State
 	}
 	if len(res.Conflicts) > 0 {
 		detail["conflicts"] = res.Conflicts
@@ -457,4 +473,42 @@ func (s *Server) rememberCertbotEmail(ctx context.Context, email string) {
 	if err := s.Store.SetSetting(ctx, certbotEmailKey, email); err != nil {
 		s.Log.Warn("could not remember the certbot email", "err", err)
 	}
+}
+
+// handleSitePolicy is a site's request limits, caching and HTTP versions as
+// its file sets them, and whether the build nginx runs has what each needs.
+func (s *Server) handleSitePolicy(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	policy, err := s.modules.proxy.SitePolicy(ctx, httpx.URLParam(r, "name"))
+	if err != nil {
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	}
+	httpx.JSON(w, http.StatusOK, policy)
+	return nil
+}
+
+// handleSiteControlsVerify measures a site's controls against this nginx on
+// loopback: a bounded set of requests to its application, audited as the
+// request tester's are.
+func (s *Server) handleSiteControlsVerify(w http.ResponseWriter, r *http.Request) error {
+	var req proxysvc.VerifyOptions
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	name := httpx.URLParam(r, "name")
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	vhosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "proxy.site.controls.verify", name, map[string]any{"path": req.Path, "asset": req.Asset})
+	out, err := s.modules.proxy.VerifySiteControls(ctx, name, req, vhosts)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "proxy.site.controls.verify", name, map[string]any{"path": req.Path, "asset": req.Asset, "requests": out.Requests})
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }

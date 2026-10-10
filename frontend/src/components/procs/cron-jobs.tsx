@@ -14,18 +14,23 @@ import {
   type CronPreset,
 } from "@/lib/cron"
 import { appendJob, removeJob, replaceJob, toggleJob, type JobEdit } from "@/lib/crontab"
-import { relativeTime, timestamp } from "@/lib/format"
+import { timestamp } from "@/lib/format"
+import { cronProgram } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import type { ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
+import { SidePanel, SidePanelFooter } from "@/components/side-panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -47,22 +52,31 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { CronJobSheet, WeekStrip } from "@/components/procs/cron-job-sheet"
+import { Countdown } from "@/components/procs/schedule-band"
+import { cronRowKeys } from "@/components/procs/row-identity"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
 /**
  * One account's crontab as a list of jobs you can act on, rather than a
- * file you edit. Each row says what the schedule means and when it fires
- * next; the controls disable, edit and remove one job by rewriting only its
- * own lines (`lib/crontab.ts`) and sending the file back. The text editor
- * is still there, one button away, for the crontab that does something the
- * builder cannot say.
+ * file you edit. Each row says what the schedule means and counts down to
+ * when it fires next; the controls disable, edit and remove one job by
+ * rewriting only its own lines (`lib/crontab.ts`) and sending the file back.
+ * The text editor is still there, one button away, for the crontab that does
+ * something the builder cannot say.
  *
  * The crontab is polled by the page rather than here, because the page's
- * readings — how many jobs, what fires next — are made of it too. Each job
- * is drawn as the program its command starts (§14): `docker system prune` is
- * Docker's, `certbot renew` is Let's Encrypt's, and a script of the
- * operator's own keeps the clock.
+ * band — what runs in the next day — is made of it too. Each job is drawn as
+ * the program it runs (§14), read past its guards: `cd / && run-parts …` is
+ * run-parts', `docker system prune` Docker's, and a script of the
+ * operator's own keeps the clock. The head counts the jobs and the disabled
+ * as chips that narrow the table, where the Cron jobs tile used to count them.
+ *
+ * A row opens the job's sheet (`cron-job-sheet.tsx`); Add job and Edit open
+ * the job editor, a sheet as well, which draws the week the schedule being
+ * written makes as it is written.
  */
 export function CronJobsPanel({
   user,
@@ -72,6 +86,9 @@ export function CronJobsPanel({
   confirm,
   adding,
   onAddingChange,
+  open,
+  onOpen,
+  cron,
 }: {
   user: string
   users: string[]
@@ -80,6 +97,10 @@ export function CronJobsPanel({
   confirm: ConfirmFn
   adding: boolean
   onAddingChange: (open: boolean) => void
+  /** The job whose sheet is open, as its lane key (`cron:<line>`). */
+  open: string | null
+  onOpen: (key: string | null) => void
+  cron?: ServiceLogSource
 }) {
   const { can } = useAuth()
   // The draft remembers whose crontab it is, so switching accounts cannot
@@ -88,6 +109,7 @@ export function CronJobsPanel({
   const draft = draftFor?.user === user ? draftFor.text : null
   const setDraft = (text: string | null) => setDraftFor(text === null ? null : { user, text })
   const [editing, setEditing] = useSessionState<CronJob | null>("processes.cron.editing", null)
+  const [shown, setShown] = useSessionState<"" | "enabled" | "disabled">("processes.cron.shown", "")
   const [saving, setSaving] = useState(false)
 
   const save = async (content: string, done: string, confirmText?: string) => {
@@ -105,8 +127,30 @@ export function CronJobsPanel({
   }
 
   const raw = crontab.data?.raw ?? ""
-  const jobs = crontab.data?.jobs ?? []
+  const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
+  const disabled = jobs.filter((job) => job.disabled).length
+  const listed = shown ? jobs.filter((job) => job.disabled === (shown === "disabled")) : jobs
+  const identities = cronRowKeys(jobs)
+  const rowKeys = new Map(jobs.map((job, index) => [job, identities[index]]))
+  const arrived = useArrivals(identities)
+  const opened = open ? jobs.find((job) => `cron:${job.line}` === open) : undefined
   const admin = can("system.admin")
+
+  const actions = (job: CronJob) => ({
+    onToggle: () =>
+      void save(
+        toggleJob(raw, job),
+        `${job.command} ${job.disabled ? "enabled" : "disabled"}`,
+      ).catch(() => undefined),
+    onEdit: () => {
+      onOpen(null)
+      setEditing(job)
+    },
+    onRemove: async (phrase: string) => {
+      await save(removeJob(raw, job), "Cron job removed", phrase)
+      if (open === `cron:${job.line}`) onOpen(null)
+    },
+  })
 
   return (
     <>
@@ -115,12 +159,6 @@ export function CronJobsPanel({
           title="Cron jobs"
           actions={
             <>
-              {admin && (
-                <Button size="sm" onClick={() => onAddingChange(true)}>
-                  <Plus className="size-3.5" />
-                  Add job
-                </Button>
-              )}
               <Select value={user} onValueChange={onUserChange}>
                 <SelectTrigger size="sm" className="w-40" aria-label="Crontab account">
                   <SelectValue />
@@ -137,14 +175,46 @@ export function CronJobsPanel({
                 </SelectContent>
               </Select>
               {admin && draft === null && crontab.data && (
-                <Button size="xs" variant="ghost" onClick={() => setDraft(raw)}>
-                  <Pencil className="size-3" />
+                <Button size="sm" variant="ghost" onClick={() => setDraft(raw)}>
+                  <Pencil className="size-3.5" />
                   Edit as text
+                </Button>
+              )}
+              {admin && (
+                <Button size="sm" onClick={() => onAddingChange(true)}>
+                  <Plus className="size-3.5" />
+                  Add job
                 </Button>
               )}
             </>
           }
-        />
+        >
+          {jobs.length > 0 && draft === null && (
+            <ChipStrip aria-label="Job state" className="mr-auto">
+              <FilterChip selected={shown === ""} onClick={() => setShown("")}>
+                All <ChipCount>{jobs.length}</ChipCount>
+              </FilterChip>
+              {disabled > 0 && (
+                <>
+                  <FilterChip
+                    selected={shown === "enabled"}
+                    onClick={() => setShown(shown === "enabled" ? "" : "enabled")}
+                  >
+                    <span aria-hidden className="size-1.5 rounded-full bg-success" />
+                    Enabled <ChipCount>{jobs.length - disabled}</ChipCount>
+                  </FilterChip>
+                  <FilterChip
+                    selected={shown === "disabled"}
+                    onClick={() => setShown(shown === "disabled" ? "" : "disabled")}
+                  >
+                    <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/50" />
+                    Disabled <ChipCount>{disabled}</ChipCount>
+                  </FilterChip>
+                </>
+              )}
+            </ChipStrip>
+          )}
+        </PanelHeader>
         <PanelBody flush={draft === null}>
           {crontab.loading && !crontab.data && <LoadingRows rows={3} className="pt-3" />}
           {crontab.error && !crontab.data && <ErrorState error={crontab.error} className="mt-3" />}
@@ -155,6 +225,8 @@ export function CronJobsPanel({
                   No cron jobs for {user}.
                   {admin && " Add one, or paste a crontab with Edit as text."}
                 </EmptyNote>
+              ) : listed.length === 0 ? (
+                <EmptyNote>No {shown} jobs.</EmptyNote>
               ) : (
                 <Table containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto">
                   <TableHeader className={stickyTableHeader}>
@@ -167,20 +239,15 @@ export function CronJobsPanel({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {jobs.map((job) => (
+                    {listed.map((job) => (
                       <CronJobRow
-                        key={`${job.line}:${job.raw}`}
+                        key={`${user}:${rowKeys.get(job)}`}
                         job={job}
+                        arrived={arrived.has(rowKeys.get(job)!)}
                         admin={admin}
                         confirm={confirm}
-                        onToggle={() =>
-                          void save(
-                            toggleJob(raw, job),
-                            `${job.command} ${job.disabled ? "enabled" : "disabled"}`,
-                          ).catch(() => undefined)
-                        }
-                        onEdit={() => setEditing(job)}
-                        onRemove={(phrase) => save(removeJob(raw, job), "Cron job removed", phrase)}
+                        onOpen={() => onOpen(`cron:${job.line}`)}
+                        {...actions(job)}
                       />
                     ))}
                   </TableBody>
@@ -252,25 +319,38 @@ export function CronJobsPanel({
         )}
       </Panel>
 
-      {(adding || editing !== null) && (
-        <CronJobDialog
-          job={editing}
-          onClose={() => {
-            onAddingChange(false)
-            setEditing(null)
-            forgetSessionState("processes.cron.job.")
-          }}
-          onSave={async (edit) => {
-            const next = editing ? replaceJob(raw, editing, edit) : appendJob(raw, edit)
-            await save(next, editing ? "Cron job updated" : "Cron job added")
-          }}
-        />
-      )}
+      <CronJobSheet
+        job={opened}
+        owner={`${user}'s crontab`}
+        verbs={opened ? cronJobVerbs({ job: opened, admin, confirm, ...actions(opened) }) : []}
+        cron={cron}
+        onOpenChange={(next) => !next && onOpen(null)}
+      />
+
+      <CronJobEditor
+        open={adding || editing !== null}
+        job={editing}
+        user={user}
+        onClose={() => {
+          onAddingChange(false)
+          setEditing(null)
+          forgetSessionState("processes.cron.job.")
+        }}
+        onSave={async (edit) => {
+          const next = editing ? replaceJob(raw, editing, edit) : appendJob(raw, edit)
+          await save(next, editing ? "Cron job updated" : "Cron job added")
+        }}
+      />
     </>
   )
 }
 
-function CronJobRow({
+/**
+ * Every verb on one job, for its row and its sheet alike: Disable or Enable
+ * and Edit are pressed daily and sit inline, Copy and Remove are words in the
+ * menu.
+ */
+export function cronJobVerbs({
   job,
   admin,
   confirm,
@@ -284,67 +364,72 @@ function CronJobRow({
   onToggle: () => void
   onEdit: () => void
   onRemove: (phrase: string) => Promise<void>
+}): Verb[] {
+  const list: Verb[] = []
+  if (admin) {
+    list.push(
+      job.disabled
+        ? { key: "toggle", label: "Enable", icon: Play, inline: true, run: onToggle }
+        : { key: "toggle", label: "Disable", icon: Pause, inline: true, run: onToggle },
+    )
+    list.push({ key: "edit", label: "Edit", icon: Pencil, inline: true, run: onEdit })
+  }
+  list.push({
+    key: "copy",
+    label: "Copy command",
+    icon: Copy,
+    run: () => void copyText(job.command, "Command copied"),
+  })
+  if (admin) {
+    list.push({
+      key: "remove",
+      label: "Remove",
+      icon: Trash,
+      danger: true,
+      run: () =>
+        confirm({
+          title: "Remove cron job",
+          confirmLabel: "Remove",
+          description: (
+            <p>
+              <span className="font-mono">{job.schedule}</span> <b>{job.command}</b> is removed from
+              the crontab.
+            </p>
+          ),
+          action: onRemove,
+        }),
+    })
+  }
+  return list
+}
+
+function CronJobRow({
+  job,
+  arrived,
+  admin,
+  confirm,
+  onOpen,
+  onToggle,
+  onEdit,
+  onRemove,
+}: {
+  job: CronJob
+  arrived: boolean
+  admin: boolean
+  confirm: ConfirmFn
+  onOpen: () => void
+  onToggle: () => void
+  onEdit: () => void
+  onRemove: (phrase: string) => Promise<void>
 }) {
   const next = useMemo(() => (job.disabled ? null : nextCronRun(job.schedule)), [job])
-  const verbs = useMemo<Verb[]>(() => {
-    const list: Verb[] = []
-    if (admin) {
-      list.push(
-        job.disabled
-          ? {
-              key: "enable",
-              label: "Enable",
-              icon: Play,
-              inline: true,
-              run: onToggle,
-            }
-          : {
-              key: "disable",
-              label: "Disable",
-              icon: Pause,
-              inline: true,
-              run: onToggle,
-            },
-      )
-      list.push({
-        key: "edit",
-        label: "Edit",
-        icon: Pencil,
-        inline: true,
-        run: onEdit,
-      })
-    }
-    list.push({
-      key: "copy",
-      label: "Copy command",
-      icon: Copy,
-      run: () => void copyText(job.command, "Command copied"),
-    })
-    if (admin) {
-      list.push({
-        key: "remove",
-        label: "Remove",
-        icon: Trash,
-        danger: true,
-        run: () =>
-          confirm({
-            title: "Remove cron job",
-            confirmLabel: "Remove",
-            description: (
-              <p>
-                <span className="font-mono">{job.schedule}</span> <b>{job.command}</b> is removed
-                from the crontab.
-              </p>
-            ),
-            action: onRemove,
-          }),
-      })
-    }
-    return list
-  }, [job, admin, confirm, onToggle, onEdit, onRemove])
+  const verbs = useMemo(
+    () => cronJobVerbs({ job, admin, confirm, onToggle, onEdit, onRemove }),
+    [job, admin, confirm, onToggle, onEdit, onRemove],
+  )
 
   return (
-    <TableRow className="group">
+    <TableRow className={cn("group", arrived && "animate-rise")} onActivate={onOpen}>
       <TableCell className="whitespace-normal">
         <div className="min-w-44">
           <p className="font-mono whitespace-nowrap">{job.schedule}</p>
@@ -354,7 +439,9 @@ function CronJobRow({
       <TableCell className="hidden md:table-cell">
         {next ? (
           <>
-            <p>{relativeTime(next.toISOString())}</p>
+            <p className="numeric">
+              <Countdown at={next.getTime()} />
+            </p>
             <p className="text-hint text-muted-foreground">{timestamp(next.toISOString())}</p>
           </>
         ) : (
@@ -364,12 +451,12 @@ function CronJobRow({
         )}
       </TableCell>
       <TableCell className="whitespace-normal">
-        <CommandCell command={job.command} comment={job.comment} />
+        <CommandCell command={job.command} comment={job.comment} onOpen={onOpen} />
       </TableCell>
       <TableCell>
         <Status
           state={job.disabled ? "inactive" : "active"}
-          label={job.disabled ? "disabled" : "active"}
+          label={job.disabled ? "disabled" : "enabled"}
         />
       </TableCell>
       <TableCell>
@@ -380,16 +467,35 @@ function CronJobRow({
 }
 
 /**
- * A cron line's command, drawn as the program it starts where that is a
+ * A cron line's command, drawn as the program it runs where that is a
  * product, with the note above the line under it. Shared with the system
- * cron files on the Scheduled page, so a job is one shape wherever it lives.
+ * cron files on the Scheduled page, so a job is one shape wherever it lives;
+ * where it opens a sheet, the command is the button a keyboard reaches.
  */
-export function CommandCell({ command, comment }: { command: string; comment?: string }) {
+export function CommandCell({
+  command,
+  comment,
+  onOpen,
+}: {
+  command: string
+  comment?: string
+  onOpen?: () => void
+}) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <ProductLogo id={programProduct(command)} size="sm" fallback={Clock} />
+      <ProductLogo id={programProduct(cronProgram(command).segment)} size="sm" fallback={Clock} />
       <div className="min-w-0">
-        <p className="font-mono text-xs break-all">{command}</p>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="text-left font-mono text-xs break-all hover:underline"
+          >
+            {command}
+          </button>
+        ) : (
+          <p className="font-mono text-xs break-all">{command}</p>
+        )}
         {comment && <p className="text-hint text-muted-foreground">{comment}</p>}
       </div>
     </div>
@@ -398,11 +504,6 @@ export function CommandCell({ command, comment }: { command: string; comment?: s
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
-/**
- * A schedule built from a preset, or typed. The expression the builder
- * writes is shown in words with its next three runs before it is saved, so
- * "every day at 3" and "at 3 every day" cannot drift apart.
- */
 /** What an existing job's schedule looks like in the builder's fields. */
 function fieldsOf(job: CronJob | null) {
   const preset: CronPreset = job ? presetFor(job.schedule) : "daily"
@@ -417,17 +518,79 @@ function fieldsOf(job: CronJob | null) {
   return out
 }
 
-function CronJobDialog({
+/** The editor's presets as the words on its toggles, shorter than the list's. */
+const PRESET_WORDS: Record<CronPreset, string> = {
+  minute: "Every minute",
+  "5min": "5 min",
+  "15min": "15 min",
+  hourly: "Hourly",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+  reboot: "At boot",
+  custom: "Custom",
+}
+
+/**
+ * Adding or editing one job, as a sheet: when it runs, what it runs, and a
+ * picture of the week that schedule makes, drawn as the fields change — so
+ * "every day at 3" and "at 3 every day" cannot drift apart, and a custom
+ * expression that fires every minute of a working day is seen as a block
+ * before it is saved. The command is drawn as the program it starts while
+ * it is typed, as its row will be.
+ *
+ * It was a dialog with a select for the frequency and a line of three dates
+ * under the fields; the frequency is a row of toggles now, since nine choices
+ * are read faster laid out than opened.
+ */
+function CronJobEditor({
+  open,
   job,
+  user,
+  onClose,
+  onSave,
+}: {
+  open: boolean
+  job: CronJob | null
+  user: string
+  onClose: () => void
+  onSave: (edit: JobEdit) => Promise<void>
+}) {
+  return (
+    <SidePanel
+      open={open}
+      onOpenChange={(next) => !next && onClose()}
+      title={job ? "Edit cron job" : "Add cron job"}
+      description={`A schedule and the command cron runs on it as ${user}`}
+      width="md"
+      bodyClassName="p-5"
+    >
+      {open && (
+        <CronJobForm
+          key={job ? job.line : "new"}
+          job={job}
+          user={user}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      )}
+    </SidePanel>
+  )
+}
+
+function CronJobForm({
+  job,
+  user,
   onClose,
   onSave,
 }: {
   job: CronJob | null
+  user: string
   onClose: () => void
   onSave: (edit: JobEdit) => Promise<void>
 }) {
   // Every field starts from the job being edited and is kept for the tab
-  // until the dialog is closed, so a walk to the Files page for the exact
+  // until the editor is closed, so a walk to the Files page for the exact
   // path of a script comes back to the half-written job.
   const [initial] = useState(() => fieldsOf(job))
   const draft = `processes.cron.job.${job ? job.line : "new"}`
@@ -459,9 +622,10 @@ function CronJobDialog({
     }
   }, [preset, hh, mm, weekday, monthDay, custom])
 
-  const valid = isValidCron(expression) && command.trim().length > 0
+  const validSchedule = isValidCron(expression)
+  const valid = validSchedule && command.trim().length > 0
   const previews = useMemo(() => {
-    if (!isValidCron(expression)) return []
+    if (!validSchedule) return []
     const out: Date[] = []
     let from = new Date()
     for (let i = 0; i < 3; i++) {
@@ -471,7 +635,8 @@ function CronJobDialog({
       from = next
     }
     return out
-  }, [expression])
+  }, [expression, validSchedule])
+  const program = cronProgram(command)
 
   const submit = async () => {
     setBusy(true)
@@ -491,41 +656,33 @@ function CronJobDialog({
   }
 
   return (
-    <Modal
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={job ? "Edit cron job" : "Add cron job"}
-      description="A schedule and the command cron runs on it"
-      size="md"
-      footer={
-        <>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button size="sm" disabled={!valid || busy} onClick={() => void submit()}>
-            {busy ? "Saving…" : job ? "Save" : "Add job"}
-          </Button>
-        </>
-      }
+    <form
+      id="cron-job-form"
+      className="space-y-8"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (valid && !busy) void submit()
+      }}
     >
-      <div className="space-y-4">
-        <Field label="Runs" htmlFor="cron-preset">
-          <Select value={preset} onValueChange={(v) => setPreset(v as CronPreset)}>
-            <SelectTrigger id="cron-preset" size="sm" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CRON_PRESETS.map((p) => (
-                <SelectItem key={p.key} value={p.key}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+      <FormSection title="When">
+        <ToggleGroup
+          type="single"
+          value={preset}
+          onValueChange={(next) => next && setPreset(next as CronPreset)}
+          variant="outline"
+          size="sm"
+          aria-label="Runs"
+          className="flex w-full flex-wrap justify-start gap-1 *:rounded-md! *:border-l!"
+        >
+          {CRON_PRESETS.map((p) => (
+            <ToggleGroupItem key={p.key} value={p.key} title={p.label} className="px-2.5 text-hint">
+              {PRESET_WORDS[p.key]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         {(preset === "daily" || preset === "weekly" || preset === "monthly") && (
           <FieldRow>
-            <Field label="At" htmlFor="cron-time" hint="Server time, 24-hour clock.">
+            <Field label="At" htmlFor="cron-time" hint="The server's clock.">
               <Input
                 id="cron-time"
                 type="time"
@@ -584,19 +741,44 @@ function CronJobDialog({
             />
           </Field>
         )}
+        <div data-slot="schedule-preview" className="space-y-3">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="font-mono text-xs">{expression || "—"}</span>
+            <span className="text-hint text-muted-foreground">
+              {expression ? describeCron(expression) : "Choose how often it runs"}
+            </span>
+          </div>
+          {validSchedule && preset !== "reboot" && <WeekStrip schedule={expression} />}
+          {previews.length > 0 && (
+            <p className="text-hint text-muted-foreground">
+              Next: {previews.map((d) => timestamp(d.toISOString())).join(" · ")}
+            </p>
+          )}
+        </div>
+      </FormSection>
+
+      <FormSection title="What">
         <Field
           label="Command"
           htmlFor="cron-command"
-          hint="Run by /bin/sh as this account, with cron's minimal PATH. Use absolute paths."
+          hint={`Run by /bin/sh as ${user}, with cron's minimal PATH. Use absolute paths.`}
         >
-          <Input
-            id="cron-command"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            placeholder="/usr/local/bin/backup >> /var/log/backup.log 2>&1"
-            className="font-mono"
-            spellCheck={false}
-          />
+          <div className="flex items-center gap-2">
+            <ProductLogo
+              id={programProduct(program.segment)}
+              size="sm"
+              fallback={Clock}
+              className="size-9"
+            />
+            <Input
+              id="cron-command"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="/usr/local/bin/backup >> /var/log/backup.log 2>&1"
+              className="font-mono"
+              spellCheck={false}
+            />
+          </div>
         </Field>
         <Field
           label="Note"
@@ -618,23 +800,21 @@ function CronJobDialog({
             onCheckedChange={setEnabled}
           />
         </OptionList>
+      </FormSection>
 
-        <div className="space-y-1.5">
-          <p className="eyebrow">Schedule</p>
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="font-mono text-xs">{expression || "—"}</span>
-            <span className="text-hint text-muted-foreground">
-              {expression ? describeCron(expression) : "Choose how often it runs"}
-            </span>
-          </div>
-          {previews.length > 0 && (
-            <p className="text-hint text-muted-foreground">
-              <Clock className="mr-1 inline size-3 align-[-2px]" />
-              Next: {previews.map((d) => timestamp(d.toISOString())).join(" · ")}
-            </p>
-          )}
-        </div>
-      </div>
-    </Modal>
+      <SidePanelFooter>
+        {previews[0] && enabled && (
+          <span className="mr-auto text-hint text-muted-foreground">
+            First run <Countdown at={previews[0].getTime()} />
+          </span>
+        )}
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" form="cron-job-form" size="sm" disabled={!valid || busy}>
+          {busy ? "Saving…" : job ? "Save" : "Add job"}
+        </Button>
+      </SidePanelFooter>
+    </form>
   )
 }

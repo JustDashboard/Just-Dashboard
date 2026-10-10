@@ -1,0 +1,341 @@
+{
+  "at": "2026-10-10T01:14:21Z",
+  "bootId": "3097f574-96cb-4aa9-b3fb-f58e34e09e94",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ],
+        [
+          "/etc/just-dashboard/network/network-recovery",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "3097f574-96cb-4aa9-b3fb-f58e34e09e94",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:14:15 UTC",
+        "invocationId": "6e01786445b94ed08277143fcc428c95",
+        "reason": null,
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:14:15 UTC",
+        "status": "succeeded"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "shaping:jdvmdum1",
+          "reason": "shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:shaping:jdvmdum1",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 36,
+      "status": "drift"
+    },
+    "networkUnit": {
+      "ActiveState": "active",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:14:15 UTC",
+      "ExecMainStartTimestampMonotonic": "14684555",
+      "ExecMainStatus": "0",
+      "InvocationID": "6e01786445b94ed08277143fcc428c95",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      },
+      {
+        "argv": "/etc/just-dashboard/network/network-recovery --network-sqm-restore /etc/just-dashboard/network",
+        "code": "exited",
+        "ignoreErrors": "no",
+        "path": "/etc/just-dashboard/network/network-recovery",
+        "status": "0"
+      }
+    ],
+    "networkUnitFailedCommands": [],
+    "networkUnitJournal": [
+      "2026-10-10T01:14:14.094678+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made...",
+      "2026-10-10T01:14:14.242818+00:00 jd-vm-reboot iptables[956]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.255165+00:00 jd-vm-reboot iptables[961]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.265553+00:00 jd-vm-reboot iptables[965]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.279274+00:00 jd-vm-reboot ip6tables[967]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.292475+00:00 jd-vm-reboot ip6tables[969]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.311886+00:00 jd-vm-reboot ip6tables[973]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:14:14.355991+00:00 jd-vm-reboot tc[975]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:14:14.386254+00:00 jd-vm-reboot tc[978]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:14:14.442936+00:00 jd-vm-reboot tc[982]: Cannot find device \"jdvmbr0\"",
+      "2026-10-10T01:14:14.646881+00:00 jd-vm-reboot tc[1007]: Warning: sch_htb: quantum of class 10010 is big. Consider r2q change.",
+      "2026-10-10T01:14:15.207162+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made."
+    ],
+    "readbackAfterBoot": {
+      "cake": {
+        "ack-filter": "disabled",
+        "atm": "noatm",
+        "bandwidth": 1125000,
+        "diffserv": "diffserv4",
+        "flowmode": "triple-isolate",
+        "fwmark": "0",
+        "ingress": true,
+        "mpu": 64,
+        "nat": false,
+        "overhead": 22,
+        "raw": false,
+        "rtt": 80000,
+        "split_gso": true,
+        "wash": true
+      },
+      "ifb": "jds2fc4474cac46",
+      "ifbAlias": "jd-sqm:2fc4474cac46fb822dabb19c2f7ad11b",
+      "ifbExists": true,
+      "ifbMac": "02:9c:2f:7a:d1:1b",
+      "ifbUp": true,
+      "redirect": [
+        {
+          "chain": 0,
+          "kind": "matchall",
+          "options": {
+            "actions": [
+              {
+                "bind": 1,
+                "control_action": {
+                  "type": "stolen"
+                },
+                "cookie": "2fc4474cac46fb822dabb19c2f7ad11b",
+                "direction": "egress",
+                "index": 1,
+                "kind": "mirred",
+                "mirred_action": "redirect",
+                "order": 1,
+                "ref": 1,
+                "to_dev": "jds2fc4474cac46"
+              }
+            ],
+            "handle": 51966,
+            "not_in_hw": true,
+            "skip_hw": true
+          },
+          "pref": 49152,
+          "protocol": "all"
+        }
+      ],
+      "savedSourceMac": "52:54:00:4a:44:06",
+      "sourceMac": "52:54:00:4a:44:06"
+    },
+    "recoveryUnit": {
+      "ActiveState": "inactive",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:14:14 UTC",
+      "ExecMainStartTimestampMonotonic": "13322208",
+      "ExecMainStatus": "0",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "recoveryUnitJournal": [
+      "2026-10-10T01:14:13.649596+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes...",
+      "2026-10-10T01:14:14.081185+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Deactivated successfully.",
+      "2026-10-10T01:14:14.081538+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes."
+    ],
+    "shapingView": {
+      "sqm": {
+        "boot": {
+          "checkedAt": "2026-10-10T01:14:19.652409204Z",
+          "status": "verified"
+        },
+        "diffserv": "diffserv4",
+        "flowMode": "triple-isolate",
+        "helper": {
+          "checkedAt": "2026-10-10T01:14:19.393454168Z",
+          "status": "verified"
+        },
+        "ifb": "jds2fc4474cac46",
+        "linkLayer": "noatm",
+        "mpu": 64,
+        "nat": false,
+        "overhead": 22,
+        "preserveDscp": false,
+        "queue": {
+          "backlog": 0,
+          "bytes": 134,
+          "drops": 0,
+          "kind": "cake",
+          "overlimits": 0,
+          "packets": 2,
+          "requeues": 0
+        },
+        "rttMillis": 80
+      },
+      "verification": {
+        "checkedAt": "2026-10-10T01:14:19.349912572Z",
+        "status": "verified"
+      }
+    },
+    "sqmRestoreCommand": [
+      {
+        "argv": "/etc/just-dashboard/network/network-recovery --network-sqm-restore /etc/just-dashboard/network",
+        "code": "exited",
+        "ignoreErrors": "no",
+        "path": "/etc/just-dashboard/network/network-recovery",
+        "status": "0"
+      }
+    ]
+  },
+  "failures": [
+    "drift after boot: [{'id': 'shaping:jdvmdum1', 'status': 'drift', 'reason': 'shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s'}]"
+  ],
+  "phase": "p14-verify",
+  "result": "fail",
+  "seconds": 3.8
+}

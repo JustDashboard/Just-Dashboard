@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type orchestrationFixture struct {
@@ -24,7 +25,7 @@ type orchestrationFixture struct {
 
 func newOrchestrationFixture(t *testing.T) *orchestrationFixture {
 	t.Helper()
-	st, err := basestore.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -978,5 +979,27 @@ func TestRetryCarriesForwardMergedRunMetadata(t *testing.T) {
 	}
 	if decoded.Commit["sha"] != "deadbeef" {
 		t.Fatalf("retried run metadata = %s, want the original commit carried forward", retry.Metadata)
+	}
+}
+
+func TestEnqueueIdempotencyKeepsRequestsWithoutSourceMetadata(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	req := RunRequest{
+		ProjectID: f.projectID, EnvironmentID: environmentID,
+		Operation: OperationDeploy, Trigger: TriggerManual, Actor: "admin",
+		IdempotencyKey: "without-source-metadata", RequestDigest: "existing-digest",
+		PlanRevision: 1, SlotClass: SlotLight,
+	}
+	initial, created, err := f.runs.Enqueue(t.Context(), req)
+	if err != nil || !created {
+		t.Fatalf("initial request: created=%t err=%v", created, err)
+	}
+	for _, metadata := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`{}`)} {
+		req.Metadata = metadata
+		replayed, created, err := f.runs.Enqueue(t.Context(), req)
+		if err != nil || created || replayed.ID != initial.ID {
+			t.Fatalf("metadata %s replay: created=%t err=%v run=%#v", metadata, created, err, replayed)
+		}
 	}
 }

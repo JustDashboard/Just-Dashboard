@@ -5,12 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // errRuleExists is ufw declining to add a rule it already has.
@@ -29,7 +28,7 @@ var errRuleExists = errors.New("ufw already has that exact rule")
 type ufwBackend struct{}
 
 func (ufwBackend) Kind() Backend { return BackendUFW }
-func (ufwBackend) Detect() bool  { return hostexec.AvailableOnHost("ufw") }
+func (ufwBackend) Detect() bool  { return availableOnHost("ufw") }
 
 func (ufwBackend) Capabilities() FirewallCapabilities {
 	return FirewallCapabilities{
@@ -76,12 +75,32 @@ func (ufwBackend) Status(ctx context.Context) (*FirewallStatus, error) {
 		num, _ := strconv.Atoi(m[1])
 		st.Rules = append(st.Rules, parseUFWRule(num, m[2]))
 	}
+	// An inactive ufw lists no rules at all, though it holds them and loads
+	// them the moment it is enabled. `show added` prints them as commands;
+	// they are listed unnumbered, so nothing is removed by a number ufw
+	// would assign differently once its IPv6 twins exist.
+	if !st.Enabled && len(st.Rules) == 0 {
+		if added, err := run(ctx, "ufw", "show", "added"); err == nil {
+			st.Rules = parseUFWAdded(added)
+			if len(st.Rules) > 0 {
+				st.RulesFrom = "configured"
+			}
+		}
+	}
 	// The verbose block is a second call and a soft failure: rules without a
 	// policy line is a worse page than rules with one, but far better than
 	// the error the combined call produced.
 	if verbose, err := run(ctx, "ufw", "status", "verbose"); err == nil {
 		st.Raw = out + "\n" + verbose
 		applyUFWVerbose(st, verbose)
+	}
+	// Inactive, ufw prints no defaults either; the ones enabling would
+	// apply are in its defaults file.
+	if !st.Enabled && st.Policy.Incoming == "" {
+		if policy, ok := ufwConfiguredDefaults(); ok {
+			st.Policy = policy
+			st.Default = fmt.Sprintf("%s (incoming), %s (outgoing), %s (routed)", policy.Incoming, policy.Outgoing, policy.Routed)
+		}
 	}
 	return st, nil
 }
@@ -101,6 +120,32 @@ func applyUFWVerbose(st *FirewallStatus, out string) {
 			st.Policy = parseDefaultPolicy(st.Default)
 		}
 	}
+}
+
+// ufwConfiguredDefaults reads DEFAULT_*_POLICY from ufw's defaults file.
+func ufwConfiguredDefaults() (DefaultPolicy, bool) {
+	raw, err := os.ReadFile(ufwDefaultsFile)
+	if err != nil {
+		return DefaultPolicy{}, false
+	}
+	word := map[string]string{"DROP": "deny", "REJECT": "reject", "ACCEPT": "allow"}
+	var p DefaultPolicy
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		v := word[strings.ToUpper(strings.Trim(value, `"' `))]
+		switch key {
+		case "DEFAULT_INPUT_POLICY":
+			p.Incoming = v
+		case "DEFAULT_OUTPUT_POLICY":
+			p.Outgoing = v
+		case "DEFAULT_FORWARD_POLICY":
+			p.Routed = v
+		}
+	}
+	return p, p.Incoming != ""
 }
 
 // parseDefaultPolicy splits ufw's one-line summary of its three defaults:
@@ -158,6 +203,18 @@ func parseUFWRule(num int, body string) Rule {
 		r.Action = "UNKNOWN"
 		r.To = strings.TrimSpace(body)
 	}
+	// An outbound rule ends its source column with "(out)".
+	r.From = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(r.From), "(out)"))
+	// An interface-scoped rule prints "on eth0" in the destination column for
+	// inbound rules and in the source column for outbound ones, before or
+	// after the "(v6)" marker.
+	var iface string
+	if r.To, iface = cutInterface(r.To); iface != "" {
+		r.Interface = iface
+	}
+	if r.From, iface = cutInterface(r.From); iface != "" && r.Interface == "" {
+		r.Interface = iface
+	}
 	// ufw appends "(v6)" to the destination of the IPv6 half of a rule. Left
 	// in the To field it makes the same rule look like two different ones.
 	if trimmed, ok := strings.CutSuffix(r.To, " (v6)"); ok {
@@ -165,6 +222,13 @@ func parseUFWRule(num int, body string) Rule {
 	}
 	if trimmed, ok := strings.CutSuffix(r.From, " (v6)"); ok {
 		r.IPv6, r.From = true, trimmed
+	}
+	// A rule naming an IPv6 address exists only in the IPv6 table, and ufw
+	// prints no "(v6)" for it.
+	for _, addr := range []string{r.From, destinationAddress(r.To)} {
+		if p, err := parseSelector(addr); err == nil && p.Addr().Is6() {
+			r.IPv6 = true
+		}
 	}
 	// A rule with a destination address prints it in front of the port —
 	// "10.0.0.5 5432/tcp" — so the port is the last field, not the whole
@@ -184,6 +248,176 @@ func parseUFWRule(num int, body string) Rule {
 		r.Port = lastField(r.To)
 	}
 	return r
+}
+
+// cutInterface removes ufw's "on <device>" from a column.
+func cutInterface(s string) (string, string) {
+	fields := strings.Fields(s)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "on" {
+			iface := fields[i+1]
+			return strings.Join(append(fields[:i:i], fields[i+2:]...), " "), iface
+		}
+	}
+	return s, ""
+}
+
+// parseUFWAdded reads `ufw show added`, which prints each rule as the
+// command that made it, into rules shaped as `status numbered` would show
+// them. A rule naming no address applies to both families.
+func parseUFWAdded(out string) []Rule {
+	rules := []Rule{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ufw ") {
+			continue
+		}
+		if r, ok := parseUFWCommand(strings.TrimPrefix(line, "ufw ")); ok {
+			rules = append(rules, r)
+		}
+	}
+	return rules
+}
+
+func parseUFWCommand(command string) (Rule, bool) {
+	tokens := ufwTokens(command)
+	r := Rule{Direction: "IN", From: "Anywhere", Raw: "ufw " + command}
+	i := 0
+	next := func() string {
+		if i < len(tokens) {
+			i++
+			return tokens[i-1]
+		}
+		return ""
+	}
+	peek := func() string {
+		if i < len(tokens) {
+			return tokens[i]
+		}
+		return ""
+	}
+	if peek() == "route" {
+		next()
+		r.Direction = "FWD"
+	}
+	switch action := next(); action {
+	case "allow", "deny", "reject", "limit":
+		r.Action = strings.ToUpper(action)
+	default:
+		return Rule{}, false
+	}
+	if peek() == "log" || peek() == "log-all" {
+		next()
+	}
+	if peek() == "in" || peek() == "out" {
+		if d := next(); r.Direction != "FWD" {
+			r.Direction = strings.ToUpper(d)
+		}
+	}
+	if peek() == "on" {
+		next()
+		r.Interface = next()
+	}
+	destination, destPort, app := "", "", ""
+	if peek() != "from" && peek() != "to" && peek() != "proto" && peek() != "" && peek() != "comment" && peek() != "in" && peek() != "out" {
+		simple := next()
+		if port, proto, ok := strings.Cut(simple, "/"); ok {
+			destPort, r.Protocol = port, proto
+		} else if bareUFWPortRe.MatchString(simple) {
+			destPort = simple
+		} else {
+			app = simple
+		}
+	}
+	for i < len(tokens) {
+		switch next() {
+		case "in", "out":
+			if peek() == "on" {
+				next()
+				if r.Interface == "" {
+					r.Interface = next()
+				} else {
+					next()
+				}
+			}
+		case "from":
+			if addr := next(); addr != "any" {
+				r.From = addr
+			}
+			if peek() == "port" || peek() == "app" {
+				next()
+				next()
+			}
+		case "to":
+			if addr := next(); addr != "any" {
+				destination = addr
+			}
+			switch peek() {
+			case "port":
+				next()
+				destPort = next()
+			case "app":
+				next()
+				app = next()
+			}
+		case "proto":
+			r.Protocol = next()
+		case "comment":
+			r.Comment = strings.Trim(next(), "'\"")
+		}
+	}
+	switch {
+	case app != "":
+		r.To = strings.TrimSpace(destination + " " + app)
+	case destPort != "":
+		r.Port = destPort
+		r.To = destPort
+		if r.Protocol != "" {
+			r.To += "/" + r.Protocol
+		}
+		if destination != "" {
+			r.To = destination + " " + r.To
+		}
+	default:
+		r.To = firstNonBlank(destination, "Anywhere")
+	}
+	family := ""
+	for _, addr := range []string{r.From, destination} {
+		if p, err := parseSelector(addr); err == nil {
+			family = map[bool]string{true: "ipv6", false: "ipv4"}[p.Addr().Is6()]
+		}
+	}
+	r.IPv6, r.BothFamilies = family == "ipv6", family == ""
+	return r, true
+}
+
+// ufwTokens splits ufw's command echo on spaces, keeping a quoted comment
+// whole.
+func ufwTokens(s string) []string {
+	var out []string
+	var b strings.Builder
+	quote := rune(0)
+	for _, c := range s {
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+			b.WriteRune(c)
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote = c
+			b.WriteRune(c)
+		case quote == 0 && c == ' ':
+			if b.Len() > 0 {
+				out = append(out, b.String())
+				b.Reset()
+			}
+		default:
+			b.WriteRune(c)
+		}
+	}
+	if b.Len() > 0 {
+		out = append(out, b.String())
+	}
+	return out
 }
 
 // lastField is the port half of ufw's destination column, which carries an

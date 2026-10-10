@@ -1,0 +1,6 @@
+=== RUN   TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks
+    wgkillswitch_live_test.go:138: IPv6 exit translated 2 client connections
+    wgkillswitch_live_test.go:138: IPv4 exit translated 2 client connections
+--- PASS: TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks (8.57s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	9.655s

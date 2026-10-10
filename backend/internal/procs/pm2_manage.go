@@ -2,10 +2,13 @@ package procs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +23,25 @@ type PM2Daemon struct {
 	Home    string `json:"home"`
 	// When `pm2 save` last wrote the resurrection list, if ever.
 	DumpSavedAt *time.Time `json:"dumpSavedAt,omitempty"`
+	// The names the resurrection list holds, so a reader can tell "saved"
+	// from "saved before the last three applications were started". Null
+	// when there is no list or it could not be read; empty when it was
+	// saved with nothing in it.
+	SavedApps []string `json:"savedApps"`
 	// Whether a boot hook exists for this account. PM2's own `startup`
 	// writes a pm2-<user>.service; the dashboard reports it and never
 	// installs it, because that step is platform-specific and PM2 owns it.
 	StartupUnit string `json:"startupUnit,omitempty"`
+}
+
+// A dump holds every application's environment, so it can run to megabytes on
+// a busy daemon; anything past this is not a list PM2 itself wrote.
+const maxDumpBytes = 16 << 20
+
+type savedList struct {
+	modTime time.Time
+	size    int64
+	names   []string
 }
 
 // Daemons lists the accounts a PM2 can be driven for, with their boot facts.
@@ -35,14 +53,72 @@ func (p *PM2) Daemons() []PM2Daemon {
 			continue
 		}
 		daemon := PM2Daemon{Account: account.Username, Home: home.home}
-		if st, err := os.Stat(filepath.Join(home.home, ".pm2", "dump.pm2")); err == nil && !st.IsDir() {
+		dump := filepath.Join(home.home, ".pm2", "dump.pm2")
+		if st, err := os.Stat(dump); err == nil && !st.IsDir() {
 			at := st.ModTime().UTC()
 			daemon.DumpSavedAt = &at
+			daemon.SavedApps = p.savedApps(dump, st)
 		}
 		daemon.StartupUnit = pm2StartupUnit(account.Username)
 		out = append(out, daemon)
 	}
 	return out
+}
+
+// savedApps reads the application names out of a resurrection list. The list
+// is read again only when `pm2 save` rewrites it, because the page asking
+// polls every few seconds and the file carries every application's
+// environment. Only the names leave this function: the environment is where
+// the secrets are.
+func (p *PM2) savedApps(path string, st os.FileInfo) []string {
+	p.dumpMu.Lock()
+	defer p.dumpMu.Unlock()
+	if cached, ok := p.dumps[path]; ok && cached.modTime.Equal(st.ModTime()) && cached.size == st.Size() {
+		return slices.Clone(cached.names)
+	}
+	names, err := readSavedApps(path)
+	if err != nil {
+		return nil
+	}
+	if p.dumps == nil {
+		p.dumps = map[string]savedList{}
+	}
+	p.dumps[path] = savedList{modTime: st.ModTime(), size: st.Size(), names: names}
+	return slices.Clone(names)
+}
+
+func readSavedApps(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxDumpBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDumpBytes {
+		return nil, fmt.Errorf("resurrection list exceeds %d bytes", maxDumpBytes)
+	}
+	return parseSavedApps(data)
+}
+
+// parseSavedApps names the applications in a dump, once each: a cluster is
+// saved as one entry per instance under the same name.
+func parseSavedApps(data []byte) ([]string, error) {
+	var entries []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse pm2 dump: %w", err)
+	}
+	names := []string{}
+	for _, entry := range entries {
+		if entry.Name != "" && !slices.Contains(names, entry.Name) {
+			names = append(names, entry.Name)
+		}
+	}
+	return names, nil
 }
 
 // pm2StartupUnit reports the systemd unit `pm2 startup` installs for an

@@ -36,6 +36,7 @@ import {
   BugAntIcon,
   CalculatorIcon,
   ChartBarIcon,
+  ChatBubbleLeftIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   CheckIcon,
@@ -147,6 +148,7 @@ import {
   XMarkIcon,
   BookOpenIcon,
   MoonIcon,
+  RocketLaunchIcon,
 } from "@heroicons/react/24/solid"
 import { cn } from "@/lib/utils"
 
@@ -261,6 +263,7 @@ export const Pencil: Icon = adapt(PencilSquareIcon, "Pencil")
 export const FloppyDisk: Icon = adapt(DocumentArrowDownIcon, "FloppyDisk")
 export const Download: Icon = adapt(ArrowDownTrayIcon, "Download")
 export const CloudDownload: Icon = adapt(CloudArrowDownIcon, "CloudDownload")
+export const Rocket: Icon = adapt(RocketLaunchIcon, "Rocket")
 export const CloudUpload: Icon = adapt(CloudArrowUpIcon, "CloudUpload")
 export const MagnifyingGlass: Icon = adapt(MagnifyingGlassIcon, "MagnifyingGlass")
 export const MagnifyingGlassMinus: Icon = adapt(MagnifyingGlassMinusIcon, "MagnifyingGlassMinus")
@@ -431,6 +434,11 @@ export const Monitoring: Icon = adapt(ComputerDesktopIcon, "Monitoring")
 export const NetworkDevice: Icon = adapt(SignalIcon, "NetworkDevice")
 export const Connection: Icon = adapt(RadioIcon, "Connection")
 export const Router: Icon = adapt(WifiIcon, "Router")
+// The Network section's own mark: nodes joined by lines, which is what the
+// section draws on every page — a topology, not one device or one route.
+export const Topology: Icon = adapt(ShareIcon, "Topology")
+// A bridge is several ports made one network: a group, not a stack.
+export const Bridge: Icon = adapt(RectangleGroupIcon, "Bridge")
 export const Route: Icon = adapt(MapIcon, "Route")
 export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")
@@ -466,6 +474,7 @@ export const GitBranch: Icon = adapt(ShareIcon, "GitBranch")
 export const GitCommit: Icon = adapt(HashtagIcon, "GitCommit")
 export const GitMerge: Icon = adapt(ArrowsPointingInIcon, "GitMerge")
 export const GitPullRequest: Icon = adapt(ChatBubbleLeftRightIcon, "GitPullRequest")
+export const ChatBubble: Icon = adapt(ChatBubbleLeftIcon, "ChatBubble")
 export const BranchPlus: Icon = adapt(SquaresPlusIcon, "BranchPlus")
 export const GitTag: Icon = adapt(TagIcon, "GitTag")
 

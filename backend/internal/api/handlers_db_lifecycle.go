@@ -52,8 +52,10 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	name := r.URL.Query().Get("file")
-	if name == "" {
-		return httpx.BadRequest("file is required")
+	// A dump's name and nothing else: not a path, and not the description
+	// kept beside a dump.
+	if err := validDumpName(name); err != nil {
+		return httpx.BadRequest("%v", err)
 	}
 	dir := s.dbDumpDir(conn.Name)
 	f, st, err := files.New([]string{dir}).Open(filepath.Join(dir, name))
@@ -65,6 +67,9 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return httpx.BadRequest("%s is a directory", name)
 	}
 	base := filepath.Base(st.Name())
+	// A whole database leaving the server is worth a line, and a GET never
+	// reaches the mutation middleware's record, so it is written here.
+	s.recordRead(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()}, nil)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": base}))
@@ -108,6 +113,16 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	if target == "" {
 		return httpx.BadRequest("this connection names no database to drop")
 	}
+	// Asked through this connection, done to another: a database a protected
+	// connection is on, or the container every database of the server is in.
+	if req.RemoveContainer {
+		err = s.refuseServerOfProtected(r.Context(), conn)
+	} else {
+		err = s.refuseDatabaseOfProtected(r.Context(), conn, dropArgument(conn, req.Database))
+	}
+	if err != nil {
+		return err
+	}
 	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
 		return err
 	}
@@ -132,9 +147,12 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	}
 	res, err := dbx.DropDatabase(ctx, conn.Driver, dsn, dropArgument(conn, req.Database))
 	if err != nil {
+		// The drop dials for itself, and a driver that could not use the
+		// connection string says so by quoting it.
+		refusal := connectError(dsn, err)
 		httpx.SetAudit(r, "database.drop", conn.Name,
-			map[string]any{"database": target, "error": err.Error()})
-		return httpx.Err(http.StatusBadGateway, "drop_failed", err.Error())
+			map[string]any{"database": target, "error": refusal})
+		return httpx.Err(http.StatusBadGateway, "drop_failed", refusal)
 	}
 
 	// A connection whose database no longer exists cannot answer a single
@@ -142,25 +160,22 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	// on every tab. It goes with the database it pointed at — but only then:
 	// dropping some *other* database on the same server leaves the connection
 	// perfectly usable.
-	removed := res.Gone && sameDatabase(conn, target)
-	if removed {
+	var forgotten forgottenConnection
+	if res.Gone && sameDatabase(conn, target) {
 		// A deployment may have linked the connection during the engine call.
 		// Retain that identity rather than reporting a successful drop as failed.
-		result, err := s.Store.DB.ExecContext(r.Context(),
-			`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+		forgotten, err = s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 		if err != nil {
-			return httpx.Internal(err)
+			return err
 		}
-		affected, _ := result.RowsAffected()
-		removed = affected == 1
 	}
-	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
-		"database": target, "detail": res.Detail, "connectionRemoved": removed,
-	})
+	httpx.SetAudit(r, "database.drop", conn.Name, forgotten.audited(map[string]any{
+		"database": target, "detail": res.Detail, "connectionRemoved": forgotten.removed,
+	}))
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"detail":            res.Detail,
 		"database":          target,
-		"connectionRemoved": removed,
+		"connectionRemoved": forgotten.removed,
 	})
 	return nil
 }
@@ -223,28 +238,25 @@ func (s *Server) removeDatabaseContainer(
 		}
 		removedVolumes = append(removedVolumes, name)
 	}
-	result, err := s.Store.DB.ExecContext(r.Context(),
-		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
-		return httpx.Internal(err)
+		return err
 	}
-	affected, _ := result.RowsAffected()
-	removed := affected == 1
 	summary := "container " + server.container.Name + " removed"
 	if len(removedVolumes) > 0 {
 		summary += " with its data"
 	}
-	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
+	httpx.SetAudit(r, "database.drop", conn.Name, forgotten.audited(map[string]any{
 		"database": target, "container": server.container.Name, "volumes": removedVolumes,
-		"warnings": warnings, "connectionRemoved": removed,
-	})
+		"warnings": warnings, "connectionRemoved": forgotten.removed,
+	}))
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"detail":            summary,
 		"database":          target,
 		"container":         server.container.Name,
 		"volumes":           removedVolumes,
 		"warnings":          warnings,
-		"connectionRemoved": removed,
+		"connectionRemoved": forgotten.removed,
 	})
 	return nil
 }
@@ -352,8 +364,11 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target, "format": format})
+	// Written directly. This is a GET, which the mutation middleware passes
+	// through with nothing to annotate: the SetAudit that used to stand here
+	// recorded nothing, and "deliberate and recorded" was half true.
+	s.recordRead(r, "database.connection.reveal", conn.Name,
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format}, nil)
 	reference := ""
 	if target == "container" {
 		reference = fmt.Sprintf("${{database.%d}}", conn.ID)

@@ -1,0 +1,126 @@
+=== RUN   TestCreateEgressGroupInstallsMemberPathsWithoutMovingTraffic
+--- PASS: TestCreateEgressGroupInstallsMemberPathsWithoutMovingTraffic (0.03s)
+=== RUN   TestCreateEgressGroupRefusesForeignObjectsAndUnownedTunnels
+--- PASS: TestCreateEgressGroupRefusesForeignObjectsAndUnownedTunnels (0.00s)
+=== RUN   TestEnableEgressGroupProvesMembersAndKeepsTheOperatorOnMain
+--- PASS: TestEnableEgressGroupProvesMembersAndKeepsTheOperatorOnMain (0.02s)
+=== RUN   TestSwitchEgressReplacesTheGroupRouteAndRecordsTheDecision
+--- PASS: TestSwitchEgressReplacesTheGroupRouteAndRecordsTheDecision (0.02s)
+=== RUN   TestSwitchEgressRefusesAPathNotProvenForTheOperator
+--- PASS: TestSwitchEgressRefusesAPathNotProvenForTheOperator (0.00s)
+=== RUN   TestEgressEditsAndAutomationAreGated
+--- PASS: TestEgressEditsAndAutomationAreGated (0.02s)
+=== RUN   TestEgressMonitorSettlesSwitchesAStoppedProcessLeft
+--- PASS: TestEgressMonitorSettlesSwitchesAStoppedProcessLeft (0.29s)
+=== RUN   TestEgressPendingChangesSettleFromTheirJournal
+--- PASS: TestEgressPendingChangesSettleFromTheirJournal (0.00s)
+=== RUN   TestLiveEgressFailoverAndFailbackWithHysteresis
+    egress_live_test.go:242: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressFailoverAndFailbackWithHysteresis (0.00s)
+=== RUN   TestLiveEgressFlapSuppression
+    egress_live_test.go:312: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressFlapSuppression (0.00s)
+=== RUN   TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember
+    egress_live_test.go:346: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember (0.00s)
+=== RUN   TestLiveEgressBootRestoresTheDecidedMemberAndReverifies
+    egress_live_test.go:387: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressBootRestoresTheDecidedMemberAndReverifies (0.00s)
+=== RUN   TestLiveEgressRecoveryAfterBackendDeathMidSwitch
+    egress_live_test.go:460: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressRecoveryAfterBackendDeathMidSwitch (0.00s)
+=== RUN   TestEgressSwitchProcessFixture
+--- PASS: TestEgressSwitchProcessFixture (0.00s)
+=== RUN   TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember
+    egress_live_test.go:551: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember (0.00s)
+=== RUN   TestLiveEgressSimulationRunsInDisposableNamespaces
+    egress_live_test.go:639: set JD_NETNS_LIVE=1 to run against a throwaway network namespace
+--- SKIP: TestLiveEgressSimulationRunsInDisposableNamespaces (0.00s)
+=== RUN   TestEgressRequestValidation
+=== RUN   TestEgressRequestValidation/selector_without
+=== RUN   TestEgressRequestValidation/sticky_mark
+=== RUN   TestEgressRequestValidation/timeout_over_interval
+=== RUN   TestEgressRequestValidation/protect_everything
+=== RUN   TestEgressRequestValidation/probe_of_a_name
+=== RUN   TestEgressRequestValidation/same_next_hop
+=== RUN   TestEgressRequestValidation/mark_in_member_bits
+=== RUN   TestEgressRequestValidation/partial_thresholds
+=== RUN   TestEgressRequestValidation/probe_on_loopback
+=== RUN   TestEgressRequestValidation/one_member
+=== RUN   TestEgressRequestValidation/gateway_family
+=== RUN   TestEgressRequestValidation/latency_over_timeout
+=== RUN   TestEgressRequestValidation/tunnel_with_gateway
+=== RUN   TestEgressRequestValidation/selector_of_all
+=== RUN   TestEgressRequestValidation/sticky_keep
+=== RUN   TestEgressRequestValidation/too_many_probes
+=== RUN   TestEgressRequestValidation/newline_in_name
+=== RUN   TestEgressRequestValidation/all_with_selector
+--- PASS: TestEgressRequestValidation (0.00s)
+    --- PASS: TestEgressRequestValidation/selector_without (0.00s)
+    --- PASS: TestEgressRequestValidation/sticky_mark (0.00s)
+    --- PASS: TestEgressRequestValidation/timeout_over_interval (0.00s)
+    --- PASS: TestEgressRequestValidation/protect_everything (0.00s)
+    --- PASS: TestEgressRequestValidation/probe_of_a_name (0.00s)
+    --- PASS: TestEgressRequestValidation/same_next_hop (0.00s)
+    --- PASS: TestEgressRequestValidation/mark_in_member_bits (0.00s)
+    --- PASS: TestEgressRequestValidation/partial_thresholds (0.00s)
+    --- PASS: TestEgressRequestValidation/probe_on_loopback (0.00s)
+    --- PASS: TestEgressRequestValidation/one_member (0.00s)
+    --- PASS: TestEgressRequestValidation/gateway_family (0.00s)
+    --- PASS: TestEgressRequestValidation/latency_over_timeout (0.00s)
+    --- PASS: TestEgressRequestValidation/tunnel_with_gateway (0.00s)
+    --- PASS: TestEgressRequestValidation/selector_of_all (0.00s)
+    --- PASS: TestEgressRequestValidation/sticky_keep (0.00s)
+    --- PASS: TestEgressRequestValidation/too_many_probes (0.00s)
+    --- PASS: TestEgressRequestValidation/newline_in_name (0.00s)
+    --- PASS: TestEgressRequestValidation/all_with_selector (0.00s)
+=== RUN   TestEgressObjectsOwnReservedTablesRulesAndMarks
+--- PASS: TestEgressObjectsOwnReservedTablesRulesAndMarks (0.00s)
+=== RUN   TestEgressBootFilesRestoreTheDecidedMember
+--- PASS: TestEgressBootFilesRestoreTheDecidedMember (0.00s)
+=== RUN   TestEgressSwitchIsOneRouteReplaceAndUndoesItself
+--- PASS: TestEgressSwitchIsOneRouteReplaceAndUndoesItself (0.00s)
+=== RUN   TestEgressRecoveryPlanReturnsToThePreviousDecision
+--- PASS: TestEgressRecoveryPlanReturnsToThePreviousDecision (0.00s)
+=== RUN   TestEgressPinningRuleset
+--- PASS: TestEgressPinningRuleset (0.00s)
+=== RUN   TestEgressSelectsReply
+--- PASS: TestEgressSelectsReply (0.00s)
+=== RUN   TestSameEgressRouteReadsBackMultipath
+--- PASS: TestSameEgressRouteReadsBackMultipath (0.00s)
+=== RUN   TestEgressMemberStateHysteresis
+--- PASS: TestEgressMemberStateHysteresis (0.00s)
+=== RUN   TestDecideEgress
+=== RUN   TestDecideEgress/steady
+=== RUN   TestDecideEgress/failover_at_once
+=== RUN   TestDecideEgress/no_proven_member
+=== RUN   TestDecideEgress/unproven_backup
+=== RUN   TestDecideEgress/not_down_stays
+=== RUN   TestDecideEgress/failback_waits_stable
+=== RUN   TestDecideEgress/failback_waits_hold
+=== RUN   TestDecideEgress/failback
+=== RUN   TestDecideEgress/manual_failback
+--- PASS: TestDecideEgress (0.00s)
+    --- PASS: TestDecideEgress/steady (0.00s)
+    --- PASS: TestDecideEgress/failover_at_once (0.00s)
+    --- PASS: TestDecideEgress/no_proven_member (0.00s)
+    --- PASS: TestDecideEgress/unproven_backup (0.00s)
+    --- PASS: TestDecideEgress/not_down_stays (0.00s)
+    --- PASS: TestDecideEgress/failback_waits_stable (0.00s)
+    --- PASS: TestDecideEgress/failback_waits_hold (0.00s)
+    --- PASS: TestDecideEgress/failback (0.00s)
+    --- PASS: TestDecideEgress/manual_failback (0.00s)
+=== RUN   TestEgressSimulationJudgesTheRules
+--- PASS: TestEgressSimulationJudgesTheRules (0.00s)
+=== RUN   TestEgressAutomationNeedsAPassedSimulationOfThisConfiguration
+--- PASS: TestEgressAutomationNeedsAPassedSimulationOfThisConfiguration (0.00s)
+=== RUN   TestReservedEgressTablesAndPrioritiesRefuseManualRoutes
+--- PASS: TestReservedEgressTablesAndPrioritiesRefuseManualRoutes (0.00s)
+=== RUN   TestEgressIdentitiesSeparateNICSourceFromProviderIdentity
+--- PASS: TestEgressIdentitiesSeparateNICSourceFromProviderIdentity (0.00s)
+=== RUN   TestEgressIdentityFamilyFailuresStayPerFamily
+--- PASS: TestEgressIdentityFamilyFailuresStayPerFamily (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.430s
+# exit 0

@@ -24,9 +24,14 @@ import (
 )
 
 var (
-	ErrDisabled = errors.New("the web terminal is disabled in this dashboard's configuration")
-	ErrNotFound = errors.New("terminal session not found")
-	ErrTooMany  = errors.New("too many terminal sessions are already open")
+	ErrDisabled               = errors.New("the web terminal is disabled in this dashboard's configuration")
+	ErrNotFound               = errors.New("terminal session not found")
+	ErrTooMany                = errors.New("too many terminal sessions are already open")
+	ErrPersistenceUnavailable = errors.New("terminal sessions cannot be opened until restart protection is available")
+	ErrUnknownAgent           = errors.New("terminal agent must be codex or claude")
+	ErrAgentShellUnavailable  = errors.New("automatic agent launch requires the bundled bash or zsh startup")
+	ErrInvalidSourceWindow    = errors.New("the source terminal is not a window in this session")
+	ErrCWDUnavailable         = errors.New("cannot determine the source terminal's working directory")
 	// The limit counts PTY windows, because each direct window owns a process,
 	// file descriptor and reader goroutine even when no browser is attached.
 	maxSessions  = 32
@@ -226,9 +231,22 @@ func (s *Session) Resize(rows, cols uint16) (changed bool, err error) {
 	return true, nil
 }
 
-// SynchronizeSize unconditionally applies the browser's authoritative size.
+// repaintHold is how long a reattach keeps the PTY one column narrower: long
+// enough for a program that is busy drawing to read the size in between.
+const repaintHold = 120 * time.Millisecond
+
+// SynchronizeSize unconditionally applies the browser's authoritative size,
+// and makes the program draw its screen again even when the size is unchanged.
 // Resize can skip a duplicate during a drag, but reconnect is a boundary at
 // which the cached fields must not be trusted more than the kernel PTY.
+//
+// A reattaching browser has just been sent raw history, not a screen, so what
+// it shows is right only once the program repaints. A size change is the one
+// repaint request every program honours, but the kernel signals SIGWINCH only
+// when the size differs, Node (under Claude Code) emits its resize event only
+// for a size unlike the last it read, and ratatui (Codex) writes only the cells
+// that changed unless the area did. So the size the PTY already has is reached
+// by way of one column narrower, held for repaintHold.
 func (s *Session) SynchronizeSize(rows, cols uint16) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -238,11 +256,31 @@ func (s *Session) SynchronizeSize(rows, cols uint16) error {
 	if rows == 0 || cols == 0 {
 		return nil
 	}
-	if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
+	kernelRows, kernelCols, err := ptyhold.Size(s.pty)
+	if err != nil {
+		return err
+	}
+	if kernelRows == rows && kernelCols == cols && cols > 1 {
+		if err := ptyhold.SetSize(s.pty, rows, cols-1); err != nil {
+			return err
+		}
+		time.AfterFunc(repaintHold, func() { s.restoreSize(rows, cols) })
+	} else if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
 		return err
 	}
 	s.Rows, s.Cols = rows, cols
 	return nil
+}
+
+// restoreSize ends SynchronizeSize's repaint, unless a resize has already
+// replaced the size it was returning to.
+func (s *Session) restoreSize(rows, cols uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.Rows != rows || s.Cols != cols {
+		return
+	}
+	_ = ptyhold.SetSize(s.pty, rows, cols)
 }
 
 // maxPending bounds how far behind one attached browser may fall before it is
@@ -401,8 +439,8 @@ func (s *Session) Close() error {
 	return nil
 }
 
-// CWD reports the shell's current directory, which is what in-session file
-// upload and download resolve relative paths against.
+// CWD reports the foreground shell or program's directory, which is what
+// in-session files and new terminals resolve relative paths against.
 func (s *Session) CWD() string {
 	s.mu.Lock()
 	pid, tmuxName := s.PID, s.TmuxName
@@ -423,19 +461,40 @@ func (s *Session) CWD() string {
 	if pid == 0 {
 		return ""
 	}
-	// The process we spawned is no longer the shell: a session is nsenter,
-	// then su, then the login shell, and each of those only forwards to the
-	// next. Their cwd never changes, so reading the leader's would pin this to
-	// wherever the session started and quietly stop tracking `cd` — the one
-	// thing this function exists to follow.
-	//
-	// Walking down to the innermost descendant finds the shell again, and
-	// keeps finding it when the shell itself forks (tmux adds another layer,
-	// and a running command adds one more).
-	if link, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", leafDescendant(pid))); err == nil {
+	// A shell can have exactly one child that is a background job in another
+	// directory. Following the whole single-child chain would mistake that
+	// job for the foreground prompt, so start with the kernel's foreground
+	// group and only walk through known wrappers such as su or sudo.
+	current := pid
+	if foreground := s.foregroundGroup(); foreground > 0 {
+		// argv can be empty while a live process execs, or deliberately have
+		// an empty argv[0]. Its cwd is the fact needed here and its liveness
+		// evidence; an empty command line must not send us back to the shell.
+		if _, err := processCWD(foreground); err == nil {
+			current = foreground
+		} else if member := groupMemberPID(foreground, pid); member > 0 {
+			current = member
+		}
+	}
+	for depth := 0; depth < 16; depth++ {
+		argv := cmdline(current)
+		if len(argv) == 0 || !wrappers[programName(argv[0])] {
+			break
+		}
+		children := childrenOf(current)
+		if len(children) != 1 {
+			break
+		}
+		current = children[0]
+	}
+	if link, err := processCWD(current); err == nil {
 		return link
 	}
 	return s.CWDHint
+}
+
+func processCWD(pid int) (string, error) {
+	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 }
 
 // leafDescendant follows the single-child chain from pid to its innermost

@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 )
 
 func testRecorder(t *testing.T, interval, retention time.Duration) *Recorder {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,8 +284,8 @@ func TestContainerHistorySurvivesARecreate(t *testing.T) {
 	var peak float64
 	for _, p := range series.Points {
 		samples += p.Samples
-		if p.CPUPeak > peak {
-			peak = p.CPUPeak
+		if p.CPUPeak != nil && *p.CPUPeak > peak {
+			peak = *p.CPUPeak
 		}
 	}
 	if samples != 40 {
@@ -324,7 +324,7 @@ func TestContainerHistoryIsPerContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(db.Points) != 1 || db.Points[0].CPU != 90 {
+	if len(db.Points) != 1 || db.Points[0].CPU == nil || *db.Points[0].CPU != 90 {
 		t.Fatalf("db series = %+v, want only db's own samples", db.Points)
 	}
 }

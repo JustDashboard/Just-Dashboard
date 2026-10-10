@@ -14,7 +14,7 @@ import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { calendarDate, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { ImportInspection, ImportResult } from "@/lib/types"
+import type { ImportInspection, ImportResult, ProxyReloadResult } from "@/lib/types"
 import { useCopy } from "@/hooks/use-copy"
 import { Field } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
@@ -23,6 +23,7 @@ import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { useProxy } from "@/components/proxy/proxy-context"
+import { reloadToast } from "@/components/proxy/load-proof"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -490,9 +491,13 @@ export function ImportOutcome({ result }: { result: ImportResult }) {
   const reload = async () => {
     setReloading(true)
     try {
-      await post("/proxy/reload", { kind: "nginx" })
+      const res = await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
       setReloaded(true)
-      notify.success("nginx reloaded")
+      const toast = reloadToast(res.loadProof, { title: "nginx reloaded" })
+      notify[toast.tone](
+        toast.title,
+        toast.description ? { description: toast.description } : undefined,
+      )
     } catch (err) {
       notify.error("nginx did not reload", err)
     } finally {

@@ -1,82 +1,177 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box, Clipboard, Layers, Sparkles } from "@/components/icons"
+import { ArrowRight, Box, Clipboard, Cross, Layers, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes } from "@/lib/format"
-import type { ComposeStack, Container, DockerDiagnosis, DockerDiskUsage } from "@/lib/types"
+import { bytes, plural } from "@/lib/format"
+import type {
+  ComposeStack,
+  Container,
+  ContainerSparkline,
+  ContainerStats,
+  DockerDiagnosis,
+  DockerDiskUsage,
+  DockerEvent,
+  DockerEventFeed,
+  DockerInfo,
+} from "@/lib/types"
+import { cn } from "@/lib/utils"
+import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useMetrics } from "@/hooks/use-metrics"
+import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useNow } from "@/components/deploy/vocabulary"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import {
-  ProductLogo,
-  ProductLogos,
-  containerProduct,
-  imageProducts,
-} from "@/components/product-logo"
-import { Page, PageContext, PageState } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductLogos, imageProducts, platformProduct } from "@/components/product-logo"
+import { Page, PageContext, PageState, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { Status, StatusDot } from "@/components/status-dot"
-import { EmptyState } from "@/components/state"
-import { AttentionPanel, attentionLabel, runtimeLabel } from "@/components/docker/attention"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Status } from "@/components/status-dot"
+import { EmptyState, ErrorState } from "@/components/state"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useDockerFindingActions } from "@/components/docker/finding-actions"
+import { AttentionPanel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
+import { ContainerBand } from "@/components/docker/container-band"
+import { ContainerRows, ProjectKey } from "@/components/docker/container-table"
 import { DiskSummary } from "@/components/docker/disk-panel"
 import { ExplainIcon } from "@/components/docker/explain"
 import { StackStateBadge } from "@/components/docker/stack-state"
+import { useContainerControl } from "@/components/docker/container-actions"
 import {
-  ContainerRowActions,
-  useContainerControl,
-  useContainerVerbs,
-} from "@/components/docker/container-actions"
+  BUCKET_ORDER,
+  containerBucket,
+  crashed,
+  mergeEvents,
+  overviewOrder,
+  recentChanges,
+  type ContainerBucket,
+} from "@/components/docker/overview"
 import { Button } from "@/components/ui/button"
 
+/** The state chips, in the order they are asked about; the toned two only while there is one. */
+const STATES: { value: ContainerBucket; label: string; tone?: "danger" | "warning" }[] = [
+  { value: "running", label: "Running" },
+  { value: "failing", label: "Failing", tone: "danger" },
+  { value: "starting", label: "Starting", tone: "warning" },
+  { value: "stopped", label: "Stopped" },
+]
+
+const BUCKETS = new Set<string>(BUCKET_ORDER)
+
+/** The project chip for containers started by hand rather than by compose. */
+const STANDALONE = "\u0000standalone"
+
 /**
- * Is Docker okay right now?
+ * Is Docker okay right now, and what is it doing?
  *
- * The overview should answer that in five seconds, and the version this
- * replaces could not: its Health tile read the worst of *everything* the
- * diagnosis found, so a server whose containers were all up and one of which
- * mounted the Docker socket showed "All good" beside a Containers page full of
- * warnings. Runtime and Attention are separate tiles here because they are
- * separate questions — see components/docker/attention.tsx.
+ * The daemon first, as the identity line Services and Live open on — Docker
+ * drawn as itself, its version, the host it runs on, the storage driver, how
+ * many containers are running and how many compose projects are up — with the
+ * verdicts at its right end: the containers failing, which narrows the table
+ * to them, and the issues Attention holds, which goes to it.
  *
- * The stack count had the same disease from the other direction. This page
- * grouped containers by compose label and the Stacks page listed compose files
- * found on disk, so "3 stacks" and "7 stacks" were both true and neither was
- * checkable. Both now read the same endpoint and say "3 active · 7 detected".
+ * Then `ContainerBand`: the containers using the most processor and memory as
+ * spans of one bar the size of the machine, and the last thing that happened
+ * to each container, live off the daemon's events.
  *
- * Two things the 0.6.7 polish pass added, both of them gaps rather than
- * decoration:
+ * It replaced four tiles (§15 pass 2 names the exit), and each figure went
+ * where it is said better:
  *
- *   **A stopped container was invisible here.** Attention deliberately excludes
- *   runtime findings, and the runtime tile summarises rather than names — so a
- *   service that had been down since a reboot showed up as the digit 7 turning
- *   into a 6. It now has a panel with the containers in it and a Start button
- *   beside each, because "what is not running" is the single most common reason
- *   somebody opens this page.
+ *   **Running** is the identity line's fact and the table's state chips, which
+ *   count *and* narrow — failing in its tone and first in the table, where the
+ *   old page had a separate "not running" list above everything because the
+ *   tile could only count them.
  *
- *   **Disk was a sentence.** "Only 412 MB could be reclaimed" is four numbers
- *   collapsed into an opinion about one of them. The bar says what the space
- *   actually is, which is the thing a reader needs before deciding whether a
- *   sweep is the answer or whether it is the volumes holding their data.
+ *   **Runtime health** is the verdict at the line's end, and each container's
+ *   health is its State cell: up for how long, and whether a check passes,
+ *   fails, or does not exist.
+ *
+ *   **Attention** is the second verdict, a link to the Attention list, which
+ *   stayed as it was — posture is still never called health — and each
+ *   container's issues are counted beside its name in the table.
+ *
+ *   **Compose stacks** is the identity line's "3 of 4 projects up" and the
+ *   Compose projects head, where each project now draws its services as a
+ *   strip of their states.
+ *
+ * Then every container as a table — framed, because it is one (§2) — read
+ * from the containers socket so its figures move with every frame, each row a
+ * container you open. New containers rise into place; a container changing
+ * state changes in place. Disk and cleanup stay where they were, beside the
+ * projects.
  */
 export default function DockerOverviewPage() {
   const { can } = useAuth()
+  const router = useRouter()
   const { confirm, dialog } = useConfirm()
+  const { host, snapshot } = useMetrics()
+  const now = useNow(60_000)
 
+  const [query, setQuery] = useSessionState("docker.overview.query", "")
+  const [rememberedState, setState] = useSessionState("docker.overview.state", "")
+  const state = (BUCKETS.has(rememberedState) ? rememberedState : "") as ContainerBucket | ""
+  const [project, setProject] = useSessionState("docker.overview.project", "")
+  const [, rememberNavigation] = useSessionState<{ id: string; name: string }[]>(
+    "docker.containers.navigation",
+    [],
+  )
+
+  // The list arrives once over REST, so the page draws without waiting for
+  // the socket; the socket then carries every change and every reading.
   const list = usePoll<Container[]>(
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
-    30_000,
+    0,
+  )
+  const [streamed, setStreamed] = useState<Container[]>()
+  const [stats, setStats] = useState<Record<string, ContainerStats>>({})
+  const [socketError, setSocketError] = useState<string>()
+  const onContainers = useCallback((envelope: Envelope) => {
+    if (envelope.type === "containers") {
+      setStreamed(envelope.data as Container[])
+      setSocketError(undefined)
+    } else if (envelope.type === "stats") {
+      const rows = envelope.data as ContainerStats[]
+      setStats(Object.fromEntries(rows.map((r) => [r.id, r])))
+    } else if (envelope.type === "error") {
+      setSocketError(envelope.error)
+    }
+  }, [])
+  useSocket("/docker/containers/stream", { onMessage: onContainers })
+
+  const [live, setLive] = useState<DockerEvent[]>([])
+  const onEvents = useCallback((envelope: Envelope) => {
+    if (envelope.type !== "events") return
+    setLive((previous) => mergeEvents(previous, envelope.data as DockerEvent[]))
+  }, [])
+  useSocket("/docker/events/stream", { onMessage: onEvents, query: { kinds: "container" } })
+  const feed = usePoll<DockerEventFeed>(
+    (signal) => get<DockerEventFeed>("/docker/events", { kinds: "container", limit: 200 }, signal),
+    // Once: the socket carries everything after, and replays its buffer on
+    // every reconnect.
+    0,
+  )
+
+  const trends = usePoll<ContainerSparkline[]>(
+    (signal) =>
+      get<ContainerSparkline[]>(
+        "/docker/containers/stats/history",
+        { range: "1h", points: 40 },
+        signal,
+      ),
+    120_000,
   )
   const health = usePoll<DockerDiagnosis>(
     (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
     60_000,
   )
+  const runFix = useDockerFindingActions({ confirm, onChanged: health.refresh })
   const stacks = usePoll<ComposeStack[]>(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
     60_000,
@@ -85,253 +180,405 @@ export default function DockerOverviewPage() {
     (signal) => get<DockerDiskUsage>("/docker/disk-usage", undefined, signal),
     120_000,
   )
+  const info = usePoll<DockerInfo>(
+    (signal) => get<DockerInfo>("/docker/info", undefined, signal),
+    300_000,
+  )
 
-  const containers = useMemo(() => list.data ?? [], [list.data])
+  const containers = useMemo(() => streamed ?? list.data ?? [], [streamed, list.data])
   const detected = useMemo(() => stacks.data ?? [], [stacks.data])
-  const active = useMemo(() => detected.filter((s) => s.deployed), [detected])
-  const idle = useMemo(() => containers.filter((c) => c.state !== "running"), [containers])
+  const trendByName = useMemo(
+    () => new Map((trends.data ?? []).map((line) => [line.name, line])),
+    [trends.data],
+  )
+  const changes = useMemo(
+    () => recentChanges(mergeEvents(feed.data?.events ?? [], live), now),
+    [feed.data, live, now],
+  )
 
-  const listRefresh = list.refresh
+  const counts = useMemo(() => {
+    const bucket: Record<ContainerBucket, number> = {
+      failing: 0,
+      starting: 0,
+      running: 0,
+      stopped: 0,
+    }
+    const projects = new Map<string, number>()
+    for (const c of containers) {
+      bucket[containerBucket(c)]++
+      const key = c.composeStack || STANDALONE
+      projects.set(key, (projects.get(key) ?? 0) + 1)
+    }
+    return { bucket, projects }
+  }, [containers])
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return overviewOrder(
+      containers.filter((c) => {
+        if (state && containerBucket(c) !== state) return false
+        if (project && (c.composeStack || STANDALONE) !== project) return false
+        if (!needle) return true
+        return (
+          c.name.toLowerCase().includes(needle) ||
+          c.image.toLowerCase().includes(needle) ||
+          c.composeStack?.toLowerCase().includes(needle) === true
+        )
+      }),
+    )
+  }, [containers, query, state, project])
+
   const healthRefresh = health.refresh
-  const refreshContainers = useCallback(() => {
-    listRefresh()
-    healthRefresh()
-  }, [listRefresh, healthRefresh])
-  const { pending, act } = useContainerControl(refreshContainers)
+  const { pending, act } = useContainerControl(healthRefresh)
 
-  if (list.loading && !list.data) {
+  /** Goes to one container, with the table's order kept for its page's previous and next. */
+  const open = useCallback(
+    (id: string, tab?: string) => {
+      rememberNavigation(
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-native-workspace='Docker'] [data-workspace-item]",
+          ),
+        )
+          .slice(0, 500)
+          .map((item) => ({
+            id: item.dataset.workspaceItem!,
+            name: item.dataset.workspaceName ?? "",
+          })),
+      )
+      const suffix = tab ? `?tab=${encodeURIComponent(tab)}` : ""
+      router.push(`/docker/containers/${encodeURIComponent(id)}${suffix}`)
+    },
+    [router, rememberNavigation],
+  )
+  // A change names a container by the name a redeploy keeps; the id it had
+  // may be gone, and Docker resolves the name to whichever has it now.
+  const openChange = useCallback(
+    (target: { id?: string; name: string }) =>
+      open(containers.find((c) => c.name === target.name)?.id ?? target.name),
+    [containers, open],
+  )
+
+  if (!list.data && !streamed) {
+    if (list.error) {
+      return (
+        <Page>
+          <PageContext title="Docker" />
+          <ErrorState error={list.error} />
+        </Page>
+      )
+    }
     return <PageState eyebrow="Server" title="Docker" />
   }
 
-  const runtime = health.data?.runtime
+  const failing = counts.bucket.failing
+  const starting = counts.bucket.starting
+  const running = containers.filter((c) => c.state === "running").length
   const attention = health.data?.attention
-  const running = containers.length - idle.length
+  const active = detected.filter((s) => s.deployed)
   const reclaimable = disk.data
     ? disk.data.images.reclaimable + disk.data.buildCache.reclaimable
     : 0
+  const narrowed = Boolean(query.trim() || state || project)
+  const projectChips = [...counts.projects.entries()].sort(([a], [b]) =>
+    a === STANDALONE ? 1 : b === STANDALONE ? -1 : a.localeCompare(b),
+  )
+
+  const header = <PageContext title="Docker" />
+
+  // A server with nothing on it is not an error state, and it is the one
+  // moment where the page should be teaching rather than reporting.
+  if (containers.length === 0 && detected.length === 0 && stacks.data) {
+    return (
+      <Page className="animate-rise">
+        {header}
+        <FirstRun canDeploy={can("service.control")} />
+        {dialog}
+      </Page>
+    )
+  }
 
   return (
-    // The page rises once, when its first container list lands — the same
-    // arrival the host Overview makes.
-    <Page className="animate-rise">
-      <PageContext title="Docker" />
+    <Workspace
+      name="Docker"
+      refresh={() => {
+        list.refresh()
+        health.refresh()
+        trends.refresh()
+        stacks.refresh()
+        disk.refresh()
+        feed.refresh()
+      }}
+      escape={() => {
+        if (query) {
+          setQuery("")
+          return true
+        }
+        if (project) {
+          setProject("")
+          return true
+        }
+        if (state) {
+          setState("")
+          return true
+        }
+        return false
+      }}
+      commands={[
+        {
+          id: "failing",
+          label: state === "failing" ? "Show every container" : "Show failing containers",
+          run: () => setState(state === "failing" ? "" : "failing"),
+        },
+      ]}
+    >
+      {/* The page rises once, when its first container list lands — the same
+          arrival the host Overview makes. */}
+      <Page className="animate-rise">
+        {header}
 
-      {/*
-        Four readings, four destinations. Every one of them is a link now: three
-        were and one was not, which taught the reader that a tile is sometimes a
-        button and sometimes furniture — and the one that was not is "Running",
-        the tile most likely to be pressed.
-      */}
-      <StatGrid columns={4}>
-        <StatLink href="/docker/containers" label="Running containers">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Running"
-            value={`${running} / ${containers.length}`}
-            tone={running > 0 ? "success" : "default"}
-            hint={
-              containers.length === 0
-                ? "nothing on this server yet"
-                : containers.length === running
-                  ? "everything on this server is up"
-                  : `${containers.length - running} not running`
-            }
-          />
-        </StatLink>
-
-        {/*
-          Runtime health, and only runtime health. The hint spells out how many
-          containers have no health check at all, because without that number
-          "everything is up" quietly includes every container nothing is
-          watching.
-        */}
-        <StatLink href="/docker/containers" label="Runtime health">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Runtime health"
-            value={runtimeLabel(runtime)}
-            /*
-              "notice" is a stopped container, not a failure and not a success:
-              it used to fall through to `success`, so the tile printed
-              "Something is stopped" in green.
-            */
-            tone={
-              runtime?.status === "critical"
-                ? "danger"
-                : runtime?.status === "warning"
-                  ? "warning"
-                  : // An empty server is not a healthy one. "Nothing running"
-                    // in green is the page congratulating somebody for having
-                    // no services yet.
-                    runtime?.status === "ok" && runtime.total > 0
-                    ? "success"
-                    : "default"
-            }
-            hint={runtime?.summary ?? "checking"}
-          />
-        </StatLink>
-
-        {/*
-          Attention is never called health. It counts posture, storage,
-          configuration and exposure — none of which stops a service, all of
-          which costs something later, and none of which clears itself.
-        */}
-        <StatLink href="/docker/containers" label="Things needing attention">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Attention"
-            value={attentionLabel(attention)}
-            tone={
-              attention?.critical
-                ? "danger"
-                : attention?.warning
-                  ? "warning"
-                  : attention?.total
-                    ? "default"
-                    : "success"
-            }
-            hint={
-              attention?.total
-                ? `${attention.recommendations} recommendation${attention.recommendations === 1 ? "" : "s"} besides`
-                : "nothing to act on"
-            }
-          />
-        </StatLink>
-
-        <StatLink href="/docker/stacks" label="Compose stacks">
-          <StatTile
-            className="h-full transition-colors group-hover:bg-row-hover"
-            label="Compose stacks"
-            value={`${active.length} active`}
-            hint={`${detected.length} detected on this server`}
-          />
-        </StatLink>
-      </StatGrid>
-
-      {/* A server with nothing on it is not an error state, and it is the one
-          moment where the page should be teaching rather than reporting. */}
-      {containers.length === 0 && detected.length === 0 ? (
-        <FirstRun canDeploy={can("service.control")} />
-      ) : (
-        <>
-          {/*
-            Not running, by name. The runtime tile counts them and the attention
-            list deliberately does not carry them, so until this panel existed
-            the only way to find out *which* service had been down since the
-            reboot was to open another page and read a column.
-          */}
-          {idle.length > 0 && (
-            <Panel plain>
-              <PanelHeader
-                title={`${idle.length} not running`}
-                actions={
-                  <Link
-                    href="/docker/containers"
-                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                  >
-                    All containers <ArrowRight className="size-3" />
-                  </Link>
-                }
-              />
-              <PanelBody flush>
-                {/*
-                  Destinations, so they are choices (§16): every row here is a
-                  container to open, and the edge that answers the pointer is
-                  what says so. The hairlines are gone with the `RowList` —
-                  each card owns its own edge.
-                */}
-                <ChoiceList aria-label="Containers that are not running" className="animate-rise">
-                  {idle.slice(0, 6).map((container) => (
-                    <IdleRow
-                      key={container.id}
-                      container={container}
-                      confirm={confirm}
-                      act={act}
-                      pending={pending[container.id]}
-                      onChanged={refreshContainers}
-                    />
-                  ))}
-                </ChoiceList>
-                {idle.length > 6 && (
-                  // Aligned with the card titles above it rather than with the
-                  // cards' own edges, and with no rule over it: a hairline
-                  // under a gapped list reads as an edge the last card lost.
-                  <p className="px-3 pt-2 text-hint text-muted-foreground">
-                    and {idle.length - 6} more.
-                  </p>
-                )}
-              </PanelBody>
-            </Panel>
-          )}
-
-          {/* Problems first. Everything below is context for them. */}
-          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} />
-
-          <Panel plain>
-            <PanelHeader
-              title={
-                <span className="inline-flex items-center gap-1.5">
-                  Compose projects
-                  <ExplainIcon name="compose" />
-                </span>
-              }
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  <Link
-                    href="/docker/stacks"
-                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                  >
-                    Manage <ArrowRight className="size-3" />
-                  </Link>
-                  {can("service.control") && (
-                    <Button size="sm" asChild>
-                      <Link href="/deploy">Open Deploy</Link>
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-            <PanelBody flush>
-              {detected.length === 0 ? (
-                <EmptyState
-                  icon={Layers}
-                  title="No compose stacks"
-                  description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
-                />
-              ) : (
-                // A run of destinations, not of readings: every one of these
-                // rows is a project to enter, so §16 makes them choices and
-                // gives them the lit edge. The row still says the same four
-                // things — the dot, the name, the directory it was found in,
-                // and what state it is in.
-                <ChoiceList aria-label="Compose projects" className="animate-rise">
-                  {detected.map((stack) => (
-                    <ChoiceRow
-                      key={stack.name}
-                      href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
-                      verb={`Open ${stack.name}`}
-                      leading={<StackMark stack={stack} />}
-                      title={
-                        <span className="flex min-w-0 items-center gap-2">
-                          <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
-                          <span className="truncate">{stack.name}</span>
-                        </span>
-                      }
-                      description={<span className="font-mono">{stack.workingDir}</span>}
-                      trailing={<StackStateBadge stack={stack} />}
-                    />
-                  ))}
-                </ChoiceList>
+        <HostIdentity
+          mark="docker"
+          fallback={Box}
+          title={info.data?.ServerVersion ? `Docker ${info.data.ServerVersion}` : "Docker"}
+          facts={
+            <>
+              {(host?.hostname || info.data?.Name) && (
+                <>
+                  <HostFact product={platformProduct(host?.platform)}>
+                    {host?.hostname || info.data?.Name}
+                  </HostFact>
+                  <FactDot />
+                </>
               )}
-            </PanelBody>
-          </Panel>
+              {info.data?.Driver && (
+                <>
+                  <span>
+                    {info.data.Driver}
+                    {info.data.CgroupVersion && ` on cgroup v${info.data.CgroupVersion}`}
+                  </span>
+                  <FactDot />
+                </>
+              )}
+              <span className="numeric">
+                {running} of {plural(containers.length, "container")} running
+              </span>
+              {detected.length > 0 && (
+                <>
+                  <FactDot />
+                  <span className="numeric">
+                    {active.length} of {plural(detected.length, "project")} up
+                  </span>
+                </>
+              )}
+              {info.data?.Images !== undefined && (
+                <>
+                  <FactDot />
+                  <span className="numeric">
+                    {plural(info.data.Images, "image")}
+                    {disk.data && ` · ${bytes(disk.data.layersSize)}`}
+                  </span>
+                </>
+              )}
+            </>
+          }
+          aside={
+            <div className="flex flex-wrap items-center gap-3">
+              {failing > 0 ? (
+                <button
+                  type="button"
+                  aria-pressed={state === "failing"}
+                  onClick={() => setState(state === "failing" ? "" : "failing")}
+                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+                >
+                  <Status tone="danger" label={`${plural(failing, "container")} failing`} />
+                </button>
+              ) : starting > 0 ? (
+                <Status tone="warning" label={`${plural(starting, "container")} starting`} />
+              ) : (
+                <Status tone="running" label="Nothing failing" />
+              )}
+              {attention && attention.issues > 0 && (
+                <a
+                  href="#attention"
+                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+                >
+                  <Status
+                    verdict={attention.critical > 0 ? "critical" : "warning"}
+                    label={`${plural(attention.issues, "issue")} to look at`}
+                  />
+                </a>
+              )}
+              <WorkspaceHelp compact />
+            </div>
+          }
+        />
+
+        <ContainerBand
+          containers={containers}
+          stats={stats}
+          snapshot={snapshot}
+          hostCpus={info.data?.NCPU ?? 0}
+          hostMemory={info.data?.MemTotal ?? 0}
+          changes={changes}
+          listening={feed.data?.listening ?? true}
+          onOpen={openChange}
+        />
+
+        {socketError && <ErrorState error={new Error(socketError)} />}
+
+        {/* Framed, because it is a table: the grid owns a scroll region and
+            the edge is what says so (§2). Everything around it stays plain. */}
+        <Panel>
+          <PanelHeader
+            title={
+              <span className="inline-flex items-center gap-1.5">
+                Containers
+                <span className="numeric text-body font-normal text-muted-foreground">
+                  {containers.length}
+                </span>
+                <ExplainIcon name="container" />
+              </span>
+            }
+            actions={
+              <Link
+                href="/docker/containers"
+                className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+              >
+                All containers <ArrowRight className="size-3" />
+              </Link>
+            }
+          >
+            <ChipStrip role="group" aria-label="State" className="mr-auto">
+              {STATES.map(({ value, label, tone }) => {
+                const count = counts.bucket[value]
+                if ((tone || value === "stopped") && count === 0 && state !== value) return null
+                return (
+                  <FilterChip
+                    key={value}
+                    selected={state === value}
+                    onClick={() => setState(state === value ? "" : value)}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        tone === "danger"
+                          ? "bg-destructive"
+                          : tone === "warning"
+                            ? "bg-warning"
+                            : value === "running"
+                              ? "bg-success"
+                              : "bg-muted-foreground/50",
+                      )}
+                    />
+                    {label}
+                    <ChipCount
+                      className={cn(
+                        tone === "danger" && "text-destructive opacity-100",
+                        tone === "warning" && "text-warning opacity-100",
+                      )}
+                    >
+                      {count}
+                    </ChipCount>
+                  </FilterChip>
+                )
+              })}
+            </ChipStrip>
+          </PanelHeader>
+          <PanelToolbar>
+            <SearchInput
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Name, image or project"
+              containerClassName="sm:w-64"
+            />
+            {projectChips.length > 1 && (
+              <ChipStrip role="group" aria-label="Project">
+                <FilterChip selected={project === ""} onClick={() => setProject("")}>
+                  Every project <ChipCount>{containers.length}</ChipCount>
+                </FilterChip>
+                {projectChips.map(([name, count]) => (
+                  <FilterChip
+                    key={name}
+                    selected={project === name}
+                    title={name === STANDALONE ? "Started by hand rather than by compose" : name}
+                    onClick={() => setProject(project === name ? "" : name)}
+                  >
+                    {name !== STANDALONE && <ProjectKey project={name} />}
+                    {name === STANDALONE ? "Standalone" : name}
+                    <ChipCount>{count}</ChipCount>
+                  </FilterChip>
+                ))}
+              </ChipStrip>
+            )}
+            {narrowed && (
+              <FilterChip
+                selected
+                className="ml-auto"
+                aria-label="Clear every filter"
+                onClick={() => {
+                  setQuery("")
+                  setState("")
+                  setProject("")
+                }}
+              >
+                Clear
+                <Cross aria-hidden className="size-3" />
+              </FilterChip>
+            )}
+          </PanelToolbar>
+          <PanelBody flush>
+            {visible.length === 0 ? (
+              <EmptyState
+                icon={Box}
+                title={narrowed ? "No containers match" : "No containers yet"}
+                description={
+                  narrowed
+                    ? "Clear a filter, or search for a different name, image or project."
+                    : "Compose projects are on this server, but none of them is deployed."
+                }
+                className="my-4"
+              />
+            ) : (
+              <ContainerRows
+                key={[query, state, project].join("\u0000")}
+                rows={visible}
+                stats={stats}
+                trends={trendByName}
+                diagnosis={health.data}
+                pending={pending}
+                confirm={confirm}
+                act={act}
+                onOpen={open}
+                onChanged={healthRefresh}
+              />
+            )}
+          </PanelBody>
+          <PanelFooter className="text-hint text-muted-foreground">
+            <span className="numeric">{plural(visible.length, "container")}</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>failing first, then by name</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>CPU is a share of one core</span>
+          </PanelFooter>
+        </Panel>
+
+        {/* Problems that do not stop a service: posture, storage,
+            configuration and exposure. The verdict above links here. */}
+        <div id="attention" className="scroll-mt-6">
+          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} onAction={runFix} />
+        </div>
+
+        <div className="grid min-w-0 items-start gap-x-10 gap-y-8 lg:grid-cols-2">
+          <ComposeProjects stacks={detected} canDeploy={can("service.control")} />
 
           {/*
             Cleanup appears only when there is something worth reclaiming. A
             panel offering to free 40 MB is a panel that trains people to
             ignore it.
           */}
-          {can("destructive") && reclaimable > 1024 * 1024 * 1024 && (
+          {can("destructive") && reclaimable > 1024 * 1024 * 1024 ? (
             <CleanupPanel
               confirm={confirm}
               onDone={() => {
@@ -340,93 +587,162 @@ export default function DockerOverviewPage() {
                 list.refresh()
               }}
             />
+          ) : (
+            disk.data && (
+              // Plain, like everything around it: a bar and a legend are a reading.
+              <Panel plain className="animate-rise">
+                <PanelHeader
+                  title="Disk"
+                  actions={
+                    <Link
+                      href="/docker/images"
+                      className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                    >
+                      Images <ArrowRight className="size-3" />
+                    </Link>
+                  }
+                />
+                <PanelBody className="space-y-3">
+                  <DiskSummary usage={disk.data} />
+                  <p className="text-hint text-muted-foreground">
+                    {reclaimable > 0
+                      ? `Only ${bytes(reclaimable)} of that could be reclaimed — not worth a sweep yet.`
+                      : "Effectively all of it is in use by something running."}
+                  </p>
+                </PanelBody>
+              </Panel>
+            )
           )}
+        </div>
 
-          {/* Plain, like everything above it: a bar and a legend are a reading. */}
-          {disk.data && reclaimable <= 1024 * 1024 * 1024 && (
-            <Panel plain className="animate-rise">
-              <PanelHeader
-                title="Disk"
-                actions={
-                  <Link
-                    href="/docker/images"
-                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                  >
-                    Images <ArrowRight className="size-3" />
-                  </Link>
-                }
-              />
-              <PanelBody className="space-y-3">
-                <DiskSummary usage={disk.data} />
-                <p className="text-hint text-muted-foreground">
-                  {reclaimable > 0
-                    ? `Only ${bytes(reclaimable)} of that could be reclaimed — not worth a sweep yet.`
-                    : "Effectively all of it is in use by something running."}
-                </p>
-              </PanelBody>
-            </Panel>
-          )}
-        </>
-      )}
-
-      {dialog}
-    </Page>
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 
 /**
- * One container that is not running, and the one button that changes that.
- *
- * Deliberately not the full verb set: this panel exists to answer "what is
- * down", and a row of five controls would turn it into a second containers
- * page. Start is inline because it is the answer; everything else is one click
- * away in the menu beside it.
- *
- * A `ChoiceRow` rather than a hand-laid `<li>`, because the row *goes*
- * somewhere (§16). The verbs sit in its actions slot, dimmed until the pointer
- * arrives rather than hidden behind it, so they still exist on a touch screen.
+ * The compose projects, as lit cards because each opens its project (§16):
+ * what it is made of as its services' products, its name in the hue the
+ * table draws its containers' project in, the directory it was found in, its
+ * state — and under them its services as one strip of their states, so a
+ * project with one service down reads as a gap in a green line before the
+ * word "Partially" is read.
  */
-function IdleRow({
-  container,
-  confirm,
-  act,
-  pending,
-  onChanged,
-}: {
-  container: Container
-  confirm: ReturnType<typeof useConfirm>["confirm"]
-  act: (c: Container, action: string, progressive: string, phrase?: string) => Promise<void>
-  pending?: string
-  onChanged: () => void
-}) {
-  const router = useRouter()
-  const href = `/docker/containers/${encodeURIComponent(container.id)}`
-  const verbs = useContainerVerbs({
-    container,
-    confirm,
-    act,
-    // There is no detail panel on this page, so the verbs that open one — logs,
-    // a shell — go to the page that has it rather than quietly doing nothing.
-    onOpenTab: () => router.push(href),
-    onChanged,
-  })
-
+function ComposeProjects({ stacks, canDeploy }: { stacks: ComposeStack[]; canDeploy: boolean }) {
+  const active = stacks.filter((s) => s.deployed).length
   return (
-    <ChoiceRow
-      href={href}
-      verb={`Open ${container.name}`}
-      leading={<ProductLogo id={containerProduct(container)} size="sm" />}
-      title={container.name}
-      description={<span className="font-mono">{container.image}</span>}
-      trailing={
-        <Status
-          state={container.state}
-          label={pending ? `${pending}…` : container.status}
-          className="shrink-0"
+    <Panel plain>
+      <PanelHeader
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Compose projects
+            <span className="numeric text-body font-normal text-muted-foreground">
+              {active} of {stacks.length} up
+            </span>
+            <ExplainIcon name="compose" />
+          </span>
+        }
+        actions={
+          <span className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/docker/stacks"
+              className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+            >
+              Manage <ArrowRight className="size-3" />
+            </Link>
+            {canDeploy && (
+              <Button size="sm" asChild>
+                <Link href="/deploy">Open Deploy</Link>
+              </Button>
+            )}
+          </span>
+        }
+      />
+      <PanelBody flush>
+        {stacks.length === 0 ? (
+          <EmptyState
+            icon={Layers}
+            title="No compose stacks"
+            description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
+          />
+        ) : (
+          <ChoiceList aria-label="Compose projects" className="animate-rise">
+            {stacks.map((stack) => (
+              <ChoiceRow
+                key={stack.name}
+                href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
+                verb={`Open ${stack.name}`}
+                leading={<StackMark stack={stack} />}
+                title={
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ProjectKey project={stack.name} />
+                    <span className="truncate">{stack.name}</span>
+                  </span>
+                }
+                description={<span className="font-mono">{stack.workingDir}</span>}
+                trailing={<StackStateBadge stack={stack} />}
+              >
+                <ServiceStrip stack={stack} />
+              </ChoiceRow>
+            ))}
+          </ChoiceList>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+/**
+ * Each service the project declares as one segment, in its state's tone: up,
+ * failing, stopped, or not created. A project that was never deployed is a
+ * row of empty track, which is what it is.
+ */
+function ServiceStrip({ stack }: { stack: ComposeStack }) {
+  const byName = new Map(stack.services.map((s) => [s.name, s]))
+  const names = [...new Set([...stack.declared, ...stack.services.map((s) => s.name)])]
+  if (names.length === 0) return null
+  const segments = names.map((name) => {
+    const service = byName.get(name)
+    if (!service || service.missing) return { name, tone: "bg-meter-track", word: "not created" }
+    if (service.state === "running") {
+      return service.health === "unhealthy"
+        ? { name, tone: "bg-destructive", word: "unhealthy" }
+        : service.health === "starting"
+          ? { name, tone: "bg-warning", word: "starting" }
+          : { name, tone: "bg-success", word: "running" }
+    }
+    if (service.state === "restarting" || service.state === "dead") {
+      return { name, tone: "bg-destructive", word: service.state }
+    }
+    return crashed(service)
+      ? { name, tone: "bg-destructive", word: service.status }
+      : { name, tone: "bg-muted-foreground/40", word: service.status || service.state }
+  })
+  return (
+    <div
+      role="img"
+      aria-label={segments.map((s) => `${s.name} ${s.word}`).join(", ")}
+      className="flex h-1 max-w-80 gap-0.5"
+    >
+      {segments.map((s) => (
+        <span
+          key={s.name}
+          title={`${s.name}: ${s.word}`}
+          className={cn("h-full flex-1 rounded-full transition-colors", s.tone)}
         />
-      }
-      actions={<ContainerRowActions verbs={verbs} reveal={false} dim />}
-      className={pending ? "opacity-70" : undefined}
+      ))}
+    </div>
+  )
+}
+
+/** What a project is made of: its services' products, or Compose itself. */
+function StackMark({ stack }: { stack: ComposeStack }) {
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  return (
+    <ProductLogos
+      ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]}
+      ring="ring-choice-surface"
     />
   )
 }
@@ -434,21 +750,14 @@ function IdleRow({
 /**
  * The first five minutes.
  *
- * A fresh server shows four zeros and an empty compose list, which is an
- * accurate and completely unhelpful description of a machine somebody has just
- * decided to put something on. The three routes are the same three the create
- * panel opens with, stated here because this is where the question is actually
- * asked.
- *
- * Open Deploy sits with this explanation on an empty server, so the command
- * appears where the reader learns what to start. The routes below offer the
- * more specific starting points.
+ * A fresh server shows an empty table and an empty compose list, which is an
+ * accurate and completely unhelpful description of a machine somebody has
+ * just decided to put something on. The three routes are the same three the
+ * create panel opens with, stated here because this is where the question is
+ * actually asked.
  */
 function FirstRun({ canDeploy }: { canDeploy: boolean }) {
   return (
-    // Plain, and the three routes are rows rather than three framed cards in
-    // a framed panel: on a page that draws no other box, the first thing a
-    // new server showed was four of them.
     <Panel plain className="animate-rise">
       <PanelHeader
         title="Nothing is running on this server yet"
@@ -506,29 +815,4 @@ function Route({
       className="py-2.5"
     />
   )
-}
-
-/** What a project is made of: its services' products, or Compose itself. */
-function StackMark({ stack }: { stack: ComposeStack }) {
-  const images = stack.services.map((service) => service.image).filter(Boolean)
-  return (
-    <ProductLogos
-      ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]}
-      ring="ring-choice-surface"
-    />
-  )
-}
-
-function stackTone(stack: ComposeStack) {
-  switch (stack.state) {
-    case "running":
-      return "running" as const
-    case "degraded":
-    case "partial":
-      return "warning" as const
-    case "stopped":
-      return "stopped" as const
-    default:
-      return "unknown" as const
-  }
 }

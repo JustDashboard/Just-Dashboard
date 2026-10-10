@@ -1,6 +1,7 @@
 package netsec
 
 import (
+	"encoding/json"
 	"net"
 	"testing"
 )
@@ -77,6 +78,19 @@ func TestAllowlistIsReportedVerbatim(t *testing.T) {
 	got := DescribeExposure(cidrs(t, "10.8.0.0/24", "127.0.0.1/32"))
 	if len(got.Allowlist) != 2 {
 		t.Fatalf("allowlist = %v, want two entries", got.Allowlist)
+	}
+}
+
+// A host with no tunnel device must still send an array: the dashboard reads
+// .length on it, and JSON null threw on the Overview page.
+func TestNoTunnelDevicesIsAnEmptyList(t *testing.T) {
+	names, _ := privateInterfacesFrom([]net.Interface{{Name: "eth0", Flags: net.FlagUp}})
+	raw, err := json.Marshal(names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "[]" {
+		t.Fatalf("interfaces serialised as %s, want []", raw)
 	}
 }
 

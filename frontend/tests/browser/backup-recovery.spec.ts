@@ -294,14 +294,20 @@ test("restore verification failure remains visible and a successful retry shows 
   await openJob(page)
   await runMenu(page, /Verify restore/)
   await expect(page.getByText("Restore check: failed", { exact: true })).toBeVisible()
-  await expect(page.getByText("The restored canary was missing.", { exact: true })).toBeVisible()
+  // The newest run is the inspector's without picking it, so the check's
+  // reason is beside its verdict as well as in the toast.
+  const inspector = page.getByRole("region", { name: "Run 8" })
+  await expect(
+    inspector.getByText("The restored canary was missing.", { exact: true }),
+  ).toBeVisible()
   await runMenu(page, /Verify restore/)
   await expect(page.getByText("Restore check: passed", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Log", exact: true }).click()
+  // The run is picked from the rail beside it; its check is in the inspector.
+  await page.getByRole("button", { name: /^Run 8,/ }).click()
   await expect(
-    page.getByText("The application verified the restored canary.", { exact: true }),
+    inspector.getByText("The application verified the restored canary.", { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText("Removed", { exact: true })).toBeVisible()
+  await expect(inspector.getByText("Removed", { exact: true })).toBeVisible()
   expect(api.checks()).toBe(2)
 })
 
@@ -346,7 +352,8 @@ test("coverage lists what the server has and writes a job for an unprotected vol
   await expect(page.getByText("shop_data", { exact: true })).toBeVisible()
   await expect(page.getByText("shop_data has no backup", { exact: true })).toHaveCount(0)
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await page.getByRole("button", { name: "Back up", exact: true }).click()
+  // Every thing on the server is a card: one nothing covers opens the form for it.
+  await page.getByRole("button", { name: "Back up shop_data" }).click()
   await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
     "Volume shop_data",
   )
@@ -396,7 +403,7 @@ test("a job is paused from its menu and files are put back in place or restored 
   expect(api.restores()).toEqual([{ body: { inPlace: true, paths: [] }, confirm: undefined }])
 
   // One file out of the archive, into a directory of the operator's choosing.
-  await runMenu(page, /Browse files/)
+  await page.getByRole("button", { name: "Browse files" }).click()
   await expect(page.getByText("4 entries", { exact: true })).toBeVisible()
   await page.getByRole("checkbox", { name: "Select source-0001/config.yml" }).click()
   await page.getByRole("button", { name: "Restore 1 selected…" }).click()
@@ -409,4 +416,27 @@ test("a job is paused from its menu and files are put back in place or restored 
     body: { destination: "/srv/restore", inPlace: false, paths: ["source-0001/config.yml"] },
     confirm: undefined,
   })
+})
+
+test("workspace: archive ranges and the selected run survive Back and reload", async ({ page }) => {
+  await mockBackups(page)
+  await page.goto("/backups/5")
+  await page.getByRole("button", { name: "Browse files" }).click()
+  await expect(page).toHaveURL(/run=8/)
+  const boxes = page.getByRole("checkbox", { name: /^Select source-/ })
+  await boxes.nth(1).click()
+  await boxes.nth(3).click({ modifiers: ["Shift"] })
+  await expect(page.getByRole("button", { name: "Restore 3 selected…" })).toBeVisible()
+  await boxes.nth(1).focus()
+  await page.keyboard.press("Shift+ArrowDown")
+  await expect(boxes.nth(2)).toBeFocused()
+  await page.reload()
+  await expect(page).toHaveURL(/run=8/)
+  await expect(page.getByRole("button", { name: "Restore 3 selected…" })).toBeVisible()
+  await boxes.first().focus()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: /Restore \d+ selected/ })).toHaveCount(0)
+  await expect(page).toHaveURL(/run=8/)
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/run=/)
 })

@@ -1,11 +1,10 @@
 "use client"
 
-import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { FileSelection } from "@/components/files/file-selection"
 import { useNearViewport } from "@/hooks/use-near-viewport"
-import { FileActionsButton, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import type { RowCaps } from "@/components/files/file-actions"
 import { Thumbnail } from "@/components/files/thumbnail"
 import { rowReveal } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
@@ -28,15 +27,16 @@ export function GridView({
   selected,
   activePath,
   dimmed,
+  dragging,
   caps,
   size,
   onToggle,
   onSelect,
+  onFocusEntry,
   onOpen,
   onDragStart,
   onDropPaths,
   onDropFiles,
-  actions,
 }: {
   entries: FileEntry[]
   selected: Set<string>
@@ -44,21 +44,23 @@ export function GridView({
   activePath: string | null
   /** Paths on the clipboard waiting to be moved. */
   dimmed: Set<string>
+  dragging: Set<string>
   caps: RowCaps
   size: TileSize
   onToggle: (entry: FileEntry, checked: boolean) => void
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
+  onFocusEntry?: (entry: FileEntry) => void
   onOpen: (entry: FileEntry) => void
   onDragStart?: (entry: FileEntry, event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
-  actions: (entry: FileEntry) => FileActions
 }) {
-  const min = size === "sm" ? "7rem" : size === "lg" ? "13rem" : "10rem"
+  const width = size === "sm" ? "5rem" : size === "lg" ? "8rem" : "6.5rem"
   return (
     <div
-      className="grid gap-2 p-3"
-      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${min}, 1fr))` }}
+      data-file-grid
+      className="grid content-start justify-start gap-x-1 gap-y-1 p-2 pb-24"
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(0, ${width}))` }}
     >
       {entries.map((entry) => (
         <Tile
@@ -67,15 +69,16 @@ export function GridView({
           selected={selected.has(entry.path)}
           active={activePath === entry.path}
           dimmed={dimmed.has(entry.path)}
+          dragging={dragging.has(entry.path)}
           caps={caps}
           size={size}
           onToggle={(checked) => onToggle(entry, checked)}
           onSelect={(event) => onSelect(entry, event)}
+          onFocusEntry={() => onFocusEntry?.(entry)}
           onOpen={() => onOpen(entry)}
           onDragStart={onDragStart ? (event) => onDragStart(entry, event) : undefined}
           onDropPaths={onDropPaths}
           onDropFiles={onDropFiles}
-          actions={actions(entry)}
         />
       ))}
     </div>
@@ -87,29 +90,31 @@ function Tile({
   selected,
   active,
   dimmed,
+  dragging,
   caps,
   size,
   onToggle,
   onSelect,
+  onFocusEntry,
   onOpen,
   onDragStart,
   onDropPaths,
   onDropFiles,
-  actions,
 }: {
   entry: FileEntry
   selected: boolean
   active: boolean
   dimmed: boolean
+  dragging: boolean
   caps: RowCaps
   size: TileSize
   onToggle: (checked: boolean) => void
   onSelect: (event: React.MouseEvent) => void
+  onFocusEntry: () => void
   onOpen: () => void
   onDragStart?: (event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
-  actions: FileActions
 }) {
   const [viewportRef, near] = useNearViewport<HTMLDivElement>()
   const drop = useDropTarget({
@@ -118,26 +123,36 @@ function Tile({
     onDropFiles,
   })
 
-  // The tile is a click target, not a control: its name is the real button,
-  // and the wrapper's handlers are a convenience for the pointer. A wrapper
-  // with `role="button"` would announce the checkbox, the menu and the name
-  // to a screen reader as one control's label.
+  // The name owns keyboard activation; the wrapper makes the whole tile
+  // available to the pointer without nesting its checkbox in a button.
   return (
     <div
       ref={viewportRef}
       data-entry-path={entry.path}
+      tabIndex={active ? 0 : -1}
       data-state={selected ? "selected" : undefined}
+      data-dragging={dragging || undefined}
       draggable={caps.write && !!onDragStart}
       onDragStart={onDragStart}
       {...drop.handlers}
       onClick={onSelect}
+      onFocusCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) onFocusEntry()
+      }}
       onDoubleClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && event.key === "Enter") {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
       className={cn(
-        "group relative flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors select-none",
-        "hover:bg-row-hover",
+        "group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-1.5 py-1.5 text-center transition-[background-color,border-color,opacity] duration-150 select-none",
+        "focus-ring-inset hover:bg-row-hover",
         (active || selected) && "bg-accent",
         active && "border-rule-brand",
         dimmed && "opacity-50",
+        dragging && "opacity-40",
         drop.over && "border-rule-brand bg-wash-brand",
       )}
       title={entry.name}
@@ -155,20 +170,6 @@ function Tile({
         />
       </span>
 
-      <span
-        className={cn("absolute top-1 right-1 z-10", rowReveal())}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
-        <FileActionsButton
-          entry={entry}
-          caps={caps}
-          actions={actions}
-          label={`Actions for ${entry.name}`}
-          className="bg-card/80 text-muted-foreground hover:text-foreground"
-        />
-      </span>
-
       {near || active ? (
         <Thumbnail entry={entry} size={size} hoverPlay />
       ) : (
@@ -176,13 +177,14 @@ function Tile({
           aria-hidden
           className={cn(
             "w-full shrink-0",
-            size === "sm" ? "h-16" : size === "lg" ? "h-32" : "h-24",
+            size === "sm" ? "h-12" : size === "lg" ? "h-24" : "h-16",
           )}
         />
       )}
 
       <span className="w-full min-w-0">
         <button
+          data-file-name
           type="button"
           className="line-clamp-2 w-full rounded-sm text-xs leading-snug break-words focus-ring"
           onClick={(e) => {
@@ -202,9 +204,6 @@ function Tile({
         >
           {entry.name}
         </button>
-        <span className="mt-0.5 block truncate text-micro text-muted-foreground">
-          {entry.isDir ? relativeTime(entry.modified) : bytes(entry.size)}
-        </span>
       </span>
     </div>
   )

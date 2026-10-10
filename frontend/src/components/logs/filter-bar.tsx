@@ -210,6 +210,7 @@ export function FilterBar({
         >
           <SearchInput
             ref={queryRef}
+            data-workspace-search
             value={filter.q}
             onChange={(e) => set({ q: e.target.value })}
             aria-label={mode === "live" ? "Filter the stream" : "Search this log's history"}

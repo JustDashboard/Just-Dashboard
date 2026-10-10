@@ -1,0 +1,50 @@
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/adguard
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/pihole
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/technitium
+--- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy (8.08s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/adguard (2.55s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/pihole (2.65s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/technitium (2.89s)
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/drift
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/foreign_readback
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/unavailable_readback
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/drift
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/foreign_readback
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/unavailable_readback
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/drift
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/foreign_readback
+=== RUN   TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/unavailable_readback
+--- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty (23.09s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/drift (2.61s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/foreign_readback (2.65s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/adguard/unavailable_readback (2.46s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/drift (2.55s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/foreign_readback (2.56s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/pihole/unavailable_readback (2.61s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/drift (2.53s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/foreign_readback (2.58s)
+    --- PASS: TestDNSServiceSelectedPolicyDriftAndReadbackUncertainty/technitium/unavailable_readback (2.53s)
+=== RUN   TestDNSServiceClientGroupCommentAndUnknownGroupGuard
+=== RUN   TestDNSServiceClientGroupCommentAndUnknownGroupGuard/verified
+=== RUN   TestDNSServiceClientGroupCommentAndUnknownGroupGuard/comment_drift
+=== RUN   TestDNSServiceClientGroupCommentAndUnknownGroupGuard/group_drift
+=== RUN   TestDNSServiceClientGroupCommentAndUnknownGroupGuard/comment_readback
+--- PASS: TestDNSServiceClientGroupCommentAndUnknownGroupGuard (13.53s)
+    --- PASS: TestDNSServiceClientGroupCommentAndUnknownGroupGuard/verified (2.68s)
+    --- PASS: TestDNSServiceClientGroupCommentAndUnknownGroupGuard/comment_drift (2.96s)
+    --- PASS: TestDNSServiceClientGroupCommentAndUnknownGroupGuard/group_drift (2.63s)
+    --- PASS: TestDNSServiceClientGroupCommentAndUnknownGroupGuard/comment_readback (2.65s)
+=== RUN   TestDNSServiceClosedRecordAndClientInputs
+--- PASS: TestDNSServiceClosedRecordAndClientInputs (2.70s)
+=== RUN   TestDNSServiceRecordConflictAndLastReadGuards
+=== RUN   TestDNSServiceRecordConflictAndLastReadGuards/adguard
+=== RUN   TestDNSServiceRecordConflictAndLastReadGuards/pihole
+=== RUN   TestDNSServiceRecordConflictAndLastReadGuards/technitium
+--- PASS: TestDNSServiceRecordConflictAndLastReadGuards (13.39s)
+    --- PASS: TestDNSServiceRecordConflictAndLastReadGuards/adguard (2.62s)
+    --- PASS: TestDNSServiceRecordConflictAndLastReadGuards/pihole (2.83s)
+    --- PASS: TestDNSServiceRecordConflictAndLastReadGuards/technitium (2.69s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	61.819s

@@ -22,8 +22,7 @@ import {
   StopCircle,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { percent, plural } from "@/lib/format"
-import { perMinute } from "@/lib/requests"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -43,26 +42,17 @@ import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FindingList } from "@/components/finding-list"
 import { IconAction } from "@/components/icon-action"
-import { TileTrend } from "@/components/metrics/sparkline"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
-import {
-  FailingShare,
-  ProjectCard,
-  ProjectRow,
-  runClock,
-  stageOf,
-} from "@/components/deploy/fleet-card"
+import { ProjectCard, ProjectRow, runClock, stageOf } from "@/components/deploy/fleet-card"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
 import { RunActorMark } from "@/components/deploy/run-marks"
@@ -75,14 +65,10 @@ import {
   useNow,
 } from "@/components/deploy/vocabulary"
 import {
-  FAILING_NOTICE,
   FLEET_FILTERS,
   fleetAttention,
   fleetCounts,
   fleetHaystack,
-  fleetLive,
-  fleetTraffic,
-  failingTone,
   matchesFilter,
   sortFleet,
   type FleetFilter,
@@ -108,37 +94,20 @@ export function ProjectsPage() {
  */
 const GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
 
-const READINGS = ["Live", "Requests", "Failing requests", "Build slots"]
-
 /**
- * The fleet before its first answer, in the shape it arrives in: four
- * readings, each a hint line tall and the Requests one carrying its trend,
- * then the toolbar's search, then three cards, or three rows in the list
- * layout. The route's Suspense fallback draws the same thing under the same
- * header.
+ * The fleet before its first answer, in the shape it arrives in: the
+ * toolbar's search, then three cards, or three rows in the list layout. The
+ * route's Suspense fallback draws the same thing under the same header.
  */
 export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" }) {
   return (
     <>
-      <StatGrid columns={4} dense>
-        {READINGS.map((label) => (
-          <StatTile
-            key={label}
-            label={label}
-            value={<Skeleton className="h-7 w-12" />}
-            trend={label === "Requests" && <Skeleton className="h-9 w-full" />}
-            // A line's height and nothing in it: the hint is a paragraph,
-            // which a block placeholder may not sit inside.
-            hint={"\u00a0"}
-          />
-        ))}
-      </StatGrid>
       <Skeleton aria-hidden className="h-10 w-full rounded-md sm:h-8 sm:w-72" />
       {layout === "grid" ? (
         <ul aria-hidden className={GRID}>
           {[0, 1, 2].map((index) => (
             <li key={index}>
-              <Skeleton className="h-48 rounded-xl" />
+              <Skeleton className="h-50.5 rounded-xl" />
             </li>
           ))}
         </ul>
@@ -156,13 +125,10 @@ export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" })
 }
 
 /**
- * The page reads top to bottom as the question an operator brings to it. The
- * four readings say how the fleet is doing as a whole; the runs in flight are
- * the thing moving; the Attention list names what somebody has to act on, in
- * the engine's own words; and the projects follow, worst first, each drawn as
- * the product it is. It used to open on the cards with the one live figure a
- * 48px line inside a wrapping sentence and the build capacity in 11px beside
- * a heading — the failure §16 describes by name.
+ * The page reads top to bottom as the question an operator brings to it: the
+ * runs in flight are the thing moving; the Attention list names what somebody
+ * has to act on, in the engine's own words; and the projects follow, worst
+ * first, each drawn as the product it is, carrying its own traffic.
  */
 function Fleet() {
   const { can } = useAuth()
@@ -171,11 +137,12 @@ function Fleet() {
   const admin = can("system.admin")
   // The header's shape, and the list rows', chosen once rather than drawn
   // twice and hidden: the tests and a screen reader find each link by its
-  // name, and a hidden twin is a second answer to every query (§12). A run
-  // in flight lays its path, stage and clock beside its name only from `lg`,
-  // where the sidebar leaves the name room to be read.
+  // name, and a hidden twin is a second answer to every query (§12). A run in
+  // flight keeps its stage and clock beside its name from `sm`; its release
+  // path, and a project's readings, join the line only from `lg`, where the
+  // sidebar leaves the name room to be read.
   const roomy = useMediaQuery("(min-width: 640px)")
-  const wideRuns = useMediaQuery("(min-width: 1024px)")
+  const lined = useMediaQuery("(min-width: 1024px)")
   const wide = useMediaQuery("(min-width: 1280px)")
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
@@ -340,20 +307,12 @@ function Fleet() {
           lands (§11), with the page's own rhythm between its blocks. */}
       {fleet.data && (
         <div className="flex min-w-0 animate-rise flex-col gap-6 md:gap-8">
-          {deployments.length > 0 && (
-            <FleetReadings
-              fleet={fleet.data}
-              pulses={pulses}
-              settled={!pulse.loading}
-              failed={Boolean(pulse.error && !pulse.data)}
-            />
-          )}
-
           {fleet.data.activeWork.length > 0 && (
             <InProgressPanel
               work={fleet.data.activeWork}
               deployments={deployments}
-              roomy={wideRuns}
+              wide={roomy}
+              roomy={lined}
               canCancel={can("service.control")}
               cancelling={cancelling}
               onCancel={cancel}
@@ -516,6 +475,7 @@ function Fleet() {
                     <ProjectRow
                       key={deployment.id}
                       wide={wide}
+                      lined={lined}
                       roomy={roomy}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}
@@ -537,127 +497,24 @@ function Fleet() {
 }
 
 /**
- * The fleet in four figures, each one a thing the cards cannot say at a
- * glance: how much of it is serving (and as what), the traffic it is taking,
- * what share of that fails, and how busy the builders are. The per-state
- * counts are the chips' — a figure here repeating a chip's count would be the
- * same number twice.
- */
-function FleetReadings({
-  fleet,
-  pulses,
-  settled,
-  failed,
-}: {
-  fleet: DeploymentFleet
-  pulses: Record<string, TrafficPulse> | undefined
-  /** Whether the traffic read has answered, so its figures rise when it does. */
-  settled: boolean
-  /** The traffic read failed, so its dashes are unknowns rather than a quiet hour. */
-  failed: boolean
-}) {
-  const { deployments, activeWork, slots } = fleet
-  const live = fleetLive(deployments)
-  const traffic = fleetTraffic(deployments, pulses)
-  const queued = activeWork.filter((item) => item.queuePosition).length
-  const resting = [
-    live.stopped > 0 && `${live.stopped} stopped`,
-    live.notDeployed > 0 && `${live.notDeployed} not deployed`,
-  ]
-    .filter(Boolean)
-    .join(" · ")
-  const share = traffic?.share ?? 0
-  const pending = <Skeleton className="h-7 w-12" />
-  // Swapped by key between placeholder and figure, so the figure rises once
-  // when the read it waits for lands (§11).
-  const arrive = (value: React.ReactNode) =>
-    settled ? (
-      <span key="figure" className="inline-block animate-rise">
-        {value}
-      </span>
-    ) : (
-      <span key="skeleton">{pending}</span>
-    )
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Live"
-        value={<NumberTicker value={live.serving} />}
-        trailing={`of ${deployments.length}`}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            {resting && <span className="truncate">{resting}</span>}
-            <ProductGlyphs ids={live.products} />
-          </span>
-        }
-      />
-      <StatTile
-        label="Requests"
-        value={arrive(traffic ? perMinute(traffic.perMinute) : "—")}
-        trailing={traffic && "/min"}
-        trend={
-          traffic && (
-            <TileTrend
-              values={traffic.points}
-              label="Requests per minute across the fleet, last hour"
-            />
-          )
-        }
-        hint={
-          traffic
-            ? `${traffic.pages.toLocaleString()} views · ${plural(traffic.sites, "site")}`
-            : failed
-              ? "traffic could not be read"
-              : settled
-                ? "no routed traffic in the last hour"
-                : "reading the last hour"
-        }
-      />
-      <StatTile
-        label="Failing requests"
-        value={arrive(traffic ? percent(share * 100, 1) : "—")}
-        tone={failingTone(share)}
-        hint={
-          !traffic ? (
-            !failed && "last hour"
-          ) : traffic.failingSites > 0 ? (
-            // The Attention list names each of these, with its share.
-            `${plural(traffic.failingSites, "site")} failing · last hour`
-          ) : traffic.worst.errorRate >= FAILING_NOTICE ? (
-            // The site behind the share, and its own, in the colour of how
-            // bad it is: a fleet at 0.6% can still hold one site at 3%, and
-            // nothing else on the page names a site under 5%.
-            <>
-              {traffic.worst.name} <FailingShare rate={traffic.worst.errorRate} />
-            </>
-          ) : (
-            "last hour"
-          )
-        }
-      />
-      <StatTile
-        label="Build slots"
-        value={<NumberTicker value={slots.heavyUsed} />}
-        trailing={`of ${slots.heavyCapacity} building`}
-        meter={slots.heavyCapacity > 0 ? (slots.heavyUsed / slots.heavyCapacity) * 100 : 0}
-        tone={queued > 0 ? "warning" : "default"}
-        hint={`${queued} queued · control ${slots.lightUsed}/${slots.lightCapacity}`}
-      />
-    </StatGrid>
-  )
-}
-
-/**
- * Runs in flight, under the readings and above everything else: the one thing
- * on the page moving under the reader, so it comes first and takes no frame.
+ * Runs in flight, above everything else: the one thing on the page moving
+ * under the reader, so it comes first and takes no frame.
  * Each is a destination — the run's own page — drawn as the project it is
  * releasing, with the release path sweeping and the stage it is at lit, which
  * is how its page draws it too.
+ *
+ * One line, so Cancel stands on the row's middle: the stage and the clock sit
+ * at its end in fixed measures, so down the list the stages are one column and
+ * the clocks end on one edge. From `lg` the release path leads them, and who
+ * started the run follows its name; narrower, the stage's word says where it
+ * is, and who started it is on the run's page. A phone has no room for the
+ * stage beside the name and keeps one slim line under it — the path and the
+ * stage, nothing else.
  */
 function InProgressPanel({
   work,
   deployments,
+  wide,
   roomy,
   canCancel,
   cancelling,
@@ -665,6 +522,9 @@ function InProgressPanel({
 }: {
   work: DeploymentActiveWork[]
   deployments: DeploymentSummary[]
+  /** From `sm`: the stage beside the name. */
+  wide: boolean
+  /** From `lg`: the release path before the stage, and who started the run. */
   roomy: boolean
   canCancel: boolean
   cancelling: Set<number>
@@ -704,10 +564,9 @@ function InProgressPanel({
             const path = (
               <MiniReleasePath currentStep={item.currentStep} currentStatus={item.currentStatus} />
             )
-            // Who started it and what it is building: beside the run's name
-            // where there is room, under the stage on a phone. The starter is
-            // named, because a face and then a subject is how every card
-            // below draws a commit and its author.
+            // Who started it and what it is building, beside the run's name.
+            // The starter is named, because a face and then a subject is how
+            // every card below draws a commit and its author.
             const starter = (
               <>
                 <RunActorMark run={run} remote={summary?.sourceRemote} size="xs" />
@@ -732,16 +591,18 @@ function InProgressPanel({
                 title={item.projectName}
                 description={
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="shrink-0">
+                    {/* Whole beside the starter, which gives way first; alone,
+                        beside the stage and Cancel, it is what gives way. */}
+                    <span className={roomy ? "shrink-0" : "min-w-0 truncate"}>
                       {runTitle(run)} · {item.environment}
                     </span>
                     {roomy && starter}
                   </span>
                 }
                 trailing={
-                  roomy ? (
+                  wide ? (
                     <>
-                      {path}
+                      {roomy && path}
                       <span className="w-28 min-w-0 truncate text-xs">
                         <TextShimmer className="font-medium">{stage}</TextShimmer>
                       </span>
@@ -770,13 +631,10 @@ function InProgressPanel({
                   )
                 }
               >
-                {!roomy && (
-                  <div className="min-w-0 space-y-1.5 text-hint text-muted-foreground">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {path}
-                      <TextShimmer className="truncate text-hint font-medium">{stage}</TextShimmer>
-                    </div>
-                    <div className="flex min-w-0 items-center gap-1.5">{starter}</div>
+                {!wide && (
+                  <div className="flex min-w-0 items-center gap-3">
+                    {path}
+                    <TextShimmer className="truncate text-hint font-medium">{stage}</TextShimmer>
                   </div>
                 )}
               </ChoiceRow>

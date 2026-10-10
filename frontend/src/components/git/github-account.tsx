@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Check,
+  ChevronDown,
   Copy,
   External,
   GitHubMark,
@@ -126,14 +127,17 @@ export function GitHubAccountControl({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              size={compact ? "sm" : "sm"}
-              variant={compact ? "ghost" : "outline"}
-              className={compact ? "h-6 gap-1 px-1.5 text-hint text-muted-foreground" : undefined}
+              size="sm"
+              variant="outline"
               disabled={!canAdmin || !status.data}
               onClick={() => setSigningIn(true)}
             >
-              <GitHubMark className={compact ? "size-3.5" : "size-4"} />
-              Sign in
+              <GitHubMark className="size-4" />
+              {compact === "avatar" ? (
+                <span className="sr-only">Sign in to GitHub</span>
+              ) : (
+                "Sign in"
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -162,26 +166,33 @@ export function GitHubAccountControl({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
+            {/* The same face and height as the controls beside it. It was a
+                ghost of six pixels less in the workspace strip, between two
+                outlined groups, and with the lift gone it read as a stray
+                label floating between buttons rather than as one of them. */}
             <Button
               size="sm"
-              variant={compact ? "ghost" : "outline"}
-              className={cn(
-                "gap-1.5 pr-2 pl-1.5",
-                compact && "h-6 gap-1 pr-1.5 pl-1 text-hint font-normal",
-              )}
+              variant="outline"
+              aria-label={compact === "avatar" ? `GitHub account ${account.login}` : undefined}
+              className={cn("gap-1.5 pr-2 pl-1.5", compact === "avatar" && "px-1.5")}
             >
-              <ForgeFace
-                login={account.login}
-                provider="github"
-                size="xs"
-                className={compact ? undefined : "size-5"}
-              />
+              <span className="relative flex">
+                <ForgeFace login={account.login} provider="github" size="md" account />
+                {!account.gitConfigured && (
+                  <span
+                    aria-hidden
+                    className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-warning ring-2 ring-control"
+                  />
+                )}
+              </span>
               {compact !== "avatar" && (
-                <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
-                  {account.login}
-                </span>
+                <>
+                  <span className={cn("truncate", compact ? "max-w-[8rem]" : "max-w-[10rem]")}>
+                    {account.login}
+                  </span>
+                  <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
+                </>
               )}
-              {!account.gitConfigured && <span className="size-1.5 rounded-full bg-warning" />}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -197,7 +208,7 @@ export function GitHubAccountControl({
           string §4 keeps out of caps. */}
       <DropdownMenuContent align="end" className="w-72 p-0">
         <div className="flex min-w-0 items-center gap-3 p-3">
-          <ForgeFace login={account.login} provider="github" />
+          <ForgeFace login={account.login} provider="github" account />
           <div className="min-w-0 flex-1">
             <p className="truncate text-body leading-tight font-medium">
               {account.name || account.login}

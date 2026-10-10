@@ -429,3 +429,115 @@ test("the lists and their form fit a phone", async ({ page }) => {
   await page.keyboard.press("Escape")
   await expect(dialog).toBeHidden()
 })
+
+test("the URL resolver says who may take the route from an address, layer by layer", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const route = {
+    url: "http://admin.example.com/office/",
+    scheme: "http",
+    host: "admin.example.com",
+    port: 80,
+    path: "/office/",
+    outcome: "proxy",
+    server: {
+      names: ["admin.example.com"],
+      listen: "*:80",
+      match: "exact",
+      file: "/etc/nginx/sites-enabled/admin",
+      line: 1,
+    },
+    location: {
+      modifier: "",
+      path: "/office/",
+      parents: [],
+      file: "/etc/nginx/sites-enabled/admin",
+      line: 9,
+    },
+    serves: [
+      {
+        text: "proxy_pass http://127.0.0.1:3000;",
+        file: "/etc/nginx/sites-enabled/admin",
+        line: 12,
+      },
+    ],
+    steps: [],
+    certain: true,
+  }
+  const asked: URLSearchParams[] = []
+  await page.route("**/api/v1/proxy/resolve/access?*", (route_) => {
+    const params = new URL(route_.request().url()).searchParams
+    asked.push(params)
+    return json(route_, {
+      route,
+      source: params.get("source"),
+      verdict: "refused",
+      summary: "Refused at Allowed addresses. Anything in front of this host is not seen here.",
+      layers: [
+        {
+          id: "outside",
+          title: "Outside this host",
+          owner: "Provider, CDN or network",
+          verdict: "unknown",
+          detail:
+            "A provider firewall, a security group, a CDN or NAT in front of this host is not visible from its configuration.",
+        },
+        {
+          id: "firewall",
+          title: "Host firewall",
+          owner: "Firewall",
+          ownerPath: "/network/firewall",
+          verdict: "admits",
+          detail: "ufw lets 10.9.0.4 reach port 80 by rule 3 (ALLOW from Anywhere).",
+        },
+        {
+          id: "addresses",
+          title: "Allowed addresses",
+          owner: "Access list office",
+          ownerPath: "/proxy/sites#access-lists",
+          verdict: "refuses",
+          detail: "10.9.0.4 is denied by the first line that matches it: nginx answers 403.",
+          rules: [{ text: "deny 10.9.0.0/16;", file: "/etc/nginx/jd-access/office.conf", line: 1 }],
+        },
+        {
+          id: "credentials",
+          title: "Sign-in",
+          owner: "Site form",
+          verdict: "admits",
+          detail: "nginx asks for no password or sign-in on this path.",
+        },
+      ],
+    })
+  })
+  await page.goto("/proxy/sites")
+  const resolver = page.getByTestId("route-resolver")
+  await resolver.getByLabel("URL to resolve").fill("http://admin.example.com/office/")
+  await resolver.getByLabel("From address").fill("10.0.0.0/8")
+  await expect(
+    resolver.getByText("One IPv4 or IPv6 address, as nginx sees the visitor."),
+  ).toBeVisible()
+  await expect(resolver.getByRole("button", { name: "Resolve" })).toBeDisabled()
+  await resolver.getByLabel("From address").fill("10.9.0.4")
+  await resolver.getByRole("button", { name: "Resolve" }).click()
+
+  const access = resolver.getByRole("region", { name: "Access from 10.9.0.4" })
+  await expect(access.getByText("Refused", { exact: true })).toBeVisible()
+  await expect(access.getByText("Refused at Allowed addresses.", { exact: false })).toBeVisible()
+  const addresses = access.getByRole("listitem").filter({ hasText: "Allowed addresses" })
+  await expect(addresses).toContainText("refuses")
+  await expect(addresses).toContainText("deny 10.9.0.0/16;")
+  await expect(addresses.getByRole("link", { name: "Access list office" })).toHaveAttribute(
+    "href",
+    "/proxy/sites#access-lists",
+  )
+  await expect(access.getByRole("listitem").filter({ hasText: "Outside this host" })).toContainText(
+    "not judged",
+  )
+  // The route itself is drawn below, as a plain resolve draws it.
+  await expect(resolver.getByTestId("route-resolution")).toContainText(
+    "proxy_pass http://127.0.0.1:3000;",
+  )
+  expect(asked).toHaveLength(1)
+  expect(asked[0].get("source")).toBe("10.9.0.4")
+})

@@ -1167,7 +1167,7 @@ export const showcaseOperations: DeploymentOperations = {
         resourceId: "11",
         available: true,
         status: "jd-postgres",
-        deepLink: "/databases/connection?conn=11",
+        deepLink: "/databases/11/settings",
       },
       {
         kind: "database",
@@ -1175,7 +1175,7 @@ export const showcaseOperations: DeploymentOperations = {
         resourceId: "12",
         available: true,
         status: "jd-redis",
-        deepLink: "/databases/connection?conn=12",
+        deepLink: "/databases/12/settings",
       },
     ],
   },
@@ -1821,6 +1821,10 @@ const showcaseConnections: DbConnection[] = [
     user: "app",
     database: "app",
     createdAt: ago(800),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
   {
     id: 12,
@@ -1831,6 +1835,10 @@ const showcaseConnections: DbConnection[] = [
     user: "",
     database: "0",
     createdAt: ago(700),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
 ]
 
@@ -2131,9 +2139,9 @@ function showcaseRead(path: string, url: URL): unknown {
       const points = containerHistory(one.name, api ? 12 : 3, api ? 210_000_000 : 96_000_000).points
       return {
         name: one.name,
-        cpu: points.map((point) => point.cpu),
+        cpu: points.map((point) => point.cpu ?? 0),
         mem: points.map((point) => point.mem),
-        cpuPeak: Math.max(...points.map((point) => point.cpuPeak)),
+        cpuPeak: Math.max(...points.map((point) => point.cpuPeak ?? 0)),
         memPeak: Math.max(...points.map((point) => point.memPeak)),
       }
     }) satisfies ContainerSparkline[]
@@ -2153,6 +2161,23 @@ function showcaseRead(path: string, url: URL): unknown {
 
 export async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+}
+
+/**
+ * The settings pages' one Save: the bar that floats at the foot of the
+ * content area while any form on the page holds an edit.
+ */
+export function saveBar(page: Page) {
+  return page.getByRole("region", { name: "Save changes" })
+}
+
+export async function saveSettings(page: Page) {
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+}
+
+/** The bar says *Saved* once every form it saved went through. */
+export async function expectSaved(page: Page) {
+  await expect(saveBar(page).getByText("Saved", { exact: true })).toBeVisible()
 }
 
 export async function mockProject(

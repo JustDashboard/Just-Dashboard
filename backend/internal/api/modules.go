@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/forgex"
@@ -27,7 +28,13 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netflows"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -79,10 +86,24 @@ type moduleSet struct {
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
+	// blocks records the remote addresses blocked from the connection table
+	// with why and until when, and lifts the ones that end.
+	blocks *netsec.Blocks
+	// network changes the host's network: devices, routes, the gateway
+	// table, shaping, VPN and resolver. netsec keeps reading it for the
+	// posture; this is the half that writes.
+	network         *netx.Service
+	dnsServices     *dnsservice.Service
+	networkVantages *netvantage.Service
+	ipam            *netipam.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
 	jobs            *jobs.Manager
+	diagnostics     *netdiag.Service
+	captures        *netcapture.Service
+	captureNative   captureNativeOwner
+	flowAccounting  *netflows.Service
 	backupStore     *backups.Store
 	backupRunner    *backups.Runner
 	backupSched     *backups.Scheduler
@@ -126,7 +147,10 @@ type moduleSet struct {
 func (s *Server) initModules() {
 	s.modules.sys = sysinfo.NewCollector()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
-	s.modules.dockerStats = s.modules.docker.NewStatsSampler()
+	s.initFlowAccounting()
+	// Callers of the shared sampler arrive when a page asks, not on a cadence,
+	// so a baseline older than this is dropped rather than averaged over.
+	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a
@@ -152,7 +176,7 @@ func (s *Server) initModules() {
 		// After the shell setup, because a held session is started with the
 		// login SetupShell assembles.
 		if err := s.modules.term.HoldSessions(s.Cfg.DataDir); err != nil {
-			s.Log.Warn("terminal sessions will end when the dashboard restarts", "error", err)
+			s.Log.Warn("new terminal sessions are unavailable until restart protection is restored", "error", err)
 		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
@@ -199,7 +223,30 @@ func (s *Server) initModules() {
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
+	s.modules.blocks = netsec.NewBlocks(s.Store.DB, s.modules.netsec)
+	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
+	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
+	s.modules.network = netx.New(netx.Options{
+		Paths:               netx.DefaultPaths(),
+		DB:                  s.Store.DB,
+		Log:                 s.Log,
+		Allowlist:           allowlistStrings(s.Cfg.AllowedCIDRs),
+		Seal:                s.Sealer.Seal,
+		Open:                s.Sealer.Open,
+		SampleEvery:         s.Cfg.MetricsInterval,
+		Retention:           s.Cfg.MetricsRetention,
+		IndependentRecovery: true,
+	})
+	// The firewall keeps its rule history beside the audit log, and offers
+	// the network module's owned nftables table where no ufw or firewalld
+	// runs.
+	s.modules.netsec.UseHistory(s.Store.DB)
+	s.modules.netsec.UseOwnedFirewall(ownedFirewall{net: s.modules.network})
+	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
+	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
+	s.modules.captureNative = netcapture.NewNative()
+	s.modules.captures = netcapture.New(s.Store.DB, s.modules.jobs, s.modules.captureNative.Capture)
 
 	databaseDumper := &backupDatabaseDumper{server: s}
 	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files).

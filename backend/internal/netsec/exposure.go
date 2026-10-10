@@ -126,8 +126,15 @@ func isPrivate(ip net.IP) bool {
 func privateInterfaces() (names []string, tailscaleIP string) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, ""
+		return []string{}, ""
 	}
+	return privateInterfacesFrom(ifaces)
+}
+
+func privateInterfacesFrom(ifaces []net.Interface) (names []string, tailscaleIP string) {
+	// Non-nil so a host with no tunnel device serialises as [], not null: the
+	// dashboard reads .length on it.
+	names = []string{}
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagUp == 0 {
 			continue

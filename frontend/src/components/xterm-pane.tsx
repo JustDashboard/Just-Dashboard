@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { IDisposable, Terminal } from "@xterm/xterm"
 import type { SearchAddon } from "@xterm/addon-search"
 import {
@@ -61,6 +63,15 @@ import { Modal } from "@/components/modal"
 import { Pane } from "@/components/panel"
 import { copyText, copyTextQuietly } from "@/lib/clipboard"
 
+export type XtermActions = {
+  copy: () => void
+  save: () => void
+  clear: () => void
+  shortcuts: () => void
+  /** Types a command line into this pane's shell and presses Enter. */
+  run: (command: string) => void
+}
+
 type Query = Record<string, string | number | boolean | undefined | null>
 
 type XtermTheme = NonNullable<Terminal["options"]["theme"]>
@@ -107,25 +118,40 @@ const TERMINAL_FALLBACK: XtermTheme = {
  */
 function resolveTerminalTheme(): XtermTheme {
   if (typeof document === "undefined") return TERMINAL_FALLBACK
-  const ctx = document.createElement("canvas").getContext("2d")
+  const canvas = document.createElement("canvas")
+  canvas.width = 1
+  canvas.height = 1
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })
   if (!ctx) return TERMINAL_FALLBACK
 
-  const probe = document.createElement("span")
-  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
-  document.body.appendChild(probe)
-
   const read = (expr: string, fallback: string) => {
+    // A fresh probe for every token. Under reduced motion the root rule gives
+    // every element a 0.01ms transition, so one probe reused for each token
+    // was read on its way from the colour before: the ground came back as the
+    // foreground, and the terminal drew white for anyone who asks for less
+    // motion. A new element has no colour to move from.
+    const probe = document.createElement("span")
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
     // A sentinel first: an expression the browser rejects outright (a typo in
     // a function name) leaves `color` at the sentinel rather than erroring, so
     // that is the signal to fall back.
     probe.style.color = "rgb(1, 2, 3)"
     probe.style.color = expr
+    document.body.appendChild(probe)
     const raw = getComputedStyle(probe).color
+    probe.remove()
     if (!raw || raw === "rgb(1, 2, 3)") return fallback
     try {
+      // The pixel, not `fillStyle` read back: Chrome 151 keeps an `oklab()`
+      // fill as `oklab()`, which xterm cannot parse and draws as a white
+      // ground, so the colour is painted and its channels read off it.
+      ctx.clearRect(0, 0, 1, 1)
       ctx.fillStyle = "#000"
       ctx.fillStyle = raw
-      return ctx.fillStyle
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+      const hex = (n: number) => n.toString(16).padStart(2, "0")
+      return `#${hex(r)}${hex(g)}${hex(b)}${a < 255 ? hex(a) : ""}`
     } catch {
       return fallback
     }
@@ -178,7 +204,6 @@ function resolveTerminalTheme(): XtermTheme {
     brightCyan: cyan,
     brightWhite: fg,
   }
-  probe.remove()
   return theme
 }
 
@@ -195,6 +220,37 @@ const CONTROL_KEYS = [
   { label: "Esc", hint: "Escape", bytes: "\u001b" },
   { label: "Ctrl+\\", hint: "Quit — stronger than Ctrl+C", bytes: "\u001c" },
 ] as const
+
+/**
+ * How many terminals may hold a WebGL context at once.
+ *
+ * Chrome keeps sixteen live contexts per page and destroys the oldest past
+ * that, which can be the pane on screen, and every visited window stays
+ * mounted with its emulator. So the contexts are rationed: the panes fitted
+ * most recently keep theirs, and a hidden pane past the budget drops to the
+ * DOM renderer until it is shown again.
+ */
+const WEBGL_BUDGET = 8
+
+type WebglHolder = { visible: () => boolean; release: () => void }
+
+/** Oldest first; a holder moves to the end each time it is fitted. */
+const webglHolders: WebglHolder[] = []
+
+function dropWebgl(holder: WebglHolder) {
+  const index = webglHolders.indexOf(holder)
+  if (index >= 0) webglHolders.splice(index, 1)
+}
+
+function holdWebgl(holder: WebglHolder) {
+  dropWebgl(holder)
+  webglHolders.push(holder)
+  while (webglHolders.length > WEBGL_BUDGET) {
+    const idle = webglHolders.find((other) => !other.visible())
+    if (!idle) return
+    idle.release()
+  }
+}
 
 /**
  * An xterm.js terminal wired to a PTY over a WebSocket.
@@ -219,6 +275,11 @@ export function XtermPane({
   fullscreenActive,
   terminalSessionId,
   active = true,
+  visible = active,
+  layoutSize,
+  hideToolbar = false,
+  minimalToolbar = false,
+  actionsRef,
   flush,
   onActivity,
 }: {
@@ -288,8 +349,17 @@ export function XtermPane({
    * container's stdin.
    */
   terminalSessionId?: string
-  /** Hidden windows keep parsing output at their last visible grid size. */
+  /** Only the focused pane auto-focuses and publishes the server focus frame. */
   active?: boolean
+  /** Every visible split fits independently; hidden windows retain their grid. */
+  visible?: boolean
+  /** The controlled pane box in pixels, fitted before the browser paints it. */
+  layoutSize?: { width: number; height: number }
+  /** The terminal workspace owns one toolbar above all its split panes. */
+  hideToolbar?: boolean
+  /** Deployment consoles keep only the actions menu and fullscreen button. */
+  minimalToolbar?: boolean
+  actionsRef?: React.RefObject<XtermActions | null>
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -366,12 +436,20 @@ export function XtermPane({
   // tearing down the PTY session behind it.
   const termRef = useRef<Terminal | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
-  const fitRef = useRef<{ fit: () => void } | null>(null)
+  const fitRef = useRef<{ fit: () => void; resync: () => void } | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   // The upload path uses this exact input writer after its HTTP request
   // finishes. It is assigned by the live socket effect so a returned path
   // travels through the same transport and copy-mode handling as typing.
   const inputRef = useRef<((data: string) => boolean) | null>(null)
+  const visibleRef = useRef(visible)
+  useLayoutEffect(() => {
+    visibleRef.current = visible
+    // A later fit animation frame can clear WebGL after xterm already painted
+    // that frame. Fit a controlled split during commit, so its repaint is queued
+    // before composition; the observer still handles fonts and internal bars.
+    if (visible) fitRef.current?.fit()
+  }, [visible, layoutSize?.width, layoutSize?.height])
   const activeRef = useRef(active)
   useEffect(() => {
     activeRef.current = active
@@ -526,50 +604,98 @@ export function XtermPane({
       // glyphs. That leaves box-drawing and block-element characters to font
       // fallback, where their edges do not fill the cell and TUI borders/logo
       // art develop visible gaps. The matching WebGL addon renders those
-      // structural characters itself. Keep DOM as a context-loss fallback and
-      // as an explicit diagnostic A/B override.
+      // structural characters itself. Keep DOM as a context-loss fallback, for
+      // hidden panes past WEBGL_BUDGET, and as an explicit diagnostic A/B
+      // override.
+      //
+      // The two renderers measure cells differently — WebGL floors the width
+      // to whole device pixels, DOM keeps the fraction — so the same grid is
+      // wider under DOM. Every switch is therefore followed by a fit before the
+      // pane is seen: a grid that no longer matched the box ran off its right
+      // edge, and the box had not changed, so no observer ever fitted it.
       host.dataset.terminalRenderer = "dom"
-      if (window.localStorage.getItem("jd.terminal.renderer") !== "dom") {
-        try {
-          const webgl = new WebglAddon()
-          disposables.push(
-            webgl.onContextLoss(() => {
-              webgl.dispose()
-              host.dataset.terminalRenderer = "dom"
-              window.requestAnimationFrame(() => {
-                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
-              })
-            }),
-          )
-          term.loadAddon(webgl)
-          host.dataset.terminalRenderer = "webgl"
-
-          // Alternate-buffer switches replace the complete rendered surface.
-          // Force one coherent frame so an atlas update cannot leave rows from
-          // the former buffer stale or blank.
-          disposables.push(
-            term.buffer.onBufferChange(() => {
-              window.requestAnimationFrame(() => {
-                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
-              })
-            }),
-          )
-        } catch {
-          // Software-only browsers remain usable through xterm's DOM renderer.
-          host.dataset.terminalRenderer = "dom"
+      const preferDom = window.localStorage.getItem("jd.terminal.renderer") === "dom"
+      let webgl: IDisposable | undefined
+      // A context that died and was not restored stays dead for this
+      // terminal; claiming a new one on every fit would trade a working DOM
+      // renderer for a blank pane every three seconds.
+      let webglLost = preferDom
+      const holder: WebglHolder = {
+        visible: () => visibleRef.current,
+        release: () => releaseWebgl(),
+      }
+      const releaseWebgl = () => {
+        dropWebgl(holder)
+        webgl?.dispose()
+        webgl = undefined
+        host.dataset.terminalRenderer = "dom"
+      }
+      const claimWebgl = () => {
+        if (webglLost) return
+        if (!webgl) {
+          try {
+            const addon = new WebglAddon()
+            addon.onContextLoss(() => {
+              webglLost = true
+              releaseWebgl()
+              window.requestAnimationFrame(() => refreshTerminal())
+            })
+            term.loadAddon(addon)
+            webgl = addon
+            host.dataset.terminalRenderer = "webgl"
+          } catch {
+            // Software-only browsers remain usable through xterm's DOM renderer.
+            webglLost = true
+            return
+          }
         }
+        holdWebgl(holder)
+      }
+      if (!preferDom) {
+        // Alternate-buffer switches replace the complete rendered surface.
+        // Force one coherent frame so an atlas update cannot leave rows from
+        // the former buffer stale or blank.
+        disposables.push(
+          term.buffer.onBufferChange(() => {
+            window.requestAnimationFrame(() => {
+              if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
+            })
+          }),
+        )
       }
 
+      const domMeasure = document.createElement("canvas").getContext("2d")
       const fitTerminal = () => {
-        if (!activeRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        if (!visibleRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        claimWebgl()
+        const proposed = fit.proposeDimensions()
+        if (proposed && host.dataset.terminalRenderer === "dom" && domMeasure && term.element) {
+          // DOM rounds the screen width before deriving its cell width, so the
+          // addon's next fit depends on the previous column count. Measure the
+          // font itself so closing a split restores the same full-width grid.
+          domMeasure.font = `${term.options.fontSize}px ${term.options.fontFamily}`
+          const cellWidth = domMeasure.measureText("W").width
+          const scrollbar = term.element.querySelector<HTMLElement>(".scrollbar.vertical")
+          if (cellWidth > 0 && (scrollbar || term.options.scrollback === 0)) {
+            const style = getComputedStyle(term.element)
+            const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+            const scrollbarWidth = term.options.scrollback === 0 ? 0 : scrollbar!.offsetWidth
+            proposed.cols = Math.max(
+              2,
+              Math.floor((host.clientWidth - padding - scrollbarWidth) / cellWidth),
+            )
+            term.resize(proposed.cols, proposed.rows)
+            return term.rows > 0 && term.cols > 0
+          }
+        }
         fit.fit()
         return term.rows > 0 && term.cols > 0
       }
       fitTerminal()
 
-      // The size the server was last told. Both xterm's resize event and the
-      // host observer converge here, so a fit cannot emit the same control
-      // message twice.
+      // The size this tab last told the server. Both xterm's resize event and
+      // the host observer converge here, so a fit cannot emit the same control
+      // message twice. It is not the PTY's size — see `resync` below.
       let sent = { rows: 0, cols: 0 }
       const terminalDebug = window.localStorage.getItem("jd.terminal.debug") === "1"
       const syncPtySize = (socket: WebSocket) => {
@@ -669,13 +795,12 @@ export function XtermPane({
         syncPtySize(socket)
       }
       const refreshTerminal = () => {
-        if (disposed || !activeRef.current || document.visibilityState !== "visible") return
+        if (disposed || !visibleRef.current || document.visibilityState !== "visible") return
         sendResize()
         // Returning to a hidden window may not change its dimensions. Repaint
         // its retained screen even when the PTY needs no resize notification.
         if (term.rows > 0) term.refresh(0, term.rows - 1)
       }
-      fitRef.current = { fit: refreshTerminal }
 
       socket.onopen = () => {
         if (disposed) return
@@ -933,13 +1058,23 @@ export function XtermPane({
           refreshTerminal()
         })
       }
+      // Another browser attached to the same window resizes the PTY too, and
+      // coming back to this one — its tab, its browser window or its terminal
+      // window — changed nothing `sent` could see, so the size was never said
+      // again and the program kept drawing for the other screen. Each return
+      // forgets what was sent; the server ignores a size the PTY already has.
+      const resync = () => {
+        sent = { rows: 0, cols: 0 }
+        scheduleResize()
+      }
+      fitRef.current = { fit: refreshTerminal, resync }
       const observer = new ResizeObserver(scheduleResize)
       observer.observe(host)
       const onVisibility = () => {
-        if (document.visibilityState === "visible") scheduleResize()
+        if (document.visibilityState === "visible") resync()
       }
       document.addEventListener("visibilitychange", onVisibility)
-      window.addEventListener("focus", scheduleResize)
+      window.addEventListener("focus", resync)
       void document.fonts?.ready.then(scheduleResize)
 
       cleanup = () => {
@@ -947,12 +1082,13 @@ export function XtermPane({
         observer.disconnect()
         cancelAnimationFrame(resizeFrame)
         document.removeEventListener("visibilitychange", onVisibility)
-        window.removeEventListener("focus", scheduleResize)
+        window.removeEventListener("focus", resync)
         clearTimeout(syncTimer)
         host.removeEventListener("wheel", onWheel, { capture: true })
         host.removeEventListener("mousedown", onMouseDownCapture, { capture: true })
         for (const d of disposables) d.dispose()
         socket.close()
+        dropWebgl(holder)
         term.dispose()
         termRef.current = null
         searchRef.current = null
@@ -998,6 +1134,40 @@ export function XtermPane({
       if (focusRef?.current === focus) focusRef.current = null
     }
   }, [active, focusRef, terminalSessionId])
+
+  useEffect(() => {
+    if (visible) fitRef.current?.resync()
+  }, [visible])
+
+  useEffect(() => {
+    if (!active || !actionsRef) return
+    const actions: XtermActions = {
+      copy: () => {
+        if (termRef.current) void copySelection(termRef.current)
+      },
+      save: () => {
+        if (termRef.current) downloadScrollback(termRef.current)
+      },
+      clear: () => {
+        termRef.current?.clear()
+        termRef.current?.focus()
+      },
+      shortcuts: () => setShortcuts(true),
+      run: (command) => {
+        const socket = socketRef.current
+        if (socket?.readyState !== WebSocket.OPEN) {
+          notify.error("Not connected")
+          return
+        }
+        sendTerminalInput(socket, `${command}\r`)
+        termRef.current?.focus()
+      },
+    }
+    actionsRef.current = actions
+    return () => {
+      if (actionsRef.current === actions) actionsRef.current = null
+    }
+  }, [active, actionsRef])
 
   // Clipboard images and dragged images take an authenticated HTTP path to
   // the server, then only the returned filename goes through the PTY socket.
@@ -1183,7 +1353,7 @@ export function XtermPane({
   return (
     <Pane
       ref={frameRef}
-      inert={!active}
+      inert={!visible}
       // In fullscreen the pane is the whole screen, so the corners and border
       // would draw a frame around nothing.
       flush={flush || fullscreen}
@@ -1191,157 +1361,163 @@ export function XtermPane({
         "relative bg-surface-sunken",
         copyMode && "terminal-tmux",
         className,
-        !active && "hidden",
+        !visible && "hidden",
       )}
     >
       {/* 40px, the height of the terminal page's rail and tools strips, so the
           three hairlines meet as one line across the workbench. */}
-      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-0.5">
-        {headerContent ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
-        ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-            {subtitle ?? path}
-            {shellTitle && (
-              <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
-                {shellTitle}
-              </span>
-            )}
-          </span>
-        )}
+      {(!hideToolbar || headerContent || searching) && (
+        <div className="flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-hairline bg-surface-header px-2 py-0.5">
+          {headerContent ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
+          ) : (
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+              {subtitle ?? path}
+              {shellTitle && (
+                <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
+                  {shellTitle}
+                </span>
+              )}
+            </span>
+          )}
 
-        {searching ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <Input
-              autoFocus
-              value={needle}
-              onChange={(e) => setNeedle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") runSearch(e.shiftKey ? "previous" : "next")
-                if (e.key === "Escape") {
+          {searching ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <Input
+                autoFocus
+                value={needle}
+                onChange={(e) => setNeedle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runSearch(e.shiftKey ? "previous" : "next")
+                  if (e.key === "Escape") {
+                    setSearching(false)
+                    searchRef.current?.clearDecorations()
+                    termRef.current?.focus()
+                  }
+                }}
+                aria-label="Find in scrollback"
+                placeholder="Find in scrollback"
+                className="h-7 w-44 text-xs"
+              />
+              <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
+                {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
+              </span>
+              <FindToggle
+                label="Match case"
+                on={findOptions.caseSensitive}
+                onClick={() => setFindOptions((o) => ({ ...o, caseSensitive: !o.caseSensitive }))}
+              >
+                <TextUppercase className="size-3.5" />
+              </FindToggle>
+              <FindToggle
+                label="Whole word"
+                on={findOptions.word}
+                onClick={() => setFindOptions((o) => ({ ...o, word: !o.word }))}
+              >
+                <TextTitle className="size-3.5" />
+              </FindToggle>
+              <FindToggle
+                label="Regular expression"
+                on={findOptions.regex}
+                onClick={() => setFindOptions((o) => ({ ...o, regex: !o.regex }))}
+              >
+                <SlashForward className="size-3.5" />
+              </FindToggle>
+              <PaneButton label="Previous match" onClick={() => runSearch("previous")}>
+                <ArrowUp className="size-3.5" />
+              </PaneButton>
+              <PaneButton label="Next match" onClick={() => runSearch("next")}>
+                <ArrowDown className="size-3.5" />
+              </PaneButton>
+              <PaneButton
+                label="Close search"
+                onClick={() => {
                   setSearching(false)
                   searchRef.current?.clearDecorations()
                   termRef.current?.focus()
-                }
-              }}
-              aria-label="Find in scrollback"
-              placeholder="Find in scrollback"
-              className="h-7 w-44 text-xs"
-            />
-            <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
-              {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
-            </span>
-            <FindToggle
-              label="Match case"
-              on={findOptions.caseSensitive}
-              onClick={() => setFindOptions((o) => ({ ...o, caseSensitive: !o.caseSensitive }))}
-            >
-              <TextUppercase className="size-3.5" />
-            </FindToggle>
-            <FindToggle
-              label="Whole word"
-              on={findOptions.word}
-              onClick={() => setFindOptions((o) => ({ ...o, word: !o.word }))}
-            >
-              <TextTitle className="size-3.5" />
-            </FindToggle>
-            <FindToggle
-              label="Regular expression"
-              on={findOptions.regex}
-              onClick={() => setFindOptions((o) => ({ ...o, regex: !o.regex }))}
-            >
-              <SlashForward className="size-3.5" />
-            </FindToggle>
-            <PaneButton label="Previous match" onClick={() => runSearch("previous")}>
-              <ArrowUp className="size-3.5" />
-            </PaneButton>
-            <PaneButton label="Next match" onClick={() => runSearch("next")}>
-              <ArrowDown className="size-3.5" />
-            </PaneButton>
-            <PaneButton
-              label="Close search"
-              onClick={() => {
-                setSearching(false)
-                searchRef.current?.clearDecorations()
-                termRef.current?.focus()
-              }}
-            >
-              <Cross className="size-3.5" />
-            </PaneButton>
-          </div>
-        ) : (
-          <>
-            <PaneButton
-              label={`Search scrollback (${formatChord(map["terminal.search"])})`}
-              onClick={() => setSearching(true)}
-            >
-              <MagnifyingGlass className="size-3.5" />
-            </PaneButton>
+                }}
+              >
+                <Cross className="size-3.5" />
+              </PaneButton>
+            </div>
+          ) : !hideToolbar ? (
+            <>
+              {!minimalToolbar && (
+                <>
+                  <PaneButton
+                    label={`Search scrollback (${formatChord(map["terminal.search"])})`}
+                    onClick={() => setSearching(true)}
+                  >
+                    <MagnifyingGlass className="size-3.5" />
+                  </PaneButton>
 
-            <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
+                  <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
 
-            <SettingsMenu />
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label="Terminal actions">
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60">
-                <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={() => termRef.current && copySelection(termRef.current)}
-                >
-                  <Copy className="size-4" /> Copy selection
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => termRef.current && downloadScrollback(termRef.current)}
-                >
-                  <Download className="size-4" /> Save scrollback
-                </DropdownMenuItem>
-                {cwd && onOpenFiles && (
-                  <DropdownMenuItem onSelect={() => onOpenFiles(cwd)}>
-                    <FolderOpen className="size-4" /> Open working folder
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setShortcuts(true)}>
-                  <Command className="size-4" /> Keyboard shortcuts
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    termRef.current?.clear()
-                    termRef.current?.focus()
-                  }}
-                >
-                  <Trash className="size-4" /> Clear screen
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <PaneButton
-              label={
-                (onToggleFullscreen ? fullscreenActive : fullscreen)
-                  ? "Leave fullscreen (Esc)"
-                  : "Fullscreen"
-              }
-              onClick={onToggleFullscreen ?? toggleFullscreen}
-            >
-              {(onToggleFullscreen ? fullscreenActive : fullscreen) ? (
-                <FullscreenClose className="size-3.5" />
-              ) : (
-                <Fullscreen className="size-3.5" />
+                  <SettingsMenu />
+                </>
               )}
-            </PaneButton>
-          </>
-        )}
 
-        {/* No connection badge. A socket that is up is the unremarkable case
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Terminal actions">
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => termRef.current && copySelection(termRef.current)}
+                  >
+                    <Copy className="size-4" /> Copy selection
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => termRef.current && downloadScrollback(termRef.current)}
+                  >
+                    <Download className="size-4" /> Save scrollback
+                  </DropdownMenuItem>
+                  {cwd && onOpenFiles && (
+                    <DropdownMenuItem onSelect={() => onOpenFiles(cwd)}>
+                      <FolderOpen className="size-4" /> Open working folder
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setShortcuts(true)}>
+                    <Command className="size-4" /> Keyboard shortcuts
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      termRef.current?.clear()
+                      termRef.current?.focus()
+                    }}
+                  >
+                    <Trash className="size-4" /> Clear screen
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <PaneButton
+                label={
+                  (onToggleFullscreen ? fullscreenActive : fullscreen)
+                    ? "Leave fullscreen (Esc)"
+                    : "Fullscreen"
+                }
+                onClick={onToggleFullscreen ?? toggleFullscreen}
+              >
+                {(onToggleFullscreen ? fullscreenActive : fullscreen) ? (
+                  <FullscreenClose className="size-3.5" />
+                ) : (
+                  <Fullscreen className="size-3.5" />
+                )}
+              </PaneButton>
+            </>
+          ) : null}
+
+          {/* No connection badge. A socket that is up is the unremarkable case
             and said nothing worth a pill in a row of controls; the one state
             worth knowing about announces itself — a dropped socket writes
             "— disconnected —" into the pane and the error banner takes over. */}
-      </div>
+        </div>
+      )}
 
       {/*
         A dashboard session's dropped socket is retried on its own (see the
@@ -1594,10 +1770,13 @@ function SnippetMenu({
         <DropdownMenuSeparator />
         {snippets.map((snippet) => (
           <DropdownMenuItem key={snippet.id} onSelect={() => onSend(snippet.command)}>
-            <span className="min-w-0 flex-1 truncate">{snippet.label}</span>
-            <span className="max-w-[50%] shrink truncate font-mono text-hint text-muted-foreground">
-              {snippet.command}
-            </span>
+            <MenuItemText
+              hint={
+                <span className="font-mono text-hint text-muted-foreground">{snippet.command}</span>
+              }
+            >
+              <span className="min-w-0 flex-1 truncate">{snippet.label}</span>
+            </MenuItemText>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

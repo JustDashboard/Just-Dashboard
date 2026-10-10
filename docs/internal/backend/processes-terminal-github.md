@@ -2,10 +2,19 @@
 
 ## Processes
 
+The live frontend can pause scheduled inventory reads and holds row order while a process has focus,
+using PID plus creation time as identity. Keyboard inspection and place restoration use the shared
+[workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
+still read while paused. Signal and priority route guards remain the contracts below.
+
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
-membership identifies systemd services, containers and login sessions; an empty command line identifies a
-kernel worker; PM2's own PID list is overlaid by the handler because a PM2 child otherwise inherits its
-daemon's systemd cgroup. **Names are not used to guess ownership** — the same executable started by a
+membership identifies systemd services, containers and login sessions; an empty command line with
+`PF_KTHREAD` among the task flags in `/proc/<pid>/stat` identifies a kernel thread (an empty command line
+alone is also a zombie's, or a process's caught mid-exit, which stay `unmanaged`; a table whose `stat`
+cannot be read keeps the old reading); PM2's own PID list is overlaid by the handler because a PM2 child
+otherwise inherits its daemon's systemd cgroup. The handler names a container owner by the container's
+name (`managerLabel`, from a Docker listing kept for ten seconds; a Docker that does not answer leaves
+the id). **Names are not used to guess ownership** — the same executable started by a
 service and by a shell has a different remedy. Unknowns stay `unmanaged`, which is information rather than
 a failed detection. `ManagerOf` is the same reading under a given process table, which the ports
 listing uses with `HOST_PROC`; `Systemd.Sockets` is `systemctl list-sockets --all --show-types
@@ -14,7 +23,22 @@ socket-activated service's port.
 
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses
-  PIDs; a replacement starts at zero rather than inheriting the old process's apparent I/O spike.
+  PIDs; a replacement starts with an unavailable rate until a new interval is measured, rather than inheriting the old process's apparent I/O spike.
+  The table's scans and the detail route share that sample, on their own clocks, so a read less than a
+  second after the last (`minRateWindow`) reports the last full window's rates and keeps its start
+  rather than measuring a few milliseconds of scheduler rounding. Every measured window also appends a
+  point — CPU, resident memory, read and write rates — to the process's history, at most one every two
+  seconds and the last ninety; the detail route returns it as `history`, so a sheet opens on a shape.
+  Memory is one `statm` read (resident, virtual and shared) with the share computed against the host's
+  total read once per scan, and swap is `VmSwap` from `status`: gopsutil's `MemoryPercent` read
+  `/proc/meminfo` once per process, and its `MemoryInfo` leaves swap at zero on Linux.
+- `/processes/inventory` also returns `groups`: workloads keyed by `GroupKey` — a systemd unit, a PM2
+  application or a container, or `name:<program>` for a session's or an unmanaged process, the program
+  being the first word of the name because Chrome and Node rewrite theirs to the whole argv — each with
+  its count, summed CPU and disk rates, its heaviest PID, and memory as each process's private pages
+  plus the largest shared figure among them, so twenty Postgres backends do not count their shared
+  buffers twenty times. The heaviest eight by CPU and eight by memory are returned, over the whole
+  snapshot like the facets; `group=<key>` filters the rows to one.
 - Concurrent inventory readers share a scan already in progress. Each receives its own row slice for
   sorting and PM2 enrichment, and canceling one reader does not cancel the others. The last reader's
   departure cancels collection; completed scans are not cached, so the next refresh starts fresh.
@@ -28,7 +52,10 @@ socket-activated service's port.
 - A signal or priority request carries the process's create timestamp. The server re-reads the PID and
   returns `process_replaced` if it now names something else, so a row left on screen cannot act on a reused
   PID. Signals remain destructive and confirmed; changing `nice` is reversible, audited, and
-  `system.admin`. PID 1 and the dashboard's own process remain refused in the backend.
+  `system.admin`. PID 1 and the dashboard's own process remain refused in the backend. A signal to a
+  kernel thread is refused as `409 kernel_thread` and a signal or priority to a zombie as
+  `409 process_zombie` naming its parent (`procs.Controllable`): the kernel ignores the first and the
+  second has already exited, and both used to answer a Kill with success.
 - The detail sheet exposes identity, cwd/executable links, resource counters and controls without returning
   environment variables (process environments routinely contain secrets). `Detail` also reads what the
   process listens on and how many connections it holds (`sockets` in `detail.go`, from gopsutil's
@@ -36,8 +63,13 @@ socket-activated service's port.
   than a number; a snapshot leaves those empty because reading every process's sockets on each poll
   costs more than the table. `GET /processes/{pid}/tree` returns the parent chain (outermost first)
   and direct children from one pass over the table, because the remedy for a runaway worker is
-  usually its supervisor. Signals are the existing `POST /processes/{pid}/signal`; the page offers
-  SIGTERM, SIGKILL, SIGSTOP/SIGCONT and SIGHUP as words with a sentence each. PM2 can gracefully reload and
+  usually its supervisor; each link's CPU is the sampler's last measured window for that process
+  (`cpuReady` false where there is none), not gopsutil's average over the process's whole life.
+  Signals are the existing `POST /processes/{pid}/signal`; the page offers SIGTERM, SIGKILL,
+  SIGSTOP/SIGCONT, SIGHUP, SIGINT, SIGUSR1 and SIGUSR2 as words with a sentence each, and none of them
+  to a kernel thread or a zombie, whose menu opens its parent instead. The detail sheet polls every two
+  seconds while open and stops, keeping the last reading, when the PID answers 404 or its creation
+  time changes. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use. Its
@@ -51,9 +83,13 @@ socket-activated service's port.
   invocation and would read as a run, and the manager's `code=dumped` exit already says the run
   dumped core. sshd's unit is refused to anyone but `system.admin` by the log routes (see
   [Logs](docker-files-logs.md#logs)), and the sheet says so rather than opening a socket.
-- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
-  `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
-  both, because a daemon with three online applications and no saved list restores nothing. The
+- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written, the
+  application names it holds (`savedApps`, each once, read only when the file's time or size changes
+  and capped at 16 MiB; `null` when there is no list or it cannot be parsed, `[]` for an empty one —
+  only the names leave the server, because the dump also holds every application's environment), and
+  whether a `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page
+  states all three, because a daemon with three online applications and no saved list restores
+  nothing, and one saved before the last start restores everything but that. The
   per-process verbs grew `reset` (restart counters, `service.control`) and `flush` (truncates the log
   files, destructive); `POST /pm2/{name}/scale` (`{instances}`) runs `pm2 scale <name> <n>` and
   refuses a fork-mode application; `POST /pm2/daemons/{user}/{start|reload}` and, destructive,
@@ -94,6 +130,24 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
+  `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
+  PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and
+  how its main process last ended (`ExecMainCode`/`ExecMainStatus` as `exitCode`/`exitStatus`), when
+  it became active and when it last changed state (`changedAt`), and its unit file, so a list row
+  offers Open unit file. CPU is `CPUUsageNSec` turned into a share of one core over the window
+  since the unit's last reading, on the process sampler's rules: a window shorter than a second
+  reports the last whole one, a new `InvocationID` or a counter that went backwards starts a new
+  window, `ratesReady` is false until some unit has two readings, and each window appends a point to
+  the unit's history, at most one every two seconds and the last ninety. `GET /systemd/{name}`
+  (`Systemd.Detail`) measures the same way and returns that `history`. An inactive unit's last read
+  is reused for a minute while it stays inactive; a unit that is not loaded is listed but not
+  asked about. The manager is `Version` and `SystemState` (`running`, `degraded`…) with the boot
+  time from the host's uptime — not `FinishTimestamp`, which a job that never finishes holds open.
+  `list-unit-files`, most of a second on a host with two hundred units, is kept thirty seconds and
+  forgotten after enable, disable and daemon-reload run here; the same commands run in a shell are
+  at most that late on the page. Readings are best-effort: a `show` that fails leaves the list
+  without figures rather than failing it.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
   and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
@@ -111,16 +165,19 @@ socket-activated service's port.
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
   What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
   unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines
-  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a timer's row
-  opens the activated service's runs.
+  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a job's sheet
+  reads the same log narrowed to its command (`command:` is a field of the cron lens). A timer's
+  sheet reads `GET /systemd/{timer}` for its `TimersCalendar`, `TimersMonotonic` and
+  `RandomizedDelayUSec`, and `GET /systemd/{service}` for the command, result and monotonic run
+  times of the service it fires, beside that service's runs; no route was added for either.
 
 ## The terminal
 
 `internal/term` runs direct PTYs. Three properties are load-bearing:
 
-**Every window is a direct PTY.** There is no multiplexer and no pane/split layer. A dashboard session
-is a workspace grouping independent PTYs as windows; each window therefore keeps native terminal
-capability negotiation. Where the host allows it, each PTY is held on the host rather than by this
+**Every window is a direct PTY.** There is no multiplexer; browser splits arrange independent windows.
+A dashboard session is a workspace grouping independent PTYs as windows; each window keeps native terminal
+capability negotiation. Each new PTY must be held on the host rather than by this
 process, so it outlives the dashboard (below). Closing a session ends all of its windows, while closing
 one window leaves its siblings running.
 
@@ -138,6 +195,50 @@ the new PTY on arrival. `hostDir` runs `test -d` through `hostexec.CommandOnHost
 containerised and runs locally otherwise. A new window inherits the directory of the window the operator
 was looking at, falling back to the workspace's first window and then home; because every step is
 validated, a stale directory can only send the new window home, never kill it.
+
+`POST /terminal/{workspace}/windows` accepts `sourceWindowId` to read the focused window's live
+directory on the server, after validating that the window belongs to the same workspace. This takes
+precedence over the optional legacy `cwd` field, avoiding stale directory metadata after `cd`.
+Direct directory lookup starts with the PTY's foreground process group and unwraps only known login
+wrappers. A shell's background job in another directory cannot change the prompt's reported directory;
+a busy foreground program or a nested account shell still reports its own directory.
+Foreground process liveness comes from its cwd symlink, rather than its command line: an empty argv
+during exec, or a deliberate empty argv[0], does not redirect lookup back to the parent shell.
+The optional `agent` is a closed vocabulary: `codex` launches `codex --yolo`, and `claude` launches
+`claude --dangerously-skip-permissions`, always in a newly held PTY. (The terminal page asks for this
+only when the focused terminal is holding a program; at a prompt it types the command into that
+shell instead.) Unknown agents and foreign or
+missing source windows return HTTP 400 without opening anything. An unavailable source directory
+returns HTTP 503 for an agent launch instead of silently running the tool somewhere else.
+
+Automatic agent launch uses the bundled bash or zsh startup and refuses other shells or unavailable
+startup files with HTTP 400 (`terminal_agent_shell_unavailable`). The fixed login bootstrap receives
+the agent and directory as positional arguments; it carries them into the interactive startup as
+one-shot variables, which are unset before loading the account's native rc. After that rc establishes
+the account's PATH, the startup restores the requested directory (an rc may have changed it) and runs
+the exact approved command. A missing tool prints the native shell error and leaves the shell usable;
+an agent that exits also returns to that shell. Nested shells never inherit the launch variables, so
+they do not restart the agent. The create audit records the source window, agent and starting directory.
+
+The shell tests cover both agents in bash and zsh, native interactive PATH, quoted directory names,
+an rc that changes directory, a nonzero agent exit, a missing tool and removal of the launch variables
+before native configuration runs. Their cleanup requests a native shell exit and drains PTY output,
+including asynchronous editor helpers, before removing temporary HOME directories.
+PTY tests keep a background job in a different directory while
+checking the foreground prompt and new window, and also check a busy foreground program's directory,
+an empty argv and a pipeline whose leader has exited. These directory fixtures own and wait for their
+detached holders before removing temporary HOME directories, so shell history writes cannot race cleanup.
+API tests exercise live `cd` in a sibling source window, launch with a background job elsewhere, reject
+unknown agents and foreign source windows, and refuse an agent in a deleted source directory.
+For optional browser proof against real PTYs, set `JD_TERMINAL_BROWSER_EVIDENCE_DIR` to a temporary
+directory and run `go test ./internal/api -run '^TestTerminalBrowserEvidenceServer$' -count=1 -v
+-timeout=20m` from `backend/`. This test-only server listens on `127.0.0.1:43128`, accepts browser
+origins on loopback ports 43117–43131, and writes `ready.json` with its initial workspace, working
+directory and stop-file path. Its isolated HOME and PATH provide stub Codex/Claude commands and
+`jd-resize-tui`, which renders the kernel PTY dimensions and responds to SIGWINCH and keyboard input.
+Create the recorded stop file to close the fixture; it otherwise expires after fifteen minutes.
+`JD_TERMINAL_BROWSER_REAL_AGENTS=1` uses installed agent binaries with the same isolated HOME and no
+copied authentication. This harness is skipped by normal local verification.
 
 **Session organisation is intentionally lightweight.** `GET /terminal/` groups live `Session` values by
 `WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory
@@ -183,14 +284,34 @@ sends a hangup and drops the dashboard's copy of the master, the holder closes i
 hangs the terminal up; a shell still there after three seconds is killed, then the holder tells the
 dashboard and exits, and the unit is collected. `KillMode=process` makes the unit ending the holder
 ending: anything the operator deliberately left running (`nohup`, `disown`) survives as it would an ssh
-session closing. Held sessions are never reaped for idleness — they exist so work can run with nobody
-watching. Protocol: SOCK_SEQPACKET, one packet per message whose first byte is its kind, versioned by
+session closing. Terminals have no idle timeout, and the periodic clipboard cleanup never detaches or
+kills a session — work can run or wait for input with nobody watching. Protocol: SOCK_SEQPACKET,
+one packet per message whose first byte is its kind, versioned by
 `ptyhold.Version`, which a newer dashboard must keep speaking to the holders already running.
 
 Where holding is impossible — not root, a host without systemd, a data directory the host does not see at
-the same path, a path too long for a socket — `HoldSessions` says why in the log and the terminal works as
-before, each PTY in this process and ending with it; the listing's `persistent` is then false and the
-page says so. A server that reboots ends every session either way.
+the same path, a path too long for a socket — `HoldSessions` records the reason and new direct PTYs are
+refused with HTTP 503 (`terminal_persistence_unavailable`). There is no process-owned fallback. The
+listing's `persistent` reports readiness to create new held terminals; `persistenceError` supplies the
+reason, which the page displays. Existing holders are adopted before checking systemd or installing the
+new holder binary, so a failure preparing new terminals still leaves running windows accessible.
+Adoption skips windows already attached to avoid duplicate readers if setup is retried. Legacy tmux
+callers remain supported internally, but the terminal API never creates a tmux session. A server that
+reboots ends every running terminal.
+
+`TestHeldWindowsSurviveManagerProcessExit` starts two windows in a separate manager process, exercises
+clean shutdown and abrupt process termination, verifies their work completes with no manager or browser
+attached, then adopts the same PIDs and workspace/window ids. It also advances clipboard maintenance
+beyond the former idle timeout and verifies both terminals remain usable. The API tests use real isolated
+holder processes, and verify that losing the ability to start holders refuses new sessions/windows
+without ending existing work. The process-exit and last-browser tests release their work only after
+the manager or browser has gone, so completion cannot race ahead of the disconnect being tested.
+With `JD_TERMINAL_SYSTEMD_LIVE=1`, the same process-exit test starts real host systemd units through
+`HoldSessions` and replaces the installed holder executable while its existing processes are running.
+Build `cmd/terminal-holder` as `jd-terminal-holder` beside a compiled `internal/term` test binary and
+run that binary as root with the variable set. It owns temporary state and units only; it never
+restarts the installed dashboard. `TestHolderSetupFailureStillAdoptsRunningWindows` also runs as root
+and proves that a failed holder installation preserves access to existing windows.
 
 **What a window is doing is read off the PTY, not asked of the shell** (`activity.go`). Two facts, both
 available without touching the account's shell configuration. The title is parsed out of the byte stream
@@ -243,7 +364,12 @@ applies that size: `TIOCSWINSZ` may produce an application redraw synchronously,
 it would lose the first bytes of the only screen a new browser needs. Every later `ResizeObserver` fit
 sends only a changed cell size. Reconnect uses `SynchronizeSize` to reapply the size even when the cached
 fields agree; ordinary resize frames are de-duplicated. The recorded size changes only after `pty.Setsize`
-succeeds. Terminal capability variables replace inherited entries rather than being appended — duplicate
+succeeds. A reattach also has to make the program repaint, because what the browser was just sent is raw
+history rather than a screen. The kernel signals `SIGWINCH` only for a size that differs, Node (under Claude
+Code) emits `resize` only for a size unlike the last it read, and ratatui (Codex) redraws only changed cells
+for an unchanged area, so when the kernel already has the requested size `SynchronizeSize` sets it one
+column narrower and restores it after `repaintHold` (120 ms) — unless a resize replaced the size meanwhile.
+The program sees two real size changes and repaints after the replay. Terminal capability variables replace inherited entries rather than being appended — duplicate
 names are legal in `execve`, and appending could leave an inherited `TERM=dumb` as the value libc returns.
 
 Legacy tmux compatibility tests use a private `TMUX_TMPDIR` and clear inherited `TMUX`. Socket-directory
@@ -360,3 +486,17 @@ deploy pages use for the repository a project deploys.
   over 8 MiB produce an explanation and retain the link to GitHub. All gh output is capped at 8 MiB.
 - **GitLab and Gitea** use the separate `forgex` REST adapter and encrypted per-checkout account setup,
   described in [`git-workspace-expansion.md`](git-workspace-expansion.md#provider-accounts).
+
+## Measured process readings
+
+CPU is a delta of user+system CPU seconds over measured wall time (100% = one core), rather than a
+lifetime average. Both CPU and I/O counters are keyed by PID and creation time, with explicit
+readiness; new, replaced or unreadable counters cannot masquerade as a measured idle process. CPU
+counter resets also start a new interval instead of reporting an idle process. Details share the
+sampler under its mutex, while concurrent full snapshots share the expensive read and receive
+independent rows.
+
+Resident and swapped bytes come from the process memory read (`statm`, and `VmSwap` from `status`,
+since gopsutil's Linux memory read leaves swap at zero). Nice is reported on the −20…19 scale the
+priority route takes: gopsutil returns `getpriority(2)`'s raw value, which is 20 minus the nice
+value, and read as-is every ordinary process was "nice 20" and could not be lowered.

@@ -1,6 +1,6 @@
 "use client"
 
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { workingTreeCounts, workingTreeSquares, type WorkingTreePart } from "@/lib/git-status"
 import type { GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -173,11 +173,15 @@ export function AuthorMark({ name, className }: { name?: string; className?: str
 }
 
 /**
- * The two places a face goes: inside a line of text, where `AuthorMark` sits
- * in a commit line, and at a row's head, the size of `ProductLogo`'s small
- * tile.
+ * The places a face goes: inside a line of text, where `AuthorMark` sits in a
+ * commit line; inside a control, beside its label; and at a row's head, the
+ * size of `ProductLogo`'s small tile.
  */
-const FACE_BOX = { xs: "size-4 rounded-sm", sm: "size-8 rounded-md" } as const
+const FACE_BOX = {
+  xs: "size-4 rounded-sm",
+  md: "size-5 rounded-sm",
+  sm: "size-8 rounded-md",
+} as const
 
 /**
  * Who opened a pull request or pushed a revision, as the face their forge
@@ -187,33 +191,53 @@ const FACE_BOX = { xs: "size-4 rounded-sm", sm: "size-8 rounded-md" } as const
  * which is the one forge the server can ask; every other forge, and a GitHub
  * login with no picture to find, is the account face's initials on its hue —
  * the same mark the commit lines and a run's actor draw, so a login looks
- * alike wherever the picture is missing. Square either way: a face in a
- * circle is the pill §4 deleted.
+ * alike wherever the picture is missing. Square for a person who authored
+ * something — a face in a circle beside a commit is the pill §4 deleted —
+ * and `account` round for the one face that is an account signed in here,
+ * which §4 draws as a circle everywhere (`UserAvatar`), carrying its slot so
+ * the pill check knows it for what it is.
  */
 export function ForgeFace({
   login,
   provider,
   size = "sm",
+  account,
   className,
 }: {
   login?: string
   /** The forge the login belongs to, as a trigger names it: `github`, `gitlab`… */
   provider?: string
   size?: keyof typeof FACE_BOX
+  /** The account this dashboard is signed in as, drawn round like every account face. */
+  account?: boolean
   className?: string
 }) {
   const who = (login ?? "").trim()
   if (!who) return null
+  const box = cn(FACE_BOX[size], account && "rounded-full")
+  const initials = size === "md" ? "xs" : size
   if (provider !== "github") {
-    return <InitialsMark name={who} size={size} className={cn(FACE_BOX[size], className)} />
+    return (
+      <InitialsMark
+        name={who}
+        size={initials}
+        className={cn(box, className)}
+        slot={account ? "user-avatar" : undefined}
+      />
+    )
   }
   return (
-    <Avatar className={cn(FACE_BOX[size], className)}>
+    <Avatar data-slot={account ? "user-avatar" : undefined} className={cn(box, className)}>
       <AvatarImage src={githubAvatarUrl(who)} alt="" />
       {/* The mark shows while the picture is on its way and stays if there
-          is none; the root's radius clips it, so it draws square-edged. */}
+          is none; the root's radius clips it to the face's own shape. */}
       <AvatarFallback className="rounded-none bg-transparent">
-        <InitialsMark name={who} size={size} className="size-full rounded-none" />
+        <InitialsMark
+          name={who}
+          size={initials}
+          className="size-full rounded-none"
+          slot={account ? "user-avatar" : undefined}
+        />
       </AvatarFallback>
     </Avatar>
   )
@@ -261,11 +285,40 @@ export function CommitLine({
       {/* On a phone the subject is what the line is for: the name drops and
           the stamp stays, rather than both surviving as two characters
           each. */}
-      <span className="shrink-0 truncate text-hint text-muted-foreground">
+      <span className="shrink-0 text-hint whitespace-nowrap text-muted-foreground">
         <span className="hidden sm:inline">{author}</span>
         {at ? <span className="hidden sm:inline"> · </span> : null}
         {at ? relativeTime(at) : null}
       </span>
     </p>
+  )
+}
+
+/**
+ * How a working tree stands, as the card and the worktree list both say it:
+ * the bar of squares and the count — conflicts in red, changes in amber — or
+ * "clean".
+ */
+export function TreeState({ repo }: { repo: GitRepo }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 leading-[1.6]">
+      <WorkingTreeBar repo={repo} />
+      <span
+        className={cn(
+          "numeric text-xs",
+          repo.conflicts > 0
+            ? "text-destructive"
+            : repo.dirty
+              ? "text-warning"
+              : "text-muted-foreground",
+        )}
+      >
+        {repo.conflicts > 0
+          ? plural(repo.conflicts, "conflict")
+          : repo.dirty
+            ? plural(repo.changes, "change")
+            : "clean"}
+      </span>
+    </span>
   )
 }

@@ -26,6 +26,10 @@ async function mockHost(page: Page, listeners: unknown[] = hostPorts) {
   await mockProxy(page, { included: true })
   // Registered after the proxy tables, so it answers first.
   await page.route("**/api/v1/ports", (route) => json(route, listeners))
+  // No external source enrolled, as on most hosts: a sheet says so.
+  await page.route("**/api/v1/ports/external", (route) =>
+    json(route, { checkedAt: new Date().toISOString(), evidence: [], scopes: [] }),
+  )
 }
 
 function tile(page: Page, label: string) {
@@ -137,18 +141,21 @@ test("a socket on one address can be taken to the firewall", async ({ page }) =>
 
   await page.getByRole("button", { name: "Actions for tcp 100.110.34.31:8443" }).click()
   await page.getByRole("menuitem", { name: "Firewall" }).click()
-  await expect(page).toHaveURL(/\/security\/firewall$/)
+  await expect(page).toHaveURL(/\/network\/firewall$/)
 })
 
 test("the overview counts services and names a public database critical", async ({ page }) => {
   await mockHost(page)
   await page.goto("/proxy")
 
-  // The ports page's own split: Internet-facing, with the private networks
-  // in the hint, both figures the page it links to shows.
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("3", { exact: true })).toBeVisible()
-  await expect(internet.getByText("2 on private networks")).toBeVisible()
+  // The ports page's own split: Internet-facing, a fact in the engine line,
+  // with the private networks as its tooltip, both figures the page it
+  // links to shows.
+  const internet = page
+    .locator("[data-slot='host-identity']")
+    .getByRole("link", { name: "3 ports internet-facing" })
+  await expect(internet).toBeVisible()
+  await expect(internet).toHaveAttribute("title", "2 on private networks")
 
   const finding = page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ })
   await expect(finding.locator(".bg-destructive")).toHaveCount(1)
@@ -158,7 +165,7 @@ test("the overview counts services and names a public database critical", async 
   ).toBeVisible()
   await expect(page.getByText(/answers on every interface/)).toHaveCount(0)
 
-  // The tile opens on the rows it counts.
+  // The fact opens on the rows it counts.
   await internet.click()
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
   await expect(rowsOf(page)).toHaveCount(3)
@@ -181,8 +188,11 @@ test("a port Docker publishes in both families is one row and one count", async 
   await expect(page.getByRole("button", { name: "Internet-facing 5" })).toBeVisible()
 
   await page.goto("/proxy")
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("5", { exact: true })).toBeVisible()
+  await expect(
+    page
+      .locator("[data-slot='host-identity']")
+      .getByRole("link", { name: "5 ports internet-facing" }),
+  ).toBeVisible()
 })
 
 test("a database behind a firewall denying inbound is the posture's warning everywhere", async ({
@@ -684,6 +694,8 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   let requests = 0
   await page.route("**/api/v1/ports", async (route) => {
     requests++
+    // Real requests settle after their timer fires; the virtual clock must allow that too.
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await json(route, hostPorts)
   })
   await page.goto("/proxy/ports")
@@ -694,7 +706,16 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   await page.getByRole("button", { name: "Pause refreshing" }).click()
   await expect(page.getByText("Paused · updated just now")).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh now" })).toHaveCount(0)
-  await page.clock.runFor(60_001)
+  // Polling schedules its next timer after the response settles. A single minute jump
+  // can outrun network responses and skip the remaining timers on a busy runner.
+  for (let interval = 0; interval < 4; interval++) {
+    const response = page.waitForResponse(
+      (reply) => new URL(reply.url()).pathname === "/api/v1/ports",
+    )
+    await page.clock.runFor(15_001)
+    await (await response).finished()
+    await page.evaluate(() => Promise.resolve())
+  }
   await expect(page.getByText("Paused · updated 1m ago")).toBeVisible()
   // The shared proxy navigation still checks port findings every 15 seconds.
   expect(requests).toBeGreaterThanOrEqual(initialRequests + 3)
@@ -706,6 +727,7 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   await expect.poll(() => requests).toBe(pausedRequests + 1)
   await page.getByRole("button", { name: "Refresh now" }).click()
   await expect.poll(() => requests).toBe(pausedRequests + 2)
+  await expect(page.getByText("Updated just now")).toBeVisible()
   await page.clock.runFor(15_001)
   await expect.poll(() => requests).toBe(pausedRequests + 4)
 })
@@ -798,7 +820,7 @@ test("the attention finding opens the ports page on its ports alone", async ({ p
   await expect(rowsOf(page).first()).toContainText("redis-server")
 })
 
-test("the Internet-facing tile opens on what it counts, not the ports a finding opened", async ({
+test("the internet-facing fact opens on what it counts, not the ports a finding opened", async ({
   page,
 }) => {
   await mockHost(page)
@@ -808,10 +830,12 @@ test("the Internet-facing tile opens on what it counts, not the ports a finding 
   await expect(page).toHaveURL(/\/proxy\/ports\?q=port:6379$/)
   await expect(rowsOf(page)).toHaveCount(1)
 
-  // The tab now remembers `port:6379`; the tile asks for its own rows anyway.
+  // The tab now remembers `port:6379`; the fact asks for its own rows anyway.
   await page.goBack()
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("3", { exact: true })).toBeVisible()
+  const internet = page
+    .locator("[data-slot='host-identity']")
+    .getByRole("link", { name: "3 ports internet-facing" })
+  await expect(internet).toBeVisible()
   await internet.click()
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
   await expect(page.getByLabel("Search sockets")).toHaveValue("")
@@ -847,7 +871,7 @@ test("a connection's service port opens what listens on it; a port the kernel pi
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   const row = page.getByRole("row").filter({ hasText: "203.0.113.50" })
   await expect(row.getByText("51234")).toBeVisible()
   await expect(row.getByRole("link", { name: "What listens on port 51234" })).toHaveCount(0)
@@ -862,7 +886,7 @@ test("the Listening tile opens every socket, not the port a link opened a moment
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   await page
     .getByRole("row")
     .filter({ hasText: "203.0.113.50" })

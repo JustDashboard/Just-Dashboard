@@ -4,13 +4,21 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Eye, Fingerprint, Key, Linked, MoreHorizontal, Notes } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { DbGraphColumn, DbGraphTable } from "@/lib/types"
-import type { DiagramColor, DiagramDetail } from "./memory"
-
-export const ROW_HEIGHT = 26
-export const HEADER_HEIGHT = 38
-export const NOTE_HEIGHT = 24
-export const NODE_WIDTH = 264
+import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
+import { SchemaMark } from "@/components/database/schema/rail"
+import type { DiagramColor } from "@/components/database/diagram/document"
+import {
+  HEADER_HEIGHT,
+  NODE_WIDTH,
+  NOTE_HEIGHT,
+  ROW_HEIGHT,
+  compactRows,
+  shortType,
+  visibleColumns,
+  type DiagramDetail,
+} from "@/components/database/diagram/geometry"
+import { handleId } from "@/components/database/diagram/layout"
+import type { DbGraphColumn, DbGraphTable } from "@/components/database/diagram/types"
 
 export type TableNodeData = {
   table: DbGraphTable
@@ -25,9 +33,14 @@ export type TableNodeData = {
   matches?: string[]
   /** Tables cannot be dragged — a finished diagram. */
   locked: boolean
+  /** The picture holds more than one schema, so a name alone does not say which table this is. */
+  qualified: boolean
   onOpen: (table: DbGraphTable) => void
   onMenu: (table: DbGraphTable, at: { x: number; y: number }) => void
 }
+
+/** The attribute a table's menu button is found by again, to hand the keyboard back to it. */
+export const NODE_MENU = "data-node-menu"
 
 /**
  * One table, drawn as the list of columns it is.
@@ -46,15 +59,11 @@ export type TableNodeData = {
  * terminal's tags use, so "the red ones are billing" is a label that stays put.
  */
 function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeData }) {
-  const { table, dimmed, focused, detail, color, note, matches, locked, onOpen, onMenu } = data
-  const columns =
-    detail === "names"
-      ? []
-      : detail === "keys"
-        ? table.columns.filter((c) => c.primaryKey || c.foreignKey || c.unique)
-        : table.columns
+  const { table, dimmed, focused, detail, color, note, matches, locked, qualified } = data
+  const columns = visibleColumns(table, detail)
   const hidden = table.columns.length - columns.length
   const hit = new Set(matches ?? [])
+  const full = table.schema ? `${table.schema}.${table.name}` : table.name
 
   return (
     <div
@@ -74,29 +83,48 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
         style={{ height: HEADER_HEIGHT }}
       >
         {/* The header carries the handles a names-only diagram lands on. */}
-        <NodeHandles id={`${table.name}.`} />
+        <NodeHandles table={table.id} column="" />
+        {/* The tree's own legend: a view is the same violet eye here. */}
+        <KindGlyph kind={rowObjectKind(table.type)} className="size-3" />
+        {/* Not `nodrag`: the name is where a hand reaches to move a table. A
+            press that does not move is still the button's own. */}
         <button
           type="button"
-          onClick={() => onOpen(table)}
-          className="nodrag min-w-0 flex-1 truncate rounded-sm text-left font-mono text-xs font-semibold focus-ring-inset"
-          title={`${table.schema ? `${table.schema}.` : ""}${table.name}`}
+          onClick={() => data.onOpen(table)}
+          className="min-w-0 flex-1 cursor-[inherit] truncate rounded-sm text-left font-mono text-xs font-semibold focus-ring-inset"
+          title={full}
         >
+          {/* Two schemas in one picture are told apart at a glance by their
+              hue — the one the picker and the legend give each — and to the
+              letter by the name. */}
+          {qualified && table.schema && (
+            <>
+              <SchemaMark name={table.schema} className="mr-1.5 inline-block align-baseline" />
+              <span className="font-normal text-muted-foreground">{table.schema}.</span>
+            </>
+          )}
           {table.name}
         </button>
         {table.rows > 0 && (
           <span
             className="numeric shrink-0 text-micro text-muted-foreground"
-            title={`${table.rows.toLocaleString()} rows (estimated)`}
+            title={`${table.rows.toLocaleString("en-US")} rows (estimated)`}
           >
             {compactRows(table.rows)}
           </span>
         )}
         <button
           type="button"
-          aria-label={`Actions for ${table.name}`}
+          aria-label={`Actions for ${full}`}
+          {...{ [NODE_MENU]: table.id }}
           onClick={(e) => {
             e.stopPropagation()
-            onMenu(table, { x: e.clientX, y: e.clientY })
+            const box = e.currentTarget.getBoundingClientRect()
+            // A keyboard press has no pointer: the menu opens under its button.
+            data.onMenu(
+              table,
+              e.detail === 0 ? { x: box.left, y: box.bottom } : { x: e.clientX, y: e.clientY },
+            )
           }}
           className="nodrag nopan flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-foreground"
         >
@@ -107,7 +135,7 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
       {detail !== "names" && (
         <div className="divide-y divide-hairline/50">
           {columns.map((c) => (
-            <ColumnRow key={c.name} table={table.name} column={c} hit={hit.has(c.name)} />
+            <ColumnRow key={c.name} table={table.id} column={c} hit={hit.has(c.name)} />
           ))}
           {hidden > 0 && (
             <div
@@ -149,35 +177,35 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
  * referring to a handle that does not exist is dropped silently rather than
  * drawn badly.
  */
-function NodeHandles({ id }: { id: string }) {
+function NodeHandles({ table, column }: { table: string; column: string }) {
   const style = { opacity: 0, width: 1, height: 1, border: 0, minWidth: 0, minHeight: 0 }
   return (
     <>
       <Handle
         type="source"
         position={Position.Left}
-        id={`${id}.left.s`}
+        id={handleId(table, column, "left", "s")}
         style={{ ...style, left: 0 }}
         isConnectable={false}
       />
       <Handle
         type="target"
         position={Position.Left}
-        id={`${id}.left.t`}
+        id={handleId(table, column, "left", "t")}
         style={{ ...style, left: 0 }}
         isConnectable={false}
       />
       <Handle
         type="source"
         position={Position.Right}
-        id={`${id}.right.s`}
+        id={handleId(table, column, "right", "s")}
         style={{ ...style, right: 0 }}
         isConnectable={false}
       />
       <Handle
         type="target"
         position={Position.Right}
-        id={`${id}.right.t`}
+        id={handleId(table, column, "right", "t")}
         style={{ ...style, right: 0 }}
         isConnectable={false}
       />
@@ -197,7 +225,7 @@ function ColumnRow({ table, column, hit }: { table: string; column: DbGraphColum
         column.foreignKey ? ` · references ${column.foreignKey}` : ""
       }`}
     >
-      <NodeHandles id={`${table}.${column.name}`} />
+      <NodeHandles table={table} column={column.name} />
       {column.primaryKey ? (
         <Key className="size-3 shrink-0 text-chart-2" />
       ) : column.foreignKey ? (
@@ -225,34 +253,6 @@ function ColumnRow({ table, column, hit }: { table: string; column: DbGraphColum
       </span>
     </div>
   )
-}
-
-/** A row count for a narrow slot: 1_234_567 → "1.2M", not "1,234,567". */
-export function compactRows(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
-}
-
-/**
- * Type names are for recognition here, not reproduction. "timestamp with time
- * zone" in a ten-pixel column pushes the name out of the box, and a reader
- * already knows what timestamptz means.
- */
-export function shortType(type: string): string {
-  const map: Record<string, string> = {
-    "timestamp with time zone": "timestamptz",
-    "timestamp without time zone": "timestamp",
-    "character varying": "varchar",
-    "double precision": "float8",
-    bigint: "int8",
-    integer: "int4",
-    smallint: "int2",
-    boolean: "bool",
-    character: "char",
-  }
-  const mapped = map[type.toLowerCase()] ?? type
-  return mapped.length > 14 ? mapped.slice(0, 13) + "…" : mapped
 }
 
 export const TableNode = memo(TableNodeComponent)

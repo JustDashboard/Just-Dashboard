@@ -1,0 +1,52 @@
+{
+  "at": "2026-10-10T01:07:20Z",
+  "bootId": "0811de16-2f74-44a2-914a-c2b4ece6be71",
+  "evidence": {
+    "journal": {
+      "appliedAt": "2026-10-10T01:07:19.246899126Z",
+      "boot": "not_verified",
+      "bootDependencies": 0,
+      "cleanup": "complete",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:08:49.119249993Z",
+      "files": [],
+      "generation": "a1adeffe2ad581a432c32d5b61c61ad79cb998c723428d3df06203897a204ea8",
+      "id": "446930cd9cd01984d1bfc5b95c93644c",
+      "ownerUserId": 1,
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-10T01:07:20.226263082Z",
+      "watchdog": "recovered"
+    },
+    "networkdJournal": [
+      "Oct 10 01:07:08.257946 jd-vm-reboot systemd-networkd[423]: jdvmdum1: Gained IPv6LL",
+      "Oct 10 01:07:08.260347 jd-vm-reboot systemd-networkd[423]: jdvmvlan42: Gained IPv6LL",
+      "Oct 10 01:07:09.299267 jd-vm-reboot systemd-networkd[423]: jdvm-veth0: Gained IPv6LL",
+      "Oct 10 01:07:10.003123 jd-vm-reboot systemd-networkd[423]: jdvmbr0: Gained IPv6LL",
+      "Oct 10 01:07:19.215124 jd-vm-reboot systemd-networkd[423]: enp0s3: Reconfiguring with /run/systemd/network/10-netplan-uplink.network.",
+      "Oct 10 01:07:19.215338 jd-vm-reboot systemd-networkd[423]: enp0s3: DHCP lease lost",
+      "Oct 10 01:07:19.217824 jd-vm-reboot systemd-networkd[423]: enp0s3: DHCPv6 lease lost",
+      "Oct 10 01:07:19.229344 jd-vm-reboot systemd-networkd[423]: enp0s4: Reconfiguring with /run/systemd/network/10-netplan-enp0s4.network.",
+      "Oct 10 01:07:19.245232 jd-vm-reboot systemd-networkd[423]: enp0s4: Configuring with /run/systemd/network/10-netplan-enp0s4.network.",
+      "Oct 10 01:07:19.259288 jd-vm-reboot systemd-networkd[423]: enp0s3: DHCPv4 address 10.0.2.15/24, gateway 10.0.2.2 acquired from 10.0.2.2",
+      "Oct 10 01:07:19.779672 jd-vm-reboot systemd-networkd[423]: enp0s4: Reconfiguring with /run/systemd/network/10-netplan-enp0s4.network.",
+      "Oct 10 01:07:19.806675 jd-vm-reboot systemd-networkd[423]: enp0s4: Configuring with /run/systemd/network/10-netplan-enp0s4.network."
+    ],
+    "response": {
+      "body": {
+        "error": {
+          "code": "would_lock_you_out",
+          "message": "this would leave this server with no route to the internet over IPv6, which your connection and every outbound one ride on, so it was put back"
+        }
+      },
+      "status": 409
+    }
+  },
+  "failures": [],
+  "phase": "p11-first-edit",
+  "result": "pass",
+  "seconds": 4.4
+}

@@ -169,7 +169,7 @@ export function AccountFace({ account, className }: { account: string; className
  *
  * The lines are measured from the marks, so the layout can change under them:
  * three columns wide, one column narrow. Wide, the three sit as one
- * composition in the middle of the frame rather than at its far edges.
+ * composition in the middle of the page rather than at its far edges.
  */
 function Picture({
   stage,
@@ -721,17 +721,19 @@ export function GitHubAppPanel({
         )}
 
         {stage && data && (
-          // Framed on purpose, against the page's default of readings on a
-          // bare ground: this is a picture of three things and the lines
-          // between them, and a picture needs an edge to be read as one.
-          <div className="animate-rise overflow-hidden rounded-xl border bg-card">
-            <div className="px-5 py-6 sm:px-6 sm:py-7 lg:px-8 lg:py-10">
+          // On the page's own ground rather than in a frame, as the picture
+          // on Notifications is: the dot grid a wiring picture is drawn on
+          // fades out towards its edges, so the picture has a middle and
+          // needs no border to read as one thing.
+          <div className="animate-rise">
+            <div className="relative py-6 lg:py-10">
+              <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
               <Picture stage={stage} data={data} admin={admin} credentials={credentials} />
             </div>
 
-            <div className="border-t border-hairline px-5 py-4 sm:px-6">
+            <div className="pt-2 lg:pt-4">
               {/* The picture's own measure, so the path and its command sit
-                  under the drawing rather than at the frame's far edges. */}
+                  under the drawing rather than at the page's far edges. */}
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 lg:flex-row lg:items-center lg:justify-between lg:gap-10">
                 <SetupPath stage={stage} deploying={deploying} />
 

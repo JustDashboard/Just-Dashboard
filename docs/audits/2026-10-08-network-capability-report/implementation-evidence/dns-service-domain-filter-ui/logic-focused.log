@@ -1,0 +1,66 @@
+bun test v1.3.11 (af24e281)
+
+src/lib/network-dns-services.test.js:
+(pass) retained history readers do not mistake the row index for an expected identity [5.00ms]
+(pass) native owner refresh holds a stale or unavailable baseline before confirmation
+(pass) owned removal retains exact resource identities while its confirmation is open [1.00ms]
+(pass) only bounded review identities survive the browser attempt record [6.00ms]
+(pass) late reads preserve terminal native responses while newer cleanup results remain visible
+(pass) an open confirmation and its result retain the exact native owner and reviewed intent
+(pass) private connection reads retain permissions and discard unexpected credentials [1.00ms]
+(pass) native unknown and unsupported evidence survives a successful HTTP reading
+(pass) native DNS refuses missing query inventory before the inventory can render it [1.00ms]
+(pass) native DNS refuses unknown listener port before the inventory can render it
+(pass) native DNS refuses invalid client groups before the inventory can render it
+(pass) native DNS refuses missing zone evidence before the inventory can render it [1.00ms]
+(pass) native DNS refuses unknown protection value before the inventory can render it
+(pass) native DNS refuses a malformed query before the inventory can render it
+(pass) native DNS refuses invalid native group before the inventory can render it
+(pass) native DNS refuses missing named networks before the inventory can render it
+(pass) native DNS refuses an unknown engine before the inventory can render it
+(pass) a reading for another connection or engine cannot replace the selected owner
+(pass) retained history metadata is readable without decrypted snapshots or query rows
+(pass) unknown retained intent and mismatched review identity refuse apply preparation
+(pass) only a planned fresh review on the same managed generation can apply [1.00ms]
+(pass) HTTP success with verified never authorizes another native apply
+(pass) HTTP success with applying never authorizes another native apply
+(pass) HTTP success with refused never authorizes another native apply
+(pass) HTTP success with needs_review never authorizes another native apply
+(pass) HTTP success with interrupted never authorizes another native apply
+(pass) HTTP success with future_state never authorizes another native apply
+(pass) expiry and invalid clocks refuse both native mutation and owned setup
+(pass) an uncertain first apply remains consumed when the retained server state is still planned
+(pass) bootstrap passwords are request-only and never survive a retained setup read
+(pass) missing inventory is a read failure rather than a healthy empty list
+(pass) closed reviewed actions preserve exact record TTL and explicit empty native groups [6.00ms]
+(pass) every retained action rejects irrelevant or arbitrary native payload fields [1.00ms]
+(pass) record and client reviewed requests enforce canonical grammar, bounds and native engine [2.00ms]
+(pass) record inventory retains nullable classification and unsupported rows without editable claims [1.00ms]
+(pass) selected snapshots refuse missing fingerprints, owner/type inconsistencies and malformed client state [2.00ms]
+(pass) plain owner inventory cannot replace an exact selected current-review read [3.00ms]
+(pass) selected metadata remains immutable across confirmation even when a top-level digest is reused [1.00ms]
+(pass) domain reviews preserve engine-specific match and explicit membership instead of native DSL [1.00ms]
+(pass) native domain readback supports the opposite presence after each consumed add or removal [1.00ms]
+(pass) closed domain intents reject wrong engines, missing selections and malformed group elements [2.00ms]
+(pass) selected filter counts, digests and configured provenance must agree before rendering [4.00ms]
+(pass) Pi-hole reported false, empty membership and null versus empty comment remain distinct [1.00ms]
+(pass) selected domain snapshots and retained reviews cannot borrow another selection or native version [3.00ms]
+(pass) domain current reads retain changed evidence but hold apply for raw or selected metadata drift [4.00ms]
+(pass) domain apply requires an editable retained baseline while uncertainty and expiry stay single-use [1.00ms]
+(pass) held domain intent includes selected raw metadata even when another digest is reused [2.00ms]
+
+src/lib/network-dns-service-policy.test.js:
+(pass) canonical native address grammar preserves Go IPv6 zero-run and mapped distinctions
+(pass) client identity permits canonical network prefixes and explicit all-client prefixes
+(pass) native endpoint and DNS owner drafts use closed literal names and ports
+(pass) missing native classification stays closed except for the inspected Primary version
+(pass) record forms keep authority, family and TTL explicit while preserving rejected drafts [1.00ms]
+(pass) existing client group form requires an explicit bounded numeric list including empty [1.00ms]
+(pass) domain filter drafts derive suffix and exact semantics from the native engine
+(pass) Pi-hole additions preserve explicit empty and zero memberships without sharing drafts
+(pass) domain drafts keep invalid input while rejecting native syntax and malformed memberships [1.00ms]
+
+ 56 pass
+ 0 fail
+ 739 expect() calls
+Ran 56 tests across 2 files. [208.00ms]

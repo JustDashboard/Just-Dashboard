@@ -1,0 +1,14 @@
+=== RUN   TestNativeManagerAutomaticOwnerLive
+    native_manager_auto_live_test.go:35: Actual standalone helper SHA256=909edb0ed96cc34d21b1cb28944e09468e5f36c931c25bf2fcca591014150941 capability=jd-native-manager-v8
+=== RUN   TestNativeManagerAutomaticOwnerLive/netplan
+    native_manager_auto_live_test.go:298: automatic owner acceptance:
+        === RUN   TestNativeManagerAutomaticOwnerLive
+            native_manager_auto_live_test.go:91: Unrepresentable authored RA route suppression refused before selected-file/staging/journal effects; actual automatic acquisition remains unchanged
+            native_manager_auto_live_test.go:93: netplan saved/loaded/applied automatic intent, actual DHCPv4 lease, SLAAC prefix, DHCP/RA default routes and active-owner DNS/domain acquisition verified
+            native_manager_auto_live_test.go:177: netplan actual auto/manual activation, automatic DNS/routes suppression, independent rollback, applying-backend death, durable confirmation and cleanup retry verified; timer/reboot unmeasured
+            native_manager_auto_live_test.go:200: Owned RA raw socket closed and sender drained; DHCP/manager/bus children reaped; lease/pid files withdrawn; private PID namespace has no remaining child
+        --- PASS: TestNativeManagerAutomaticOwnerLive (19.66s)
+        PASS
+--- PASS: TestNativeManagerAutomaticOwnerLive (39.61s)
+    --- PASS: TestNativeManagerAutomaticOwnerLive/netplan (20.76s)
+PASS

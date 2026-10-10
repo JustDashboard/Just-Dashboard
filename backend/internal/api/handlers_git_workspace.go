@@ -2,7 +2,9 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -101,6 +103,75 @@ func (s *Server) handleGitWorktreeRemove(w http.ResponseWriter, r *http.Request)
 	return s.gitAction(w, r, "worktree.remove", func(path string) (*gitx.Result, error) {
 		return s.modules.git.RemoveWorktree(r.Context(), path, req.Path)
 	})
+}
+
+// handleGitRemoval answers what deleting a checkout would lose — the
+// uncommitted files, stashes and unpushed branches that exist only here, the
+// worktrees and nested checkouts that would go with it — and, in `protected`,
+// why the delete would be refused.
+func (s *Server) handleGitRemoval(w http.ResponseWriter, r *http.Request) error {
+	path, err := s.gitRepo(r)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, time.Minute)
+	defer cancel()
+	removal, err := s.modules.git.Removal(ctx, path, s.Cfg.UpdateDir)
+	if err != nil {
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, removal)
+	return nil
+}
+
+// handleGitRepositoryDelete deletes a checkout from this server.
+//
+// It is one of the few routes that takes a typed phrase — the checkout's
+// directory name — because it is rare and nothing brings it back: the work a
+// checkout holds that was never pushed (uncommitted files, stashes, local
+// branches) lives only in that directory. What it refuses (a root, the
+// dashboard's own install, a repository with worktrees or other checkouts
+// inside it, a locked worktree) is refused before the phrase is asked for,
+// so nobody types a name for an act that would not happen.
+func (s *Server) handleGitRepositoryDelete(w http.ResponseWriter, r *http.Request) error {
+	var req gitPathRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Path == "" {
+		req.Path = r.URL.Query().Get("path")
+	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	path, err := s.modules.git.Resolve(req.Path)
+	if err != nil {
+		return gitErr(err)
+	}
+	unlock := s.modules.git.Lock(path)
+	defer unlock()
+	ctx, cancel := timeoutCtx(r, 5*time.Minute)
+	defer cancel()
+	removal, err := s.modules.git.Removal(ctx, path, s.Cfg.UpdateDir)
+	if err != nil {
+		return gitErr(err)
+	}
+	if removal.Protected != "" {
+		return httpx.Err(http.StatusConflict, "protected", removal.Protected)
+	}
+	if err := httpx.RequireTypedConfirmation(w, r, filepath.Base(path)); err != nil {
+		return err
+	}
+	res, err := s.modules.git.DeleteRepository(ctx, path, s.Cfg.UpdateDir)
+	httpx.SetAudit(r, "git.repository.delete", path, map[string]any{"ok": err == nil, "worktree": removal.Worktree})
+	if err != nil {
+		if res != nil {
+			return httpx.BadRequest("%s", res.Output)
+		}
+		return gitErr(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"path": path, "removed": true})
+	return nil
 }
 
 func (s *Server) handleGitRecover(w http.ResponseWriter, r *http.Request) error {

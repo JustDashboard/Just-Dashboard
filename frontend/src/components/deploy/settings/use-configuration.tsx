@@ -5,13 +5,18 @@ import { get, put } from "@/lib/api"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentConfiguration, DeploymentEnvironmentConfiguration } from "@/lib/types"
-import { StatGrid } from "@/components/stat-tile"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 
-type ConfigurationChanges = Partial<
-  Pick<DeploymentConfiguration, "build" | "runtime" | "dependencies" | "checks" | "domains">
+type Owned = Pick<
+  DeploymentConfiguration,
+  "build" | "runtime" | "dependencies" | "checks" | "domains"
 >
+
+/** A part a form owns: its value, or how to make it from the latest copy. */
+type ConfigurationChanges = {
+  [K in keyof Owned]?: Owned[K] | ((latest: DeploymentEnvironmentConfiguration) => Owned[K])
+}
 
 /**
  * The environment's desired configuration, and the one way to change it.
@@ -19,7 +24,14 @@ type ConfigurationChanges = Partial<
  * Every settings section reads the same document and writes it back with
  * the revision it read, so a save made from a stale tab is refused rather
  * than silently overwriting somebody else's. `save` takes only the parts a
- * form owns and fills the rest from the copy on screen.
+ * form owns and fills the rest from the latest copy.
+ *
+ * The latest copy is the one the last write handed back, not the one on
+ * screen: the page's save bar writes its dirty forms one after another, and
+ * the second used to go out with the revision the first had just replaced —
+ * refused — and with the first form's part as it was before, which would
+ * have undone it. A form that owns only some of a part (Build's release
+ * tasks are a field of `build`) passes a function and changes just that.
  */
 export function useConfiguration(projectId: number, environmentId: number) {
   const state = usePoll(
@@ -35,17 +47,29 @@ export function useConfiguration(projectId: number, environmentId: number) {
   )
   const current = state.data
   const refresh = state.refresh
+  const written = useRef<DeploymentEnvironmentConfiguration>(undefined)
   const save = useCallback(
     async (changes: ConfigurationChanges) => {
-      if (!current) throw new Error("The configuration has not loaded yet")
-      await put(`/deploy/${projectId}/environments/${environmentId}/configuration`, {
-        revision: current.revision,
-        build: changes.build ?? current.build,
-        runtime: changes.runtime ?? current.runtime,
-        dependencies: changes.dependencies ?? current.dependencies,
-        checks: changes.checks ?? current.checks,
-        domains: changes.domains ?? current.domains,
-      })
+      const pending = written.current
+      const latest = pending && current && pending.revision > current.revision ? pending : current
+      if (!latest) throw new Error("The configuration has not loaded yet")
+      const part = <K extends keyof Owned>(key: K): Owned[K] => {
+        const change = changes[key] as
+          Owned[K] | ((latest: DeploymentEnvironmentConfiguration) => Owned[K]) | undefined
+        if (change === undefined) return latest[key]
+        return typeof change === "function" ? change(latest) : change
+      }
+      written.current = await put<DeploymentEnvironmentConfiguration>(
+        `/deploy/${projectId}/environments/${environmentId}/configuration`,
+        {
+          revision: latest.revision,
+          build: part("build"),
+          runtime: part("runtime"),
+          dependencies: part("dependencies"),
+          checks: part("checks"),
+          domains: part("domains"),
+        },
+      )
       refresh()
     },
     [current, projectId, environmentId, refresh],
@@ -61,21 +85,16 @@ export function useConfiguration(projectId: number, environmentId: number) {
 
 /**
  * The three states a settings section passes through before it has a form
- * to show. Rendered by the section, so the rail stays put while it loads.
- *
- * `readings` says the page opens on a row of figures, so the skeleton draws
- * one: a placeholder that is not the shape of what replaces it is a jump.
+ * to show. Rendered by the section, so its head stays put while it loads.
  */
 export function ConfigurationState({
   state,
-  readings,
   children,
 }: {
   state: ReturnType<typeof useConfiguration>
-  readings?: boolean
   children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
 }) {
-  if (state.loading) return <SettingsSkeleton readings={readings} />
+  if (state.loading) return <SettingsSkeleton />
   if (state.error && !state.configuration)
     return <ErrorState error={state.error} onRetry={state.refresh} />
   if (!state.configuration) return null
@@ -83,8 +102,8 @@ export function ConfigurationState({
 }
 
 /**
- * A settings page before its configuration lands: the figures, then two
- * sections with their heads in the rail and three fields beside each.
+ * A settings page before its configuration lands: two sections, each head
+ * over three fields.
  *
  * It was a framed table — a header strip over five rows — which is the one
  * shape no settings page has, so the moment the data arrived the whole
@@ -92,44 +111,22 @@ export function ConfigurationState({
  * page it stands in for, unframed like the page, and the content that
  * replaces it rises once (§11) instead of jumping.
  */
-function SettingsSkeleton({ readings }: { readings?: boolean }) {
+function SettingsSkeleton() {
   return (
-    <div className="min-w-0 space-y-8">
-      {readings && (
-        <StatGrid columns={4} dense>
-          {[0, 1, 2, 3].map((cell) => (
-            // Stamped as a tile so the grid gives it a tile's padding and
-            // rules, and the figures land exactly where the bars were.
-            <div
-              key={cell}
-              data-slot="stat-tile"
-              className="flex min-w-0 flex-col gap-2.5 px-5 py-4"
-            >
-              <Skeleton className="h-2.5 w-16" />
-              <Skeleton className="h-6 w-24" />
-            </div>
-          ))}
-        </StatGrid>
-      )}
-      <div className="divide-y divide-hairline">
-        {[0, 1].map((row) => (
-          <div
-            key={row}
-            className="grid min-w-0 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0 xl:grid-cols-[15rem_minmax(0,1fr)]"
-          >
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-2.5 w-44" />
-              <Skeleton className="h-2.5 w-32" />
-            </div>
-            <div className="max-w-3xl min-w-0 space-y-3">
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-2/3" />
-            </div>
+    <div className="mx-auto w-full max-w-3xl min-w-0 divide-y divide-hairline">
+      {[0, 1].map((row) => (
+        <div key={row} className="min-w-0 space-y-4 py-8 first:pt-0 last:pb-0">
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-44" />
           </div>
-        ))}
-      </div>
+          <div className="min-w-0 space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-2/3" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -230,7 +227,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * already claimed to have.
  *
  * `key` names the section (`deploy.7.settings.build`). `changed` answers for
- * a group of fields, so a rail head can say which part of a long form has
+ * a group of fields, so a section's head can say which part of a long form has
  * the edits; `changes` is the count the foot prints; `discard` drops the
  * draft and the form reads the saved value again.
  */

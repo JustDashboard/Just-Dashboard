@@ -53,6 +53,30 @@ func (m *Manager) SetupShell() error {
 // its interactive editor with our final prompt hook. The snippets are constants,
 // and shell/path are positional arguments, never interpolated shell source.
 func (m *Manager) loginArgv(keepCWD bool) []string {
+	return m.startupArgv(keepCWD, "", "")
+}
+
+func (m *Manager) validateAgent(agent string) error {
+	if agent == "" {
+		return nil
+	}
+	if agent != "codex" && agent != "claude" {
+		return ErrUnknownAgent
+	}
+	shell := m.shell
+	if shell == "" {
+		shell = m.account.Shell
+	}
+	if shell == "" {
+		shell = "/bin/bash"
+	}
+	if m.shellDir == "" || (filepath.Base(shell) != "bash" && filepath.Base(shell) != "zsh") {
+		return ErrAgentShellUnavailable
+	}
+	return nil
+}
+
+func (m *Manager) startupArgv(keepCWD bool, agent, cwd string) []string {
 	shell := m.shell
 	if shell == "" {
 		shell = m.account.Shell
@@ -64,8 +88,14 @@ func (m *Manager) loginArgv(keepCWD bool) []string {
 	switch filepath.Base(shell) {
 	case "bash":
 		bootstrap = `exec "$0" --rcfile "$1/bashrc" -i`
+		if agent != "" {
+			bootstrap = `export JD_TERMINAL_START_AGENT="$2" JD_TERMINAL_START_DIR="$3"; exec "$0" --rcfile "$1/bashrc" -i`
+		}
 	case "zsh":
 		bootstrap = `export JD_ORIGINAL_ZDOTDIR="${ZDOTDIR:-$HOME}"; export ZDOTDIR="$1"; exec "$0" -i`
+		if agent != "" {
+			bootstrap = `export JD_ORIGINAL_ZDOTDIR="${ZDOTDIR:-$HOME}"; export ZDOTDIR="$1" JD_TERMINAL_START_AGENT="$2" JD_TERMINAL_START_DIR="$3"; exec "$0" -i`
+		}
 	default:
 		return m.account.loginArgv(m.shell, keepCWD)
 	}
@@ -80,5 +110,9 @@ func (m *Manager) loginArgv(keepCWD bool) []string {
 		}
 		args = append(args, m.account.Name, "--", "-l")
 	}
-	return append(args, "-c", bootstrap, shell, m.shellDir)
+	args = append(args, "-c", bootstrap, shell, m.shellDir)
+	if agent != "" {
+		args = append(args, agent, cwd)
+	}
+	return args
 }

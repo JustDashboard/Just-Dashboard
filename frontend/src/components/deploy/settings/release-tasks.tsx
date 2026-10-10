@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ArrowDown, ArrowUp, Key, Plus, Trash } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useArrivals } from "@/hooks/use-arrivals"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentBuildMethod,
@@ -15,6 +16,7 @@ import type {
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Group } from "@/components/panel"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -45,17 +47,28 @@ type TaskEvidence = { name: string; durationMs: number; exitCode: number; variab
  * application's toolchain, variables and volumes, or the dashboard's shell over the
  * source as committed — which has none of the application's dependencies, so
  * `npx`, `python manage.py` or `bundle exec` can only fail there.
+ *
+ * The hint is the line under the choice, so it starts where the chip's own
+ * words stop: "Runs in the dashboard's shell" under a pressed Dashboard shell
+ * was the label again. It used to sit under Command, a field away from the
+ * choice it described.
  */
-const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] = [
+const RUNNERS: {
+  runner: ReleaseTask["runner"]
+  label: string
+  hint: string
+  product?: string
+}[] = [
   {
     runner: "image",
     label: "Release image",
-    hint: "Runs once in the release's own image, with its volumes, its runtime variables and the ones below, before it starts.",
+    product: "docker",
+    hint: "Once, before it starts, with its volumes, its runtime variables and the ones below",
   },
   {
     runner: undefined,
     label: "Dashboard shell",
-    hint: "Runs in the dashboard's shell over the unbuilt source, without the application's dependencies.",
+    hint: "Over the unbuilt source, without the application's dependencies",
   },
 ]
 
@@ -65,7 +78,13 @@ const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] 
  * `release_task_outside_compose_stack` says before Deploy.
  */
 const COMPOSE_IMAGE_HINT =
-  "Runs once in the primary service's image, with the runtime variables and the ones below — outside the Compose stack, so its network and the service's own environment: entries do not apply."
+  "Once, in the primary service's image but outside the Compose stack, so its network and environment: entries do not apply"
+
+/** The program a command runs, drawn as itself when it is one the product knows. */
+function ProgramGlyph({ command }: { command: string }) {
+  const product = programProduct(command)
+  return product ? <ProductGlyph id={product} /> : null
+}
 
 function runnerHint(runner: ReleaseTask["runner"], buildMethod?: DeploymentBuildMethod) {
   if (runner === "image" && buildMethod === "compose") return COMPOSE_IMAGE_HINT
@@ -134,6 +153,10 @@ export function ReleaseTasks({
       { tasks?: TaskEvidence[] } | undefined
   )?.tasks
 
+  // Drawn by position, so a task added is a position that was not there: it
+  // rises, and one moved or typed into does not.
+  const arrived = useArrivals(tasks.map((_, index) => String(index)))
+
   const update = (index: number, patch: Partial<ReleaseTask>) =>
     onChange(tasks.map((task, i) => (i === index ? { ...task, ...patch } : task)))
   const move = (index: number, by: -1 | 1) => {
@@ -150,6 +173,25 @@ export function ReleaseTasks({
     requestAnimationFrame(() => document.getElementById(`${id}-task-${to}-${arrow}`)?.focus())
   }
 
+  // A task just added takes the keyboard at the field it cannot do without
+  // — its name, or its command when a starter already named it — once it has
+  // been drawn.
+  function add(name = "") {
+    onChange([
+      ...tasks,
+      {
+        name,
+        command: "",
+        workingDirectory: "",
+        timeoutSeconds: 300,
+        env: [],
+        runner: defaultReleaseTaskRunner(buildMethod),
+      },
+    ])
+    const added = `${id}-task-${tasks.length}-${name ? "command" : "name"}`
+    requestAnimationFrame(() => document.getElementById(added)?.focus())
+  }
+
   return (
     <div className="space-y-4">
       {/* Where the tasks run: the run page's seven stages, with Release lit. */}
@@ -160,7 +202,26 @@ export function ReleaseTasks({
       />
       <FormNote>A failing task stops the release; the live version keeps serving.</FormNote>
       {tasks.length === 0 ? (
-        <p className="text-body text-muted-foreground">No release tasks configured.</p>
+        <div className="space-y-2">
+          <p className="text-body text-muted-foreground">No release tasks configured.</p>
+          {!disabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-hint text-muted-foreground">Start from</span>
+              {STARTERS.map((starter) => (
+                <Button
+                  key={starter}
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => add(starter)}
+                >
+                  <Plus className="size-3" />
+                  {starter}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <ol className="space-y-3">
           {tasks.map((task, index) => {
@@ -168,8 +229,12 @@ export function ReleaseTasks({
             const error = rowError?.(index)
             const last = evidence?.find((one) => one.name === task.name)
             const titleId = `${id}-task-${index}-title`
+            // What an empty directory falls back to, said the same shut and
+            // open: the field read "Source root" while the facts above it
+            // said the image's own.
+            const workdir = task.runner === "image" ? "the image's own" : "source root"
             return (
-              <li key={index}>
+              <li key={index} className={cn(arrived.has(String(index)) && "animate-rise")}>
                 <Group
                   role="group"
                   aria-labelledby={titleId}
@@ -196,6 +261,7 @@ export function ReleaseTasks({
                             ? `passed in ${(last.durationMs / 1000).toFixed(1)} s`
                             : `exit ${last.exitCode}`
                         } · #${lastRun.runNumber}`}
+                        className="animate-rise"
                       />
                     )}
                     {!disabled && (
@@ -263,7 +329,16 @@ export function ReleaseTasks({
                       </InputGroup>
                     </Field>
                   </FieldRow>
-                  <Field label="Runs in">
+                  <Field
+                    label="Runs in"
+                    // Keyed on the place, so pressing the other chip brings its
+                    // line in rather than repainting the words under the pointer.
+                    hint={
+                      <span key={task.runner ?? "shell"} className="block animate-rise">
+                        {runnerHint(task.runner, buildMethod)}
+                      </span>
+                    }
+                  >
                     <div className="flex flex-wrap gap-1.5">
                       {RUNNERS.map((option) => (
                         <FilterChip
@@ -279,6 +354,7 @@ export function ReleaseTasks({
                             task.runner !== option.runner && "border-border",
                           )}
                         >
+                          {option.product && <ProductGlyph id={option.product} />}
                           {option.label}
                         </FilterChip>
                       ))}
@@ -287,7 +363,9 @@ export function ReleaseTasks({
                   <Field
                     label="Command"
                     htmlFor={`${id}-task-${index}-command`}
-                    hint={runnerHint(task.runner, buildMethod)}
+                    // A textarea has no addon to carry the program's mark, so
+                    // it rides the label's edge, where it cannot move the words.
+                    trailing={<ProgramGlyph command={task.command} />}
                   >
                     <Textarea
                       id={`${id}-task-${index}-command`}
@@ -304,16 +382,13 @@ export function ReleaseTasks({
                   <Disclosure
                     quiet
                     summary="Working directory"
-                    facts={
-                      task.workingDirectory?.trim() ||
-                      (task.runner === "image" ? "the image's own" : "source root")
-                    }
+                    facts={task.workingDirectory?.trim() || workdir}
                   >
                     <Input
                       aria-label={`Release task ${n} working directory`}
                       value={task.workingDirectory ?? ""}
                       onChange={(event) => update(index, { workingDirectory: event.target.value })}
-                      placeholder="Source root"
+                      placeholder={workdir}
                       readOnly={disabled}
                       className="font-mono sm:text-xs"
                       spellCheck={false}
@@ -355,7 +430,10 @@ export function ReleaseTasks({
                             >
                               <Key
                                 aria-hidden
-                                className={cn("size-3 shrink-0", on && "text-brand")}
+                                className={cn(
+                                  "size-3 shrink-0 transition-colors",
+                                  on && "text-brand",
+                                )}
                               />
                               {variable.name}
                             </FilterChip>
@@ -365,7 +443,7 @@ export function ReleaseTasks({
                     )}
                   </Field>
                   {error && (
-                    <p role="alert" className="text-hint text-destructive">
+                    <p role="alert" className="animate-rise text-hint text-destructive">
                       {error}
                     </p>
                   )}
@@ -376,28 +454,7 @@ export function ReleaseTasks({
         </ol>
       )}
       {!disabled && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            onChange([
-              ...tasks,
-              {
-                name: "",
-                command: "",
-                workingDirectory: "",
-                timeoutSeconds: 300,
-                env: [],
-                runner: defaultReleaseTaskRunner(buildMethod),
-              },
-            ])
-            // A task just added takes the keyboard at its name, the field it
-            // cannot do without — once it has been drawn.
-            const added = `${id}-task-${tasks.length}-name`
-            requestAnimationFrame(() => document.getElementById(added)?.focus())
-          }}
-        >
+        <Button type="button" size="sm" variant="outline" onClick={() => add()}>
           <Plus className="size-3.5" />
           Add release task
         </Button>
@@ -405,6 +462,9 @@ export function ReleaseTasks({
     </div>
   )
 }
+
+/** Names a first task is usually given; the command is left for the operator. */
+const STARTERS = ["Database migrations", "Clear cache", "Warm up"]
 
 /** A timeout the way it is said: "5 min", "90 s", "1 h". */
 export function spoken(seconds: number) {

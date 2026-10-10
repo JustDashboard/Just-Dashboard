@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useQuestionHistory, useHistoryVisit } from "@/components/workspace/history"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Logs, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -14,11 +16,12 @@ import {
   readLogWindow,
   resolveRange,
 } from "@/lib/log-filter"
-import { lensFor, withLensDefaults } from "@/lib/log-lenses"
+import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -28,18 +31,25 @@ import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Button } from "@/components/ui/button"
 import { SourceRail, railSources, sourceProduct } from "@/components/logs/source-rail"
-import { SourceFacts } from "@/components/logs/source-facts"
+import { SourceIdentity } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { askOf, withAsk } from "@/components/logs/logs-model"
 import { LogWorkspace } from "@/components/logs/log-workspace"
+import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
 import type {
   LogWindow,
   ServiceLogSource,
   ServiceLogsContext,
 } from "@/components/logs/service-logs"
 import { serviceViews, useServiceFinds } from "@/components/logs/service-views"
-import { RecordColumn, recordQueryKey, useRequestRecords } from "@/components/logs/request-records"
+import {
+  RecordColumn,
+  RecordIdentity,
+  recordQueryKey,
+  useRequestRecords,
+} from "@/components/logs/request-records"
 import { railSourceFor } from "@/components/logs/service-views-model"
+import { sectionHref } from "@/components/database/engine"
 import type { RequestsView } from "@/components/deploy/requests-workspace"
 import {
   EMPTY_REQUEST_QUERY,
@@ -93,6 +103,12 @@ function toLocalInput(date: Date) {
  * between them. The rail hides and resizes the way the terminal's session
  * rail does, and remembers both.
  *
+ * Over the frame, the page reads the way a deployment's Logs page does: the
+ * chosen source as its identity line, with Export and the shortcuts at its
+ * end, then the readings its lens takes — what the log adds up to, each with
+ * its window's shape — which hold still while the reader moves between the
+ * views in the strip beneath them.
+ *
  * It is every service page's reading in one place. A source is offered the
  * views its own page has beside Live, History and Insights — a container's
  * Events, a unit's Runs, a saved database's Queries, a site's Requests — and
@@ -100,6 +116,17 @@ function toLocalInput(date: Date) {
  * each read in the same column under the same strip.
  */
 export default function LogsPage() {
+  const visit = useHistoryVisit()
+  return <LogsScreen key={visit} />
+}
+
+function LogsScreen() {
+  const [question, setQuestion] = useState(0)
+  const {
+    editing,
+    commit: commitQuestion,
+    begin: beginQuestion,
+  } = useQuestionHistory(() => setQuestion((value) => value + 1))
   const params = useSearchParams()
   const { host } = useMetrics()
   const { can } = useAuth()
@@ -270,11 +297,29 @@ export default function LogsPage() {
   }, [selected, sourceId, unit, units, detectedLens, host?.platform])
   const finds = useServiceFinds(record ? undefined : viewSource, readLens, requests.sites)
 
+  // The lens's readings stand over the frame where five fit across it and
+  // the console keeps its height under them. On a narrower or shorter window
+  // they are the counts on the lens row's chips, as a database's Logs
+  // workbench carries them: tiles over a laptop's 720px left the live tail
+  // nine lines, and on a phone pushed the first line a screen down.
+  const roomy = useMediaQuery("(min-width: 1280px) and (min-height: 800px)")
+  const readings = useLensReadings(
+    sourceId,
+    lensFor(
+      lens === "none"
+        ? undefined
+        : (readLens ?? (selected?.kind === "stack" ? STACK_LENS : undefined)),
+    ),
+    { forcedLens: lens, enabled: !record && !windowError },
+  )
+  const showReadings = roomy && !record && !windowError && readings.tiles.length > 0
+
   // Another log opened on a stretch of time, from a view or a request —
   // History on it, narrowed where the asker knows how. A source the rail
   // does not list is said to be gone, as a link to one is, rather than
   // swapped for another.
   const openLog = (id: string | undefined, at: OpenAt) => {
+    commitQuestion()
     setRecord("")
     if (id !== undefined && id !== sourceId) {
       const target = railSourceFor(listed, id)
@@ -311,7 +356,7 @@ export default function LogsPage() {
     ? serviceViews(viewSource, finds, {
         openLog,
         onQuery: (conn: DbFleetEntry, sql: string) =>
-          router.push(`/databases/query?${new URLSearchParams({ conn: String(conn.id), sql })}`),
+          router.push(sectionHref(conn.id, "query", { sql })),
       })
     : []
   // A view the source does not have — Events kept from a container, now on
@@ -324,7 +369,7 @@ export default function LogsPage() {
   const predicatesKey = JSON.stringify(predicates ?? [])
   const recordWords = JSON.stringify(record ? queryParams(recordQuery) : [])
   useEffect(() => {
-    if (windowError) return
+    if (windowError || editing.current) return
     const url = new URL(window.location.href)
     if (record) {
       // A record's address is the record and its question, in the request
@@ -365,6 +410,8 @@ export default function LogsPage() {
     }
     window.history.replaceState(null, "", url)
   }, [
+    question,
+    editing,
     record,
     recordView,
     recordWords,
@@ -380,6 +427,37 @@ export default function LogsPage() {
     windowError,
   ])
 
+  const onFilterChange = (next: LogFilterState) => {
+    beginQuestion()
+    setFilter(next)
+  }
+  const identity = record
+    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp compact />} />
+    : viewSource &&
+      selected &&
+      !windowError && (
+        <SourceIdentity
+          key={sourceId}
+          source={viewSource}
+          aside={
+            <div className="flex items-center gap-2">
+              {/* A page view with its own export — a site's requests — is not
+                the log's lines, and two Export buttons would be two answers. */}
+              {(!shownView || shownView.filtered) && (
+                <ExportDialog
+                  sourceId={sourceId}
+                  source={selected}
+                  filter={filter}
+                  boot={boot}
+                  lens={lens}
+                />
+              )}
+              <WorkspaceHelp compact />
+            </div>
+          }
+        />
+      )
+
   const railToggle = (
     <IconAction
       label={showRail ? "Hide the sources" : "Show the sources"}
@@ -390,193 +468,216 @@ export default function LogsPage() {
       {showRail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
     </IconAction>
   )
+  // Equivalent URLs can reorder fields when a restored question is written back.
+  const questionParams = new URLSearchParams(params.toString())
+  questionParams.sort()
 
   return (
     // Below `lg` the rail stacks over the lines, and the two shared the
     // window: a request record's chart and filters left its rows no height
     // at all. There the page scrolls, and the column under the rail keeps a
     // window's height of its own.
-    <Page fill className="gap-4 max-lg:h-auto max-lg:overflow-visible md:gap-5">
-      <PageContext eyebrow="Server" title="Logs" />
+    <Workspace
+      name="Logs"
+      rows={false}
+      memory
+      stateKey={`logs.${sourceId}.${shownMode}.${questionParams.toString()}`}
+      refresh={() => {
+        sources.refresh()
+        setJump((value) => value + 1)
+      }}
+    >
+      <Page fill className="gap-4 max-lg:h-auto max-lg:overflow-visible md:gap-5">
+        <PageContext
+          eyebrow="Server"
+          title="Logs"
+          actions={identity ? undefined : <WorkspaceHelp />}
+        />
+        {identity}
+        {showReadings && (
+          <LensReadings
+            key={sourceId}
+            readings={readings}
+            filter={filter}
+            onFilterChange={onFilterChange}
+            className="shrink-0 animate-rise"
+          />
+        )}
 
-      {/* One frame around the whole workbench. The rail and the lines are
+        {/* One frame around the whole workbench. The rail and the lines are
           separated by a hairline rather than by a gutter and two borders: two
           framed panes with a gap between them read as two boxes floating on
           the page, and the screen is one working surface. */}
-      <div
-        style={{ "--jd-rail": `${railPx}px` } as React.CSSProperties}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card max-lg:flex-none lg:flex-row"
-      >
-        {showRail && (
-          <div className="relative flex max-h-64 shrink-0 border-b border-hairline lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0">
-            <SourceRail
-              index={sources.data}
-              sources={listed}
-              loading={sources.loading}
-              error={sources.error}
-              selectedId={record ? null : (selected?.id ?? null)}
-              onSelect={(source) => {
-                setRecord("")
-                switchSource(source, source.kind === "journal" ? unit : "")
-                setPicked(source.id)
-                if (source.kind !== "journal") setUnit("")
-              }}
-              records={requests.records}
-              selectedRecord={record || null}
-              onSelectRecord={(next) => setRecord(next.id)}
-              onRescan={() => sources.refresh()}
-              platform={host?.platform}
-            />
-            <ResizeHandle
-              side="left"
-              label="Sources panel width"
-              value={railPx}
-              min={RAIL.min}
-              max={RAIL.max}
-              onChange={(px, commit) => setRailWidth(px, commit)}
-              onReset={resetRailWidth}
-              className="absolute inset-y-0 -right-1 z-20"
-            />
-          </div>
-        )}
+        <div
+          style={{ "--jd-rail": `${railPx}px` } as React.CSSProperties}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card max-lg:flex-none lg:flex-row"
+        >
+          {showRail && (
+            <div className="relative flex max-h-64 shrink-0 border-b border-hairline lg:max-h-none lg:w-(--jd-rail) lg:border-r lg:border-b-0">
+              <SourceRail
+                index={sources.data}
+                sources={listed}
+                loading={sources.loading}
+                error={sources.error}
+                selectedId={record ? null : (selected?.id ?? null)}
+                onSelect={(source) => {
+                  if (record || source.id !== selected?.id) commitQuestion()
+                  setRecord("")
+                  switchSource(source, source.kind === "journal" ? unit : "")
+                  setPicked(source.id)
+                  if (source.kind !== "journal") setUnit("")
+                }}
+                records={requests.records}
+                selectedRecord={record || null}
+                onSelectRecord={(next) => {
+                  if (next.id !== record) commitQuestion()
+                  setRecord(next.id)
+                }}
+                onRescan={() => sources.refresh()}
+                platform={host?.platform}
+              />
+              <ResizeHandle
+                side="left"
+                label="Sources panel width"
+                value={railPx}
+                min={RAIL.min}
+                max={RAIL.max}
+                onChange={(px, commit) => setRailWidth(px, commit)}
+                onReset={resetRailWidth}
+                className="absolute inset-y-0 -right-1 z-20"
+              />
+            </div>
+          )}
 
-        {windowError ? (
-          <Blank leading={railToggle}>
-            <EmptyState
-              icon={Logs}
-              title="Invalid log window"
-              description={windowError}
-              action={
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setWindowError(undefined)
-                    setRange("24h")
-                    setSince("")
-                    setUntil("")
-                  }}
-                >
-                  Use last 24 hours
-                </Button>
-              }
-            />
-          </Blank>
-        ) : record ? (
-          found ? (
-            <RecordColumn
+          {windowError ? (
+            <Blank leading={railToggle}>
+              <EmptyState
+                icon={Logs}
+                title="Invalid log window"
+                description={windowError}
+                action={
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setWindowError(undefined)
+                      setRange("24h")
+                      setSince("")
+                      setUntil("")
+                    }}
+                  >
+                    Use last 24 hours
+                  </Button>
+                }
+              />
+            </Blank>
+          ) : record ? (
+            found ? (
+              <RecordColumn
+                className={COLUMN}
+                key={record}
+                record={found}
+                leading={railToggle}
+                view={recordView}
+                onViewChange={setRecordView}
+                query={recordQuery}
+                onQueryChange={setRecordQuery}
+                openLog={openLog}
+              />
+            ) : (
+              <Blank leading={railToggle}>
+                <EmptyState
+                  icon={Logs}
+                  title={
+                    requests.settled ? "Request record unavailable" : "Looking for request records…"
+                  }
+                  description={
+                    requests.settled
+                      ? `The requested record (${record}) is not among this host's deployments and sites with one. The deployment may have been removed, or the site may no longer write an access log of its own.`
+                      : undefined
+                  }
+                />
+              </Blank>
+            )
+          ) : selected ? (
+            <LogWorkspace
+              key={sourceId}
+              refreshToken={jump}
               className={COLUMN}
-              key={record}
-              record={found}
+              flush
               leading={railToggle}
-              view={recordView}
-              onViewChange={setRecordView}
-              query={recordQuery}
-              onQueryChange={setRecordQuery}
-              openLog={openLog}
+              // The identity line over the frame names it — a unit's journal
+              // as the unit — so the strip is the views alone.
+              name={null}
+              source={selected}
+              sourceId={sourceId}
+              units={sources.data?.units ?? []}
+              views={ctx && views.map((view) => ({ ...view, render: () => view.render(ctx) }))}
+              mode={shownMode}
+              onModeChange={(next) => {
+                if (next !== mode) commitQuestion()
+                setMode(next)
+              }}
+              filter={filter}
+              onFilterChange={onFilterChange}
+              onSubmitQuestion={() => {
+                if (editing.current) commitQuestion()
+              }}
+              unit={unit}
+              onUnitChange={(next) => {
+                if (next !== unit) commitQuestion()
+                switchSource(selected, next)
+                setUnit(next)
+              }}
+              lens={lens}
+              onLensChange={(next) => {
+                setLens(next)
+                setFilter((f) => ({ ...f, fields: {} }))
+              }}
+              detectedLens={detectedLens}
+              readings={showReadings ? undefined : readings}
+              answered={showReadings ? readings : undefined}
+              range={range}
+              onRangeChange={setRange}
+              since={since}
+              until={until}
+              onSinceChange={setSince}
+              onUntilChange={setUntil}
+              onCustomRange={(from, to) => {
+                setRange("custom")
+                setSince(toLocalInput(from))
+                setUntil(toLocalInput(to))
+              }}
+              context={context}
+              onContextChange={setContext}
+              archives={archives}
+              onArchivesChange={setArchives}
+              boot={boot}
+              onBootChange={setBoot}
             />
           ) : (
             <Blank leading={railToggle}>
               <EmptyState
                 icon={Logs}
                 title={
-                  requests.settled ? "Request record unavailable" : "Looking for request records…"
+                  sources.loading
+                    ? "Looking for logs…"
+                    : picked
+                      ? "Requested log source unavailable"
+                      : "No log sources on this host"
                 }
                 description={
-                  requests.settled
-                    ? `The requested record (${record}) is not among this host's deployments and sites with one. The deployment may have been removed, or the site may no longer write an access log of its own.`
-                    : undefined
+                  sources.loading
+                    ? undefined
+                    : picked
+                      ? `The requested source (${picked}) is not in the current inventory. It may have been removed or its owner may be unavailable. Rescan or choose another source.`
+                      : `Nothing readable was found under ${(sources.data?.roots ?? []).join(", ") || "the configured log roots"}. Containers, PM2 processes and the journal appear here too when they are present.`
                 }
               />
             </Blank>
-          )
-        ) : selected ? (
-          <LogWorkspace
-            key={`${sourceId}|${jump}`}
-            className={COLUMN}
-            flush
-            leading={railToggle}
-            // A unit's journal is named as the unit: its Runs have no filter
-            // row, which is where the unit is picked, to say whose they are.
-            name={
-              viewSource && viewSource.label !== selected.label ? (
-                <span className="truncate text-body font-medium">{viewSource.label}</span>
-              ) : undefined
-            }
-            facts={<SourceFacts source={viewSource ?? selected} />}
-            actions={
-              // A page view with its own export — a site's requests — is not
-              // the log's lines, and two Export buttons would be two answers.
-              (!shownView || shownView.filtered) && (
-                <ExportDialog
-                  sourceId={sourceId}
-                  source={selected}
-                  filter={filter}
-                  boot={boot}
-                  lens={lens}
-                />
-              )
-            }
-            source={selected}
-            sourceId={sourceId}
-            units={sources.data?.units ?? []}
-            views={ctx && views.map((view) => ({ ...view, render: () => view.render(ctx) }))}
-            mode={shownMode}
-            onModeChange={setMode}
-            filter={filter}
-            onFilterChange={setFilter}
-            unit={unit}
-            onUnitChange={(next) => {
-              switchSource(selected, next)
-              setUnit(next)
-            }}
-            lens={lens}
-            onLensChange={(next) => {
-              setLens(next)
-              setFilter((f) => ({ ...f, fields: {} }))
-            }}
-            detectedLens={detectedLens}
-            insightReadings
-            range={range}
-            onRangeChange={setRange}
-            since={since}
-            until={until}
-            onSinceChange={setSince}
-            onUntilChange={setUntil}
-            onCustomRange={(from, to) => {
-              setRange("custom")
-              setSince(toLocalInput(from))
-              setUntil(toLocalInput(to))
-            }}
-            context={context}
-            onContextChange={setContext}
-            archives={archives}
-            onArchivesChange={setArchives}
-            boot={boot}
-            onBootChange={setBoot}
-          />
-        ) : (
-          <Blank leading={railToggle}>
-            <EmptyState
-              icon={Logs}
-              title={
-                sources.loading
-                  ? "Looking for logs…"
-                  : picked
-                    ? "Requested log source unavailable"
-                    : "No log sources on this host"
-              }
-              description={
-                sources.loading
-                  ? undefined
-                  : picked
-                    ? `The requested source (${picked}) is not in the current inventory. It may have been removed or its owner may be unavailable. Rescan or choose another source.`
-                    : `Nothing readable was found under ${(sources.data?.roots ?? []).join(", ") || "the configured log roots"}. Containers, PM2 processes and the journal appear here too when they are present.`
-              }
-            />
-          </Blank>
-        )}
-      </div>
-    </Page>
+          )}
+        </div>
+      </Page>
+    </Workspace>
   )
 }
 

@@ -9,6 +9,7 @@ import {
   StepMark,
   formatDuration,
   groupedState,
+  stageName,
   stepStateLabel,
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
@@ -34,10 +35,13 @@ const DONE = new Set<ReleaseNodeState>(["passed", "warning", "skipped"])
  */
 export function ReleasePipeline({
   steps,
+  operation,
   now,
   className,
 }: {
   steps: DeploymentStep[]
+  /** The run's operation, which names the stage a Stop works in. */
+  operation?: string
   /** The clock a stage still working is measured against. */
   now: number
   className?: string
@@ -46,7 +50,7 @@ export function ReleasePipeline({
   // for a project with no new name — and draws as not part of this run
   // rather than as waiting on it for ever.
   const groups = RELEASE_GROUPS.map((group) => ({
-    label: group.label,
+    label: stageName(group.label, operation),
     state: groupedState(steps, group.keys),
     seconds: groupSeconds(steps, group.keys, now),
   }))
