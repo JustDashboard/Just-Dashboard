@@ -1,0 +1,13 @@
+# 2026-10-09T23:42:19Z commit 3d951306 (+ working tree)
+# sudo -n env JD_NETNS_LIVE=1 TMPDIR=/home/ubuntu/Just-Dashboard-net-egress-artifacts/tmp GOMAXPROCS=2 netx.test -test.run '^TestLiveEgressFailoverAndFailbackWithHysteresis$' -test.v -test.count=1
+=== RUN   TestLiveEgressFailoverAndFailbackWithHysteresis
+    egress_live_test.go:242: ip: /dev/stdin:2:8-10: Error: syntax error, unexpected fwd, expecting string or last
+         chain fwd {
+               ^^^
+        /dev/stdin:3:3-6: Error: syntax error, unexpected type
+          type filter hook forward priority 0; policy accept;
+          ^^^^
+        …
+--- FAIL: TestLiveEgressFailoverAndFailbackWithHysteresis (0.15s)
+FAIL
+# exit 1

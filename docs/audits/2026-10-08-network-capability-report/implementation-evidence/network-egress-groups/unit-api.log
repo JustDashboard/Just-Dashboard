@@ -1,0 +1,13 @@
+=== RUN   TestEgressRoutesAreExactlyTheContract
+--- PASS: TestEgressRoutesAreExactlyTheContract (5.33s)
+=== RUN   TestEveryEgressMutationIsRefusedBelowItsCapabilityBeforeTheModule
+--- PASS: TestEveryEgressMutationIsRefusedBelowItsCapabilityBeforeTheModule (20.09s)
+=== RUN   TestEgressPathWithdrawalsAreDestructive
+--- PASS: TestEgressPathWithdrawalsAreDestructive (5.28s)
+=== RUN   TestEgressMutationsAreAuditedAndMapModuleRefusals
+--- PASS: TestEgressMutationsAreAuditedAndMapModuleRefusals (5.02s)
+=== RUN   TestEgressChangesAcceptPendingApplyButSimulationAndAutomationDoNot
+--- PASS: TestEgressChangesAcceptPendingApplyButSimulationAndAutomationDoNot (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	35.788s
+# exit 0
