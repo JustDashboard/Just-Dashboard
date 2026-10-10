@@ -73,14 +73,14 @@ func TestBridgeUnitCommandsRenderOwnedVLANsAndFloodEnds(t *testing.T) {
 		t.Fatalf("lines =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
 	}
 	paths := Paths{Dir: "/etc/just-dashboard/network", Sysctl: "/etc/sysctl.d/90-just-dashboard.conf"}
-	unit := renderUnitWith(paths, false, bridgeUnitCommands(sp))
+	unit := renderUnitWith(paths, false, nil, bridgeUnitCommands(sp))
 	links := strings.Index(unit, "ExecStart=-ip -force -batch")
 	first := strings.Index(unit, "ExecStart=-bridge vlan add dev jd-lan vid 10 pvid untagged self")
 	rules := strings.Index(unit, "ExecStart=-ip -6 -force -batch")
 	if links < 0 || first < links || rules < first {
 		t.Fatalf("bridge lines follow the devices they configure:\n%s", unit)
 	}
-	if renderUnitWith(paths, false, bridgeUnitCommands(emptySpec())) != renderUnit(paths, false) {
+	if renderUnitWith(paths, false, nil, bridgeUnitCommands(emptySpec())) != renderUnit(paths, false) {
 		t.Fatal("a spec without VLANs or flood ends renders the unit it always did")
 	}
 }

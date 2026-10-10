@@ -1,0 +1,7 @@
+=== RUN   TestLiveShapingVerifiesEveryRequestedParameter
+    shaping_live_test.go:28: real tc parameters rejected for {Device:ds0 Qdisc: EgressKbit:50000 IngressKbit:100000 SQM:<nil> Made:{CreatedAt:0001-01-01 00:00:00 +0000 UTC CreatedBy:}}: tc printed unreadable shaping classes
+--- FAIL: TestLiveShapingVerifiesEveryRequestedParameter (0.05s)
+=== RUN   TestLiveSQMOwnershipRecoveryAndColdRestore
+    shaping_sqm_live_test.go:51: shaping differs from the saved configuration: sqmsrc IFB has foreign classs
+--- FAIL: TestLiveSQMOwnershipRecoveryAndColdRestore (0.08s)
+FAIL

@@ -252,6 +252,25 @@ func TestDriftBootNeedsMeasuredExecutionAndDetectsIgnoredFailure(t *testing.T) {
 			t.Fatalf("partial results claimed success: %+v", b)
 		}
 	})
+	// systemd 255 prints one ExecStart line per command, as a guest reboot
+	// showed; reading only the last line left every real boot unknown and hid
+	// an earlier command's failure.
+	for _, first := range []string{"0", "1"} {
+		t.Run("one line per command, first exits "+first, func(t *testing.T) {
+			s := testService(t)
+			if err := writeFileAtomic(s.paths.Unit, []byte(generatedHeader+"[Service]\nExecStart=-ip -force -batch links\nExecStart=-sysctl -q -p conf\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			record(t).on("systemctl show", "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nFragmentPath="+s.paths.Unit+"\nDropInPaths=\nNeedDaemonReload=no\nResult=success\nExecMainStartTimestamp=Fri 2026-10-09 23:29:56 UTC\nExecMainExitTimestamp=Fri 2026-10-09 23:29:57 UTC\nExecMainStartTimestampMonotonic=13114874\nExecMainExitTimestampMonotonic=13300000\nExecMainStatus=0\n"+
+				"ExecStart={ path=ip ; argv[]=ip -force -batch links ; ignore_errors=yes ; start_time=[Fri 2026-10-09 23:29:56 UTC] ; stop_time=[Fri 2026-10-09 23:29:56 UTC] ; pid=689 ; code=exited ; status="+first+" }\n"+
+				"ExecStart={ path=sysctl ; argv[]=sysctl -q -p conf ; ignore_errors=yes ; start_time=[Fri 2026-10-09 23:29:57 UTC] ; stop_time=[Fri 2026-10-09 23:29:57 UTC] ; pid=833 ; code=exited ; status=0 }\n")
+			b := s.driftBoot(context.Background())
+			want := map[string]string{"0": "succeeded", "1": "failed"}[first]
+			if len(b.Execution.Commands) != 2 || b.Execution.Status != want {
+				t.Fatalf("activation = %+v, want %s from both commands", b.Execution, want)
+			}
+		})
+	}
 }
 
 func TestDriftBootUnreadableMetadataDoesNotInventAnUnrecordedOrOwnedActivation(t *testing.T) {
@@ -363,5 +382,34 @@ func TestDriftDetectsMissingRecoveryHelperWithoutExecutingReplacements(t *testin
 	}
 	if o := s.driftRecoveryHelper(); o.Status != "conflict" || o.Owned || o.Repairable {
 		t.Fatalf("foreign executable accepted: %+v", o)
+	}
+}
+
+// The installed helper is the packaged backend, about 80 MB when stripped. A
+// guest reboot acceptance found it read against the render limit, so the
+// helper always looked unreadable and every selected repair was blocked as if
+// it were absent. Sparse files stand in for executables of that size.
+func TestDriftHashesAnExecutableSizedRecoveryHelper(t *testing.T) {
+	s := testService(t)
+	path := filepath.Join(s.paths.Dir, recoveryBinary)
+	if err := writeFileAtomic(path, []byte("\x7fELF"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 80<<20); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := s.driftRecoveryHelper()
+	if o.Status != "unknown" || !o.Owned || o.Observed["sha256"] != digestBytes(data) || o.Observed["mode"] != "0700" {
+		t.Fatalf("executable-sized helper misread: %+v", o)
+	}
+	if err := os.Truncate(path, maxRecoveryHelperBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if o := s.driftRecoveryHelper(); o.Status != "unreadable" {
+		t.Fatalf("helper past its inspection bound accepted: %+v", o)
 	}
 }

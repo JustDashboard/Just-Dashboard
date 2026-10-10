@@ -1,0 +1,204 @@
+{
+  "at": "2026-10-10T00:52:23Z",
+  "bootId": "f6d6fda8-c847-42da-a007-ce960b0a42b8",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          1,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ],
+        [
+          "/etc/just-dashboard/network/network-recovery",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "f6d6fda8-c847-42da-a007-ce960b0a42b8",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 00:52:21 UTC",
+        "invocationId": "807ea0a5ccf24556a152048b39f65d37",
+        "reason": "The measured activation or one of its commands failed, including commands whose errors the unit ignores.",
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 00:52:20 UTC",
+        "status": "failed"
+      },
+      "files": 8,
+      "notMatching": [],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [],
+        "status": "no_known_repairs"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "invocations": {
+      "after": {
+        "ActiveState": "active",
+        "InvocationID": "807ea0a5ccf24556a152048b39f65d37",
+        "Result": "success"
+      },
+      "before": "ec12346d314a4ba1bf8c27e9f53c40fa"
+    },
+    "kernelAfterNetworkdRestartMissing": [],
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "1"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      },
+      {
+        "argv": "/etc/just-dashboard/network/network-recovery --network-sqm-restore /etc/just-dashboard/network",
+        "code": "exited",
+        "ignoreErrors": "no",
+        "path": "/etc/just-dashboard/network/network-recovery",
+        "status": "0"
+      }
+    ]
+  },
+  "failures": [
+    "measured activation after restart: {'status': 'failed', 'reason': 'The measured activation or one of its commands failed, including commands whose errors the unit ignores.', 'bootId': 'f6d6fda8-c847-42da-a007-ce960b0a42b8', 'invocationId': '807ea0a5ccf24556a152048b39f65d37', 'startedAt': 'Sat 2026-10-10 00:52:20 UTC', 'finishedAt': 'Sat 2026-10-10 00:52:21 UTC', 'result': 'success', 'bootTrigger': 'unknown'}"
+  ],
+  "phase": "p7-daemon-restart",
+  "result": "fail",
+  "seconds": 3.2
+}

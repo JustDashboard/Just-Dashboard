@@ -1,0 +1,108 @@
+{
+  "at": "2026-10-09T23:39:05Z",
+  "bootId": "8c7b60a9-06a8-4759-8aba-1aa5a47e3f8b",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway"
+      ],
+      "execution": {
+        "bootId": "8c7b60a9-06a8-4759-8aba-1aa5a47e3f8b",
+        "bootTrigger": "unknown",
+        "finishedAt": "Fri 2026-10-09 23:37:11 UTC",
+        "invocationId": "e4291283827846ea9aae4d732467de6a",
+        "reason": "A measured activation exists, but complete command outcomes are unavailable.",
+        "result": "success",
+        "startedAt": "Fri 2026-10-09 23:37:11 UTC",
+        "status": "unknown"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "link:jdvmdum0",
+          "reason": "The saved managed device is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "address:jdvmdum1/10.232.2.1/24",
+          "reason": "The saved managed address is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "route:2",
+          "reason": "The saved managed route is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "shaping:jdvmbr0",
+          "reason": "shaping differs from the saved configuration: jdvmbr0 has \"noqueue\" as its queue after setting \"cake\"",
+          "status": "drift"
+        },
+        {
+          "id": "recovery-helper:/etc/just-dashboard/network/network-recovery",
+          "reason": "file exceeds inspection limit",
+          "status": "unreadable"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:link:jdvmdum0",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:address:jdvmdum1/10.232.2.1/24",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:route:2",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:shaping:jdvmbr0",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 34,
+      "status": "drift"
+    },
+    "notMatching": {
+      "address:jdvmdum1/10.232.2.1/24": "missing",
+      "link:jdvmdum0": "missing",
+      "recovery-helper:/etc/just-dashboard/network/network-recovery": "unreadable",
+      "route:2": "missing",
+      "shaping:jdvmbr0": "drift"
+    }
+  },
+  "failures": [
+    "drift before the deletion: {'recovery-helper:/etc/just-dashboard/network/network-recovery': 'unreadable'}",
+    "deleted objects reported as {'link:jdvmdum0': 'missing', 'address:jdvmdum1/10.232.2.1/24': 'missing', 'route:2': 'missing', 'shaping:jdvmbr0': 'drift', 'recovery-helper:/etc/just-dashboard/network/network-recovery': 'unreadable'}"
+  ],
+  "phase": "p7-runtime-drift",
+  "result": "fail",
+  "seconds": 2.8
+}

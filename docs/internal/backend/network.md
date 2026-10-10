@@ -348,7 +348,8 @@ ufw and Docker drop forwarded traffic by default, so translated connections carr
 `0x4a000000/0xff000000` (outside Tailscale's packet-mark bits) and one rule per chain admits exactly
 them: `-m connmark --mark … -j ACCEPT` at the top of iptables' and ip6tables' `FORWARD`, `INPUT` and
 `DOCKER-USER`. They are re-asserted on every gateway change (a `ufw reload` or a Docker restart can
-remove them), restored at boot by the unit (delete then insert, so idempotent), and removed when
+remove them), restored at boot by the unit (a failure-tolerant `ExecStartPre` delete, then the
+insert, so idempotent), and removed when
 nothing translates (each `-D` repeats until the kernel has none left, at most eight times). Writes are refused (`409 network_read_only`) where firewalld is active or another
 nftables table drops forwarded traffic, naming the chain and the accept to add there. A forward or NAT
 entry that needs forwarding while it is off is refused with `409 forwarding_off`; the page offers the
@@ -453,7 +454,12 @@ A limit under 1 Mbit/s on the uplink or the client-path device is refused. The i
 ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
 never touched, and a download limit on a device that has one is refused.
 Apply verification reads the exact HTB class/default/leaf and rate/ceil, CAKE bandwidth, and ingress
-matchall/drop policer rate/burst. Detailed policer output supplements iproute2 JSON where its fields
+matchall/drop policer rate/burst. The fq_codel leaf lists each flow holding packets as a class
+beneath `10:`; those belong to the leaf and are not counted as HTB classes. iproute2 releases before JSON class output (Ubuntu 24.04 ships
+6.1) print `tc -j class show` as text, and nothing for a device without classes; that form is read
+too. Its rates are whole units, so a rate of 1 Gbit or more that is not a whole number of Mbit reads
+back as drift there. The boot batch omits the runtime path's clearing deletes; the unit runs them
+first as failure-tolerant `ExecStartPre` lines, so the batch's exit reflects restoration alone. Detailed policer output supplements iproute2 JSON where its fields
 are absent, with a small allowance for kernel clock quantization. First replacement refuses foreign
 hierarchies/filters unless the root is the kernel's own default — `noqueue`, a single queue of the
 current `net.core.default_qdisc` with the kernel's `0:` handle, or a multiqueue `mq` whose per-ring
@@ -783,7 +789,10 @@ only the journal; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reach
 isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
 (`sudo -E JD_NETNS_LIVE=1 go test ./internal/netx -run TestLiveConntrack`) because the netlink reader
 enters the throwaway namespace in-process; so do the `TestLiveEgress` tests, whose probes and
-connection tracking do the same ([egress groups](network-egress.md#tests)).
+connection tracking do the same ([egress groups](network-egress.md#tests)). Reboots are accepted
+only in a disposable QEMU guest: `testdata/vm-reboot-acceptance/` boots Ubuntu 24.04 with user-mode
+networking, installs the backend in the production layout and reboots the guest between phases; see
+the [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md).
 
 ### Retained capture routes
 

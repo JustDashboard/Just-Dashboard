@@ -1,0 +1,9 @@
+# Session transcript (verbatim command output), exploratory guest, 2026-10-10T00:32Z.
+$ stat -c "%i %y" /run/systemd/network/10-netplan-uplink.network
+1972 2026-10-10 00:30:53.860785528 +0000
+$ systemctl is-enabled just-dashboard-network-recovery.service
+enabled
+$ sudo systemctl enable just-dashboard-network-recovery.service ; stat ...
+2111 2026-10-10 00:32:16.524645256 +0000
+$ sudo systemctl enable just-dashboard-network.service ; stat ...
+2138 2026-10-10 00:32:37.007610499 +0000

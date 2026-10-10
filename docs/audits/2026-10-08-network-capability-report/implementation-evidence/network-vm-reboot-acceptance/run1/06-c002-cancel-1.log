@@ -1,0 +1,137 @@
+{
+  "at": "2026-10-10T00:58:56Z",
+  "bootId": "046e6291-9dd3-4547-a9a2-4a757abce173",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "046e6291-9dd3-4547-a9a2-4a757abce173",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 00:58:47 UTC",
+        "invocationId": "0617cabd51e040bc800d98bfcfcbb628",
+        "reason": null,
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 00:58:47 UTC",
+        "status": "succeeded"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "shaping:jdvmdum1",
+          "reason": "shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:shaping:jdvmdum1",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T00:58:25.747423727Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "sysctl"
+      ],
+      "files": [
+        "/etc/sysctl.d/90-just-dashboard.conf",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "aaec1f2c346cd540f14a4ac8a3d21fec918967d88811114cb7d6e0f4710868a5",
+      "id": "732c99db39d874db017d3cbd9ba07a4b",
+      "persistence": "written",
+      "phase": "saved",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T00:58:25.805332333Z",
+      "watchdog": "completed"
+    },
+    "routeInKernel": false,
+    "routeInSpec": false
+  },
+  "failures": [
+    "drift after a canceled request: [{'id': 'shaping:jdvmdum1', 'status': 'drift', 'reason': 'shaping differs from the saved configuration: jdvmdum1 HTB class rate/ceil does not match 20000 kbit/s'}]"
+  ],
+  "phase": "c002-cancel 1",
+  "result": "fail",
+  "seconds": 2.9
+}

@@ -503,6 +503,19 @@ func renderNativeNetplan(data []byte, p *nativeProfile, in NativeIntent) ([]byte
 	return out.Bytes(), nil
 }
 
+// netplanGenerator is the generator the netplan CLI wraps. `netplan generate`
+// also reloads udev and systemd on the live host, even with --root-dir, and
+// systemd's reload reruns Netplan's own generator over the real configuration.
+// In a booted Ubuntu 24.04 guest that rewrote the live renderer artifacts with
+// new inodes while a private candidate was staged, so every Netplan edit was
+// refused as an ownership change after staging.
+const netplanGenerator = "/usr/libexec/netplan/generate"
+
+func generateNetplanRoot(ctx context.Context, root string) error {
+	_, err := nativeExecute(ctx, nil, netplanGenerator, "--root-dir", root)
+	return err
+}
+
 func stageNativeNetplan(ctx context.Context, p *nativeProfile, candidate []byte) ([]byte, error) {
 	if p.View.Renderer == "networkd" {
 		if err := nativeNetplanRetainsAutomaticPolicy(p, p.File.Data, candidate); err != nil {
@@ -536,8 +549,7 @@ func stageNativeNetplan(ctx context.Context, p *nativeProfile, candidate []byte)
 	if !strings.HasPrefix(hostRoot, "/run/jd-native-stage-") {
 		return nil, errors.New("private native staging root identity is invalid")
 	}
-	_, err = nativeExecute(ctx, nil, "netplan", "generate", "--root-dir", hostRoot)
-	if err != nil {
+	if err := generateNetplanRoot(ctx, hostRoot); err != nil {
 		return nil, errors.New("netplan refused the staged supported profile; no native profile was changed")
 	}
 	file, err := nativeReadProfile(filepath.Join(hostRoot, p.Generated.Path))

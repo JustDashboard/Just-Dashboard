@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-10T01:20:07Z",
+  "bootId": "47775ab0-e4ff-47e3-82e9-693ad6ad4f0d",
+  "evidence": {
+    "backendAfterKill": {
+      "active": "failed",
+      "pid": "0",
+      "startedThisBoot": true,
+      "sub": "failed"
+    },
+    "fired": "2026-10-10T01:20:06.923442109Z ip -j route get 1.1.1.1 journal=runtime_applied",
+    "journalAtKill": {
+      "appliedAt": "2026-10-10T01:20:06.905806012Z",
+      "boot": "not_verified",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "f53a1e15fe3d7a384a2fc39fc5e5e61f5c44b9f73f3295c890579a6f9c758ea6",
+      "id": "336d23d881e8a17ea115268ac5660eba",
+      "persistence": "not_written",
+      "phase": "runtime_applied",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:20:06.905807396Z",
+      "watchdog": "armed"
+    },
+    "requestError": "RemoteDisconnected('Remote end closed connection without response')",
+    "timer": {
+      "ActiveState": "active",
+      "LoadState": "loaded",
+      "NextElapseUSecMonotonic": "3min 30.378494s"
+    }
+  },
+  "failures": [],
+  "phase": "f4-kill runtime_applied 10",
+  "result": "pass",
+  "seconds": 1.5
+}

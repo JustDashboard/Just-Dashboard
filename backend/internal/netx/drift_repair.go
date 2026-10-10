@@ -82,7 +82,7 @@ func (s *Service) driftRecoveryReady(ctx context.Context) string {
 	if props["LoadState"] != "loaded" || props["FragmentPath"] != unit || props["DropInPaths"] != "" || props["NeedDaemonReload"] != "no" || props["UnitFileState"] != "enabled" {
 		return "The loaded independent recovery unit must use its owned fragment without overrides and be enabled persistently."
 	}
-	data, err = readDriftFile(helper)
+	installed, _, err := digestDriftFile(helper)
 	if err != nil {
 		return "The independent recovery helper must already be installed."
 	}
@@ -94,8 +94,8 @@ func (s *Service) driftRecoveryReady(ctx context.Context) string {
 	if err != nil {
 		return "The running backend executable cannot be identified."
 	}
-	current, err := os.ReadFile(executable)
-	if err != nil || digestBytes(data) != digestBytes(current) {
+	current, _, err := digestDriftFile(executable)
+	if err != nil || installed != current {
 		return "The independent recovery helper's current backend ownership cannot be established."
 	}
 	return ""

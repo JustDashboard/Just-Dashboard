@@ -1,0 +1,13 @@
+# Only the first NIC (the user-mode uplink carrying SSH) is configured by
+# cloud-init. The other three are left for the native owner fixtures.
+# set-name keeps Netplan's boot-time wait-online drop-in from naming the
+# pre-rename kernel device (eth0), which otherwise delays every boot by the
+# full two-minute wait-online timeout.
+version: 2
+ethernets:
+  uplink:
+    match:
+      macaddress: "52:54:00:4a:44:03"
+    set-name: enp0s3
+    dhcp4: true
+    dhcp6: false

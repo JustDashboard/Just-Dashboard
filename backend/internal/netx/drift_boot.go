@@ -64,12 +64,7 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 		b.Status, b.Reason, b.Execution.Reason = "unreadable", err.Error(), err.Error()
 		return b
 	}
-	values := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		if key, value, ok := strings.Cut(line, "="); ok {
-			values[key] = strings.TrimSpace(value)
-		}
-	}
+	values := systemdProperties(out)
 	b.LoadState, b.UnitFileState, b.ActiveState, b.FragmentPath, b.DropInPaths, b.NeedDaemonReload = values["LoadState"], values["UnitFileState"], values["ActiveState"], values["FragmentPath"], values["DropInPaths"], values["NeedDaemonReload"]
 	_, dropInsKnown := values["DropInPaths"]
 	unitData, unitErr := readDriftFile(s.paths.Unit)
@@ -160,6 +155,24 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 		e.Reason = "A measured activation exists, but complete command outcomes are unavailable."
 	}
 	return b
+}
+
+// systemdProperties reads `systemctl show`. A command list such as ExecStart
+// is printed as one line per command, so a repeated property keeps every line.
+func systemdProperties(out string) map[string]string {
+	values := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if previous, seen := values[key]; seen {
+			value = previous + "\n" + value
+		}
+		values[key] = value
+	}
+	return values
 }
 
 func parseBootCommands(raw string) []BootCommand {

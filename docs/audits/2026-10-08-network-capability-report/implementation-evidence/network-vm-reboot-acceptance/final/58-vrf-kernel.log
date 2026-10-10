@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-10T01:34:15Z",
+  "bootId": "b2fdb865-ccb9-4026-890d-e897743e1154",
+  "evidence": {
+    "module": true,
+    "pingOutsideVRF": [
+      "ping: connect: Network is unreachable"
+    ],
+    "pingThroughVRF": [
+      "2 packets transmitted, 2 received, 0% packet loss, time 1027ms",
+      "rtt min/avg/max/mdev = 0.050/0.080/0.111/0.030 ms"
+    ],
+    "routeGetInVRF": "10.244.0.2 dev va table 1100 src 10.244.0.1 uid 0 \n    cache",
+    "routeGetOutside": "RTNETLINK answers: Network is unreachable",
+    "rules": [
+      "0:\tfrom all lookup local",
+      "1000:\tfrom all lookup [l3mdev-table]",
+      "32766:\tfrom all lookup main",
+      "32767:\tfrom all lookup default"
+    ]
+  },
+  "failures": [],
+  "phase": "vrf-kernel",
+  "result": "pass",
+  "seconds": 1.1
+}

@@ -50,6 +50,11 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 	if !e.Success {
 		success = 0
 	}
+	// The row outlives the request. A client that disconnects after its
+	// mutation applied cancels the request context, and a guest acceptance
+	// lost exactly that row ("context canceled") while the change stood.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if _, err := l.st.DB.ExecContext(ctx,
 		`INSERT INTO audit_log(ts, user_id, username, role, ip, actor, action, target, method, path, status, success, detail)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,

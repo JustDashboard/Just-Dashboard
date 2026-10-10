@@ -1,0 +1,21 @@
+-- Boot 79a3b0e5f0f74cecacc1a8092ae79bf8 --
+-- Boot dc14b39ae271460a9baf808ec99712d2 --
+-- Boot 887b64d6063d4f95babd9d29e781f87c --
+-- Boot 58a0a4dc35b5476d8f1a827a8333fe63 --
+-- Boot 04a7b20d9fc24d8aaf72eec2ca5daec9 --
+-- Boot 8c7b60a906a847598aba1aa5a47e3f8b --
+-- Boot 2152bd0f5ecd4347abedf9ced414bfa0 --
+-- Boot b21e1c10d28141ac8d310457ace47bf1 --
+2026-10-09T23:43:26.375174+00:00 jd-vm-reboot network-recovery[1500]: network recovery needs attention: restore owned SQM: shaping differs from the saved configuration: enp0s6 IFB has foreign classs
+-- Boot 877f22449be24eedb36a7aacaf706bff --
+-- Boot 60cbffc7b9964a4293cdafc97e0b1cd9 --
+-- Boot c2f179c6ea824adf8091f289044aaf71 --
+-- Boot 752c686fb7604e558d437a785716d6a5 --
+-- Boot 09dbf7ea12734e86bf061633812ba0cd --
+-- Boot d8beee61a2bc4035b5737891022c697d --
+-- Boot 67a2c0e6e4b0409db29c279bc5224649 --
+-- Boot 820cd6e8f8dc401a83c15e1ba7278b3e --
+-- Boot f6d6fda8c84742daa007ce960b0a42b8 --
+-- Boot df43c4985595419b9c145409b9245d23 --
+2026-10-10T00:55:24.398613+00:00 jd-vm-reboot network-recovery[1045]: shaping differs from the saved configuration: enp0s6 IFB has foreign classs
+2026-10-10T00:55:24.398613+00:00 jd-vm-reboot network-recovery[1045]: shaping differs from the saved configuration: enp0s6 IFB has foreign classs

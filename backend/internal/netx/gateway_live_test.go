@@ -507,12 +507,16 @@ func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
 	if err := os.WriteFile(batch, []byte(renderShaping(sp)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// -force, as the boot unit runs it: the deletes of what is not there fail
-	// and the rest carries on.
+	// As the boot unit runs it: the failure-tolerant deletes first, then the
+	// batch with -force.
 	load := func() string {
-		// tc exits non-zero under -force when any line failed, and the deletes
-		// of queues that are not there do; the unit's "-" prefix accepts that.
-		out, _ := gwInNS(t, ns, "tc", "-force", "-batch", batch)
+		for _, cleanup := range shapingCleanup(sp) {
+			_, _ = gwInNS(t, ns, append([]string{"tc"}, cleanup...)...)
+		}
+		out, err := gwInNS(t, ns, "tc", "-force", "-batch", batch)
+		if err != nil {
+			t.Fatalf("a restoration line failed:\n%s", out)
+		}
 		return out
 	}
 	load()

@@ -140,3 +140,25 @@ func TestRecoveryUnitIsRecheckedWhenPreviouslyInstalled(t *testing.T) {
 		t.Fatal("cached installation accepted a replacement unit owned elsewhere")
 	}
 }
+
+// A booted Ubuntu guest showed `systemctl enable` reloading systemd even for an
+// enabled unit; the reload regenerated Netplan's artifacts, and the next
+// networkd reload reconfigured the uplink. An enabled unit is left alone.
+func TestEnabledRecoveryUnitIsNotEnabledAgain(t *testing.T) {
+	s := testService(t)
+	s.recoveryInstalled = true
+	r := record(t).on(filepath.Join(s.paths.Dir, recoveryBinary)+" --network-recovery-check", "").on("systemctl daemon-reload", "").on("systemctl enable", "")
+	unitPath := filepath.Join(filepath.Dir(s.paths.Unit), "just-dashboard-network-recovery.service")
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(s.paths.Unit), "multi-user.target.wants"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(unitPath, filepath.Join(filepath.Dir(s.paths.Unit), "multi-user.target.wants", "just-dashboard-network-recovery.service")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.installRecoveryBinary(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.ran("systemctl enable") {
+		t.Fatalf("an enabled recovery unit was enabled again: %v", r.commands())
+	}
+}

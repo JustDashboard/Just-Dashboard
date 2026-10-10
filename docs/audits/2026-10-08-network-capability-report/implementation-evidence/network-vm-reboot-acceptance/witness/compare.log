@@ -1,0 +1,24 @@
+same    addresses.txt
+same    etc-just-dashboard.txt
+same    etc-systemd-system.txt
+same    groups.txt
+same    iptables.sha256
+same    links.txt
+DIFFERS modules.txt
+80a81
+> nft_queue
+98a100
+> sch_netem
+129a132
+> xt_NFQUEUE
+same    nft-ruleset.sha256
+same    nft-tables.txt
+same    packages.txt
+same    qemu-processes.txt
+same    routes4.txt
+same    routes6.txt
+same    rules4.txt
+same    rules6.txt
+same    running-services.txt
+same    sysctls.txt
+same    unit-files.txt

@@ -1,0 +1,44 @@
+Created symlink /etc/systemd/system/multi-user.target.wants/NetworkManager.service → /usr/lib/systemd/system/NetworkManager.service.
+/var/lib/dpkg/info/network-manager.postinst: 135: file: not found
+Processing triggers for libc-bin (2.39-0ubuntu8.9) ...
+Processing triggers for dbus (1.14.10-4ubuntu4.1) ...
+Processing triggers for linux-image-6.8.0-146-generic (6.8.0-146.146) ...
+/etc/kernel/postinst.d/zz-update-grub:
+Sourcing file `/etc/default/grub'
+Sourcing file `/etc/default/grub.d/40-force-partuuid.cfg'
+Sourcing file `/etc/default/grub.d/50-cloudimg-settings.cfg'
+Generating grub configuration file ...
+GRUB_FORCE_PARTUUID is set, will attempt initrdless boot
+Found linux image: /boot/vmlinuz-6.8.0-146-generic
+Found initrd image: /boot/microcode.cpio
+Adding boot menu entry for UEFI Firmware Settings ...
+done
+dpkg-exit=0
+Get:34 http://archive.ubuntu.com/ubuntu noble-backports/multiverse Translation-en [340 B]
+Fetched 35.1 MB in 6s (6215 kB/s)
+Reading package lists...
+Setting up iptables (1.8.10-3ubuntu2) ...
+update-alternatives: using /usr/sbin/iptables-legacy to provide /usr/sbin/iptables (iptables) in auto mode
+update-alternatives: using /usr/sbin/ip6tables-legacy to provide /usr/sbin/ip6tables (ip6tables) in auto mode
+update-alternatives: using /usr/sbin/iptables-nft to provide /usr/sbin/iptables (iptables) in auto mode
+update-alternatives: using /usr/sbin/ip6tables-nft to provide /usr/sbin/ip6tables (ip6tables) in auto mode
+update-alternatives: using /usr/sbin/arptables-nft to provide /usr/sbin/arptables (arptables) in auto mode
+update-alternatives: using /usr/sbin/ebtables-nft to provide /usr/sbin/ebtables (ebtables) in auto mode
+Processing triggers for libc-bin (2.39-0ubuntu8.9) ...
+module vrf loaded
+module ifb loaded
+module sch_cake loaded
+module tcp_bbr loaded
+== native owner fixtures
+== setup complete: owners
+== native owner fixtures
+== setup complete: owners
+== native owner fixtures
+== setup complete: owners
+== native owner fixtures
+== setup complete: owners
+== dashboard backend
+== setup complete: backend
+== native owner fixtures
+== setup complete: owners
+== setup complete: none

@@ -143,10 +143,35 @@ func renderShaping(sp *Spec) string {
 		}
 		fmt.Fprintf(&b, "# %s\n", sh.Device)
 		for _, l := range shapeLines(sh) {
-			b.WriteString(l + "\n")
+			if !shapeDelete(l) {
+				b.WriteString(l + "\n")
+			}
 		}
 	}
 	return b.String()
+}
+
+// shapingCleanup is the deletes renderShaping leaves out: the boot unit runs
+// them as separate failure-tolerant steps before the batch (persist.go).
+func shapingCleanup(sp *Spec) [][]string {
+	var out [][]string
+	for _, sh := range sp.Shaping {
+		sh, err := normShape(sh)
+		if err != nil {
+			continue
+		}
+		for _, l := range shapeLines(sh) {
+			if shapeDelete(l) {
+				out = append(out, strings.Fields(l))
+			}
+		}
+	}
+	return out
+}
+
+// shapeDelete reports a line that only clears what may not be there.
+func shapeDelete(l string) bool {
+	return strings.HasPrefix(l, "qdisc del ") || strings.HasPrefix(l, "filter del ")
 }
 
 // runShapeLines runs a device's tc commands one by one, as explicit
@@ -156,7 +181,7 @@ func runShapeLines(ctx context.Context, lines []string) error {
 	for _, l := range lines {
 		args := strings.Fields(l)
 		_, err := run(ctx, "tc", args...)
-		if err != nil && !strings.HasPrefix(l, "qdisc del ") && !strings.HasPrefix(l, "filter del ") {
+		if err != nil && !shapeDelete(l) {
 			return fmt.Errorf("tc %s: %w", l, err)
 		}
 	}
@@ -657,6 +682,68 @@ type tcClass struct {
 	Ceil   uint64 `json:"ceil"`
 }
 
+var tcTextRate = regexp.MustCompile(`^([0-9]+)(bit|Kbit|Mbit|Gbit|Tbit)$`)
+
+// parseTCClasses reads `tc -j class show`. iproute2 printed classes only as
+// text before its class printer learned JSON, and Ubuntu 24.04 ships such a
+// release (6.1): there -j prints the text form, and nothing at all for a
+// device without classes. Text rates are whole units, so at or above 1 Gbit a
+// rate that is not a whole number of Mbit reads back as another rate and is
+// reported as drift rather than as a match.
+func parseTCClasses(out string) ([]tcClass, error) {
+	out = strings.TrimSpace(out)
+	var classes []tcClass
+	if strings.HasPrefix(out, "[") {
+		err := json.Unmarshal([]byte(out), &classes)
+		return classes, err
+	}
+	units := map[string]uint64{"bit": 1, "Kbit": 1e3, "Mbit": 1e6, "Gbit": 1e9, "Tbit": 1e12}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		if len(f) < 3 || f[0] != "class" {
+			return nil, fmt.Errorf("unreadable tc class %q", line)
+		}
+		c := tcClass{Kind: f[1], Handle: f[2]}
+		for i := 3; i < len(f); i++ {
+			if f[i] == "root" {
+				c.Root = true
+				continue
+			}
+			if f[i] != "parent" && f[i] != "rate" && f[i] != "ceil" {
+				continue
+			}
+			if i+1 == len(f) {
+				return nil, fmt.Errorf("unreadable tc class %q", line)
+			}
+			value := f[i+1]
+			switch f[i] {
+			case "parent":
+				c.Parent = value
+			default:
+				m := tcTextRate.FindStringSubmatch(value)
+				if m == nil {
+					return nil, fmt.Errorf("unreadable tc class rate %q", value)
+				}
+				n, err := strconv.ParseUint(m[1], 10, 64)
+				if err != nil {
+					return nil, err
+				}
+				if f[i] == "rate" {
+					c.Rate = n * units[m[2]] / 8
+				} else {
+					c.Ceil = n * units[m[2]] / 8
+				}
+			}
+			i++
+		}
+		classes = append(classes, c)
+	}
+	return classes, nil
+}
+
 type tcFilter struct {
 	Protocol string `json:"protocol"`
 	Pref     int    `json:"pref"`
@@ -730,9 +817,19 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 			if err != nil {
 				return fmt.Errorf("reading shaping classes: %w", err)
 			}
-			var classes []tcClass
-			if json.Unmarshal([]byte(out), &classes) != nil {
+			listed, err := parseTCClasses(out)
+			if err != nil {
 				return errors.New("tc printed unreadable shaping classes")
+			}
+			// fq_codel lists each flow holding packets as a class beneath the
+			// leaf. They belong to the leaf queue, not to the HTB hierarchy,
+			// and come and go with traffic.
+			var classes []tcClass
+			for _, class := range listed {
+				if class.Kind != "htb" && class.Parent == "10:" {
+					continue
+				}
+				classes = append(classes, class)
 			}
 			if len(classes) != 1 || classes[0].Kind != "htb" || classes[0].Handle != "1:10" || (!classes[0].Root && classes[0].Parent != "1:") || classes[0].Rate != shapeBytes(sh.EgressKbit) || classes[0].Ceil != shapeBytes(sh.EgressKbit) {
 				return shapingDrift("%s HTB class rate/ceil does not match %d kbit/s", sh.Device, sh.EgressKbit)

@@ -102,9 +102,13 @@ func digestBytes(data []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// The recovery helper is the packaged backend executable, about 80 MB when
+// stripped: far larger than any render, and never held in memory to hash it.
+const maxRecoveryHelperBytes = 256 << 20
+
 // Do not follow a replacement symlink or read an unbounded special file. The
 // opened inode must be the regular file whose ownership we inspected.
-func readDriftFile(path string) ([]byte, error) {
+func openDriftFile(path string) (*os.File, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -116,14 +120,24 @@ func readDriftFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil {
+		file.Close()
 		return nil, err
 	}
 	if !os.SameFile(info, opened) || !opened.Mode().IsRegular() {
+		file.Close()
 		return nil, fmt.Errorf("file changed while opening")
 	}
+	return file, nil
+}
+
+func readDriftFile(path string) ([]byte, error) {
+	file, err := openDriftFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maxRecoveryJournalBytes+1))
 	if err != nil {
 		return nil, err
@@ -132,6 +146,31 @@ func readDriftFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("file exceeds inspection limit")
 	}
 	return data, nil
+}
+
+// digestDriftFile hashes an executable-sized file through the same identity
+// checks, returning its first bytes for the type check.
+func digestDriftFile(path string) (string, []byte, error) {
+	file, err := openDriftFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+	head := make([]byte, 4)
+	n, err := io.ReadFull(file, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return "", nil, err
+	}
+	hash := sha256.New()
+	hash.Write(head[:n])
+	copied, err := io.Copy(hash, io.LimitReader(file, maxRecoveryHelperBytes+1-int64(n)))
+	if err != nil {
+		return "", nil, err
+	}
+	if int64(n)+copied > maxRecoveryHelperBytes {
+		return "", nil, fmt.Errorf("file exceeds inspection limit")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), head[:n], nil
 }
 
 func fileObservation(path, domain string, expected []byte, expectedErr error) DriftObservation {
@@ -493,7 +532,7 @@ func (s *Service) driftRecoveryHelper() DriftObservation {
 	path := filepath.Join(s.paths.Dir, recoveryBinary)
 	o := observation("recovery-helper", path)
 	o.Coverage = "presence-and-mode"
-	data, err := readDriftFile(path)
+	digest, head, err := digestDriftFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		o.Status, o.Repairable, o.Reason = "missing", true, "The independent recovery executable required by the boot unit is absent."
 		return o
@@ -507,8 +546,8 @@ func (s *Service) driftRecoveryHelper() DriftObservation {
 		o.Status, o.Reason = "unreadable", err.Error()
 		return o
 	}
-	o.Observed = map[string]string{"sha256": digestBytes(data), "mode": fmt.Sprintf("%04o", info.Mode().Perm())}
-	if len(data) < 4 || string(data[:4]) != "\x7fELF" {
+	o.Observed = map[string]string{"sha256": digest, "mode": fmt.Sprintf("%04o", info.Mode().Perm())}
+	if string(head) != "\x7fELF" {
 		o.Status, o.Owned, o.Reason = "conflict", false, "The helper path contains an unrecognized replacement."
 		return o
 	}

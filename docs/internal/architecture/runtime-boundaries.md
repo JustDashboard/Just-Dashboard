@@ -203,6 +203,8 @@ dashboard ([network module](../backend/network.md#three-rules)). The schema bloc
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
-the database being tampered with. An `Entry` records who (user, role, `Actor` = session or token), from
+the database being tampered with. The row is written with the request's values but not its
+cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still
+leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.

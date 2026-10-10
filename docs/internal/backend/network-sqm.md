@@ -72,7 +72,10 @@ down and its CAKE queue recreated, because CAKE/matchall cannot replace themselv
 
 Native verification checks exact CAKE bandwidth, classes, flow mode, NAT/wash, overhead, MPU,
 link accounting, expected RTT, ingress, split GSO, ACK filtering and fwmark; it also checks IFB up
-state and redirect ownership. CAKE's own virtual classes are supported. iproute2 intentionally omits
+state and redirect ownership. CAKE's own virtual classes are supported, in JSON and in the text
+form iproute2 6.1 (Ubuntu 24.04) prints for `tc -j class show`, including its empty output when
+the IFB has no flows yet. Before that was read, every Ubuntu 24.04 apply was refused as "foreign
+classes" and its synchronous and independent recovery stayed degraded on the same check. iproute2 intentionally omits
 zero MPU from its printed options; absent MPU is zero only for that documented case, with all other
 required profile evidence present. See the
 [iproute2 printer](https://raw.githubusercontent.com/iproute2/iproute2/main/tc/q_cake.c).
@@ -134,7 +137,12 @@ creation, an independent process restoring after backend termination, fresh-resp
 and rollback after a failed owned update's boot readback. It checks a supported fq_codel baseline
 and preservation of native clsact egress. It never changes physical host interfaces or host units.
 Service/watchdog plumbing is simulated inside the namespace fixture; the separate recovery process
-runs actual ip/tc. Actual host systemd scheduling and a physical reboot remain separate acceptance.
+runs actual ip/tc. The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md)
+adds a real systemd boot: after a reboot the packaged `--network-sqm-restore` step exited 0 and every
+CAKE parameter, the IFB alias/MAC and the redirect read back exactly on Ubuntu 24.04 (iproute2 6.1).
+A production host's reboot, provider queues and offloads remain separate acceptance. With BBR on,
+`default_qdisc=fq` makes NIC roots `fq` after a reboot, which a root change through shaping refuses as an
+unmanaged queue; the guest profile left the root untouched.
 
 The congestion fixture declares a 10 Mbit/s HTB/256000-byte FIFO access bottleneck, four saturated
 TCP downloads with DSCP 0/8/46/34, plus a 46-marked UDP echo, two-second warmup and five-second sample

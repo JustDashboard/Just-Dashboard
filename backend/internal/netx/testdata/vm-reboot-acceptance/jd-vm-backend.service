@@ -1,0 +1,17 @@
+# The dashboard backend in the reboot-acceptance guest. Production runs this
+# binary in the Compose backend container (host PID and network namespaces,
+# /etc mounted); here it runs directly on the guest host with the same
+# environment, so hostexec reaches the same namespaces. It is never enabled:
+# each boot is inspected before the backend starts.
+[Unit]
+Description=Just Dashboard backend (VM reboot acceptance)
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/jd-vm-acceptance/backend.env
+# The fault shim stands in front of ip and systemctl. It does nothing unless
+# guest.py arms /run/jd-vm-fault/phase for one phase-kill case.
+Environment=PATH=/usr/local/lib/jd-vm-acceptance/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/var/lib/just-dashboard
+ExecStart=/usr/local/bin/just-dashboard
+Restart=no

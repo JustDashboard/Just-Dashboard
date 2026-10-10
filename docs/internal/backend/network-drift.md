@@ -26,7 +26,11 @@ When independent recovery is configured, inspection also checks its owned boot
 unit render and the required executable's presence, digest and mode. A missing
 helper is a known boot dependency failure. It never executes an unfamiliar
 replacement to test it; an executable's build identity and ability to run remain
-unknown without separate installation/self-check evidence.
+unknown without separate installation/self-check evidence. The helper is the
+packaged backend executable (about 80 MB stripped), so it is hashed as a stream
+through the same no-follow identity checks under its own 256 MiB bound rather
+than read into memory under the render limit; the selected-repair preflight
+compares it with the running executable the same way.
 
 Each observation has an identity, domain, resource, coverage, reason, ownership
 and repair eligibility. `matching` requires observed facts within the stated
@@ -76,13 +80,23 @@ can continue restoring. Inspection checks available `ExecStart` command exit
 results and reports a failed ignored command even if the overall unit result is
 success. It reports success only with a measured finished activation and complete
 command outcomes matching the number of commands in the owned file. Missing
-outcomes remain unknown.
+outcomes remain unknown. systemd prints one `ExecStart=` line per command and
+every line is read. Deletes that only clear the way for a replacement (the owned
+admission rule, a shaped device's root queue and ingress policer filter) are
+`ExecStartPre=-` lines: on a fresh boot there is nothing to delete, so they fail
+by design and are not part of the measured result. A boot that first ran an
+interrupted-change recovery replays managed devices and addresses before the
+ordinary unit, whose creation lines then report existing objects; that boot's
+activation reads failed even when every runtime observation matches. A restart
+of the unit (it is `PartOf` systemd-networkd) finds its devices and addresses
+still present and reads failed for the same reason.
 
 `bootTrigger=unknown` is deliberate: systemd's current activation properties do
 not establish whether a boot transaction, daemon restart or operator started
-the unit. A measured successful activation does not establish reboot acceptance.
-Actual reboot and daemon restart acceptance remain pending until separately
-exercised and recorded.
+the unit. A measured successful activation does not by itself establish reboot
+acceptance. The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md)
+records actual guest reboots and a systemd-networkd restart against this
+inspection; a disposable guest is not the production host.
 
 ## Owned repair plan
 

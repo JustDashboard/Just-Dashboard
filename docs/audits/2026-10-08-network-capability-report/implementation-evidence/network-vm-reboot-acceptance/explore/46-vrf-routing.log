@@ -1,0 +1,478 @@
+{
+  "at": "2026-10-10T00:55:01Z",
+  "bootId": "f6d6fda8-c847-42da-a007-ce960b0a42b8",
+  "evidence": {
+    "addRule": {
+      "body": {
+        "action": "lookup",
+        "createdAt": "2026-10-10T00:54:59.72755475Z",
+        "createdBy": "admin",
+        "family": "inet",
+        "from": "10.245.0.0/24",
+        "id": 13,
+        "l3mdev": true,
+        "priority": 10002
+      },
+      "status": 201
+    },
+    "clientDecision": null,
+    "kernelRules": [
+      "0:\tfrom all lookup local",
+      "1000:\tfrom all lookup [l3mdev-table]",
+      "10000:\tfrom 10.231.0.0/24 lookup 231",
+      "10001:\tfrom all fwmark 0x231 lookup 231",
+      "10002:\tfrom 10.245.0.0/24 lookup [l3mdev-table]",
+      "32766:\tfrom all lookup main",
+      "32767:\tfrom all lookup default"
+    ],
+    "l3mdevRules": [
+      {
+        "action": "lookup",
+        "family": "inet",
+        "guard": "Not made by Just Dashboard; whatever set it up owns it.",
+        "id": 0,
+        "l3mdev": true,
+        "managed": false,
+        "owner": "system",
+        "priority": 1000
+      },
+      {
+        "action": "lookup",
+        "family": "inet6",
+        "guard": "Not made by Just Dashboard; whatever set it up owns it.",
+        "id": 0,
+        "l3mdev": true,
+        "managed": false,
+        "owner": "system",
+        "priority": 1000
+      },
+      {
+        "action": "lookup",
+        "family": "inet",
+        "from": "10.245.0.0/24",
+        "id": 13,
+        "l3mdev": true,
+        "managed": true,
+        "owner": "just-dashboard",
+        "priority": 10002
+      }
+    ],
+    "liveRoutingMaturity": [
+      "=== RUN   TestLiveRoutingMaturity",
+      "--- PASS: TestLiveRoutingMaturity (2.00s)",
+      "PASS"
+    ],
+    "preview": {
+      "probe": {
+        "agreement": "model_unknown",
+        "changes": false,
+        "kernel": {
+          "address": "10.245.0.9",
+          "device": "enp0s3",
+          "family": "inet",
+          "gateway": "10.0.2.2",
+          "table": 254
+        },
+        "now": {
+          "alternatives": [
+            {
+              "assumption": "if rule 1000 selects it",
+              "decision": {
+                "reason": "Rule 1000 looks the packet up in its VRF device's table, which the model does not resolve.",
+                "status": "unknown",
+                "steps": [
+                  {
+                    "detail": "table local has no route for it",
+                    "priority": 0,
+                    "result": "no_route"
+                  },
+                  {
+                    "detail": "it looks up a VRF device's table",
+                    "priority": 1000,
+                    "result": "unknown"
+                  }
+                ]
+              }
+            },
+            {
+              "assumption": "if rule 1000 does not",
+              "decision": {
+                "alternatives": [
+                  {
+                    "assumption": "if rule 10002 selects it",
+                    "decision": {
+                      "reason": "Rule 10002 looks the packet up in its VRF device's table, which the model does not resolve.",
+                      "status": "unknown",
+                      "steps": [
+                        {
+                          "detail": "table local has no route for it",
+                          "priority": 0,
+                          "result": "no_route"
+                        },
+                        {
+                          "priority": 1000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10001,
+                          "result": "no_match"
+                        },
+                        {
+                          "detail": "it looks up a VRF device's table",
+                          "priority": 10002,
+                          "result": "unknown"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "assumption": "if rule 10002 does not",
+                    "decision": {
+                      "route": {
+                        "destination": "default",
+                        "device": "enp0s3",
+                        "family": "inet",
+                        "flags": [],
+                        "gateway": "10.0.2.2",
+                        "guard": "Learned from DHCP: the provider hands this route out again at every renewal.",
+                        "id": 0,
+                        "managed": false,
+                        "metric": 100,
+                        "nexthops": [],
+                        "owner": "dhcp",
+                        "protocol": "dhcp",
+                        "source": "10.0.2.15",
+                        "type": "unicast"
+                      },
+                      "rulePriority": 32766,
+                      "status": "route",
+                      "steps": [
+                        {
+                          "detail": "table local has no route for it",
+                          "priority": 0,
+                          "result": "no_route"
+                        },
+                        {
+                          "priority": 1000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10001,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10002,
+                          "result": "no_match"
+                        },
+                        {
+                          "detail": "table main",
+                          "priority": 32766,
+                          "result": "decided"
+                        }
+                      ],
+                      "table": 254,
+                      "tableName": "main"
+                    }
+                  }
+                ],
+                "reason": "Rule 10002 selects traffic using a VRF device, and the answer depends on it.",
+                "status": "unknown",
+                "steps": [
+                  {
+                    "detail": "table local has no route for it",
+                    "priority": 0,
+                    "result": "no_route"
+                  },
+                  {
+                    "priority": 1000,
+                    "result": "no_match"
+                  },
+                  {
+                    "priority": 10000,
+                    "result": "no_match"
+                  },
+                  {
+                    "priority": 10001,
+                    "result": "no_match"
+                  },
+                  {
+                    "detail": "selects traffic using a VRF device",
+                    "priority": 10002,
+                    "result": "unknown"
+                  }
+                ]
+              }
+            }
+          ],
+          "reason": "Rule 1000 selects traffic using a VRF device, and the answer depends on it.",
+          "status": "unknown",
+          "steps": [
+            {
+              "detail": "table local has no route for it",
+              "priority": 0,
+              "result": "no_route"
+            },
+            {
+              "detail": "selects traffic using a VRF device",
+              "priority": 1000,
+              "result": "unknown"
+            }
+          ]
+        },
+        "tuple": {
+          "source": "10.245.0.1",
+          "target": "10.245.0.9"
+        },
+        "with": {
+          "alternatives": [
+            {
+              "assumption": "if rule 1000 selects it",
+              "decision": {
+                "reason": "Rule 1000 looks the packet up in its VRF device's table, which the model does not resolve.",
+                "status": "unknown",
+                "steps": [
+                  {
+                    "detail": "table local has no route for it",
+                    "priority": 0,
+                    "result": "no_route"
+                  },
+                  {
+                    "detail": "it looks up a VRF device's table",
+                    "priority": 1000,
+                    "result": "unknown"
+                  }
+                ]
+              }
+            },
+            {
+              "assumption": "if rule 1000 does not",
+              "decision": {
+                "alternatives": [
+                  {
+                    "assumption": "if rule 10002 selects it",
+                    "decision": {
+                      "reason": "Rule 10002 looks the packet up in its VRF device's table, which the model does not resolve.",
+                      "status": "unknown",
+                      "steps": [
+                        {
+                          "detail": "table local has no route for it",
+                          "priority": 0,
+                          "result": "no_route"
+                        },
+                        {
+                          "priority": 1000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10001,
+                          "result": "no_match"
+                        },
+                        {
+                          "detail": "it looks up a VRF device's table",
+                          "priority": 10002,
+                          "result": "unknown"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "assumption": "if rule 10002 does not",
+                    "decision": {
+                      "alternatives": [
+                        {
+                          "assumption": "if rule 10003 selects it",
+                          "decision": {
+                            "reason": "Rule 10003 looks the packet up in its VRF device's table, which the model does not resolve.",
+                            "status": "unknown",
+                            "steps": [
+                              {
+                                "detail": "table local has no route for it",
+                                "priority": 0,
+                                "result": "no_route"
+                              },
+                              {
+                                "priority": 1000,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10000,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10001,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10002,
+                                "result": "no_match"
+                              },
+                              {
+                                "detail": "it looks up a VRF device's table",
+                                "priority": 10003,
+                                "result": "unknown"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "assumption": "if rule 10003 does not",
+                          "decision": {
+                            "route": {
+                              "destination": "default",
+                              "device": "enp0s3",
+                              "family": "inet",
+                              "flags": [],
+                              "gateway": "10.0.2.2",
+                              "guard": "Learned from DHCP: the provider hands this route out again at every renewal.",
+                              "id": 0,
+                              "managed": false,
+                              "metric": 100,
+                              "nexthops": [],
+                              "owner": "dhcp",
+                              "protocol": "dhcp",
+                              "source": "10.0.2.15",
+                              "type": "unicast"
+                            },
+                            "rulePriority": 32766,
+                            "status": "route",
+                            "steps": [
+                              {
+                                "detail": "table local has no route for it",
+                                "priority": 0,
+                                "result": "no_route"
+                              },
+                              {
+                                "priority": 1000,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10000,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10001,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10002,
+                                "result": "no_match"
+                              },
+                              {
+                                "priority": 10003,
+                                "result": "no_match"
+                              },
+                              {
+                                "detail": "table main",
+                                "priority": 32766,
+                                "result": "decided"
+                              }
+                            ],
+                            "table": 254,
+                            "tableName": "main"
+                          }
+                        }
+                      ],
+                      "reason": "Rule 10003 selects traffic using a VRF device, and the answer depends on it.",
+                      "status": "unknown",
+                      "steps": [
+                        {
+                          "detail": "table local has no route for it",
+                          "priority": 0,
+                          "result": "no_route"
+                        },
+                        {
+                          "priority": 1000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10000,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10001,
+                          "result": "no_match"
+                        },
+                        {
+                          "priority": 10002,
+                          "result": "no_match"
+                        },
+                        {
+                          "detail": "selects traffic using a VRF device",
+                          "priority": 10003,
+                          "result": "unknown"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "reason": "Rule 10002 selects traffic using a VRF device, and the answer depends on it.",
+                "status": "unknown",
+                "steps": [
+                  {
+                    "detail": "table local has no route for it",
+                    "priority": 0,
+                    "result": "no_route"
+                  },
+                  {
+                    "priority": 1000,
+                    "result": "no_match"
+                  },
+                  {
+                    "priority": 10000,
+                    "result": "no_match"
+                  },
+                  {
+                    "priority": 10001,
+                    "result": "no_match"
+                  },
+                  {
+                    "detail": "selects traffic using a VRF device",
+                    "priority": 10002,
+                    "result": "unknown"
+                  }
+                ]
+              }
+            }
+          ],
+          "reason": "Rule 1000 selects traffic using a VRF device, and the answer depends on it.",
+          "status": "unknown",
+          "steps": [
+            {
+              "detail": "table local has no route for it",
+              "priority": 0,
+              "result": "no_route"
+            },
+            {
+              "detail": "selects traffic using a VRF device",
+              "priority": 1000,
+              "result": "unknown"
+            }
+          ]
+        }
+      },
+      "status": 200
+    },
+    "vrfs": [
+      {
+        "name": "jdvrf0",
+        "table": 1100
+      }
+    ]
+  },
+  "failures": [],
+  "phase": "vrf-routing",
+  "result": "pass",
+  "seconds": 5.3
+}
