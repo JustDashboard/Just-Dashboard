@@ -846,6 +846,13 @@ export type DockerEventFeed = {
   buffered: number
 }
 
+/** The part of `docker info` a page names the engine by, in Docker's own field names. */
+export type DockerEngineInfo = {
+  ServerVersion: string
+  Driver: string
+  Images: number
+}
+
 /**
  * The part of `docker info` the overview's identity line reads. The route
  * passes the daemon's own document through, so the names are its casing and

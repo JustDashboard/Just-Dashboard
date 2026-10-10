@@ -1021,12 +1021,12 @@ right edge — a table that arrives broken.
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
 containers, volumes, networks and stacks lists are cards at every width — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
-panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
-paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
-because there is no header over it; below, they go beneath the name at the card's full width. Which
-shape is drawn is chosen once by the page (`useMediaQuery`) rather than by `hidden`/`xl:block` twins,
-because a reading that exists in a hidden copy is two answers to every query a test or a screen
-reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
+panel, so it carries the lit edge. The containers list was the first of them and went back to a
+table in 0.7.1 (§16 says where that leaves the line). `components/docker/container-table.tsx` keeps
+both halves of the paragraphs above: from `xl` a table of fixed columns, each heading naming and
+sorting its reading; below, the same readings beneath the name, nothing dropped. Which shape is drawn
+is chosen once (`useMediaQuery`) rather than by `hidden`/`xl:block` twins, because a reading that
+exists in a hidden copy is two answers to every query a test or a screen reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
 frames, which is the stacking this section refuses. System users took the same argument in 0.7.0:
 every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
 their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
@@ -1915,6 +1915,30 @@ The passes, in order. Each one is a diff you can review on its own.
    processes it holds now, each opening Live's sheet; and how it runs, with its type in words and
    its overrides.
 
+   Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no
+   life: a runtime health bar and a list of findings over a column of grey cards, nothing on it that
+   moved but a dot. Its figures went where they are read. Running, failing, starting, paused and
+   stopped are counted chips in the table's head — failing in its tone and starting in amber, each
+   drawn only while there is one — beside Needs attention; the health-check counts the bar drew are a
+   fact in the identity line (how many running containers a passing check vouches for) and each row's
+   second line, where "no health check" is still said out loud. The line opens on the engine as
+   Services' opens on the host: Docker as its mark and version, the host with its distribution, the
+   storage driver, the running count, the stacks and images, and at its right end the verdict — the
+   failing count, a press of which narrows the table. Under it `components/docker/container-band.tsx`
+   answers what the bar never did: the five containers using the most processor and memory on Live's
+   bar the size of the machine (`ShareBar`), figures gliding to each two-second frame of the
+   container socket, and **Recent**, Docker's event log followed live — a restart loop one line ("×14
+   in 9 min · exit 1"), an OOM kill said on the exit it caused, a failing health check in red. Failing
+   is read from the state, the health check, the exit status and that log together
+   (`components/docker/containers.ts`): a 137 is `docker stop`'s as often as the OOM killer's, so only
+   the event log turns it red. The table took Live's fixed columns and figure-beside-a-bar readings —
+   memory against its limit where there is one, amber past 85% — with a ticking uptime under each
+   state, sortable headings that hold still under the pointer (`useInspectionOrder`), the processor's
+   hour and the network rate in the network section's colours from `2xl`, and each compose project in
+   its `LANES` hue as a chip and a press on any of its rows. A container new since the last frame
+   rises. The findings list went under the table: each row's issue count says which containers it is
+   about.
+
    Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
    identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
    count, the security chip and a security-first queue; On disk heads the software band. The band
@@ -2463,12 +2487,15 @@ reading page is revamped:
   density and its wash. Twelve columns of readings do not become cards. The containers table was the
   example here until 2026-09-23 and is the case that shows where the line is: its cells were live
   readings, but every row opened the container's own page, so the row was a destination with
-  readings on it — which is the Git card's shape, not a table's (§12). The Docker overview drew
-  its containers as a table again on 2026-10-08, at the operator's request, and that is the other
-  side of the same line: there the containers are read down their columns — which is busy, which
-  is near its limit, which is published on every interface — before any one is taken, which is the
-  Services and PM2 tables' shape, so it keeps hairlines and a wash and its rows open by a press
-  anywhere on them, while `/docker/containers` keeps its cards;
+  readings on it — which is the Git card's shape, not a table's (§12). The operator reversed it in
+  0.7.1, and the reason moves the line rather than erasing it: thirty containers are read down their
+  columns far more often than one is entered, and Live, PM2 and Services had by then all become
+  tables whose rows open something. A table of readings whose row also opens stays a table — the
+  name is the button, the row takes Enter, and there is no lit edge; the edge stays with lists whose
+  rows are only ways in. The Docker overview drew its containers as a table again on 2026-10-08, at
+  the operator's request, and that is the other side of the same line: there the containers are read
+  down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
+  its rows open by a press anywhere on them;
 - a **figure** is still a `StatTile` (§15 pass 2) in either register.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
