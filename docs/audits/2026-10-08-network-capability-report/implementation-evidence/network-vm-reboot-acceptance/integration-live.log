@@ -1,0 +1,68 @@
+source 92334261 (guest reboot fixes merged beside every package), 2026-10-10T01:45:45Z
+host before: netns=0 nft=d0e3b1cee4c9 rules=1646c3d2cb97
+=== RUN   TestLiveEgressFailoverAndFailbackWithHysteresis
+    egress_live_test.go:276: failover: provider-a is down (no probe answered); provider-b is the best proven member. | through up1 via 10.201.1.1 (table 7700) -> through up2 via 10.202.1.1 (table 7700)
+    egress_live_test.go:303: failback after 6 rounds: provider-a is back and stable for 6s; failing back.
+--- PASS: TestLiveEgressFailoverAndFailbackWithHysteresis (1.99s)
+=== RUN   TestLiveEgressFlapSuppression
+--- PASS: TestLiveEgressFlapSuppression (4.01s)
+=== RUN   TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember
+--- PASS: TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember (1.58s)
+=== RUN   TestLiveEgressBootRestoresTheDecidedMemberAndReverifies
+    egress_live_test.go:427: verified: Checked at start: table 7700 sends its traffic through up2 via 10.202.1.1, as decided, with every member table and rule in place. Not yet proven by this process's probes: provider-b (unknown).
+    egress_live_test.go:444: repaired: Checked at start: table 7700 default route (holds no default route) missing (a device may have come up after the boot unit ran); restored the decided route, through up2 via 10.202.1.1.
+--- PASS: TestLiveEgressBootRestoresTheDecidedMemberAndReverifies (1.29s)
+=== RUN   TestLiveEgressRecoveryAfterBackendDeathMidSwitch
+--- PASS: TestLiveEgressRecoveryAfterBackendDeathMidSwitch (0.86s)
+=== RUN   TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember
+    egress_live_test.go:605: failback connections: {Read:19 Truncated:false Error: ByMember:map[1:10 2:9] Moved:8 Pinned:1 Flushed:0 FlushFailed:0 Spared:0 Basis:Pinned connections by their mark; others by the member's local address (its own source, or the address it translated to).}
+    egress_live_test.go:622: flush: Flushed 13 tracked connections of provider-b, which is down, so none stays routed into a dead path.
+--- PASS: TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember (2.55s)
+=== RUN   TestLiveEgressSimulationRunsInDisposableNamespaces
+    egress_live_test.go:678: Every member proves its path: After 3 clean samples every member must be up through its own mark, source and device.
+    egress_live_test.go:678: Latency under the threshold moves nothing: provider-a delayed below 200 ms: 0 switches.
+    egress_live_test.go:678: Fails over after a sustained failure: Failed over to provider-b at sample 2 of the failure, after the 2 bad samples the rules require.
+    egress_live_test.go:678: A flapping member is not failed back to: provider-a alternated between failing and answering for 6 samples: 0 failbacks to it.
+    egress_live_test.go:678: Fails back only after a stable recovery: provider-a was up again at recovery sample 2 and failed back to at sample 5; the stable window is 3 samples.
+    egress_live_test.go:678: Latency over the threshold fails over: provider-a delayed above 200 ms while carrying traffic: failed over true.
+    egress_live_test.go:678: With nothing proven the route is kept: Every member failed: 0 switches, and the rules held the current route: true.
+    egress_live_test.go:678: Never switches to an unproven member: Every switch went to members proven up at that sample.
+    egress_live_test.go:678: Traffic follows the decision: Whenever the decided members were up and clean, unmarked traffic through the group table reached the first target.
+    egress_live_test.go:678: Recovers to a proven member: After the outage, the decided members are up again by the end of the run.
+    egress_live_test.go:684: sample 8 (failure): failover [2] — provider-a is down (no probe answered); provider-b is the best proven member.
+    egress_live_test.go:684: sample 21 (recovery): failback [1] — provider-a is back and stable for 6s; failing back.
+    egress_live_test.go:684: sample 28 (latency-breach): failover [2] — provider-a is down (median round trip 300 ms is above 200 ms); provider-b is the best proven member.
+    egress_live_test.go:726: failed as expected — A flapping member is not failed back to: provider-a alternated between failing and answering for 6 samples: 3 failbacks to it.
+    egress_live_test.go:726: failed as expected — Fails back only after a stable recovery: provider-a was already carrying traffic when its recovery began: it was failed back to while it flapped.
+--- PASS: TestLiveEgressSimulationRunsInDisposableNamespaces (16.94s)
+=== RUN   TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables
+--- PASS: TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables (4.97s)
+=== RUN   TestLiveShapingBatchLoadsAndReadsBack
+--- PASS: TestLiveShapingBatchLoadsAndReadsBack (0.41s)
+=== RUN   TestLiveShapingLeavesAClsactQueueAlone
+--- PASS: TestLiveShapingLeavesAClsactQueueAlone (0.18s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.24s)
+=== RUN   TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss
+--- PASS: TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss (0.34s)
+=== RUN   TestLiveQueueOwnershipAndAppliedParameters
+--- PASS: TestLiveQueueOwnershipAndAppliedParameters (0.32s)
+=== RUN   TestLiveShapingVerifiesEveryRequestedParameter
+--- PASS: TestLiveShapingVerifiesEveryRequestedParameter (0.21s)
+=== RUN   TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree
+--- PASS: TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree (0.08s)
+=== RUN   TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad
+    shaping_sqm_congestion_live_test.go:179: Congestion observations (local scope; no universal performance assertion): {"legacy":{"durationSeconds":5.085674347355962,"tcpFlows":4,"tcpBytes":[1381392,1694160,1313336,1682576],"throughputMbit":9.550692530136617,"udpSent":24,"udpReplies":24,"medianMillis":215.51909670233727,"p95Millis":222.84334152936935,"receivedDscp":[46]},"legacyPolicerKbit":10000,"scope":"two disposable namespaces; 10 Mbit/s HTB + 256000-byte FIFO bottleneck; four saturated TCP downloads marked DSCP 0/8/46/34 plus 46-marked UDP echo; 2s warmup + 5s samples per mode; no BBR change","sqm":{"durationSeconds":5.008428581058979,"tcpFlows":4,"tcpBytes":[1571080,1636240,341728,1346640],"throughputMbit":7.819918636379731,"udpSent":245,"udpReplies":245,"medianMillis":3.62416822463274,"p95Millis":9.721054695546627,"receivedDscp":[0]},"sqmKbit":9000,"sqmQueue":{"kind":"cake","dev":"","handle":"ca11:","parent":"","root":true,"options":{"ack-filter":"disabled","atm":"noatm","bandwidth":1125000,"diffserv":"diffserv3","flowmode":"dual-dsthost","fwmark":"0","ingress":true,"mpu":64,"nat":false,"overhead":22,"raw":false,"rtt":100000,"split_gso":true,"wash":true},"bytes":7235828,"packets":5028,"drops":416,"overlimits":9085,"requeues":0,"backlog":0,"tins":[{"threshold_rate":70312,"sent_bytes":555704,"peak_delay_us":132198,"avg_delay_us":41857,"base_delay_us":17020,"sent_packets":368,"drops":24,"ecn_mark":0,"sparse_flows":0,"bulk_flows":1},{"threshold_rate":1125000,"sent_bytes":5238058,"peak_delay_us":9814,"avg_delay_us":5765,"base_delay_us":1531,"sent_packets":3469,"drops":353,"ecn_mark":0,"sparse_flows":2,"bulk_flows":0},{"threshold_rate":281250,"sent_bytes":2071890,"peak_delay_us":26331,"avg_delay_us":15936,"base_delay_us":2795,"sent_packets":1607,"drops":39,"ecn_mark":0,"sparse_flows":2,"bulk_flows":0}]}}
+--- PASS: TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad (14.67s)
+=== RUN   TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate
+--- PASS: TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate (1.27s)
+=== RUN   TestLiveSQMOwnershipRecoveryAndColdRestore
+--- PASS: TestLiveSQMOwnershipRecoveryAndColdRestore (1.11s)
+=== RUN   TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline
+--- PASS: TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline (0.27s)
+=== RUN   TestLiveUploadProfileMeasuresQueueDelayUnderDeclaredLoad
+    shaping_upload_live_test.go:166: Upload latency observations (local scope; no universal performance assertion beyond this fixture): {"cake":{"durationSeconds":5.000028328970075,"tcpFlows":4,"tcpBytes":[720896,655360,655360,655360],"throughputMbit":4.299137241973945,"udpSent":247,"udpReplies":247,"medianMillis":0.9554941207170486,"p95Millis":2.2158995270729065,"receivedDscp":null},"cakeKbit":9000,"cakeTins":[{"name":"Bulk","thresholdBytesPerSecond":70312,"peakDelayUs":0,"avgDelayUs":0,"baseDelayUs":0,"sentPackets":0,"sentBytes":0,"drops":0,"ecnMarks":0,"sparseFlows":0,"bulkFlows":0},{"name":"Best effort","thresholdBytesPerSecond":1125000,"peakDelayUs":19225,"avgDelayUs":7697,"baseDelayUs":2077,"sentPackets":7326,"sentBytes":10717416,"drops":1767,"ecnMarks":0,"sparseFlows":3,"bulkFlows":5},{"name":"Video","thresholdBytesPerSecond":562500,"peakDelayUs":0,"avgDelayUs":0,"baseDelayUs":0,"sentPackets":0,"sentBytes":0,"drops":0,"ecnMarks":0,"sparseFlows":0,"bulkFlows":0},{"name":"Voice","thresholdBytesPerSecond":281250,"peakDelayUs":0,"avgDelayUs":0,"baseDelayUs":0,"sentPackets":0,"sentBytes":0,"drops":0,"ecnMarks":0,"sparseFlows":0,"bulkFlows":0}],"fifo":{"durationSeconds":5.116962785832584,"tcpFlows":4,"tcpBytes":[2949120,196608,1900544,1179648],"throughputMbit":9.733774132167314,"udpSent":26,"udpReplies":26,"medianMillis":197.05428928136826,"p95Millis":228.76124177128077,"receivedDscp":null},"scope":"two disposable namespaces; macvlan wan0 over veth wire0 with a 10 Mbit/s HTB + 256000-byte FIFO access link; four saturated TCP uploads plus a 20 ms UDP echo; 2s warmup + 5s samples per mode; no BBR change"}
+--- PASS: TestLiveUploadProfileMeasuresQueueDelayUnderDeclaredLoad (14.78s)
+PASS
+exit=0
+host after: netns=0 nft=d0e3b1cee4c9 rules=1646c3d2cb97

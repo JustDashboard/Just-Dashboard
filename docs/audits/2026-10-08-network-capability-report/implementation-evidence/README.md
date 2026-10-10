@@ -125,6 +125,12 @@ issuance diagnosis and watched network probes, with native nginx/certbot runs, r
 final gate including its one unrelated retried timing case. HTTP/3 and the connection limit remain
 unmeasured.
 
+[Guest reboot acceptance](network-vm-reboot-acceptance.md) (C001, C002, F4, P2, P7, P11, P14,
+C027) records 61 steps and 14 real reboots of a disposable Ubuntu 24.04 QEMU guest running the
+backend in the production layout, the seven defects it found and fixed, the harness, the comparison
+of this host before and after (its raw readings are not published) and the integration rerun of
+the live shaping, SQM, boot and egress tests.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
