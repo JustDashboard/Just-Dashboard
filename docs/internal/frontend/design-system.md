@@ -70,8 +70,8 @@ taking a frame:
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
   facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
-  Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
-  its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
+  under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -1419,9 +1419,9 @@ needs doing carries the page's one brand command, so "Prepare a stream" stays ou
 connect opens a sheet showing the file before anything is written. The install step keeps the recent
 installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
-site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
-page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to
-that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
+site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the way a request
+reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
+site's Logs verb goes to that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
 ends on the engine's own log, a `Pane` across the page under the two columns.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
@@ -2210,7 +2210,29 @@ The passes, in order. Each one is a diff you can review on its own.
    ones last; and **SSH keys**, one bar of every authorised key shared out by account, in the hue
    each account has on the cards. The pure reads are `components/system-users/access.ts`
    (unit-tested); a press on any row opens that account's keys sheet. The cards lead with the
-   account that needs no password and a new account rises into the list (`useArrivals`). The audit
+   account that needs no password and a new account rises into the list (`useArrivals`).
+
+   A proxy site's own page took the same exit in 0.7.1, at the operator's request, because it was
+   four grey figures — requests a minute, server errors, refused, upstream failures — over a
+   two-column route line and its logs, with nothing on it that moved. Each went where it is said
+   better: the rate and the probes refused are the first node of the route, the server errors the
+   identity line's verdict — a press of which narrows Requests to them and brings the pane into
+   view, as the tile's did — and the upstream failures the Errors tab's count, which is the day the
+   view holds. The line keeps the Sites card's facts and adds when the file was edited; its verdict
+   (`components/proxy/site-overview.ts`, unit-tested) is the hour's failed requests, else a pool's
+   servers failing, else the certificate, else how much it answered. Under it
+   `components/proxy/site-route-map.tsx` draws the way a request reaches the site in the wiring
+   vocabulary the dashboard's own request path speaks: who asked as the browsers and bots they were
+   with their share, the names with whose certificate answers them and its term on a meter, the
+   engine with what the file switches on in the hue of its kind (`--tag-green` for what guards,
+   `--tag-blue` for protocols, `--tag-cyan` for what saves work), and what answers behind it — a
+   pool's servers with the check's reading, or the program holding a local upstream's socket drawn
+   as its product, and *nothing listens* in red where a loopback port has none. Its wires carry the
+   readings: a pulse quicker on a busy site, red to a server that refuses, amber through a
+   certificate in its renewal window, still on a site that is off. The logs became the deployment
+   Logs page's `Pane` — Requests, Insights, Errors and Log files in one strip, the service logs
+   `flush` under the last as Output sits under the deployment's — and Controls three to a row, each
+   setting in its kind's hue with on, off or *no module* beside it. The audit
    log, which had no figures at all, gained four readings of
    the last day read from their own query so a filter narrows the trail without narrowing them:
    the changes with their hours as a trend, the failures, the people as their faces and the
