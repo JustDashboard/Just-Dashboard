@@ -1,6 +1,7 @@
 package netx
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strconv"
@@ -279,5 +280,23 @@ func TestNativeNetplanRecoveryDecodesExactAuthoredPolicyAcrossGeneratedDHCPDisap
 				t.Fatal("foreign or inconsistent retained recovery policy was admitted")
 			}
 		})
+	}
+}
+
+// The netplan CLI reloads udev and systemd on the live host even with
+// --root-dir; staging must run only the generator it wraps.
+func TestNetplanStagingRunsOnlyTheGeneratorInItsPrivateRoot(t *testing.T) {
+	prev := nativeExecute
+	t.Cleanup(func() { nativeExecute = prev })
+	var calls []string
+	nativeExecute = func(ctx context.Context, input []byte, tool string, args ...string) (string, error) {
+		calls = append(calls, strings.Join(append([]string{tool}, args...), " "))
+		return "", nil
+	}
+	if err := generateNetplanRoot(context.Background(), "/run/jd-native-stage-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 || calls[0] != "/usr/libexec/netplan/generate --root-dir /run/jd-native-stage-1" {
+		t.Fatalf("staging ran %q", calls)
 	}
 }
