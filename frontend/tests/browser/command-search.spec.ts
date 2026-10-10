@@ -314,6 +314,10 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   await expect(
     palette(page).getByRole("listbox").getByRole("option").filter({ hasText: "shop-web" }),
   ).toBeVisible()
+  // The dialog zooms in as it opens; measured mid-zoom, a 44px row reads 43.99.
+  await palette(page).evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((animation) => animation.finished))
+  })
   const box = (await palette(page).boundingBox())!
   expect(box.x).toBeGreaterThanOrEqual(0)
   expect(box.y).toBeGreaterThanOrEqual(0)
