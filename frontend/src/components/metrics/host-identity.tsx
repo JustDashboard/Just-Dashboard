@@ -93,8 +93,10 @@ export function HostIdentity({
         </div>
       </div>
       {/* A flex box, so a bare status set here sits on the line's centre
-          rather than on the baseline of a 16px line box it never asked for. */}
-      {aside && <div className="flex shrink-0">{aside}</div>}
+          rather than on the baseline of a 16px line box it never asked for;
+          never wider than the line, so a verdict with commands beside it
+          wraps them on a phone rather than pushing the last one off it. */}
+      {aside && <div className="flex max-w-full shrink-0">{aside}</div>}
     </div>
   )
 }
