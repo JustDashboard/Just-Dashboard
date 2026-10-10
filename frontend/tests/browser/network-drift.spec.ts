@@ -145,7 +145,7 @@ test("a failed refresh retains dated evidence and blocks repair review", async (
   await expect(page.getByText("Last known evidence", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Review selected (1)" })).toBeDisabled()
   await expect(page.getByRole("checkbox", { name: `Select repair for ${resource}` })).toBeDisabled()
-  await expect(page.locator("time").first()).toHaveAttribute("datetime", report.checkedAt)
+  await expect(page.locator(`time[datetime="${report.checkedAt}"]`)).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeVisible()
 })
 

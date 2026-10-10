@@ -3,7 +3,10 @@ import {
   driftCounts,
   driftReading,
   driftRepairOutcome,
-  driftReportObservations,
+  driftMoves,
+  driftRows,
+  driftSummary,
+  driftVerdict,
   driftReviewKey,
   selectedDriftRepairRequest,
 } from "./network-drift"
@@ -15,24 +18,30 @@ test("missing, unreadable and incomplete comparisons keep distinct readings", ()
   expect(driftReading("future_status").tone).toBe("unknown")
 })
 
+const observation = (id, status, resource = id) => ({ id, resource, status })
+const report = (over = {}) => ({
+  spec: observation("spec", "matching", "spec.json"),
+  journal: observation("journal", "not_required", "change.json"),
+  files: [],
+  runtime: [],
+  boot: { status: "missing", unit: "jd-network.service", execution: { status: "unrecorded" } },
+  blocklists: [
+    { id: 1, name: "Abuse", enabled: false, enforcement: "unknown", cache: {}, runtime: {} },
+  ],
+  ...over,
+})
+
 test("counts include unavailable configuration and boot evidence without inventing differences", () => {
   expect(
     driftCounts(
       ["matching", "unknown", "unreadable", "missing", "conflict"].map((status) => ({ status })),
     ),
   ).toEqual({ differences: 2, unknown: 2, matching: 1 })
-  expect(
-    driftCounts(
-      driftReportObservations({
-        spec: { status: "unreadable" },
-        journal: { status: "not_required" },
-        files: [],
-        runtime: [],
-        boot: { status: "missing" },
-        blocklists: [{ id: 1, enabled: false, enforcement: "unknown" }],
-      }),
-    ),
-  ).toEqual({ differences: 1, unknown: 2, matching: 0 })
+  expect(driftCounts(driftRows(report({ spec: { status: "unreadable" } })))).toEqual({
+    differences: 1,
+    unknown: 2,
+    matching: 0,
+  })
 })
 
 test("selected execution sends only reviewed identities and refuses advisory or shifted evidence", () => {
@@ -166,4 +175,51 @@ test("repair outcomes require independent phase evidence and retain boot executi
     expect(driftRepairOutcome({ ...render, ...changed }).tone).toBe("warning")
   }
   expect(driftRepairOutcome({ ...pending, watchdog: "failed_to_arm" }).tone).toBe("warning")
+})
+
+test("every table row belongs to the domain whose picture line colours it", () => {
+  const rows = driftRows(
+    report({
+      files: [observation("f1", "drift", "/etc/links"), observation("f2", "matching")],
+      runtime: [observation("k1", "conflict")],
+    }),
+  )
+  expect(rows.map((row) => row.domain)).toEqual([
+    "config",
+    "config",
+    "files",
+    "files",
+    "kernel",
+    "boot",
+    "boot",
+    "blocklists",
+  ])
+  expect(driftSummary(rows, "files")).toMatchObject({ total: 2, differences: 1, tone: "warning" })
+  expect(driftSummary(rows, "kernel").tone).toBe("danger")
+  expect(driftSummary(rows, "blocklists").tone).toBe("default")
+})
+
+test("a verdict says stale evidence before it says anything the evidence shows", () => {
+  const rows = driftRows(report({ files: [observation("f1", "drift")] }))
+  expect(driftVerdict(rows, true, true).label).toBe("Last known evidence")
+  expect(driftVerdict(rows, false, false).label).toBe("Changed during inspection")
+  expect(driftVerdict(rows, true, false)).toEqual({ tone: "warning", label: "2 differences" })
+  const matching = report({ boot: { status: "matching", execution: { status: "succeeded" } } })
+  expect(driftVerdict(driftRows(matching), true, false)).toEqual({
+    tone: "running",
+    label: "Everything matches",
+  })
+  const unrecorded = report({ boot: { status: "matching", execution: { status: "unrecorded" } } })
+  expect(driftVerdict(driftRows(unrecorded), true, false).label).toBe("1 reading incomplete")
+})
+
+test("moves name the rows whose status changed between two inspections", () => {
+  const rows = driftRows(report({ files: [observation("f1", "drift", "/etc/links")] }))
+  expect(driftMoves(undefined, rows, 1)).toEqual([])
+  const before = new Map(rows.map((row) => [row.id, row.status]))
+  before.set("f1", "matching")
+  before.delete("boot:unit")
+  expect(driftMoves(before, rows, 7)).toEqual([
+    { id: "f1", resource: "/etc/links", from: "matching", to: "drift", at: 7 },
+  ])
 })
