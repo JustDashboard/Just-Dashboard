@@ -16,6 +16,9 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ClientConfig } from "@/components/network/vpn/client-config"
+import { EditPeer, KillSwitchFile, SiteVerify } from "@/components/network/vpn/peer-actions"
+import { PeerRecord } from "@/components/network/vpn/record"
+import { handshakeReading, killSwitchOffered } from "@/components/network/vpn/record-logic"
 
 const list = (raw: string) =>
   raw
@@ -160,7 +163,9 @@ export function AddPeer({
               label="Send its internet traffic here"
               hint={
                 tunnel.exitNode
-                  ? "IPv4 internet goes through this server. IPv6 is blocked to prevent leaks until dual-stack egress is configured."
+                  ? tunnel.families?.ipv6.exit.configured
+                    ? "IPv4 and IPv6 default routes use this server while the tunnel is up. Local routes can remain native; a Linux kill-switch file is offered once it is added."
+                    : "IPv4 internet goes through this server. IPv6 is captured by the tunnel and has no exit until IPv6 egress is enabled."
                   : "Needs the tunnel to be an exit node; without it only this server's networks are reached."
               }
             >
@@ -170,7 +175,7 @@ export function AddPeer({
                   onCheckedChange={setFullTunnel}
                   aria-label="Full tunnel"
                 />
-                {fullTunnel ? "IPv4 full tunnel" : "Only this server's networks"}
+                {fullTunnel ? "Full tunnel" : "Only this server's networks"}
               </label>
             </Field>
           ) : (
@@ -234,7 +239,10 @@ export function AddPeer({
 /**
  * One peer: whether it is connected, what it has moved, the networks it is
  * given, and its configuration — shown again from the sealed copy, or
- * forgotten once the device has it. Removing it revokes the key at once.
+ * forgotten once the device has it. Forgetting the copy is not revoking the
+ * peer: its key keeps working until the peer is removed, which revokes it at
+ * once. Below that, its record: traffic, where it dialled from, its budget
+ * and history, and for a site the check that it works end to end.
  */
 export function PeerSheet({
   tunnel,
@@ -250,7 +258,10 @@ export function PeerSheet({
   const { confirm, dialog } = useConfirm()
   const [config, setConfig] = useState<{ config: string; qr: string }>()
   const [loading, setLoading] = useState(false)
+  const [editing, setEditing] = useState(false)
   if (!tunnel || !peer) return dialog
+  const handshake = handshakeReading(peer)
+  const made = peer.id > 0 && tunnel.managed
   const base = `/network/vpn/wireguard/${encodeURIComponent(tunnel.name)}/peers/${peer.id}`
   const show = async () => {
     setLoading(true)
@@ -264,12 +275,12 @@ export function PeerSheet({
   }
   const forget = () =>
     confirm({
-      title: `Forget ${peer.name}'s configuration`,
+      title: `Forget ${peer.name}'s saved copy`,
       confirmLabel: "Forget",
       description: (
         <p>
-          The device keeps working; only the copy kept here goes, so its QR code cannot be shown
-          again. Add the device again to make a new one.
+          This does not revoke {peer.name}: its key keeps working, and only the copy kept here goes,
+          so its QR code cannot be shown again. To cut it off, remove the peer instead.
         </p>
       ),
       action: async () => {
@@ -308,15 +319,16 @@ export function PeerSheet({
         description={`The ${peer.name} peer on ${tunnel.name}`}
         actions={
           <>
-            <Status
-              tone={peer.online ? "running" : peer.latestHandshake ? "stopped" : "unknown"}
-              label={peer.online ? "Online" : peer.latestHandshake ? "Quiet" : "Never connected"}
-              live={peer.online}
-            />
-            {peer.id > 0 && tunnel.managed && (
-              <Button size="sm" variant="outline" className="ml-auto" onClick={remove}>
-                Remove
-              </Button>
+            <Status tone={handshake.tone} label={handshake.label} />
+            {made && (
+              <span className="ml-auto flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <Button size="sm" variant="outline" onClick={remove}>
+                  Remove
+                </Button>
+              </span>
             )}
           </>
         }
@@ -327,6 +339,11 @@ export function PeerSheet({
             <Detail label="Address">
               <span className="font-mono">{peer.address}</span>
             </Detail>
+            {peer.address6 && (
+              <Detail label="IPv6 address">
+                <span className="font-mono break-all">{peer.address6}</span>
+              </Detail>
+            )}
             <Detail label="Routes to it">
               <span className="font-mono">{peer.allowedIps.join(", ") || "—"}</span>
             </Detail>
@@ -357,21 +374,41 @@ export function PeerSheet({
           ) : config ? (
             <ClientConfig name={peer.name} config={config.config} qr={config.qr} />
           ) : peer.hasConfig ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void show()} pending={loading} disabled={loading}>
-                Show QR code
-              </Button>
-              <Button size="sm" variant="outline" onClick={forget}>
-                Forget the configuration
-              </Button>
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void show()} pending={loading} disabled={loading}>
+                  Show QR code
+                </Button>
+                <Button size="sm" variant="outline" onClick={forget}>
+                  Forget the saved copy
+                </Button>
+              </div>
+              <p className="text-hint text-muted-foreground">
+                Forgetting keeps {peer.name} connected; removing it revokes its key.
+              </p>
             </div>
           ) : (
             <p className="text-hint text-muted-foreground">
-              Its configuration was forgotten here; the device still has its own copy.
+              Its saved copy was forgotten here; the peer still has its own and stays connected
+              until it is removed.
             </p>
           )}
+          {made && peer.hasConfig && killSwitchOffered(peer) && (
+            <KillSwitchFile tunnel={tunnel} peer={peer} />
+          )}
+          {made && peer.kind === "site" && <SiteVerify tunnel={tunnel} peer={peer} />}
+          <PeerRecord tunnel={tunnel} peer={peer} onChanged={onChanged} />
         </div>
       </SidePanel>
+      {editing && (
+        <EditPeer
+          tunnel={tunnel}
+          peer={peer}
+          open
+          onOpenChange={setEditing}
+          onChanged={onChanged}
+        />
+      )}
       {dialog}
     </>
   )

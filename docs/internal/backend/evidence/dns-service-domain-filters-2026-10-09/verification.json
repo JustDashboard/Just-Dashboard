@@ -1,0 +1,54 @@
+{
+  "source": "f3fe06aac9ffd4921a3740925650f442cc1a6988",
+  "binary_sha256": "2c3125e20fc193f618be1b4c368c6d6965ebb663121a27a2b0b5f6716455ceb0",
+  "native_checks": [
+    {
+      "engine": "adguard",
+      "source": "f3fe06aac9ffd4921a3740925650f442cc1a6988",
+      "backend_go_files": 1863,
+      "modules": 2,
+      "source_matches_named_git_commit": true,
+      "binary_matches_compiler_record": true,
+      "raw_matches_result": true,
+      "selection_current_reads": 16,
+      "no_skip": true,
+      "owned_cleanup_complete": true,
+      "host_unchanged": true
+    },
+    {
+      "engine": "pihole",
+      "source": "f3fe06aac9ffd4921a3740925650f442cc1a6988",
+      "backend_go_files": 1863,
+      "modules": 2,
+      "source_matches_named_git_commit": true,
+      "binary_matches_compiler_record": true,
+      "raw_matches_result": true,
+      "selection_current_reads": 20,
+      "no_skip": true,
+      "owned_cleanup_complete": true,
+      "host_unchanged": true
+    }
+  ],
+  "copies_sha256": {
+    "domain-native-compile.json": "26892079e668d9cfb2b564f2191064573cc699d26c7c38c9a299f557cbea8a77",
+    "domain-native-compile.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "domain-native-runner-first.py": "5ddd3a3a16b684575ec9138f5eca543e456400bc085b8c6914da17d8894b1c41",
+    "domain-filter-validation.json": "4a9b380c9ef6ad98f7f729882cd2c01c59ddb35c2411538e656760791b73150c",
+    "domain-filter-unit-first.log": "1bef326d41019f0557ec7d9b288f44e4784594184da6790916b9bb2ffacb157b",
+    "domain-filter-unit-corrected.log": "aa05149f70a039c9b8c0fd342767503c1420f2460f4200608a756ab267dbad49",
+    "domain-filter-unit-expanded.log": "77c4f0c5b8d4a9f7b76b6c85350991a17a73fdd410e6bed0d04f6f136014bba1",
+    "domain-filter-required-first.log": "0dee3099decb8e353b6a4bc4338d338ae09d0e1fd416bc3875b81dfe61e5a883",
+    "domain-filter-required-final.log": "8f1d90127477fe4c53066cb602b0c6975a14573d29c020d2d88f482d1275aa82",
+    "domain-filter-race-final.log": "a1249adb29ca9ab7e15396b0538b7325ef52cf23976777197be3fe525323231d",
+    "native-adguard-first.log": "43f361aef7136b70a3343ca1f11f59de1eeb1e133b7ec1d0f3aff9f16194b34c",
+    "native-adguard-first.result.json": "09e9702b496dfb6ef7c400a65136f08b4241aedc31e33621dd492ea4a3ac9101",
+    "native-adguard-first.source-binary.json": "98ace749130830de12c9725f5d4b2fed95b2abb5bff0812be95adcd796fb9589",
+    "native-pihole-first.log": "532d875ab791245bde1ce5a6890f6c3e804d77b3ce451acd1f1edffb2044388b",
+    "native-pihole-first.result.json": "b5da35560a1b1b8297ba110ea23c9f2514b34fc457218e18d2a30cc2a60f55b9",
+    "native-pihole-first.source-binary.json": "fd465621ec54a49afe1336545e5effcff4611364d8ca0dc7fc6bdbe1be8ebc1b"
+  },
+  "all_copies_byte_identical_to_workspace_originals": true,
+  "workspace_originals": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts",
+  "frontend": "not_changed; matching mounted controls remain pending",
+  "effective_filtering": "not_measured; actual fixture protection disabled; semantics follow pinned native contracts"
+}

@@ -1,0 +1,2 @@
+2026-10-09 20:33:45,079 fail2ban                [373]: ERROR   NOK: ("'CommandAction' object has no attribute 'type'",)
+'CommandAction' object has no attribute 'type'

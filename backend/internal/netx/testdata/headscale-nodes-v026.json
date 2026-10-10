@@ -1,0 +1,43 @@
+[
+	{
+		"id": 7,
+		"machine_key": "mkey:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"node_key": "nodekey:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"disco_key": "discokey:1111111111111111111111111111111111111111111111111111111111111111",
+		"ip_addresses": [
+			"100.64.0.7",
+			"fd7a:115c:a1e0::7"
+		],
+		"name": "router",
+		"user": {
+			"id": 2,
+			"name": "bob",
+			"created_at": {
+				"seconds": 1760000000
+			}
+		},
+		"last_seen": {
+			"seconds": 1789999990,
+			"nanos": 0
+		},
+		"expiry": {
+			"seconds": 1791000000
+		},
+		"register_method": 2,
+		"given_name": "bob-router",
+		"online": true,
+		"approved_routes": [
+			"192.168.20.0/24"
+		],
+		"available_routes": [
+			"192.168.20.0/24",
+			"192.168.30.0/24"
+		],
+		"subnet_routes": [
+			"192.168.20.0/24"
+		],
+		"valid_tags": [
+			"tag:router"
+		]
+	}
+]

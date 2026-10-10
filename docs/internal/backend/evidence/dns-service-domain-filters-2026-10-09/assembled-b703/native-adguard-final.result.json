@@ -1,0 +1,43 @@
+{
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "engine": "adguard",
+  "exit_code": 0,
+  "wall_seconds": 70.471,
+  "raw_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+  "skipped": false,
+  "terminal_pass": true,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "owned_tmp_directory_removed": true,
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "networkd883_identity": {
+      "comm": "systemd-network",
+      "name": "systemd-network",
+      "uids": [
+        998,
+        998,
+        998,
+        998
+      ],
+      "gids": [
+        998,
+        998,
+        998,
+        998
+      ]
+    },
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true,
+  "source_matches_compile_and_git_after": true
+}

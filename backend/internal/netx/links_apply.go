@@ -21,6 +21,12 @@ func renderLinks(sp *Spec) string {
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
+	// Egress groups last: their member routes need the devices above, and
+	// the boot file restores each group with the member last decided.
+	for _, line := range egressBatchLines(sp, "inet") {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
 	return b.String()
 }
 
@@ -36,6 +42,9 @@ func renderIPv6Rules(sp *Spec) string {
 		if args, err := ruleArgs(r); err == nil {
 			b.WriteString("rule add " + strings.Join(args, " ") + "\n")
 		}
+	}
+	for _, line := range egressBatchLines(sp, "inet6") {
+		b.WriteString(line + "\n")
 	}
 	return b.String()
 }
@@ -178,6 +187,12 @@ func linkAddArgs(l LinkSpec) ([]string, error) {
 		if l.STP {
 			args = append(args, "stp_state", "1")
 		}
+		if l.VLANFiltering {
+			args = append(args, "vlan_filtering", "1")
+		}
+		if l.MulticastSnooping != nil {
+			args = append(args, "mcast_snooping", boolDigit(*l.MulticastSnooping))
+		}
 	case "dummy":
 		args = append(args, "type", "dummy")
 	case "vlan":
@@ -308,6 +323,10 @@ type LinkRequest struct {
 	PeerNamespace string `json:"peerNamespace,omitempty"`
 	MTU           int    `json:"mtu,omitempty"`
 	STP           bool   `json:"stp,omitempty"`
+	// VLANFiltering and MulticastSnooping are a bridge's; snooping left
+	// unset keeps the kernel's default.
+	VLANFiltering     bool  `json:"vlanFiltering,omitempty"`
+	MulticastSnooping *bool `json:"multicastSnooping,omitempty"`
 	// Master is a bridge to make the new device a port of.
 	Master    string   `json:"master,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
@@ -344,7 +363,11 @@ func (req LinkRequest) spec() (LinkSpec, error) {
 	}
 	switch kind {
 	case "bridge":
-		l.STP = req.STP
+		l.STP, l.VLANFiltering = req.STP, req.VLANFiltering
+		if req.MulticastSnooping != nil {
+			on := *req.MulticastSnooping
+			l.MulticastSnooping = &on
+		}
 	case "vlan":
 		if req.VLANID < 1 || req.VLANID > 4094 {
 			return LinkSpec{}, fmt.Errorf("a VLAN id is 1 to 4094")
@@ -476,6 +499,13 @@ func (req LinkRequest) spec() (LinkSpec, error) {
 	}
 	l.Addresses = addrs
 	return l, nil
+}
+
+func boolDigit(on bool) string {
+	if on {
+		return "1"
+	}
+	return "0"
 }
 
 func famName(v6 bool) string {
@@ -699,6 +729,7 @@ func pathPurpose(l *Link) string {
 // the undo of a change that already failed.
 func (s *Service) best(ctx context.Context, name string, args ...string) {
 	if _, err := run(ctx, name, args...); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Warn("network: rollback step failed", "cmd", name+" "+strings.Join(args, " "), "err", err)
 	}
 }
@@ -706,6 +737,7 @@ func (s *Service) best(ctx context.Context, name string, args ...string) {
 // bestBatch is best for a batch of lines.
 func (s *Service) bestBatch(ctx context.Context, lines []string) {
 	if err := applyBatch(ctx, lines); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Warn("network: rollback batch failed", "err", err)
 	}
 }
@@ -728,22 +760,6 @@ func applying(do func(ctx context.Context) error, undo func(ctx context.Context)
 		}
 		return nil
 	}
-}
-
-// runtimeOnly is commit without the files, for a change to something the
-// dashboard did not make and so does not restore: apply, verify, and put it
-// back if the check fails.
-func runtimeOnly(ctx context.Context, st step) error {
-	if err := st.apply(ctx); err != nil {
-		return err
-	}
-	if st.verify != nil {
-		if err := st.verify(ctx); err != nil {
-			rollback(ctx, st.undo)
-			return err
-		}
-	}
-	return nil
 }
 
 // stamp is the Made record of a new entry.
@@ -949,7 +965,8 @@ func (s *Service) DeleteLink(ctx context.Context, name, client, actor string) er
 			continue
 		}
 		if l.Master == name {
-			l.Master = ""
+			// A port leaves its VLANs with the bridge.
+			l.Master, l.VLANs = "", nil
 		}
 		kept = append(kept, l)
 	}
@@ -1022,6 +1039,7 @@ func (s *Service) SetLinkState(ctx context.Context, name string, up bool, client
 	}
 	undo := func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, was) }
 	stp := step{apply: set(want), undo: undo, verify: verifyPath(st.path)}
+	stp.recovery = []recoveryCommand{{Tool: "ip", Args: []string{"link", "set", name, was}}}
 	if m, ok := next.link(name); ok {
 		m.Up = up
 		if err := s.commit(ctx, next, stp); err != nil {
@@ -1029,7 +1047,7 @@ func (s *Service) SetLinkState(ctx context.Context, name string, up bool, client
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil
@@ -1079,8 +1097,9 @@ func (s *Service) SetLinkMTU(ctx context.Context, name string, mtu int, client, 
 			_, err := run(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(mtu))
 			return err
 		},
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(prev)) },
-		verify: verifyPath(st.path),
+		undo:     func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(prev)) },
+		verify:   verifyPath(st.path),
+		recovery: []recoveryCommand{{Tool: "ip", Args: []string{"link", "set", name, "mtu", strconv.Itoa(prev)}}},
 	}
 	if m, ok := next.link(name); ok {
 		m.MTU = mtu
@@ -1089,7 +1108,7 @@ func (s *Service) SetLinkMTU(ctx context.Context, name string, mtu int, client, 
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil
@@ -1172,14 +1191,21 @@ func (s *Service) SetLinkMaster(ctx context.Context, name, master, client, actor
 			verify: verifyPath(st.path),
 		}
 	}
+	previousMaster := []string{"link", "set", name, "nomaster"}
+	if prev != "" {
+		previousMaster = []string{"link", "set", name, "master", prev}
+	}
+	stp.recovery = []recoveryCommand{{Tool: "ip", Args: previousMaster}}
 	if m, ok := next.link(name); ok {
-		m.Master = master
+		// Memberships belong to the bridge a port was in; a new bridge
+		// starts it at the kernel's default.
+		m.Master, m.VLANs = master, nil
 		if err := s.commit(ctx, next, stp); err != nil {
 			return nil, err
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil

@@ -1,0 +1,56 @@
+{
+  "testedSource": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7",
+  "reviewedSourceBeforeDocumentationCommit": "81109dfcdf2ae67091779c23215393e6e8a17bbd",
+  "activeBase": "7be11ba08c63252fd94fd1d7f86b0ee6683d837e",
+  "previousPushedCheckpoint": "c62a9fb59ff3bc407365afc1caff8e7e615e03bb",
+  "completeChangedFiles": 677,
+  "changedMarkdownFiles": 59,
+  "localLinksChecked": 534,
+  "missingLinks": [],
+  "requirements": 187,
+  "uniqueRequirements": 187,
+  "statuses": {
+    "in progress": 53,
+    "verified": 6,
+    "pending": 128
+  },
+  "completeProtectedDiff": [],
+  "backendFrontendUnchangedAfterTestedSource": true,
+  "documentationReview": {
+    "docs/internal": "Compared complete diff and owning native/DNS/security/frontend guides; updated helper-v10 inode ownership, INI idempotence and bounded acceptance/source attribution. Initial failures preserved. No unsupported platform/structural/timer/reboot closure.",
+    "AGENTS.md": "Compared complete diff and contributor instructions; no additional update needed. Same PR authorized; no merge/delete.",
+    "README.md": "Compared complete diff; operator-facing supported behavior remains correct after the inode/idempotence repair; no additional update needed. Earlier DNS controls documented in same PR.",
+    "CONTRIBUTING.md": "Updated canonical unchanged-intent exact authored inode recovery and confirmed candidate/terminal retry acceptance."
+  },
+  "validation": {
+    "required": {
+      "exit": 0,
+      "netxSeconds": 20.554,
+      "wrapperSeconds": 73.12
+    },
+    "targetedRace": {
+      "exit": 0,
+      "netxSeconds": 29.315,
+      "wrapperSeconds": 57.54
+    },
+    "documentationOnlyFinal": {
+      "base": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7",
+      "exit": 0,
+      "log": "root-assembly-documentation-final.log",
+      "sha256": "5747abdbcf4379784eb1b55f2a81389af40e5ee3c76b69d37250619675364b28"
+    },
+    "actualNative": {
+      "source": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7",
+      "backendGoFiles": 1856,
+      "dependencyFiles": 2,
+      "passed": 4,
+      "skipped": 0,
+      "ownedCleanup": 0,
+      "raceSha256": "b3b7ef9e9d63d33d60bc37462ced44fa1962af888fda85401f878659fe9761dc",
+      "actualHelperSha256": "8f5c829b1a63022236fde72b34f8e642c757127322770b37c70c42ca63807643",
+      "helperCapability": "jd-native-manager-v10"
+    }
+  },
+  "independentReview": "DNS reviewer verified all1856 backendGo+2module hashes, actual retained race hash, bound helper/capability, four byte-identical decompressed workspace logs and result/source/cleanup/timing fields; exact inode/guard assertions and final guide/P11 claims clear. Original run02 deterministic gzip reproduces original failed bytes. Root live opt-ins unset; actual owner proof separate.",
+  "scope": "All187 retained;6verified/53inprogress/128pending; no10/10/full-goal completion claim; privatev9/undo5 notintegrated."
+}

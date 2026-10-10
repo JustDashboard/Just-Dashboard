@@ -1,0 +1,7 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/technitium-5f11764185000d748868b674f785293d.log (609 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/technitium-8fa053663b592307c7de24f97dea83aa.log (0 bytes)
+    provision_live_test.go:341: engine=technitium image=technitium/dns-server@sha256:1045db38fd2f2e4d9578f9168b7eb4862575469ed0ffc79e03f36bdc772a93b5 nativeVersion=15.6 UDP/TCP=owned-fixture.invalid owner=c3971c165c9f8f06cd43f59e9ae6fe36 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (13.53s)
+PASS
+wrapper_elapsed=14.56 exit=0

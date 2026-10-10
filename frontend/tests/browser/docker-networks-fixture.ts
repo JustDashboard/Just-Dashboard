@@ -661,6 +661,38 @@ export async function mockNetworks(
         ? json(route, networkDetail(net))
         : json(route, { error: { code: "not_found", message: "No such network" } }, 404)
     }
+    // What attaching, detaching or removing would disturb, and what a prune
+    // would take. Nothing here is in the way; a spec that wants a refusal
+    // routes its own over this.
+    const preview = path.match(/^\/docker\/networks\/([^/]+)\/(connect|disconnect|removal)$/)
+    if (preview && method === "GET") {
+      const net = NETS.find((n) => n.id === decodeURIComponent(preview[1]))
+      return json(route, {
+        network: net?.name ?? "",
+        networkId: net?.id ?? "",
+        container: url.searchParams.get("container") ?? undefined,
+        owner: { kind: "manual" },
+        conflicts: [],
+        blocked: false,
+        checkedAt: new Date().toISOString(),
+      })
+    }
+    if (path === "/docker/networks/prune" && method === "GET") {
+      return json(route, {
+        checkedAt: new Date().toISOString(),
+        candidates: NETS.filter(
+          (n) => membersOf(n).length === 0 && !["bridge", "host", "none"].includes(n.name),
+        ).map((n) => ({
+          id: n.id,
+          name: n.name,
+          owner: n.labels?.["com.docker.compose.project"]
+            ? { kind: "compose", project: n.labels["com.docker.compose.project"] }
+            : { kind: "manual" },
+          conflicts: [],
+          removable: true,
+        })),
+      })
+    }
     if (method !== "GET") {
       const body = route.request().postData()
       mocks.writes.push({ method, path, body: body ? JSON.parse(body) : undefined })

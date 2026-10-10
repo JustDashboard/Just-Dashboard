@@ -1,19 +1,41 @@
 "use client"
 
+import Link from "next/link"
 import { useState } from "react"
+import { Field } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ErrorState } from "@/components/state"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useAuth } from "@/hooks/use-auth"
+import { post } from "@/lib/api"
+import { previewReading, type IPAMPreview } from "@/lib/network-ipam"
 
-import { calcSubnet, type SubnetInfo } from "./subnet-math"
+import { calcSubnet, prefixRelation, type SubnetInfo } from "./subnet-math"
 
 export function SubnetTool() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const [input, setInput] = useState("")
   const [info, setInfo] = useState<SubnetInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [other, setOther] = useState("")
+  const [preview, setPreview] = useState<IPAMPreview>()
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewError, setPreviewError] = useState<Error>()
+
+  // Pure arithmetic: reading the other prefix never leaves the browser.
+  let relation: { sentence?: string; problem?: string } = {}
+  if (info && other.trim()) {
+    try {
+      relation = { sentence: prefixRelation(info.cidr, other).sentence }
+    } catch (err) {
+      relation = { problem: err instanceof Error ? err.message : "Could not parse that." }
+    }
+  }
 
   const run = () => {
     if (!input.trim() || busy) return
@@ -25,6 +47,8 @@ export function SubnetTool() {
       try {
         setInfo(calcSubnet(input))
         setError(null)
+        setPreview(undefined)
+        setPreviewError(undefined)
       } catch (err) {
         setInfo(null)
         setError(err instanceof Error ? err.message : "Could not parse that.")
@@ -33,6 +57,20 @@ export function SubnetTool() {
       }
     }, 0)
   }
+
+  const checkIPAM = async () => {
+    if (!info || previewBusy) return
+    setPreviewBusy(true)
+    setPreviewError(undefined)
+    try {
+      setPreview(await post<IPAMPreview>("/network/ipam/preview", { prefix: info.cidr }))
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+  const reading = preview ? previewReading(preview) : undefined
 
   return (
     <Panel plain>
@@ -91,6 +129,73 @@ export function SubnetTool() {
             </Detail>
             <Detail label="Scope">{info.note}</Detail>
           </DetailList>
+        )}
+
+        {info && (
+          <section aria-label="Overlap" className="space-y-3 border-t border-hairline pt-4">
+            <h3 className="eyebrow">Overlap</h3>
+            <Field
+              label="Compare with another prefix"
+              htmlFor="tool-subnet-other"
+              error={relation.problem}
+            >
+              <Input
+                id="tool-subnet-other"
+                value={other}
+                onChange={(event) => setOther(event.target.value)}
+                placeholder="10.0.0.0/8"
+                className="font-mono"
+                aria-invalid={Boolean(relation.problem)}
+              />
+            </Field>
+            {relation.sentence && (
+              <p className="text-body" aria-live="polite">
+                {relation.sentence}
+              </p>
+            )}
+            {admin ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void checkIPAM()}
+                    disabled={previewBusy}
+                    pending={previewBusy}
+                  >
+                    Check shared IPAM
+                  </Button>
+                  <Button asChild size="sm" variant="ghost">
+                    <Link href="/network/ipam">Plan in IPAM</Link>
+                  </Button>
+                </div>
+                {previewError && <ErrorState error={previewError} />}
+                {preview && reading && (
+                  <div className="space-y-1.5 text-body" aria-label="IPAM overlap">
+                    <p className="font-medium">
+                      {reading.label}: <span className="font-mono">{preview.prefix}</span>
+                    </p>
+                    <p className="text-muted-foreground">{reading.detail}</p>
+                    {preview.conflicts.map((conflict, index) => (
+                      <p key={index} className="font-mono text-hint break-all">
+                        {conflict.prefix} · {conflict.owner} · {conflict.resource} ·{" "}
+                        {conflict.basis}
+                      </p>
+                    ))}
+                    <p className="text-hint text-muted-foreground">
+                      Reserving it in IPAM rechecks overlap and holds the prefix for the resource
+                      that will use it.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-hint text-muted-foreground">
+                Checking against shared address planning needs the admin capability; the comparison
+                above stays in this browser.
+              </p>
+            )}
+          </section>
         )}
       </PanelBody>
     </Panel>

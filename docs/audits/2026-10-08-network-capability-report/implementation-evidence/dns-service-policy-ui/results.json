@@ -1,0 +1,80 @@
+[
+  {
+    "engine": "adguard",
+    "exit": 0,
+    "elapsed": 39.51,
+    "log": "native-adguard-assembled.log",
+    "currentReads": 8,
+    "skip": false,
+    "owner": "bf746b2642d1d3e4928d792ad4ce61d6",
+    "cleanup": {
+      "container": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "network": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "volume": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      }
+    }
+  },
+  {
+    "engine": "pihole",
+    "exit": 0,
+    "elapsed": 64.68,
+    "log": "native-pihole-assembled.log",
+    "currentReads": 12,
+    "skip": false,
+    "owner": "56e3133523f8ee9a8d420a832384cca3",
+    "cleanup": {
+      "container": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "network": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "volume": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      }
+    }
+  },
+  {
+    "engine": "technitium",
+    "exit": 0,
+    "elapsed": 12.72,
+    "log": "native-technitium-assembled.log",
+    "currentReads": 8,
+    "skip": false,
+    "owner": "68ff1139da45ba1bd95e43713b1fb395",
+    "cleanup": {
+      "container": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "network": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      },
+      "volume": {
+        "exit": 0,
+        "remaining": "",
+        "error": ""
+      }
+    }
+  }
+]

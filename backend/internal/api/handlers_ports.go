@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -41,6 +42,10 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 	// HTTP request: traffic the dashboard originates, so an admin's, audited.
 	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
 		Method(http.MethodPost, "/identify", s.handle(s.handlePortsIdentify))
+	// What enrolled external sources measured of each port. The external
+	// checks it reads are an admin's, and so is this.
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodGet, "/external", s.handle(s.handlePortsExternal))
 }
 
 // portIdentifyTimeout bounds the three steps together: the banner's wait,
@@ -252,6 +257,10 @@ func (s *Server) readPortsProxy(ctx context.Context) portsProxy {
 // close, and a form needs one.
 const freePortsMax = 20
 
+// freeReservationsMax bounds the passed-over ports reported: a search that
+// starts inside the ephemeral range passes thousands.
+const freeReservationsMax = 32
+
 // portsFree is GET /ports/free.
 type portsFree struct {
 	Ports []int `json:"ports"`
@@ -262,6 +271,13 @@ type portsFree struct {
 	// ContainersChecked is false where Docker could not be asked, so the
 	// page does not claim to have kept clear of containers' ports.
 	ContainersChecked bool `json:"containersChecked"`
+	// Reservations are the other ports passed over: a deployment's lease,
+	// the preview range, the ephemeral range, and a port a firewall rule or
+	// a gateway forward already decides for.
+	Reservations []portReservation `json:"reservations"`
+	// Sources is every owner consulted and whether it could be, provider
+	// reservations included — which no adapter supplies yet.
+	Sources []portSource `json:"sources"`
 }
 
 // handlePortsFree finds ports nothing listens on and no container keeps,
@@ -300,19 +316,25 @@ func (s *Server) handlePortsFree(w http.ResponseWriter, r *http.Request) error {
 		count = n
 	}
 
-	out := portsFree{Ports: []int{}, Skipped: []dockerx.HostPortBinding{}}
+	out := portsFree{Ports: []int{}, Skipped: []dockerx.HostPortBinding{}, Reservations: []portReservation{}}
 	kept := map[int]dockerx.HostPortBinding{}
 	ctx, cancel := context.WithTimeout(r.Context(), ownerSourceTimeout)
 	bindings, err := s.modules.docker.HostPortBindings(ctx)
 	cancel()
+	containers := portSource{Key: "containers", Label: "Container publications", State: portSourceUnavailable}
 	if err == nil {
 		out.ContainersChecked = true
+		containers.State, containers.Detail = portSourceChecked, fmt.Sprintf("%d bindings, stopped containers' included", len(bindings))
 		for _, b := range bindings {
 			if b.Protocol == protocol && bindingOverlaps(b.HostIP, address) {
 				kept[b.HostPort] = b
 			}
 		}
+	} else {
+		containers.Detail = err.Error()
 	}
+	policy := s.freePortPolicy(r.Context(), protocol, address)
+	out.Sources = append([]portSource{{Key: "sockets", Label: "Listening sockets", State: portSourceChecked, Detail: "each candidate is bound and released on " + address}, containers}, policy.sources...)
 	// A port under 1024 asked for is searched from there; otherwise the
 	// search stays among the ports an unprivileged program may take.
 	minimum := min(from, 1024)
@@ -324,6 +346,13 @@ func (s *Server) handlePortsFree(w http.ResponseWriter, r *http.Request) error {
 					out.Skipped = append(out.Skipped, b)
 					passed[candidate] = true
 				}
+				return portalloc.ErrReserved
+			}
+			if reservation, ok := policy.reserved(candidate); ok {
+				if !passed[candidate] && len(out.Reservations) < freeReservationsMax {
+					out.Reservations = append(out.Reservations, reservation)
+				}
+				passed[candidate] = true
 				return portalloc.ErrReserved
 			}
 			return portalloc.Available(address, protocol, candidate)

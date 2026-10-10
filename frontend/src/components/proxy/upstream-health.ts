@@ -20,7 +20,7 @@ const WORD: Record<UpstreamState, string> = {
 }
 
 /** "up 2 ms", "refused", "dynamic, not checked". */
-export function upstreamLabel(target: UpstreamTarget): string {
+export function upstreamLabel(target: Pick<UpstreamTarget, "state" | "ms">): string {
   if (target.state !== "up") return WORD[target.state]
   return `up ${target.ms ?? 0} ms`
 }

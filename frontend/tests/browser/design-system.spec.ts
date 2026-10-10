@@ -79,6 +79,8 @@ async function mockShell(page: Page) {
       })
     }
     if (path === "/deploy/github-app/") return json(route, { configured: false, installations: [] })
+    if (path === "/security/boundary")
+      return json(route, { checks: [], allowlist: [], sshPorts: [] })
     if (path.startsWith("/audit")) {
       return json(route, {
         entries: [

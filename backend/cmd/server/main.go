@@ -30,6 +30,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
@@ -38,6 +39,47 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--network-sqm-check" {
+		fmt.Println("sqm-v1")
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--network-sqm-restore" {
+		if len(os.Args) != 3 {
+			fmt.Fprintln(os.Stderr, "SQM restoration needs a directory")
+			os.Exit(2)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := netx.RestoreSQMBootStandalone(ctx, os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--network-native-check" {
+		fmt.Println(netx.NativeRecoveryCapability())
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--network-recovery-check" {
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "--network-recover" || os.Args[1] == "--network-recover-boot") {
+		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "network recovery needs a directory and change ID")
+			os.Exit(2)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		recover := netx.RecoverNetworkStandalone
+		if os.Args[1] == "--network-recover-boot" {
+			recover = netx.RecoverNetworkBootStandalone
+		}
+		if err := recover(ctx, os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--admin" {
 		if agent, _ := strconv.ParseBool(config.Env("JD_AGENT_MODE")); agent {
 			fmt.Fprintln(os.Stderr, "local dashboard accounts are unavailable in agent mode")

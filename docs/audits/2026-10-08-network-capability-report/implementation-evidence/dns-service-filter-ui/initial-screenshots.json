@@ -1,0 +1,86 @@
+[
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-adguar-3f604--filter-reading-fits-1720px-chromium/native-filters-adguard-1720.png",
+    "name": "native-filters-adguard-1720.png",
+    "sha256": "9a5665e2970265de104028b128becd87f1d0f0b92942b51c2126dbda3972bd6d",
+    "bytes": 124809,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-adguar-df428--filter-reading-fits-1280px-chromium/native-filters-adguard-1280.png",
+    "name": "native-filters-adguard-1280.png",
+    "sha256": "2b9a6a37a4dea6d6b991e7b672263e78cb0f4a38a1d4721fd7ce4355b099a2b5",
+    "bytes": 95635,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filter-rules-adguard-390.png",
+    "name": "native-filter-rules-adguard-390.png",
+    "sha256": "79952a271a6712dd30c7e27cf97cfad8d9b79fb578662c209d358bbe5d6ac14a",
+    "bytes": 41453,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filters-adguard-390.png",
+    "name": "native-filters-adguard-390.png",
+    "sha256": "ed2aec958b1da287157a898a31aec938570d8276aa5d3bc6a8955dbb3123e0db",
+    "bytes": 68927,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-pihole-native-filter-reading-fits-1280px-chromium/native-filters-pihole-1280.png",
+    "name": "native-filters-pihole-1280.png",
+    "sha256": "531bda4b671cb13fde41023fe434c023ff851397d0d0bee07112dc7662e4e0d8",
+    "bytes": 88993,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-pihole-native-filter-reading-fits-1720px-chromium/native-filters-pihole-1720.png",
+    "name": "native-filters-pihole-1720.png",
+    "sha256": "39ee4753bf57a31a9ff78ed9793f28623ce70093978815fa2a0cd79d5c5ed81f",
+    "bytes": 123904,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filter-rules-pihole-390.png",
+    "name": "native-filter-rules-pihole-390.png",
+    "sha256": "a8d1ead0643e00afcf0124827de8bb7173724a0811638562fef00cd36423039b",
+    "bytes": 42634,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filters-pihole-390.png",
+    "name": "native-filters-pihole-390.png",
+    "sha256": "12b342831bd91ab86c024170d47b066a81c824a174ef9b73b1dc8c93c5889846",
+    "bytes": 72468,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-techni-2dacd--filter-reading-fits-1280px-chromium/native-filters-technitium-1280.png",
+    "name": "native-filters-technitium-1280.png",
+    "sha256": "611799955092416d788fe31acec9257cf8ff6d9f2a87062c6f2387bc36ea4541",
+    "bytes": 106925,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filter-rules-technitium-390.png",
+    "name": "native-filter-rules-technitium-390.png",
+    "sha256": "0df6d6c4f115794926f2634629e5420d892dba88b4e1a5844f7f9d5563028079",
+    "bytes": 41224,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filters-technitium-390.png",
+    "name": "native-filters-technitium-390.png",
+    "sha256": "6bbfdb31c76ca72bbfaac36ebfcc23a6f020eb8eb7416401f68ef8c8af0783ae",
+    "bytes": 61867,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  },
+  {
+    "original": "/home/ubuntu/jd-network-validation-tmp/dns-filter-ui-browser-first/network-dns-filters-techni-d7a68--filter-reading-fits-1720px-chromium/native-filters-technitium-1720.png",
+    "name": "native-filters-technitium-1720.png",
+    "sha256": "ee0617c354fd965805d865de903bd4b3a592a3d148b04710c0f39311a18850b3",
+    "bytes": 126993,
+    "scope": "initial opening-transition capture; no final viewport-containment claim"
+  }
+]

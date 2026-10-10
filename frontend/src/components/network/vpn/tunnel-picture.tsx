@@ -178,7 +178,17 @@ function Side({
                   aria-label={`Open ${peer.name || peer.address}`}
                   className="rounded-xl focus-ring"
                 >
-                  <WireMark tone={peer.online ? "success" : "neutral"} shape="square" size="md">
+                  <WireMark
+                    tone={
+                      peer.online
+                        ? "success"
+                        : peer.handshakeState === "stale" || peer.transport?.state === "captured"
+                          ? "warning"
+                          : "neutral"
+                    }
+                    shape="square"
+                    size="md"
+                  >
                     {site ? <Location aria-hidden /> : <DesktopDevice aria-hidden />}
                   </WireMark>
                 </button>
@@ -187,7 +197,7 @@ function Side({
                 peer.online
                   ? "online"
                   : peer.latestHandshake
-                    ? `seen ${relativeTime(new Date(peer.latestHandshake * 1000).toISOString())}`
+                    ? `${peer.handshakeState === "stale" ? "stale · " : ""}seen ${relativeTime(new Date(peer.latestHandshake * 1000).toISOString())}`
                     : "never connected"
               }
               title={peer.name || <span className="font-mono">{peer.address}</span>}

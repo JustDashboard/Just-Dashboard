@@ -1,0 +1,103 @@
+{
+  "at": "2026-10-10T00:42:54Z",
+  "bootId": "c2f179c6-ea82-4adf-8091-f289044aaf71",
+  "evidence": {
+    "file": {
+      "inode": 16085,
+      "mode": "0o644",
+      "path": "/etc/systemd/network/30-jdvm-direct.network",
+      "sha256": "0b9543db3f328545cc21416bd48e195da6364ecd7906309ba29163749631f042"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T00:42:02.274835155Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "complete",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T00:43:32.161723678Z",
+      "files": [],
+      "generation": "3ecd01a6db69ad1cbf2b78f95f681168ec7a0d40ad9460b9c5b6fe26236642f8",
+      "id": "8537e6034e98a38b6cc47fdb66d12c47",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T00:42:03.40441958Z",
+      "verifiedAt": "2026-10-10T00:42:02.998440198Z",
+      "watchdog": "completed"
+    },
+    "profile": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s6",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.6.15/24",
+            "10.0.6.16/24"
+          ],
+          "dns": [
+            "10.0.6.3"
+          ],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.6.0/24",
+              "gateway": "10.0.6.2",
+              "metric": 100,
+              "table": 254
+            },
+            {
+              "destination": "10.91.6.0/24",
+              "gateway": "10.0.6.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:6::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "direct.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "networkd",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "systemd 255 (255.4-1ubuntu8.17)"
+    }
+  },
+  "failures": [],
+  "phase": "p11-persist networkd",
+  "result": "pass",
+  "seconds": 1.2
+}

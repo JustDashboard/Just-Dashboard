@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-10T00:21:06Z",
+  "bootId": "877f2244-9be2-4eed-b36a-7aacaf706bff",
+  "evidence": {},
+  "failures": [
+    "PUT /network/native/profiles/enp0s4 -> 409: {'error': {'code': 'network_read_only', 'message': 'Native ownership changed during staging; no native profile was activated.'}}"
+  ],
+  "phase": "p11-confirm netplan-networkd",
+  "result": "fail",
+  "seconds": 2.8
+}

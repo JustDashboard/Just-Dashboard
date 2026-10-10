@@ -1,0 +1,24 @@
+{
+  "source": "b0f803b235a2ccfff6c10f85511578bcf7b2c819",
+  "engine": "adguard",
+  "exit_code": 1,
+  "wall_seconds": 8.79,
+  "raw_sha256": "d38f4fb6da00550d9df6e5b84ff73a2a746693e13fe7cad575149df5e4fc81c3",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true
+}

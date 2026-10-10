@@ -1,0 +1,33 @@
+== serve 2026-10-09T21:28:44Z
+== specs 2026-10-09T21:28:46Z: tests/browser/command-search.spec.ts tests/browser/docker-network-maturity.spec.ts --repeat-each=1
+
+Running 25 tests using 1 worker
+
+  ✓   1 [chromium] › tests/browser/command-search.spec.ts:25:5 › find a domain, inspect its container and return to the previous site entirely by keyboard (3.4s)
+  ✓   2 [chromium] › tests/browser/command-search.spec.ts:54:5 › arrows, Home/End, Escape and shortcut toggle retain focus ownership (2.5s)
+  ✓   3 [chromium] › tests/browser/command-search.spec.ts:89:5 › all live inventories are scoped and duplicate PM2 names keep their daemon identity (2.0s)
+  ✓   4 [chromium] › tests/browser/command-search.spec.ts:127:5 › scope chips count each kind's matches and the dialog holds still while results change (1.2s)
+  ✓   5 [chromium] › tests/browser/command-search.spec.ts:145:5 › a section's landing page is found by the name the rail gives it inside the section (1.1s)
+  ✓   6 [chromium] › tests/browser/command-search.spec.ts:161:5 › a failed source reports incomplete search and can recover without reopening (1.3s)
+  ✓   7 [chromium] › tests/browser/command-search.spec.ts:186:5 › late results do not take the selected option from the keyboard (1.3s)
+  ✓   8 [chromium] › tests/browser/command-search.spec.ts:212:5 › reopening reads additions and removes deleted resources without polling while closed (1.8s)
+  ✓   9 [chromium] › tests/browser/command-search.spec.ts:232:5 › page and action permissions stay hidden for a read-only account (1.3s)
+  ✓  10 [chromium] › tests/browser/command-search.spec.ts:257:5 › current database engine pages remain searchable (2.0s)
+  ✓  11 [chromium] › tests/browser/command-search.spec.ts:267:5 › the page-owned Find command retains keyboard focus after the dialog closes (1.5s)
+  ✓  12 [chromium] › tests/browser/command-search.spec.ts:283:5 › the global shortcut opens from the SQL editor and restores the editor's focus (3.1s)
+  ✓  13 [chromium] › tests/browser/command-search.spec.ts:306:5 › mobile results and controls fit inside the viewport (1.3s)
+  ✓  14 [chromium] › tests/browser/command-search.spec.ts:329:5 › the preview follows the selection and opens what the result is wired to (2.1s)
+  ✓  15 [chromium] › tests/browser/command-search.spec.ts:359:5 › Tab reaches the scope chips, arrows walk them and Escape still clears before closing (1.4s)
+  ✓  16 [chromium] › tests/browser/docker-network-maturity.spec.ts:139:5 › networks name their owners, and unread membership never reads as unused (1.2s)
+  ✓  17 [chromium] › tests/browser/docker-network-maturity.spec.ts:166:5 › a network's detail names its owner, both families and the networks its members join (1.6s)
+  ✓  18 [chromium] › tests/browser/docker-network-maturity.spec.ts:199:5 › attaching previews shared names and refusals, and keeps the draft when the preview fails (4.0s)
+  ✓  19 [chromium] › tests/browser/docker-network-maturity.spec.ts:277:5 › detaching names who loses the member, and a refused detach cannot be confirmed (2.7s)
+  ✓  20 [chromium] › tests/browser/docker-network-maturity.spec.ts:338:5 › a removal says what still names the network, and a live deployment's network is refused (1.7s)
+  ✓  21 [chromium] › tests/browser/docker-network-maturity.spec.ts:407:5 › the reviewed prune removes only what nothing names and says why the rest is kept (1.6s)
+  ✓  22 [chromium] › tests/browser/docker-network-maturity.spec.ts:472:5 › the creation form reads the Engine's drivers and names options Docker would ignore (2.0s)
+  ✓  23 [chromium] › tests/browser/docker-network-maturity.spec.ts:561:7 › network previews fit without page overflow at 390px (2.0s)
+  ✓  24 [chromium] › tests/browser/docker-network-maturity.spec.ts:561:7 › network previews fit without page overflow at 1440px (1.9s)
+  ✓  25 [chromium] › tests/browser/docker-network-maturity.spec.ts:594:5 › readers see owners and previews' results but are offered no change (1.3s)
+
+  25 passed (49.1s)
+== exit 0 2026-10-09T21:29:35Z

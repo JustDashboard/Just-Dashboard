@@ -1,0 +1,99 @@
+# 2026-10-09T23:43:09Z commit 3d951306 (+ working tree)
+# sudo -n env JD_NETNS_LIVE=1 TMPDIR=/home/ubuntu/Just-Dashboard-net-egress-artifacts/tmp GOMAXPROCS=2 netx.test -test.run '^TestLiveEgress' -test.v -test.count=1
+=== RUN   TestLiveEgressFailoverAndFailbackWithHysteresis
+    egress_live_test.go:276: failover: provider-a is down (no probe answered); provider-b is the best proven member. | through up1 via 10.201.1.1 (table 7700) -> through up2 via 10.202.1.1 (table 7700)
+    egress_live_test.go:303: failback after 6 rounds: provider-a is back and stable for 6s; failing back.
+--- PASS: TestLiveEgressFailoverAndFailbackWithHysteresis (1.57s)
+=== RUN   TestLiveEgressFlapSuppression
+--- PASS: TestLiveEgressFlapSuppression (3.58s)
+=== RUN   TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember
+--- PASS: TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember (1.02s)
+=== RUN   TestLiveEgressBootRestoresTheDecidedMemberAndReverifies
+    egress_live_test.go:427: verified: Checked at start: table 7700 sends its traffic through up2 via 10.202.1.1, as decided, with every member table and rule in place. Not yet proven by this process's probes: provider-b (unknown).
+    egress_live_test.go:444: repaired: Checked at start: table 7700 default route (holds no default route) missing (a device may have come up after the boot unit ran); restored the decided route, through up2 via 10.202.1.1.
+--- PASS: TestLiveEgressBootRestoresTheDecidedMemberAndReverifies (0.80s)
+=== RUN   TestLiveEgressRecoveryAfterBackendDeathMidSwitch
+--- PASS: TestLiveEgressRecoveryAfterBackendDeathMidSwitch (1.73s)
+=== RUN   TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember
+    egress_live_test.go:605: failback connections: {Read:19 Truncated:false Error: ByMember:map[1:10 2:9] Moved:8 Pinned:1 Flushed:0 FlushFailed:0 Spared:0 Basis:Pinned connections by their mark; others by the member's local address (its own source, or the address it translated to).}
+    egress_live_test.go:622: flush: Flushed 13 connections pinned to provider-b, which is down.
+--- PASS: TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember (2.01s)
+=== RUN   TestLiveEgressSimulationRunsInDisposableNamespaces
+    egress_live_test.go:673: Every member proves its path: After 3 clean samples every member must be up through its own mark, source and device.
+    egress_live_test.go:673: Latency under the threshold moves nothing: provider-a delayed below 200 ms: 0 switches.
+    egress_live_test.go:673: Fails over after a sustained failure: Failed over to provider-b at sample 2 of the failure, after the 2 bad samples the rules require.
+    egress_live_test.go:673: A flapping member is not failed back to: provider-a alternated between failing and answering for 6 samples: 0 failbacks to it.
+    egress_live_test.go:673: Fails back only after a stable recovery: provider-a was up again at recovery sample 2 and failed back to at sample 5; the stable window is 3 samples.
+    egress_live_test.go:673: Latency over the threshold fails over: provider-a delayed above 200 ms while carrying traffic: failed over true.
+    egress_live_test.go:673: With nothing proven the route is kept: Every member failed: 0 switches, and the rules held the current route: true.
+    egress_live_test.go:673: Never switches to an unproven member: Every switch went to members proven up at that sample.
+    egress_live_test.go:673: Traffic follows the decision: Whenever the decided members were up and clean, unmarked traffic through the group table reached the first target.
+    egress_live_test.go:673: Recovers to a proven member: After the outage, the decided members are up again by the end of the run.
+    egress_live_test.go:679: sample 8 (failure): failover [2] — provider-a is down (no probe answered); provider-b is the best proven member.
+    egress_live_test.go:679: sample 21 (recovery): failback [1] — provider-a is back and stable for 6s; failing back.
+    egress_live_test.go:679: sample 28 (latency-breach): failover [2] — provider-a is down (median round trip 300 ms is above 200 ms); provider-b is the best proven member.
+    egress_live_test.go:689: the simulation changed the host's own routing:
+        0:	from all lookup local
+        19000:	from all fwmark 0x100/0x7f00 lookup 7701
+        19001:	from all fwmark 0x200/0x7f00 lookup 7702
+        32766:	from all lookup main
+        32767:	from all lookup default
+        default via 10.201.1.1 dev up1 table 7700 
+        default via 10.201.1.1 dev up1 table 7701 
+        default via 10.202.1.1 dev up2 table 7702 
+        default via 10.201.1.1 dev up1 
+        10.201.1.0/24 dev up1 proto kernel scope link src 10.201.1.2 
+        10.202.1.0/24 dev up2 proto kernel scope link src 10.202.1.2 
+        10.203.0.0/24 dev op0 proto kernel scope link src 10.203.0.1 
+        local 10.201.1.2 dev up1 table local proto kernel scope host src 10.201.1.2 
+        broadcast 10.201.1.255 dev up1 table local proto kernel scope link src 10.201.1.2 
+        local 10.202.1.2 dev up2 table local proto kernel scope host src 10.202.1.2 
+        broadcast 10.202.1.255 dev up2 table local proto kernel scope link src 10.202.1.2 
+        local 10.203.0.1 dev op0 table local proto kernel scope host src 10.203.0.1 
+        broadcast 10.203.0.255 dev op0 table local proto kernel scope link src 10.203.0.1 
+        local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+        local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+        broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+        fe80::/64 dev up1 proto kernel metric 256 pref medium
+        fe80::/64 dev up2 proto kernel metric 256 pref medium
+        fe80::/64 dev op0 proto kernel metric 256 pref medium
+        local ::1 dev lo table local proto kernel metric 0 pref medium
+        multicast ff00::/8 dev up1 table local proto kernel metric 256 pref medium
+        multicast ff00::/8 dev up2 table local proto kernel metric 256 pref medium
+        multicast ff00::/8 dev op0 table local proto kernel metric 256 pref medium
+        
+        ---
+        0:	from all lookup local
+        19000:	from all fwmark 0x100/0x7f00 lookup 7701
+        19001:	from all fwmark 0x200/0x7f00 lookup 7702
+        32766:	from all lookup main
+        32767:	from all lookup default
+        default via 10.201.1.1 dev up1 table 7700 
+        default via 10.201.1.1 dev up1 table 7701 
+        default via 10.202.1.1 dev up2 table 7702 
+        default via 10.201.1.1 dev up1 
+        10.201.1.0/24 dev up1 proto kernel scope link src 10.201.1.2 
+        10.202.1.0/24 dev up2 proto kernel scope link src 10.202.1.2 
+        10.203.0.0/24 dev op0 proto kernel scope link src 10.203.0.1 
+        local 10.201.1.2 dev up1 table local proto kernel scope host src 10.201.1.2 
+        broadcast 10.201.1.255 dev up1 table local proto kernel scope link src 10.201.1.2 
+        local 10.202.1.2 dev up2 table local proto kernel scope host src 10.202.1.2 
+        broadcast 10.202.1.255 dev up2 table local proto kernel scope link src 10.202.1.2 
+        local 10.203.0.1 dev op0 table local proto kernel scope host src 10.203.0.1 
+        broadcast 10.203.0.255 dev op0 table local proto kernel scope link src 10.203.0.1 
+        local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+        local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+        broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
+        fe80::/64 dev up1 proto kernel metric 256 pref medium
+        fe80::/64 dev up2 proto kernel metric 256 pref medium
+        fe80::/64 dev op0 proto kernel metric 256 pref medium
+        local ::1 dev lo table local proto kernel metric 0 pref medium
+        local fe80::40ed:59ff:fe0f:9782 dev up2 table local proto kernel metric 0 pref medium
+        local fe80::a484:55ff:fe1d:8ee1 dev op0 table local proto kernel metric 0 pref medium
+        local fe80::b069:a7ff:fef4:b0f7 dev up1 table local proto kernel metric 0 pref medium
+        multicast ff00::/8 dev up1 table local proto kernel metric 256 pref medium
+        multicast ff00::/8 dev up2 table local proto kernel metric 256 pref medium
+        multicast ff00::/8 dev op0 table local proto kernel metric 256 pref medium
+--- FAIL: TestLiveEgressSimulationRunsInDisposableNamespaces (9.19s)
+FAIL
+# exit 1

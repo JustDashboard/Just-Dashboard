@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 )
 
@@ -213,17 +215,98 @@ func TestNetworkDNSHostsRoundTrip(t *testing.T) {
 func TestNetworkDNSLookupValidation(t *testing.T) {
 	_, viewer, _ := networkClients(t)
 	for name, body := range map[string]string{
-		"an address for an A lookup": `{"name":"192.0.2.1","type":"A"}`,
-		"a name for a PTR":           `{"name":"example.com","type":"PTR"}`,
-		"a record type outside":      `{"name":"example.com","type":"ANY"}`,
-		"a space in the name":        `{"name":"exa mple.com","type":"A"}`,
-		"an empty name":              `{"name":"","type":"A"}`,
-		"a server of the caller's":   `{"name":"example.com","type":"A","server":"192.0.2.9"}`,
+		"an address for an A lookup":       `{"name":"192.0.2.1","type":"A"}`,
+		"a name for a PTR":                 `{"name":"example.com","type":"PTR"}`,
+		"a record type outside":            `{"name":"example.com","type":"ANY"}`,
+		"a space in the name":              `{"name":"exa mple.com","type":"A"}`,
+		"an empty name":                    `{"name":"","type":"A"}`,
+		"a server of the caller's":         `{"name":"example.com","type":"A","server":"192.0.2.9"}`,
+		"legacy public fan-out":            `{"name":"private.corp.example","type":"A","includePublic":true}`,
+		"comparison without destinations":  `{"name":"private.corp.example","type":"A","mode":"compare","acknowledgeDisclosure":true}`,
+		"comparison without disclosure":    `{"name":"private.corp.example","type":"A","mode":"compare","destinations":["1.1.1.1"]}`,
+		"arbitrary comparison destination": `{"name":"private.corp.example","type":"A","mode":"compare","destinations":["127.0.0.1:9999"],"acknowledgeDisclosure":true}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if w := viewer.do(http.MethodPost, "/api/v1/network/dns/lookup", body, nil); w.Code != http.StatusBadRequest {
 				t.Fatalf("got %d: %s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+// The routes added for the verification plan, host previews, the certificate
+// check and the DNSSEC chain keep their capabilities, and refuse a bad request
+// before anything is asked of the host's resolver or the network.
+func TestNetworkDNSDiagnosticRoutesCapabilitiesAndValidation(t *testing.T) {
+	admin, viewer, paths := networkClients(t)
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/network/dns/verification-plan", `{"servers":["192.0.2.53"]}`},
+		{http.MethodPost, "/api/v1/network/dns/hosts/preview", `{"records":[]}`},
+		{http.MethodPost, "/api/v1/network/dns/dnssec-chain", `{"name":"example.com"}`},
+		{http.MethodGet, "/api/v1/network/dns/services/handoffs", ``},
+	} {
+		if w := viewer.do(tc.method, tc.path, tc.body, nil); w.Code != http.StatusForbidden {
+			t.Fatalf("readonly %s %s = %d", tc.method, tc.path, w.Code)
+		}
+	}
+	for name, tc := range map[string]struct{ path, body string }{
+		"listed and cleared":       {"/api/v1/network/dns/verification-plan", `{"fallback":["9.9.9.9"],"clear":["fallback"]}`},
+		"bad verification name":    {"/api/v1/network/dns/verification-plan", `{"servers":["192.0.2.53"],"verificationNames":["bad name"]}`},
+		"an unknown plan field":    {"/api/v1/network/dns/verification-plan", `{"servers":["192.0.2.53"],"apply":true}`},
+		"a chain for an address":   {"/api/v1/network/dns/dnssec-chain", `{"name":"192.0.2.1"}`},
+		"a preview of localhost":   {"/api/v1/network/dns/hosts/preview", `{"records":[{"address":"192.0.2.1","names":["localhost"]}]}`},
+		"an arbitrary TLS server":  {"/api/v1/network/dns/tls-check", `{"servers":["192.0.2.99#probe.example"]}`},
+		"seventeen TLS servers":    {"/api/v1/network/dns/tls-check", `{"servers":["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17"]}`},
+		"TLS in an effective test": {"/api/v1/network/dns/lookup", `{"name":"example.com","type":"A","transport":"tls"}`},
+		"DNSSEC in effective test": {"/api/v1/network/dns/lookup", `{"name":"example.com","type":"A","dnssec":true}`},
+		"forwarding in comparison": {"/api/v1/network/dns/lookup", `{"name":"example.com","type":"A","mode":"compare","destinations":["1.1.1.1"],"acknowledgeDisclosure":true,"acknowledgeForwarding":true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := admin
+			if strings.Contains(tc.path, "tls-check") || strings.Contains(tc.path, "lookup") {
+				c = viewer
+			}
+			if w := c.do(http.MethodPost, tc.path, tc.body, nil); w.Code != http.StatusBadRequest {
+				t.Fatalf("got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	if err := os.WriteFile(paths.Hosts, []byte("192.0.2.50 nas.lan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var preview netx.HostRecordsPreview
+	w := admin.do(http.MethodPost, "/api/v1/network/dns/hosts/preview", `{"records":[{"address":"192.0.2.10","names":["nas.lan"]}]}`, nil)
+	decodeNetworkBody(t, w.Body.Bytes(), &preview)
+	if w.Code != http.StatusOK || len(preview.Issues) != 1 || preview.Issues[0].Kind != "shadowed" || len(preview.Block) != 3 {
+		t.Fatalf("preview %d = %+v", w.Code, preview)
+	}
+	if b, _ := os.ReadFile(paths.Hosts); string(b) != "192.0.2.50 nas.lan\n" {
+		t.Fatalf("a preview wrote the file: %q", b)
+	}
+	// With no managed records, the resolution check asks nothing at all.
+	var evidence netx.HostResolutionEvidence
+	w = viewer.do(http.MethodGet, "/api/v1/network/dns/hosts/resolution", "", nil)
+	decodeNetworkBody(t, w.Body.Bytes(), &evidence)
+	if w.Code != http.StatusOK || evidence.Names == nil || len(evidence.Names) != 0 {
+		t.Fatalf("resolution %d = %+v", w.Code, evidence)
+	}
+}
+
+// A policy refusal and a failed verification are conflicts with the host's
+// state, each with the code the page reads.
+func TestMapDNSErrorCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{&netx.DNSPolicyRefusal{Code: "dns_private_name_public_upstream", Reason: "refused"}, "dns_private_name_public_upstream"},
+		{&netx.DNSPolicyRefusal{Code: "dns_private_name_unknown_forwarding", Reason: "acknowledge"}, "dns_private_name_unknown_forwarding"},
+		{&netx.UpstreamError{Reason: "did not answer"}, "dns_upstream_unreachable"},
+	} {
+		var apiErr *httpx.APIError
+		if !errors.As(mapDNSError(tc.err), &apiErr) || apiErr.Status != http.StatusConflict || apiErr.Code != tc.code {
+			t.Fatalf("%v mapped to %+v", tc.err, apiErr)
+		}
 	}
 }

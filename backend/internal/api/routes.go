@@ -65,6 +65,7 @@ func (s *Server) Routes() http.Handler {
 			// certificate, and the only way to become that hub is /agent/enrol.
 			s.mountAgentRoutes(r)
 		} else {
+			s.mountNetworkVantageMachineRoutes(r)
 			r.Group(func(r chi.Router) {
 				r.Use(s.loginLim.Middleware)
 				r.Use(httpx.AuditMutations(s.Audit))

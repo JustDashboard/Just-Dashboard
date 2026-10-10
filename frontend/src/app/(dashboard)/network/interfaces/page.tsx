@@ -17,6 +17,11 @@ import { DeviceList, GROUPS } from "@/components/network/interfaces/device-list"
 import { DeviceSheet } from "@/components/network/interfaces/device-sheet"
 import { CreateDevice } from "@/components/network/interfaces/create-device"
 import { Namespaces } from "@/components/network/interfaces/namespaces"
+import {
+  NamespaceSheet,
+  type NamespaceTarget,
+} from "@/components/network/interfaces/namespace-sheet"
+import { Notice } from "@/components/state"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 
 /**
@@ -57,6 +62,7 @@ function Interfaces() {
   const [everything, setEverything] = useState(false)
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState<string | undefined>(() => params.get("device") ?? undefined)
+  const [inspecting, setInspecting] = useState<NamespaceTarget>()
   const [creating, setCreating] = useState(() => params.get("create") !== null)
   useEffect(() => {
     if (params.get("device") || params.get("create") !== null) {
@@ -74,11 +80,44 @@ function Interfaces() {
   )
   const hidden = withRates.filter((l) => GROUPS.some((g) => g.everythingOnly && g.match(l))).length
   const chosen = withRates.find((l) => l.name === open)
+  const unjoined = withRates.filter((l) => l.dockerJoin)
+  const unjoinedReasons = [...new Set(unjoined.map((l) => l.dockerJoinReason ?? ""))].filter(
+    Boolean,
+  )
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Interfaces" />
-      {links.data && <NetworkReadWarning error={links.error} refresh={links.refresh} />}
+      {links.data && (
+        <NetworkReadWarning
+          error={links.error}
+          refresh={links.refresh}
+          lastSuccess={links.lastSuccess}
+        />
+      )}
+      {live.error && live.now > 0 && (
+        <NetworkReadWarning
+          error={live.error}
+          refresh={live.refresh}
+          lastSuccess={live.lastSuccess}
+          reading="live throughput"
+        />
+      )}
+      {unjoined.length > 0 && (
+        <Notice
+          tone="warning"
+          title={`${plural(unjoined.length, "Docker device")} not joined to a container or network`}
+        >
+          <ul className="flex flex-col gap-1">
+            {unjoinedReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          <p className="mt-1">
+            Their rows say so under Containers in Everything; nothing about them is guessed.
+          </p>
+        </Notice>
+      )}
       <Toolbar>
         <FilterChip selected={!everything} onClick={() => setEverything(false)}>
           Real devices
@@ -121,13 +160,32 @@ function Interfaces() {
         />
       )}
 
-      {namespaces.error && <ErrorState error={namespaces.error} onRetry={namespaces.refresh} />}
+      {namespaces.data ? (
+        <NetworkReadWarning
+          error={namespaces.error}
+          refresh={namespaces.refresh}
+          lastSuccess={namespaces.lastSuccess}
+          reading="namespaces"
+        />
+      ) : (
+        namespaces.error && <ErrorState error={namespaces.error} onRetry={namespaces.refresh} />
+      )}
       <Namespaces
         namespaces={namespaces.data}
         links={withRates}
         onChanged={() => {
           namespaces.refresh()
           links.refresh()
+        }}
+        onOpen={(ns) => setInspecting({ kind: ns.kind, name: ns.name })}
+      />
+      <NamespaceSheet
+        target={inspecting}
+        links={withRates}
+        onOpenChange={(next) => !next && setInspecting(undefined)}
+        onOpenDevice={(name) => {
+          setInspecting(undefined)
+          setOpen(name)
         }}
       />
 
@@ -139,6 +197,10 @@ function Interfaces() {
         open={!!chosen}
         onOpenChange={(next) => !next && setOpen(undefined)}
         onChanged={links.refresh}
+        onOpenNamespace={(kind, name) => {
+          setOpen(undefined)
+          setInspecting({ kind, name })
+        }}
       />
       <CreateDevice
         open={creating && admin}

@@ -1,0 +1,150 @@
+{
+  "at": "2026-10-10T01:24:36Z",
+  "bootId": "339fec2c-236b-4273-9a32-a9c259007286",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          1,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "339fec2c-236b-4273-9a32-a9c259007286",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:24:29 UTC",
+        "invocationId": "058a11e8c1f9453db6ebdcadcfc38d4a",
+        "reason": "The measured activation or one of its commands failed, including commands whose errors the unit ignores.",
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:24:29 UTC",
+        "status": "failed"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "link:jdvmdum0",
+          "reason": "The saved managed device is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "address:jdvmdum1/10.232.2.1/24",
+          "reason": "The saved managed address is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "route:2",
+          "reason": "The saved managed route is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "shaping:jdvmbr0",
+          "reason": "shaping differs from the saved configuration: jdvmbr0 has \"noqueue\" as its queue after setting \"cake\"",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:link:jdvmdum0",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:address:jdvmdum1/10.232.2.1/24",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:route:2",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:shaping:jdvmbr0",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "notMatching": {
+      "address:jdvmdum1/10.232.2.1/24": "missing",
+      "link:jdvmdum0": "missing",
+      "route:2": "missing",
+      "shaping:jdvmbr0": "drift"
+    }
+  },
+  "failures": [],
+  "phase": "p7-runtime-drift",
+  "result": "pass",
+  "seconds": 3.1
+}

@@ -1,0 +1,9 @@
+=== RUN   TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables
+--- PASS: TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables (5.50s)
+=== RUN   TestLiveUFWChangesAreRestoredByTheJournal
+--- PASS: TestLiveUFWChangesAreRestoredByTheJournal (9.01s)
+=== RUN   TestLiveRoutingMaturity
+--- PASS: TestLiveRoutingMaturity (4.74s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	19.286s
+JD_NETNS_LIVE=1 timeout 400 go test ./internal/netx/ -run  -count=1 -v  4.61s user 6.04s system 51% cpu 20.682 total

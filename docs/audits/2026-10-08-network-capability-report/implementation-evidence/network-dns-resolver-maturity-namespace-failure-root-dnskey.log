@@ -1,0 +1,73 @@
+=== RUN   TestDNSResolverMaturityNativeDisposable
+    dns_verify_live_test.go:58: native resolver maturity fixture: exit status 1
+        === RUN   TestDNSResolverMaturityNativeDisposable
+            dns_verify_live_test.go:550: strict DoT apply verified: 5 checks, restarts=1
+            dns_verify_live_test.go:562: opportunistic DoT fallback reported as a warning
+            dns_verify_live_test.go:581: wrong TLS identity rolled back with the previous drop-in restored
+            dns_verify_live_test.go:598: an overriding later drop-in failed the read-back and was rolled back
+            dns_verify_live_test.go:614: independent TLS check trusted 2 servers
+            dns_verify_live_test.go:622: public chain = &{Name:www.example StartedAt:2026-10-09 15:06:01.030799863 +0000 UTC EndedAt:2026-10-09 15:06:01.317815066 +0000 UTC Owner:systemd-resolved OwnerVersion:systemd 257 (257.4-1ubuntu3.2) PolicyMatch:longest suffix: 0 labels PolicyStable:true Levels:[{Zone:www.example Role:not_apex Scope:global DNSKEY:{State:absent Records:0 Detail:} DS:{State:not_asked Records:0 Detail:} Keys:[] Links:[] Link:not_checked Detail:No DNSKEY records: not a zone apex.} {Zone:example Role:apex Scope:global DNSKEY:{State:authenticated Records:1 Detail:} DS:{State:authenticated Records:1 Detail:} Keys:[{KeyTag:24838 Algorithm:15 Flags:257 SEP:true}] Links:[{KeyTag:24838 Algorithm:15 DigestType:2 Digest:b025dea09f3d03ef4cd0f4f93d79ddc6f7d734306d9304f3017ff3d8118b8968 Matched:true MatchedKey:0x22b6096989a0 Supported:true}] Link:digest_match Detail:A DS digest recomputed here from this zone's DNSKEY matches the parent's DS record.} {Zone:. Role:unavailable Scope:global DNSKEY:{State:validation_failed Records:0 Detail:Call failed: DNSSEC validation failed: no-signature} DS:{State:not_asked Records:0 Detail:} Keys:[] Links:[] Link:not_checked Detail:Call failed: DNSSEC validation failed: no-signature}] Verdict:broken Summary:.: Call failed: DNSSEC validation failed: no-signature Questions:4 Error: Limitations:[RRSIG signatures are verified only by systemd-resolved: it refuses explicit RRSIG questions, so this check recomputes DS digests and compares root keys with the IANA anchors, but does not verify signatures itself. An absent DS set is reported as resolved returned it; its API does not say whether the absence itself was proven by NSEC/NSEC3. Ancestors outside the name's own policy scope are not asked, so a private zone's chain may end at its local trust anchor or at the edge of its scope. Answers are fresh network data from the identified resolver; local trust anchors, negative trust anchors and the resolver's own configuration files are not read.]} <nil>
+                resolved log tail:
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                dnspriv0: Bus client set DNS server list to: 127.0.0.2#resolver.fixture.example
+                dnspriv0: Bus client set search domain list to: ~corp.example
+                dnspriv0: Bus client set default route setting: no
+                dnspriv0: Bus client set DNSOverTLS setting: yes
+                dnspriv0: Bus client set DNSSEC setting: yes
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Using degraded feature set UDP+EDNS0+DO instead of TLS+EDNS0+DO for DNS server 127.0.0.4.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 jjTdGuhHDgotmZ6xe4uwh0Su+XzFkdUAdTkmwq014tc=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 25302
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                DNSSEC validation failed for question . IN DS: no-signature
+                DNSSEC validation failed for question . IN DNSKEY: no-signature
+        --- FAIL: TestDNSResolverMaturityNativeDisposable (14.61s)
+        FAIL
+--- FAIL: TestDNSResolverMaturityNativeDisposable (14.63s)
+FAIL

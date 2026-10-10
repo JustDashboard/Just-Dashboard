@@ -29,7 +29,8 @@ Attention uses local rules and measurements, with no AI model, API key or paid s
 configuration remedies can be previewed and applied, with Compose changes kept in their owning file.
 Missing evidence is reported instead of treated as a passed check.
 
-It manages exactly one machine. There is no fleet view, no agents to enrol, no cluster.
+It manages exactly one machine. Optional rootless probe agents can report scoped DNS/TCP/TLS
+measurements from controlled sources; they cannot manage a host. There is no fleet view or cluster.
 
 ## What it does
 
@@ -63,16 +64,59 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 - **The server as a router, drawn live.** Its devices, tunnels and Docker networks as one topology
   whose wires move with their traffic; bridges, VLANs, VXLAN and GRE tunnels and network namespaces
   made in a form; IPv4/IPv6 routing tables and policy rules applied, checked against the path back to
-  your browser and taken back if they would cut you off; port forwarding and NAT that admit their own
+  your browser and taken back if they would cut you off; monitored egress groups that fail over
+  between gateways or owned tunnels on measured latency, loss and failure with hysteresis, recorded
+  decisions and a namespace simulation before any automation; port forwarding and NAT that admit their own
   traffic past ufw and Docker; rate limits, country and feed blocklists and the kernel's DDoS-related
   settings; per-device speed limits and BBR; a WireGuard server in one step with a QR code per phone,
   site-to-site peers and an exit node; Tailscale's exit node and subnet routes; the resolver's
   upstreams, DNS over TLS and ad-blocking presets; and traffic per device, program and container.
+  Administrator Socket History keeps bounded observations with capped retention and exact JSON
+  export. Its optional fixed kernel observer needs an explicit opt-in and reports TCP/UDP transport
+  byte subtotals, short socket events and coverage gaps; it does not resume automatically after restart.
   Twenty-six diagnostics include route and path-MTU checks, bounded packet snapshots, Wake-on-LAN
   and host prerequisites, with an IPv4/IPv6 subnet
   calculator. The [complete networking inventory and compatibility boundaries](docs/audits/2026-10-08-network-audit/README.md)
   explain supported controls and external requirements. Managed network configuration is restored
-  at boot by a unit of its own, with or without the dashboard.
+  at boot by a unit of its own, with or without the dashboard. Managed changes retain a durable undo
+  journal and use independent host recovery when systemd is available; the Network overview reports
+  apply, save and recovery phases. Covered interactive changes can require a fresh dashboard
+  reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets
+  and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
+  configured resolver chain, checking native split policy when supported and reporting unknowns
+  for other paths; direct comparisons require named destinations and a disclosure acknowledgment,
+  and can use DNS over TLS and the DNSSEC OK bit. A private name is not sent to a public resolver by
+  the default test, and a configured private resolver whose forwarding is unseen needs an explicit
+  acknowledgment. The DNS page names who writes `/etc/resolv.conf` on the host (systemd-resolved,
+  NetworkManager, resolvconf, netconfig, dhcpcd, Tailscale and others) and where a change is made
+  instead; edits a link's split DNS through its native profile with temporary apply; shows the
+  checks an upstream change is held to before applying it and each result after, rolling back when
+  a required one fails; checks configured DNS-over-TLS certificates; traces a name's DNSSEC chain;
+  previews host-record overlaps and checks local resolution after saving.
+  Administrators can connect supported native AdGuard Home, Pi-hole or Technitium engines read-only
+  by default, inspect their separate configured/runtime evidence and review supported policy changes.
+  A detected AdGuard Home, Pi-hole or Technitium hands off to its connection, or opens the connection
+  form with its loopback origin, and connections read the engine's DHCP ranges and leases read-only.
+  Native filter readings show redacted subscription origins, custom-rule metadata and native group
+  memberships. Failed reads retain dated evidence; configured counts do not prove client filtering.
+  Reviewed controls include exact A/AAAA local overrides, supported unsigned Technitium primary-zone
+  records with explicit TTL, and existing Pi-hole client group assignments, including no memberships.
+  Custom-domain reviews distinguish AdGuard domain-and-subdomain rules from Pi-hole exact-domain
+  rules, retaining native group memberships and unselected policy without claiming client filtering.
+  Unsupported records remain visible; fresh selected native policy is checked before apply.
+  Optional owned DNS setup reviews an already cached pinned image and exact loopback-only resources;
+  creation and removal are separately confirmed, and removal includes both persistent data volumes.
+  Retained outcomes remain inspectable after uncertainty; the dashboard does not replay an apply.
+  Existing native profiles expose owner, saved intent and current evidence separately. The
+  [native profile adapter and its current limits](docs/internal/backend/network-native-managers.md)
+  describe conservative L3 editing, durable terminal cleanup, verified Ubuntu Netplan/NetworkManager
+  origin recovery, direct DHCPv4/SLAAC acquisition and bounded authored Netplan automatic-policy
+  preservation. Structural editing, broader native policies and host reboot still await acceptance.
+  Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
+  measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
+  outcomes across restarts; Drift compares
+  owned saved, rendered and runtime state with measured unit activation. Reviewed selected owned
+  repairs require temporary apply and reconnect confirmation; wider native repairs remain advisory.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with
@@ -322,7 +366,7 @@ and changing accounts or settings are `admin`'s, and deleting a whole database a
 | **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
 | **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
 | **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
-| **Network** | Topology, interfaces and namespaces, routing and policy rules, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
+| **Network** | Topology, interfaces and namespaces, routing and policy rules, monitored egress groups with simulated failover, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, source-scoped investigation, saved diagnostic runs, bounded private packet captures, drift review and selected owned repair, address planning, controlled external checks, opt-in socket history, download SQM, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
 | **Security** | A verdict on the host: exposure, sshd (with a jump-host profile), fail2ban, CrowdSec and Suricata where they run, logins and who is attacking. |
 | **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |
 | **Updates** | The dashboard updates itself in one click; host packages on apt, dnf, yum, zypper, pacman or apk. |

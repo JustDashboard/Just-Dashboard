@@ -1,0 +1,6 @@
+=== RUN   TestLiveQueueOwnershipAndAppliedParameters
+    shaping_inspect_live_test.go:61: restored map[drop_batch:64 ecn:true flows:1024 interval:99998 limit:2048 memory_limit:33554432 quantum:1514 target:6998], was map[drop_batch:64 ecn:true flows:1024 interval:99999 limit:2048 memory_limit:33554432 quantum:1514 target:6999]
+--- FAIL: TestLiveQueueOwnershipAndAppliedParameters (0.44s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.468s
+FAIL

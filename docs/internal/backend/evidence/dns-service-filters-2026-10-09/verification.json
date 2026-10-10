@@ -1,0 +1,163 @@
+{
+  "base": "6ebbf2d744c2680e5b163e9010b97e1659275f4d",
+  "final_product_source": "dab8f9d7ee66d9b455e677317c2f0499e1032028",
+  "original_artifacts": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-artifacts",
+  "copy_hashes": {
+    "filter-native-runner.py": {
+      "sha256": "b12c6e25f5f4f11939e6f02d8febfbf9cd541448572b141acfd5cab5e29cb247",
+      "bytes": 3530,
+      "copy": "byte_identical"
+    },
+    "filter-native-runner-corrected.py": {
+      "sha256": "ffb0d67a2b58948d7c8229981f25ef4a4a4e529ef8d0b480a87cd3851c6f62f3",
+      "bytes": 3610,
+      "copy": "byte_identical"
+    },
+    "filter-race-pinned-null.log": {
+      "sha256": "6d2c34b61a92da760173bd76ca5f46ecd4c16a93807ea62df8a8173ec08f70a0",
+      "bytes": 3122,
+      "copy": "byte_identical"
+    },
+    "filter-api-race-final.log": {
+      "sha256": "4186697b7aff726e89112ef714e880db5fb28a4dbe45656fe162bb4954824088",
+      "bytes": 203,
+      "copy": "byte_identical"
+    },
+    "test-changed-pinned-null.log": {
+      "sha256": "ceb98adb7a5017a94fd21d6a33b7224b0f620481df78de212a8cd28af5ec2adb",
+      "bytes": 256,
+      "copy": "byte_identical"
+    },
+    "native-adguard.log": {
+      "sha256": "d38f4fb6da00550d9df6e5b84ff73a2a746693e13fe7cad575149df5e4fc81c3",
+      "bytes": 1825,
+      "copy": "byte_identical"
+    },
+    "native-adguard.source-binary.json": {
+      "sha256": "dfe7ff544fee7cba2331c41f4bea9e0bd50008cadc0fad7eef5bda9498a9e29e",
+      "bytes": 220667,
+      "copy": "byte_identical"
+    },
+    "native-adguard.result.json": {
+      "sha256": "98490a0b5e01a672c9ebe0c61537fb1f1dd6ab89b9dda4b397f9a72f948ccc0f",
+      "bytes": 663,
+      "copy": "byte_identical"
+    },
+    "native-adguard-corrected.log": {
+      "sha256": "cbba095a7cf959e905c1db48f4786986a584285431c6d80caf76cf3443c29a48",
+      "bytes": 3103,
+      "copy": "byte_identical"
+    },
+    "native-adguard-corrected.source-binary.json": {
+      "sha256": "c6d083ca34edf650ca7237c4fcb3b03ebeb99d1e18add5bca3371cc5687d2695",
+      "bytes": 220764,
+      "copy": "byte_identical"
+    },
+    "native-adguard-corrected.result.json": {
+      "sha256": "1255d9cee4d30d580fd861ca72c3607e23d252d6a574ddbbfb78a2126ec25019",
+      "bytes": 665,
+      "copy": "byte_identical"
+    },
+    "native-pihole-corrected.log": {
+      "sha256": "4ad51f78bd1342ee5257612a58bfaf9b0ed087f96dbf13751b8c4db1770ff4dd",
+      "bytes": 2311,
+      "copy": "byte_identical"
+    },
+    "native-pihole-corrected.source-binary.json": {
+      "sha256": "bb356c9b8425db5890d22cb7384f75492275765ebc00067d4ce8e9ce9533b30f",
+      "bytes": 220763,
+      "copy": "byte_identical"
+    },
+    "native-pihole-corrected.result.json": {
+      "sha256": "a904da48aee2ca312570043026589a8f6e9e624f0441016c73d174a6c0604c4e",
+      "bytes": 664,
+      "copy": "byte_identical"
+    },
+    "native-technitium-corrected.log": {
+      "sha256": "5d72f2687274d5bf96d2aa9b8ef4aebd0c342a89bb3c455ff902d55a958938bb",
+      "bytes": 1920,
+      "copy": "byte_identical"
+    },
+    "native-technitium-corrected.source-binary.json": {
+      "sha256": "7c85b4d47669dcac77cb0f320103ed6fa8e72c2ff1ed191af7047aa3a3990312",
+      "bytes": 220767,
+      "copy": "byte_identical"
+    },
+    "native-technitium-corrected.result.json": {
+      "sha256": "0de8e816eef0f11942de8181766447ae7294dc35da45362d3f7fad25f7b9e534",
+      "bytes": 668,
+      "copy": "byte_identical"
+    }
+  },
+  "verification": {
+    "native-adguard": {
+      "source": "b0f803b235a2ccfff6c10f85511578bcf7b2c819",
+      "backend_go_files_verified": 1858,
+      "dependency_files_verified": [
+        "backend/go.mod",
+        "backend/go.sum"
+      ],
+      "source_hash_mismatches": [],
+      "binary_hash_verified": true,
+      "raw_hash_verified": true,
+      "child_seconds": 8.76,
+      "selection_current_read_count": 0,
+      "no_skip": true,
+      "cleanup_verified": true,
+      "host_unchanged": true
+    },
+    "native-adguard-corrected": {
+      "source": "dab8f9d7ee66d9b455e677317c2f0499e1032028",
+      "backend_go_files_verified": 1858,
+      "dependency_files_verified": [
+        "backend/go.mod",
+        "backend/go.sum"
+      ],
+      "source_hash_mismatches": [],
+      "binary_hash_verified": true,
+      "raw_hash_verified": true,
+      "child_seconds": 37.79,
+      "selection_current_read_count": 8,
+      "no_skip": true,
+      "cleanup_verified": true,
+      "host_unchanged": true
+    },
+    "native-pihole-corrected": {
+      "source": "dab8f9d7ee66d9b455e677317c2f0499e1032028",
+      "backend_go_files_verified": 1858,
+      "dependency_files_verified": [
+        "backend/go.mod",
+        "backend/go.sum"
+      ],
+      "source_hash_mismatches": [],
+      "binary_hash_verified": true,
+      "raw_hash_verified": true,
+      "child_seconds": 71.43,
+      "selection_current_read_count": 12,
+      "no_skip": true,
+      "cleanup_verified": true,
+      "host_unchanged": true
+    },
+    "native-technitium-corrected": {
+      "source": "dab8f9d7ee66d9b455e677317c2f0499e1032028",
+      "backend_go_files_verified": 1858,
+      "dependency_files_verified": [
+        "backend/go.mod",
+        "backend/go.sum"
+      ],
+      "source_hash_mismatches": [],
+      "binary_hash_verified": true,
+      "raw_hash_verified": true,
+      "child_seconds": 13.37,
+      "selection_current_read_count": 8,
+      "no_skip": true,
+      "cleanup_verified": true,
+      "host_unchanged": true
+    }
+  },
+  "test_attribution": {
+    "filter-race-pinned-null.log": "Corrected final product content: DNS filter races, PASS 6.021s.",
+    "filter-api-race-final.log": "Original product phase: private API race, PASS 3.961s. API source/test byte-identical in corrected product; corrected required gate also retests API.",
+    "test-changed-pinned-null.log": "Corrected final product content: required scoped build/vet/API and DNS tests, exit 0; 0.431s and 0.502s."
+  }
+}

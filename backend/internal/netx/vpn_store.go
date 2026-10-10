@@ -43,8 +43,11 @@ type VPNClient struct {
 	// HasConfig is a sealed configuration that has not been forgotten.
 	HasConfig bool
 	Config    string
-	CreatedBy string
-	CreatedAt time.Time
+	// ClientRoutes is a device's own AllowedIPs, comma separated, as last
+	// generated; empty when unknown.
+	ClientRoutes string
+	CreatedBy    string
+	CreatedAt    time.Time
 }
 
 // Save stores a client with its configuration sealed and returns its id,
@@ -58,9 +61,9 @@ func (v *VPNStore) Save(ctx context.Context, c VPNClient, config string) (int64,
 		c.CreatedAt = time.Now()
 	}
 	res, err := v.db.ExecContext(ctx,
-		`INSERT INTO network_vpn_clients (iface, public_key, name, kind, address, config_sealed, created_by, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.Iface, c.PublicKey, c.Name, c.Kind, c.Address, sealed, c.CreatedBy, c.CreatedAt.Unix())
+		`INSERT INTO network_vpn_clients (iface, public_key, name, kind, address, config_sealed, created_by, created_at, client_routes)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.Iface, c.PublicKey, c.Name, c.Kind, c.Address, sealed, c.CreatedBy, c.CreatedAt.Unix(), c.ClientRoutes)
 	if err != nil {
 		return 0, fmt.Errorf("storing the client: %w", err)
 	}
@@ -77,9 +80,9 @@ func (v *VPNStore) Get(ctx context.Context, iface string, id int64) (VPNClient, 
 		created int64
 	)
 	err := v.db.QueryRowContext(ctx,
-		`SELECT id, iface, public_key, name, kind, address, config_sealed, created_by, created_at
+		`SELECT id, iface, public_key, name, kind, address, config_sealed, created_by, created_at, client_routes
 		   FROM network_vpn_clients WHERE iface = ? AND id = ?`, iface, id).
-		Scan(&c.ID, &c.Iface, &c.PublicKey, &c.Name, &c.Kind, &c.Address, &sealed, &c.CreatedBy, &created)
+		Scan(&c.ID, &c.Iface, &c.PublicKey, &c.Name, &c.Kind, &c.Address, &sealed, &c.CreatedBy, &created, &c.ClientRoutes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VPNClient{}, fmt.Errorf("client %d of %s: %w", id, iface, ErrNotFound)
 	}
@@ -101,6 +104,25 @@ func (v *VPNStore) Get(ctx context.Context, iface string, id int64) (VPNClient, 
 func (v *VPNStore) Forget(ctx context.Context, iface string, id int64) error {
 	res, err := v.db.ExecContext(ctx,
 		`UPDATE network_vpn_clients SET config_sealed = '' WHERE iface = ? AND id = ?`, iface, id)
+	return vpnAffectedOne(res, err, iface, id)
+}
+
+// Update replaces a client's name and, when config is not empty, its sealed
+// configuration and recorded routes. A forgotten configuration stays
+// forgotten: an edit never brings a private key back.
+func (v *VPNStore) Update(ctx context.Context, iface string, id int64, name, config, routes string) error {
+	if config == "" {
+		res, err := v.db.ExecContext(ctx,
+			`UPDATE network_vpn_clients SET name = ? WHERE iface = ? AND id = ?`, name, iface, id)
+		return vpnAffectedOne(res, err, iface, id)
+	}
+	sealed, err := v.seal(config)
+	if err != nil {
+		return fmt.Errorf("sealing the client configuration: %w", err)
+	}
+	res, err := v.db.ExecContext(ctx,
+		`UPDATE network_vpn_clients SET name = ?, config_sealed = ?, client_routes = ? WHERE iface = ? AND id = ? AND config_sealed <> ''`,
+		name, sealed, routes, iface, id)
 	return vpnAffectedOne(res, err, iface, id)
 }
 
@@ -131,7 +153,7 @@ func (v *VPNStore) DeleteInterface(ctx context.Context, iface string) error {
 // List is a tunnel's clients, oldest first, without their configurations.
 func (v *VPNStore) List(ctx context.Context, iface string) ([]VPNClient, error) {
 	rows, err := v.db.QueryContext(ctx,
-		`SELECT id, iface, public_key, name, kind, address, config_sealed <> '', created_by, created_at
+		`SELECT id, iface, public_key, name, kind, address, config_sealed <> '', created_by, created_at, client_routes
 		   FROM network_vpn_clients WHERE iface = ? ORDER BY id`, iface)
 	if err != nil {
 		return nil, fmt.Errorf("listing the clients: %w", err)
@@ -143,7 +165,7 @@ func (v *VPNStore) List(ctx context.Context, iface string) ([]VPNClient, error) 
 			c       VPNClient
 			created int64
 		)
-		if err := rows.Scan(&c.ID, &c.Iface, &c.PublicKey, &c.Name, &c.Kind, &c.Address, &c.HasConfig, &c.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&c.ID, &c.Iface, &c.PublicKey, &c.Name, &c.Kind, &c.Address, &c.HasConfig, &c.CreatedBy, &created, &c.ClientRoutes); err != nil {
 			return nil, fmt.Errorf("reading a client: %w", err)
 		}
 		c.CreatedAt = time.Unix(created, 0)

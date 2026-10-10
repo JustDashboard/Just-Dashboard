@@ -235,6 +235,76 @@ export const crowdsec = {
       version: "v0.9.1",
     },
   ],
+  /** The server's verdict: the firewall bouncer pulled a minute ago and its set drops. */
+  enforcement: {
+    state: "enforcing",
+    summary:
+      "firewall-bouncer-nftables pulled 1 min ago; the kernel holds 7 addresses in crowdsec-blacklists-crowdsec, crowdsec-blacklists-cscli and a hooked rule drops them.",
+    bouncers: [
+      {
+        name: "caddy-bouncer",
+        kind: "proxy",
+        valid: true,
+        lastPull: iso(2),
+        pullAgeSeconds: 120,
+        fresh: true,
+      },
+      {
+        name: "firewall-bouncer-nftables",
+        kind: "firewall",
+        valid: true,
+        lastPull: iso(1),
+        pullAgeSeconds: 60,
+        fresh: true,
+        unit: "crowdsec-firewall-bouncer",
+        unitActive: true,
+      },
+    ],
+    kernel: {
+      backend: "nftables",
+      entries: 7,
+      sets: [
+        {
+          family: "ip",
+          table: "crowdsec",
+          name: "crowdsec-blacklists-crowdsec",
+          entries: 5,
+          dropped: true,
+          hooks: ["input"],
+        },
+        {
+          family: "ip",
+          table: "crowdsec",
+          name: "crowdsec-blacklists-cscli",
+          entries: 2,
+          dropped: true,
+          hooks: ["input"],
+        },
+      ],
+    },
+    checkedAt: iso(0),
+    freshness: "3m0s",
+    enforcedBy: ["firewall-bouncer-nftables", "caddy-bouncer"],
+  },
+}
+
+/** The same host after the firewall bouncer's table was flushed by a ruleset reload. */
+export const crowdsecFlushed = {
+  ...crowdsec,
+  enforcement: {
+    ...crowdsec.enforcement,
+    state: "degraded",
+    summary:
+      "firewall-bouncer-nftables is pulling decisions, but no CrowdSec set exists in the kernel, so nothing it pulled is dropped.",
+    kernel: { entries: 0, sets: [] },
+    enforcedBy: [],
+    missing: [
+      {
+        bouncer: "firewall-bouncer-nftables",
+        reason: "no CrowdSec set exists in nftables or ipset",
+      },
+    ],
+  },
 }
 
 function alert(
@@ -400,6 +470,34 @@ export const suricata = {
   ],
   rulesLoaded: 47213,
   logPath: "/var/log/suricata/eve.json",
+  capture: {
+    at: iso(1),
+    uptimeSeconds: 7200,
+    kernelPackets: 1824113,
+    kernelDrops: 12,
+    decoderPackets: 1824101,
+  },
+  interfaces: { configured: ["eth0"], candidates: ["eth0", "ens4", "tailscale0"], editable: true },
+  rules: {
+    file: "/var/lib/suricata/rules/suricata.rules",
+    updatedAt: iso(60 * 26),
+    sources: ["et/open"],
+    updater: true,
+  },
+  inline: {
+    queues: [
+      {
+        source: "iptables-save",
+        chain: "FORWARD",
+        queue: "0",
+        bypass: false,
+        rule: "-A FORWARD -j NFQUEUE --queue-num 0",
+      },
+    ],
+    failOpen: false,
+    words:
+      "A queue rule without bypass drops what it queues whenever Suricata is not reading — a stopped or restarting Suricata then cuts that traffic, the dashboard's included if it is queued.",
+  },
 }
 
 /**
@@ -568,6 +666,111 @@ export const overview = {
   ],
 }
 
+/**
+ * The three engines folded by address, as `/security/blocks` answers for the
+ * jails, decisions and firewall above: the sshd jail and CrowdSec both hold
+ * 203.0.113.9, which also sits inside a /24 the firewall denies.
+ */
+export const blocks = {
+  distinct: 9,
+  duplicated: 2,
+  covered: 2,
+  communityOnly: 4,
+  truncated: false,
+  engines: [
+    { engine: "fail2ban", read: true, count: 2 },
+    { engine: "crowdsec", read: true, count: 7 },
+    { engine: "firewall", read: true, count: 1 },
+  ],
+  entries: [
+    {
+      value: "203.0.113.9",
+      range: false,
+      engines: ["crowdsec", "fail2ban"],
+      sources: [
+        { engine: "fail2ban", ref: "sshd" },
+        {
+          engine: "crowdsec",
+          ref: "11",
+          detail: "crowdsecurity/ssh-bf",
+          origin: "crowdsec",
+          until: until(3, 12),
+        },
+      ],
+      coveredBy: ["203.0.113.0/24"],
+    },
+    {
+      value: "198.51.100.4",
+      range: false,
+      engines: ["crowdsec", "fail2ban"],
+      sources: [
+        { engine: "fail2ban", ref: "sshd" },
+        {
+          engine: "crowdsec",
+          ref: "12",
+          detail: "crowdsecurity/ssh-slow-bf",
+          origin: "crowdsec",
+          until: until(1, 40),
+        },
+      ],
+    },
+    {
+      value: "192.0.2.77",
+      range: false,
+      engines: ["crowdsec"],
+      sources: [{ engine: "crowdsec", ref: "13", detail: "manual", origin: "cscli" }],
+    },
+    {
+      value: "203.0.113.0/24",
+      range: true,
+      engines: ["firewall"],
+      sources: [{ engine: "firewall", ref: "1", detail: "deny" }],
+    },
+  ],
+}
+
+/** The sshd jail's policy on a host whose sshd moved to 2222 while the ban still names ssh. */
+export const sshdPolicy = {
+  name: "sshd",
+  rule: "5 failures within 10 minutes earn a 2-hour ban",
+  values: [
+    { key: "bantime", running: "7200", dropIn: "7200" },
+    { key: "findtime", running: "600" },
+    { key: "maxretry", running: "5", dropIn: "3", drift: true },
+  ],
+  watches: { kind: "journal", match: "_SYSTEMD_UNIT=ssh.service + _COMM=sshd" },
+  actions: [
+    {
+      name: "iptables-multiport",
+      kind: "firewall",
+      enforces: true,
+      allPorts: false,
+      ports: ["ssh"],
+      words: "drops a banned address on ssh in the firewall",
+    },
+    {
+      name: "sendmail-whois",
+      kind: "report",
+      enforces: false,
+      allPorts: false,
+      words: "reports the ban and blocks nothing",
+    },
+  ],
+  coverage: { service: "sshd", listening: ["2222"], covered: [], uncovered: ["2222"] },
+  ignoreSelf: true,
+  ignoreIp: ["127.0.0.0/8", "::1"],
+  findings: [
+    {
+      level: "warning",
+      text: "maxretry is 5 in the running server and 3 in the drop-in, so a restart changes it.",
+    },
+    {
+      level: "critical",
+      text: "sshd listens on 2222, and the ban drops only ssh: a banned address keeps reaching sshd.",
+    },
+  ],
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -619,10 +822,24 @@ export async function mockIntrusion(
         return json(route, posture)
       case "/firewall/":
         return json(route, firewall)
+      case "/firewall/history":
+        return json(route, { events: [], limits: [] })
+      case "/firewall/access":
+        return json(route, { backend: "ufw", checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: "ufw", findings: [], checks: [] })
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/fail2ban/sshd/policy":
+        return json(route, sshdPolicy)
+      case "/security/blocks":
+        return json(route, blocks)
+      case "/security/boundary/check":
+        return json(route, { impacts: [] })
+      case "/network/changes/current":
+        return json(route, { available: false, owned: false, change: null })
       case "/security/crowdsec/":
         return json(route, crowdsec)
       case "/security/suricata/":

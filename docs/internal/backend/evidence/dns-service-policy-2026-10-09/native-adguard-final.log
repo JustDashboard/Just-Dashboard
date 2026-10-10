@@ -1,0 +1,7 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/adguard-7d718f6cf98a6cf133b950f86016ca29.log (6367 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/adguard-4053e1c0b22b5e3941c401d80dc114ed.log (2144 bytes)
+    provision_live_test.go:341: engine=adguard image=adguard/adguardhome@sha256:92929135ced2554aaf94706f766a98ad348f211df61b0704e2db7e8498cc00b7 nativeVersion=v0.107.71 UDP/TCP=owned-fixture.invalid owner=32387fd7cd9c07beebb772c0a165a33c nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (30.27s)
+PASS
+wrapper_elapsed=31.30 exit=0

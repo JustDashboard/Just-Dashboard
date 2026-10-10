@@ -1,0 +1,3 @@
+Against 40573e4d1fea9ace65df6aacb9fc71f115b1e2d1: 254 changed files.
+Checking formatting...
+All matched files use Prettier code style!

@@ -1,16 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { WGInterface } from "@/lib/types"
+import type { WGEndpointEvidence, WGInterface } from "@/lib/types"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { Field, FieldRow } from "@/components/form"
+import { Disclosure, Field, FieldRow } from "@/components/form"
 import { ProductGlyph } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { portProblem } from "../tools/tool-input"
+import { wireGuardIPv6Payload, wireGuardIPv6Problem } from "./ipv6-input"
+import { mtuProblem, networkList, resolversProblem } from "./record-logic"
+import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
+import type { IPAMReservation } from "@/lib/network-ipam"
 
 /** What a client is told to resolve names with: a public resolver, or one that also blocks ads. */
 const RESOLVERS = [
@@ -52,18 +56,76 @@ const RESOLVERS = [
  * resolver they are told to use. The server opens the port in the firewall
  * when the firewall would otherwise refuse it, and says so either way.
  */
-export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface) => void }) {
+export function WireGuardSetup({
+  onCreated,
+  initialReservationId,
+}: {
+  onCreated: (tunnel: WGInterface) => void
+  initialReservationId?: string
+}) {
+  const [name, setName] = useState("")
   const [endpoint, setEndpoint] = useState("")
   const [port, setPort] = useState("")
   const [subnet, setSubnet] = useState("")
   const [resolver, setResolver] = useState("cloudflare")
   const [exitNode, setExitNode] = useState(true)
+  const [ipv6, setIPv6] = useState(false)
+  const [subnet6, setSubnet6] = useState("")
+  const [exit6, setExit6] = useState(false)
+  const [mtu, setMtu] = useState("")
+  const [customDNS, setCustomDNS] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [reservations, setReservations] = useState<IPAMReservation[]>([])
+  // A consumed or detached link must not initialize this retained draft again.
+  const [detachedSeeds, setDetachedSeeds] = useState<string[]>([])
+  const activeSeed =
+    initialReservationId && !detachedSeeds.includes(initialReservationId)
+      ? initialReservationId
+      : ""
+  const detachSeed = useCallback(() => {
+    if (initialReservationId)
+      setDetachedSeeds((ids) =>
+        ids.includes(initialReservationId) ? ids : [...ids, initialReservationId],
+      )
+  }, [initialReservationId])
+  const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
+  const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
+  const selectReservation = useCallback(
+    (row: IPAMReservation | undefined, family: "inet" | "inet6") => {
+      detachSeed()
+      setReservations((rows) => [
+        ...rows.filter(
+          (existing) => existing.family !== family && (!row || existing.resource === row.resource),
+        ),
+        ...(row ? [row] : []),
+      ])
+      if (!row) return
+      if (name !== row.resource) {
+        setSubnet("")
+        setSubnet6("")
+        setIPv6(false)
+        setExit6(false)
+      }
+      setName(row.resource)
+      if (family === "inet") setSubnet(row.prefix)
+      else {
+        setIPv6(true)
+        setSubnet6(row.prefix)
+        setExit6(false)
+      }
+    },
+    [name, detachSeed],
+  )
   const portError = port ? portProblem(port) : undefined
+  const ipv6Error = ipv6 ? wireGuardIPv6Problem(subnet6) : undefined
+  const mtuError = mtuProblem(mtu)
+  const dnsError = resolversProblem(customDNS)
+  const custom = networkList(customDNS)
 
   const submit = async () => {
-    if (busy || portError) return
+    if (busy || portError || ipv6Error || mtuError || dnsError || activeSeed || ipamUnavailable)
+      return
     setBusy(true)
     setError(undefined)
     try {
@@ -71,21 +133,33 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         interface: WGInterface
         warnings: string[]
         firewall: { opened: boolean; reason?: string }
+        endpointEvidence?: WGEndpointEvidence
       }>("/network/vpn/wireguard", {
+        name: name.trim() || undefined,
         endpoint: endpoint.trim() || undefined,
         port: port ? Number(port.trim()) : undefined,
         subnet: subnet.trim() || undefined,
-        dns: RESOLVERS.find((r) => r.id === resolver)?.servers,
+        dns: custom.length ? custom : RESOLVERS.find((r) => r.id === resolver)?.servers,
+        mtu: mtu.trim() ? Number(mtu.trim()) : undefined,
         exitNode,
+        ipv6: wireGuardIPv6Payload(ipv6, subnet6, exitNode && exit6),
+        ...(reservations.length ? { ipamReservationIds: reservations.map((row) => row.id) } : {}),
       })
-      notify.success(`${made.interface.name} is up on udp ${made.interface.listenPort}`, {
-        description: made.firewall.opened
-          ? "The firewall now admits its port."
-          : made.firewall.reason,
-      })
+      notify.success(
+        `${made.interface.name} ${made.interface.up ? "is up" : "is configured"} on udp ${made.interface.listenPort}`,
+        {
+          description: [
+            made.firewall.opened ? "The firewall now admits its port." : made.firewall.reason,
+            made.endpointEvidence?.explanation,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        },
+      )
       for (const w of made.warnings) notify.warning(w)
       onCreated(made.interface)
     } catch (err) {
+      if (reservations.length) setIPAMRefreshKey((value) => value + 1)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -94,6 +168,33 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      <IPAMReservationPicker
+        open
+        owner="wireguard_server"
+        selected={reservations}
+        onSelect={selectReservation}
+        onUnavailable={setIPAMUnavailable}
+        initialId={activeSeed}
+        disabled={busy}
+        refreshKey={ipamRefreshKey}
+      />
+      <Field
+        label="Tunnel name"
+        htmlFor="wg-name"
+        hint="The first available native name when empty; a selected plan requires its exact name."
+      >
+        <Input
+          id="wg-name"
+          value={name}
+          onChange={(event) => {
+            detachSeed()
+            setName(event.target.value)
+            setReservations([])
+          }}
+          className="font-mono"
+          placeholder="wg0"
+        />
+      </Field>
       <ChoiceGrid columns={2}>
         <ChoiceCard
           verb="A VPN to browse through"
@@ -156,13 +257,77 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
           />
         </Field>
       </FieldRow>
+      <Field
+        label="IPv6 addressing"
+        hint="Opt in for new peers. Existing IPv4 client profiles stay unchanged."
+      >
+        <label className="flex h-9 items-center gap-2 text-body">
+          <Switch
+            checked={ipv6}
+            onCheckedChange={(value) => {
+              setIPv6(value)
+              if (!value) {
+                detachSeed()
+                setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+              }
+            }}
+            aria-label="IPv6 addressing"
+          />
+          {ipv6 ? "Dual stack" : "IPv4 only"}
+        </label>
+      </Field>
+      {ipv6 && (
+        <FieldRow>
+          <Field
+            label="IPv6 tunnel network"
+            htmlFor="wg-subnet6"
+            hint="A random unique-local /64 when empty; host and peer overlaps are refused"
+            error={ipv6Error}
+          >
+            <Input
+              id="wg-subnet6"
+              value={subnet6}
+              placeholder="fd42:8::/64"
+              onChange={(event) => {
+                detachSeed()
+                setSubnet6(event.target.value)
+                setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+              }}
+              aria-invalid={Boolean(ipv6Error)}
+              className="font-mono"
+            />
+          </Field>
+          <Field
+            label="IPv6 exit"
+            hint="NAT66 through the IPv6 uplink; requires both forwarding switches and verified rules"
+          >
+            <label className="flex h-9 items-center gap-2 text-body">
+              <Switch
+                checked={exitNode && exit6}
+                onCheckedChange={setExit6}
+                disabled={!exitNode}
+                aria-label="IPv6 exit"
+              />
+              {exitNode && exit6 ? "On" : "Off"}
+            </label>
+          </Field>
+        </FieldRow>
+      )}
+      <p className="text-hint text-muted-foreground">
+        Public endpoint and provider reachability need testing from another network. A generated
+        configuration does not establish them.
+      </p>
       <FieldRow>
         <Field label="Tunnel network" htmlFor="wg-subnet" hint="A /24 nothing here uses when empty">
           <Input
             id="wg-subnet"
             value={subnet}
             placeholder="10.8.0.0/24"
-            onChange={(event) => setSubnet(event.target.value)}
+            onChange={(event) => {
+              detachSeed()
+              setSubnet(event.target.value)
+              setReservations((rows) => rows.filter((row) => row.family !== "inet"))
+            }}
             className="font-mono"
           />
         </Field>
@@ -173,13 +338,64 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
           </label>
         </Field>
       </FieldRow>
+      <Disclosure
+        summary="Advanced"
+        facts={[mtu.trim() && `MTU ${mtu.trim()}`, custom.length > 0 && "own resolvers"]
+          .filter(Boolean)
+          .join(" · ")}
+      >
+        <FieldRow>
+          <Field
+            label="MTU"
+            htmlFor="wg-mtu"
+            hint="1420 when empty, which fits WireGuard over IPv6 on a 1500-byte link"
+            error={mtuError}
+          >
+            <Input
+              id="wg-mtu"
+              inputMode="numeric"
+              value={mtu}
+              placeholder="1420"
+              aria-invalid={Boolean(mtuError)}
+              onChange={(event) => setMtu(event.target.value)}
+            />
+          </Field>
+          <Field
+            label="Own resolvers"
+            htmlFor="wg-dns"
+            hint="Addresses clients are told to resolve with, in place of the choice above"
+            error={dnsError}
+          >
+            <Input
+              id="wg-dns"
+              value={customDNS}
+              placeholder="10.0.4.53, fd00::53"
+              aria-invalid={Boolean(dnsError)}
+              onChange={(event) => setCustomDNS(event.target.value)}
+              className="font-mono"
+            />
+          </Field>
+        </FieldRow>
+      </Disclosure>
       {error && (
         <p role="alert" className="animate-rise text-body text-destructive">
           {error}
         </p>
       )}
       <div className="flex justify-end">
-        <Button onClick={submit} pending={busy} disabled={busy || Boolean(portError)}>
+        <Button
+          onClick={submit}
+          pending={busy}
+          disabled={
+            busy ||
+            Boolean(portError) ||
+            Boolean(ipv6Error) ||
+            Boolean(mtuError) ||
+            Boolean(dnsError) ||
+            Boolean(activeSeed) ||
+            ipamUnavailable
+          }
+        >
           Set up WireGuard
         </Button>
       </div>

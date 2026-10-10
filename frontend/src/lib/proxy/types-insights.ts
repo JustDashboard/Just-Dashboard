@@ -62,7 +62,63 @@ export type UpstreamTarget = {
   detail?: string
 }
 
-export type UpstreamReport = { checkedAt: string; targets: UpstreamTarget[] }
+/**
+ * One server of an upstream pool: its options as written, the check's state
+ * (absent for one marked down) and what nginx's error logs said of it over
+ * the window, by kind.
+ */
+export type PoolMember = {
+  address: string
+  weight?: number
+  maxFails?: number
+  failTimeout?: string
+  backup?: boolean
+  down?: boolean
+  state?: UpstreamState
+  ms?: number
+  status?: number
+  owner?: string
+  detail?: string
+  /** Addresses a host name resolves to from here now. */
+  resolved?: string[]
+  /** refused, timeout, reset, closed, disabled (set aside after max_fails), other. */
+  failures?: Record<string, number>
+  lastFailure?: string
+}
+
+/**
+ * How nginx spreads one route's requests: `native` across an upstream
+ * block's servers, `native-dns` across the addresses one name resolved to,
+ * or `single`, one address whose spreading — a provider's balancer, a
+ * floating address — nginx cannot see.
+ */
+export type UpstreamPool = {
+  /** The upstream block's name; absent for a single endpoint. */
+  name?: string
+  kind: "http" | "stream"
+  sites: string[]
+  files: string[]
+  method?: string
+  keepalive?: number
+  balancing: "native" | "native-dns" | "single"
+  /** The managed balancer a single endpoint's host name suggests. */
+  provider?: string
+  members: PoolMember[]
+  verdict: "serving" | "degraded" | "on-backup" | "down" | "unknown"
+  /** Requests nginx had nowhere to send, every server set aside. */
+  noLive?: number
+}
+
+/** Which error logs the pools' failures were read from, and since when. */
+export type PoolEvidence = { since: string; logs: string[]; complete: boolean; note?: string }
+
+export type UpstreamReport = {
+  checkedAt: string
+  targets: UpstreamTarget[]
+  /** Absent from a backend that predates pools. */
+  pools?: UpstreamPool[]
+  evidence?: PoolEvidence
+}
 
 /**
  * Where an nginx site writes, read from its own file. A log is empty when the

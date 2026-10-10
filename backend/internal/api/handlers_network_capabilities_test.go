@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 )
 
@@ -45,5 +46,37 @@ func TestNetworkLANProbesRejectMalformedInputBeforeHostWork(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("%s = %d %s", body, w.Code, w.Body.String())
 		}
+	}
+}
+
+// The route lookup joins its kernel decision to the policy, firewall and NAT
+// layers of the same flow when a port is given, and the support probe now
+// reports capability probes beside binaries. Loopback keeps it on this host.
+func TestRouteLookupJoinsPathLayersAndSupportReportsProbes(t *testing.T) {
+	admin, _, _ := networkClients(t)
+	w := admin.do(http.MethodPost, "/api/v1/network/probe", `{"tool":"route","target":"127.0.0.1","port":22}`, nil)
+	var res netsec.ProbeResult
+	decodeNetworkBody(t, w.Body.Bytes(), &res)
+	if w.Code != http.StatusOK || res.Verdict == "" {
+		t.Fatalf("route = %d %s", w.Code, w.Body.String())
+	}
+	joined := false
+	for _, table := range res.Tables {
+		joined = joined || table.ID == "path"
+	}
+	for _, fact := range res.Facts {
+		joined = joined || fact.Label == "Policy, NAT and firewall layers"
+	}
+	if !joined {
+		t.Fatalf("route lookup with a port did not join the path layers: %+v", res)
+	}
+	w = admin.do(http.MethodPost, "/api/v1/network/probe", `{"tool":"capabilities"}`, nil)
+	decodeNetworkBody(t, w.Body.Bytes(), &res)
+	probes := false
+	for _, table := range res.Tables {
+		probes = probes || table.ID == "probes" && len(table.Rows) > 0
+	}
+	if !probes || res.Summary == "" {
+		t.Fatalf("support probe = %+v", res)
 	}
 }

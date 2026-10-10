@@ -1,0 +1,24 @@
+
+Running 17 tests using 1 worker
+
+(node:2532427) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/network-dns-filters.spec.ts:15:7 › adguard filter inventory reads on a read-only connection and keeps metadata provenance (1.9s)
+  ✓   2 [chromium] › tests/browser/network-dns-filters.spec.ts:15:7 › pihole filter inventory reads on a read-only connection and keeps metadata provenance (1.6s)
+  ✓   3 [chromium] › tests/browser/network-dns-filters.spec.ts:15:7 › technitium filter inventory reads on a read-only connection and keeps metadata provenance (1.5s)
+  ✓   4 [chromium] › tests/browser/network-dns-filters.spec.ts:63:5 › failed and native-unavailable filter refreshes retain prior rows, age and read-only retry (2.1s)
+  ✓   5 [chromium] › tests/browser/network-dns-filters.spec.ts:94:5 › partial unknown filter data replaces prior configured entries without an empty-policy count (1.9s)
+  ✓   6 [chromium] › tests/browser/network-dns-filters.spec.ts:134:5 › a refreshed connection generation clears old filters and refuses a mismatched response (1.8s)
+  ✓   7 [chromium] › tests/browser/network-dns-filters.spec.ts:154:5 › malformed private filter origins fail without displaying returned secrets (1.2s)
+  ✓   8 [chromium] › tests/browser/network-dns-filters.spec.ts:171:5 › reader accounts never request native filter metadata (839ms)
+  ✓   9 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › adguard native filter reading fits 390px (1.3s)
+  ✓  10 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › pihole native filter reading fits 390px (1.3s)
+  ✓  11 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › technitium native filter reading fits 390px (1.4s)
+  ✓  12 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › adguard native filter reading fits 1280px (1.6s)
+  ✓  13 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › pihole native filter reading fits 1280px (1.9s)
+  ✓  14 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › technitium native filter reading fits 1280px (1.6s)
+  ✓  15 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › adguard native filter reading fits 1720px (2.0s)
+  ✓  16 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › pihole native filter reading fits 1720px (1.8s)
+  ✓  17 [chromium] › tests/browser/network-dns-filters.spec.ts:180:9 › technitium native filter reading fits 1720px (1.7s)
+
+  17 passed (29.3s)

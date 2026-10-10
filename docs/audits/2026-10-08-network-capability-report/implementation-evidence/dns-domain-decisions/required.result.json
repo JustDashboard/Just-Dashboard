@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "scripts/test-changed.sh",
+    "17aeaae3"
+  ],
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-decision-restart-endpoint",
+  "environment": {
+    "GOTOOLCHAIN": "go1.26.8",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "TMPDIR": "/home/ubuntu/jd-de-t",
+    "JD_DNS_DOMAIN_DECISIONS_LIVE": "0",
+    "JD_DNS_SERVICES_LIVE_ENGINE": ""
+  },
+  "exit_code": 0,
+  "elapsed_seconds": 8.178,
+  "raw_sha256": "18d65de932822a0647143e8f23433787bfc6fbf1f17e23170cb44c342cf66de3",
+  "native_dispatch": false
+}

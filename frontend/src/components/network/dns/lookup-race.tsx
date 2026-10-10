@@ -2,10 +2,11 @@
 
 import { useAuth } from "@/hooks/use-auth"
 import { useMemo, useState } from "react"
-import { post } from "@/lib/api"
+import { ApiError, post } from "@/lib/api"
 import type { DNSLookup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Field } from "@/components/form"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import {
   InputGroup,
@@ -28,35 +29,59 @@ const REPLAY_MS = 1600
 
 const ms = (value: number) => (value < 10 ? value.toFixed(1) : String(Math.round(value)))
 
-/**
- * One name asked of the configured resolvers, with public presets only after
- * the reader opts in, which is why the form says where the name goes
- * before it is sent. The answer comes back as one response, and the rows are
- * let in by how long each took, so the fastest lands first and its bar is the
- * shortest — a race drawn from a measurement, not an animation of one that
- * did not happen. A row that failed has no bar, only why.
- *
- * Bars are scaled to the slowest *answer*: a resolver that timed out would
- * otherwise make every real latency a hairline.
- */
+/** The native policy is tested before the reader chooses direct comparison destinations. */
 export function LookupRace() {
   const { can } = useAuth()
-  const admin = can("system.admin")
+  const allowed = can("read")
   const [name, setName] = useState("")
   const [type, setType] = useState("A")
-  const [includePublic, setIncludePublic] = useState(false)
+  const [compare, setCompare] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const [acknowledgeDisclosure, setAcknowledgeDisclosure] = useState(false)
+  const [transport, setTransport] = useState<"classic" | "tls">("classic")
+  const [dnssec, setDNSSEC] = useState(false)
+  // A private name on a chain whose forwarding this page cannot see is asked
+  // only after the reader acknowledges it; the refusal says when.
+  const [forwarding, setForwarding] = useState<{ asked: boolean; acknowledged: boolean }>({
+    asked: false,
+    acknowledged: false,
+  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<DNSLookup>()
+
+  const destinations = result?.comparisonTargets ?? []
+  const ready =
+    allowed && name.trim() && !busy && (!compare || (selected.length > 0 && acknowledgeDisclosure))
+  const reset = () => {
+    setAcknowledgeDisclosure(false)
+    setForwarding({ asked: false, acknowledged: false })
+  }
 
   const submit = async () => {
     setBusy(true)
     setError(undefined)
     try {
       setResult(
-        await post<DNSLookup>("/network/dns/lookup", { name: name.trim(), type, includePublic }),
+        await post<DNSLookup>("/network/dns/lookup", {
+          name: name.trim(),
+          type,
+          mode: compare ? "compare" : "effective",
+          ...(compare
+            ? {
+                destinations: selected,
+                acknowledgeDisclosure,
+                ...(transport === "tls" ? { transport } : {}),
+                ...(dnssec ? { dnssec } : {}),
+              }
+            : forwarding.acknowledged
+              ? { acknowledgeForwarding: true }
+              : {}),
+        }),
       )
     } catch (err) {
+      if (err instanceof ApiError && err.code === "dns_private_name_unknown_forwarding")
+        setForwarding({ asked: true, acknowledged: false })
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -69,7 +94,7 @@ export function LookupRace() {
         className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-start"
         onSubmit={(event) => {
           event.preventDefault()
-          if (admin && name.trim() && !busy) void submit()
+          if (ready) void submit()
         }}
       >
         <Field
@@ -77,36 +102,41 @@ export function LookupRace() {
           htmlFor="lookup-name"
           error={error}
           hint={
-            !admin
-              ? "Running DNS diagnostics requires an administrator."
-              : includePublic
-                ? "This name is also sent to the public third-party resolvers in the presets above."
-                : "Sent only to this server's configured resolvers."
+            !allowed
+              ? "Running DNS diagnostics requires read access."
+              : compare
+                ? "This name is sent directly to each selected destination, including when it is private."
+                : "Uses the configured resolver chain. Native split-DNS is checked when supported; other paths are marked unknown."
           }
         >
           <InputGroup>
             <InputGroupInput
               id="lookup-name"
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                setName(event.target.value)
+                reset()
+              }}
               spellCheck={false}
               autoComplete="off"
               className="font-mono"
               placeholder={type === "PTR" ? "192.0.2.10" : "example.com"}
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <InputGroupButton
-                type="submit"
-                disabled={!admin || busy || !name.trim()}
-                pending={busy}
-              >
+              <InputGroupButton type="submit" disabled={!ready} pending={busy}>
                 Resolve
               </InputGroupButton>
             </InputGroupAddon>
           </InputGroup>
         </Field>
         <Field label="Record" htmlFor="lookup-type">
-          <Select value={type} onValueChange={setType}>
+          <Select
+            value={type}
+            onValueChange={(value) => {
+              setType(value)
+              reset()
+            }}
+          >
             <SelectTrigger id="lookup-type" className="w-full">
               <SelectValue />
             </SelectTrigger>
@@ -120,15 +150,125 @@ export function LookupRace() {
           </Select>
         </Field>
       </form>
-      <label className="flex items-center gap-3 text-body">
-        <Switch
-          aria-label="Include public resolvers"
-          checked={includePublic}
-          onCheckedChange={setIncludePublic}
-          disabled={!admin || busy}
-        />
-        Include public resolvers
-      </label>
+      <div className="flex min-w-0 flex-col gap-3">
+        {!compare && forwarding.asked && (
+          <label className="flex min-h-11 items-center gap-3 text-body">
+            <Checkbox
+              aria-label="Acknowledge unknown forwarding"
+              checked={forwarding.acknowledged}
+              disabled={busy}
+              onCheckedChange={(value) =>
+                setForwarding({ asked: true, acknowledged: value === true })
+              }
+            />
+            Send it to the configured resolver anyway; where that resolver forwards it is not
+            measured.
+          </label>
+        )}
+        <label className="flex min-h-11 items-center gap-3 text-body">
+          <Switch
+            aria-label="Compare named resolvers"
+            checked={compare}
+            onCheckedChange={(value) => {
+              setCompare(value)
+              reset()
+            }}
+            disabled={!allowed || busy}
+          />
+          Compare named resolvers
+        </label>
+        {compare && (
+          <div className="flex min-w-0 flex-col gap-3">
+            <p className="text-body text-muted-foreground">
+              Direct comparison bypasses split-DNS routing and host records. Each selected resolver
+              receives this name. Private LAN and VPN names may leave their intended scope.
+            </p>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] sm:items-end">
+              <Field label="Transport" htmlFor="lookup-transport">
+                <Select
+                  value={transport}
+                  onValueChange={(value) => {
+                    setTransport(value === "tls" ? "tls" : "classic")
+                    setAcknowledgeDisclosure(false)
+                  }}
+                >
+                  <SelectTrigger id="lookup-transport" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="classic">Classic DNS</SelectItem>
+                    <SelectItem value="tls">DNS over TLS</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <label className="flex min-h-11 items-center gap-3 text-body">
+                <Checkbox
+                  aria-label="Request DNSSEC records"
+                  checked={dnssec}
+                  disabled={busy}
+                  onCheckedChange={(value) => setDNSSEC(value === true)}
+                />
+                Request DNSSEC records (the DO bit)
+              </label>
+            </div>
+            {transport === "tls" && (
+              <p className="text-hint text-muted-foreground">
+                Each destination is asked over TLS and its certificate verified for the name it
+                publishes. A destination without one is listed as not asked.
+              </p>
+            )}
+            {destinations.length === 0 ? (
+              <p className="text-body text-muted-foreground">
+                Resolve with the effective policy first to load named destinations.
+              </p>
+            ) : (
+              <fieldset className="grid min-w-0 gap-x-6 sm:grid-cols-2">
+                <legend className="mb-2 text-body font-medium">Destinations</legend>
+                {destinations.map((destination) => (
+                  <label
+                    key={destination.server}
+                    className="flex min-h-11 min-w-0 items-center gap-3 text-body"
+                  >
+                    <Checkbox
+                      aria-label={`${destination.label} ${destination.server}`}
+                      checked={selected.includes(destination.server)}
+                      disabled={busy}
+                      onCheckedChange={(checked) => {
+                        setSelected((current) =>
+                          checked
+                            ? [...current, destination.server]
+                            : current.filter((server) => server !== destination.server),
+                        )
+                        setAcknowledgeDisclosure(false)
+                      }}
+                    />
+                    <span className="min-w-0 break-all">
+                      {destination.label}{" "}
+                      <span className="font-mono text-muted-foreground">{destination.server}</span>
+                      {transport === "tls" && (
+                        <span className="block text-hint text-muted-foreground">
+                          {destination.tlsName
+                            ? `TLS ${destination.tlsName}`
+                            : "no TLS identity: not asked over TLS"}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            <label className="flex min-h-11 items-center gap-3 text-body">
+              <Checkbox
+                aria-label="Acknowledge private-name disclosure"
+                checked={acknowledgeDisclosure}
+                disabled={busy || selected.length === 0}
+                onCheckedChange={(value) => setAcknowledgeDisclosure(value === true)}
+              />
+              I understand this name will be disclosed to the selected destinations.
+            </label>
+          </div>
+        )}
+      </div>
       {result && <Race result={result} />}
     </div>
   )
@@ -165,6 +305,13 @@ function Race({ result }: { result: DNSLookup }) {
           )}
         </p>
       </div>
+      {result.route && <p className="pt-3 text-body text-muted-foreground">{result.route}</p>}
+      {result.note && <p className="pt-2 text-hint text-muted-foreground">{result.note}</p>}
+      {result.omittedTargets?.map((destination, index) => (
+        <p key={`${destination.server}:${index}`} className="pt-2 text-hint text-muted-foreground">
+          {destination.label} {destination.server}: omitted — {destination.reason}
+        </p>
+      ))}
       <ol className="divide-y divide-hairline">
         {rows.map((row, rank) => {
           const landed = Math.min(row.latencyMs, REPLAY_MS) * 0.8
@@ -177,6 +324,15 @@ function Race({ result }: { result: DNSLookup }) {
               <div className="min-w-0">
                 <p className="truncate text-body font-medium">{row.label}</p>
                 <p className="truncate font-mono text-hint text-muted-foreground">{row.server}</p>
+                {row.transport && (
+                  <p className="truncate text-hint text-muted-foreground">
+                    {row.transport === "tls"
+                      ? `TLS ${row.tlsVersion ?? ""} · ${row.tlsName}`
+                      : row.transport.toUpperCase()}
+                    {row.authenticatedData !== undefined &&
+                      ` · AD ${row.authenticatedData ? "set" : "clear"} · ${row.signatures ?? 0} RRSIG`}
+                  </p>
+                )}
               </div>
               <div className="flex min-w-0 items-center gap-3">
                 <div

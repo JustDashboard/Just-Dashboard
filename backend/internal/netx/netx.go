@@ -108,9 +108,35 @@ type Service struct {
 	// gateway table may ever match.
 	trustedRanges []netip.Prefix
 
-	sampler *Sampler
-	vpn     *VPNStore
-	flows   *flowSampler
+	sampler   *Sampler
+	vpn       *VPNStore
+	wg        *wgRecord
+	flows     *flowSampler
+	telemetry *gatewayTelemetry
+	// forwardChecks are the last target checks, by forward id, kept for the
+	// page; they are measurements, not configuration.
+	checksMu            sync.Mutex
+	forwardChecks       map[int]ForwardCheck
+	latency             latencySampler
+	congestion          congestionReader
+	independentRecovery bool
+	recoveryInstalled   bool
+	// incidentMu serialises the Overview's concurrent readers folding their
+	// findings into the incident history.
+	incidentMu sync.Mutex
+	// history is the route observer's last reading (route_history.go).
+	history routeObserver
+	// forwardingSample is the last forwarded-datagram reading per family,
+	// which the next read turns into a rate (forwarding.go).
+	forwardingSample forwardingSamples
+	// egress measures and switches egress groups (egress_monitor.go).
+	egress *egressMonitor
+	// egressNetns is the namespace file member probes and connection
+	// tracking run in; empty is this process's own, the host's. Tests point
+	// it at a throwaway namespace, as egressNetnsRoot is where simulation
+	// namespaces are opened from (the host's /run/netns otherwise).
+	egressNetns     string
+	egressNetnsRoot string
 }
 
 // Paths are where the module reads and writes on the host. Tests point them
@@ -128,6 +154,10 @@ type Paths struct {
 	Hosts string
 	// WireGuard is wg-quick's configuration directory.
 	WireGuard string
+	// SSH is sshd's configuration directory. A pending SSH apply may journal
+	// only its main file, the dashboard's drop-in and the socket drop-in
+	// beside the boot unit.
+	SSH string
 }
 
 // DefaultPaths are the host's own.
@@ -139,6 +169,7 @@ func DefaultPaths() Paths {
 		Resolved:  "/etc/systemd/resolved.conf.d/90-just-dashboard.conf",
 		Hosts:     "/etc/hosts",
 		WireGuard: "/etc/wireguard",
+		SSH:       "/etc/ssh",
 	}
 }
 
@@ -158,6 +189,9 @@ type Options struct {
 	// per-interface history is kept at the same grain and for as long.
 	SampleEvery time.Duration
 	Retention   time.Duration
+	// IndependentRecovery installs this static executable on the host and
+	// arms a systemd timer before managed runtime changes.
+	IndependentRecovery bool
 }
 
 // New builds the module. It touches nothing on the host; Start begins the
@@ -167,29 +201,48 @@ func New(opts Options) *Service {
 		opts.Log = slog.Default()
 	}
 	s := &Service{
-		paths:         opts.Paths,
-		db:            opts.DB,
-		log:           opts.Log,
-		trustedRanges: operatorRanges(opts.Allowlist),
+		paths:               opts.Paths,
+		db:                  opts.DB,
+		log:                 opts.Log,
+		trustedRanges:       operatorRanges(opts.Allowlist),
+		independentRecovery: opts.IndependentRecovery,
 	}
 	// Gateway slice: the renderer reads a fetched blocklist's cache from here
 	// (gateway.go, gatewayListDir).
 	gatewayListDir = filepath.Join(opts.Paths.Dir, "lists")
 	s.sampler = newSampler(opts.DB, opts.Log, opts.SampleEvery, opts.Retention)
 	s.vpn = newVPNStore(opts.DB, opts.Seal, opts.Open)
+	s.wg = newWGRecord(opts.DB, opts.Log, opts.Retention)
 	s.flows = newFlowSampler()
+	s.telemetry = newGatewayTelemetry(opts.DB, opts.Log)
+	s.egress = newEgressMonitor(s, newEgressStore(opts.DB))
 	return s
 }
 
-// Start begins sampling interface counters. It returns once the first read
-// has been taken, so the first page load already has a rate to show.
+// Start begins sampling interface counters and WireGuard's peers. It returns
+// once the first interface read has been taken, so the first page load
+// already has a rate to show.
 func (s *Service) Start(ctx context.Context) {
+	if s.independentRecovery {
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		if err := RecoverNetwork(recovery, s.paths.Dir, "pending"); err != nil {
+			s.log.Error("network recovery needs attention", "err", err)
+		}
+		cancel()
+	}
 	s.sampler.Start(ctx)
+	s.wg.start(ctx)
+	s.telemetry.start(ctx)
+	s.egress.start(ctx)
 }
 
-// Stop ends the sampler.
+// Stop ends the samplers, the gateway counter recorder and the egress
+// monitor.
 func (s *Service) Stop() {
 	s.sampler.Stop()
+	s.wg.stopLoop()
+	s.telemetry.halt()
+	s.egress.halt()
 }
 
 // Sampler is the interface counter recorder, for the traffic routes.

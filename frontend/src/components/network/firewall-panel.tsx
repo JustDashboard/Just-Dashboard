@@ -6,6 +6,8 @@ import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   FirewallCheck,
+  ClockRewind,
+  ListOrdered,
   NetworkDevice,
   SecureConnection,
   LockClosed,
@@ -33,7 +35,19 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { FirewallPicture } from "@/components/network/firewall-picture"
+import {
+  FirewallAccessPanel,
+  FirewallEnforcement,
+  FirewallPreflightCheck,
+} from "@/components/network/firewall-access"
+import {
+  FirewallHistoryPanel,
+  FirewallPlanTray,
+  RuleHistorySheet,
+} from "@/components/network/firewall-changes"
+import { findingsByRule, rulePath, type StagedChange } from "@/components/network/firewall-reading"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,
@@ -77,6 +91,7 @@ export function FirewallPanel({
   posture,
   loading,
   error,
+  lastSuccess,
   refresh,
   onFix,
   handoff,
@@ -87,6 +102,7 @@ export function FirewallPanel({
   posture: Posture | undefined
   loading: boolean
   error: Error | undefined
+  lastSuccess?: number
   refresh: () => void
   onFix?: (finding: SecurityFinding) => void
 }) {
@@ -101,6 +117,9 @@ export function FirewallPanel({
   const setQuery = (q: string) => setFilters({ q })
   const admin = can("system.admin")
   const [handoffEdit, setHandoffEdit] = useState(handoff?.edit)
+  const [staged, setStaged] = useState<StagedChange[]>([])
+  const [historyRule, setHistoryRule] = useState<FirewallRule | null>(null)
+  const findings = useMemo(() => findingsByRule(status), [status])
 
   // ufw and firewalld both say "off" in words; iptables says nothing, and its
   // LOG rules are the operator's own, so only a firewall that says so is
@@ -179,15 +198,21 @@ export function FirewallPanel({
             confirm({
               title: enabled ? "Enable firewall" : "Disable firewall",
               confirmLabel: enabled ? "Enable" : "Disable",
-              description: enabled ? (
-                <p className="text-destructive">
-                  {status.backend} applies its default-deny policy immediately. If the port this
-                  dashboard listens on is not already allowed, you will lose access.
-                </p>
-              ) : (
-                <p className="text-destructive">
-                  Every rule stops being enforced and the host is left unfiltered.
-                </p>
+              description: (
+                <div className="space-y-3">
+                  {enabled ? (
+                    <p className="text-destructive">
+                      {status.backend} applies its default policy immediately. The server checks
+                      first that your connection, SSH and public ingress stay admitted, and puts the
+                      firewall back if the enforced rules say otherwise.
+                    </p>
+                  ) : (
+                    <p className="text-destructive">
+                      Every rule stops being enforced and the host is left unfiltered.
+                    </p>
+                  )}
+                  <FirewallPreflightCheck change={{ op: enabled ? "enable" : "disable" }} />
+                </div>
               ),
               action: async (c) => {
                 await post("/firewall/enabled", { enabled }, { confirm: c })
@@ -212,7 +237,7 @@ export function FirewallPanel({
     return (
       <>
         {header}
-        <ErrorState error={error} />
+        <ErrorState error={error} onRetry={refresh} />
       </>
     )
   }
@@ -220,6 +245,12 @@ export function FirewallPanel({
     return (
       <>
         {header}
+        <NetworkReadWarning
+          error={error}
+          refresh={refresh}
+          lastSuccess={lastSuccess}
+          reading="firewall state"
+        />
         <EmptyState
           icon={Shield}
           title="No firewall on this host"
@@ -255,11 +286,14 @@ export function FirewallPanel({
       title: "Deny inbound by default",
       confirmLabel: "Apply",
       description: (
-        <p className="text-destructive">
-          Everything not covered by an allow rule stops being reachable, including this dashboard if
-          no rule admits the port you are reading it on. The server refuses the change outright when
-          there is no inbound allow rule at all.
-        </p>
+        <div className="space-y-3">
+          <p className="text-destructive">
+            Everything not covered by an allow rule stops being reachable. The server refuses a
+            default that would refuse your connection, SSH or public ingress where they are admitted
+            now.
+          </p>
+          <FirewallPreflightCheck change={{ op: "policy", direction, policy }} />
+        </div>
       ),
       action: async (c) => {
         await send(c)
@@ -280,6 +314,12 @@ export function FirewallPanel({
       }}
     >
       {header}
+      <NetworkReadWarning
+        error={error}
+        refresh={refresh}
+        lastSuccess={lastSuccess}
+        reading="firewall state"
+      />
 
       {/* What the page is about, as its own row (§15 pass 8): the backend by
           its own name, on the tile a product's mark takes — none of the three
@@ -331,6 +371,19 @@ export function FirewallPanel({
       {caps.readOnlyReason && (
         <Notice icon={LockClosed} title={`${status.backend} can be read here, not changed`}>
           {caps.readOnlyReason}
+        </Notice>
+      )}
+      {status.rulesFrom === "configured" && (
+        <Notice title={`${status.backend} is not enforcing these rules`}>
+          They are the rules it loads the moment it is switched on, read from its configuration.
+          Rules are numbered, and can be edited or removed one by one, once it enforces them.
+        </Notice>
+      )}
+      {status.backend === "nftables" && (
+        <Notice title="The dashboard's own nftables table">
+          Only table inet jd_firewall is managed here: it filters inbound traffic for both families,
+          admits established connections, loopback, ICMP and your trusted addresses before its
+          rules, and is restored at boot. Rules in any other table are never adopted or changed.
         </Notice>
       )}
 
@@ -411,6 +464,17 @@ export function FirewallPanel({
 
       <AreaFindings posture={posture} area="firewall" onFix={onFix} />
 
+      <FirewallAccessPanel />
+
+      {writable && (
+        <FirewallPlanTray
+          staged={staged}
+          onUnstage={(index) => setStaged(staged.filter((_, i) => i !== index))}
+          onClear={() => setStaged([])}
+          onApplied={refresh}
+        />
+      )}
+
       <div
         className={cn(
           "grid min-w-0 items-start gap-6",
@@ -426,6 +490,7 @@ export function FirewallPanel({
                   onDone={refresh}
                   hasProfiles={caps.profiles}
                   arrival={handoff?.add}
+                  onStage={(rule, label) => setStaged([...staged, { op: "add", rule, label }])}
                 />
               )
             }
@@ -448,13 +513,20 @@ export function FirewallPanel({
                 className="text-destructive"
                 onClick={() =>
                   confirm({
-                    title: "Reset the firewall",
+                    title:
+                      status.backend === "firewalld"
+                        ? `Reload zone ${status.zone ?? ""}'s shipped settings`
+                        : "Reset the firewall",
                     confirmLabel: "Reset",
                     description: (
-                      <p className="text-destructive">
-                        Every rule is removed and {status.backend} is disabled. There is no undo,
-                        and the host is left unfiltered until you configure it again.
-                      </p>
+                      <div className="space-y-3">
+                        <p className="text-destructive">
+                          {status.backend === "firewalld"
+                            ? `Every change made to zone ${status.zone ?? ""} is replaced by the definition firewalld ships for it. Zones firewalld does not ship have nothing to reload.`
+                            : `Every rule is removed and ${status.backend} is disabled. The host is left unfiltered until you configure it again.`}
+                        </p>
+                        <FirewallPreflightCheck change={{ op: "reset" }} />
+                      </div>
                     ),
                     action: async (c) => {
                       await post("/firewall/reset", {}, { confirm: c })
@@ -519,8 +591,19 @@ export function FirewallPanel({
                           <div className="space-y-1.5">
                             <Tag style={{ color: actionHue(rule.action) }}>{rule.action}</Tag>
                             <span className="block font-mono text-hint text-muted-foreground">
-                              #{rule.number ?? i + 1} · {rule.direction || "IN"}
+                              {rule.number !== undefined ? `#${rule.number}` : "configured"} ·{" "}
+                              {rule.direction || "IN"}
+                              {rule.interface ? ` · on ${rule.interface}` : ""}
                             </span>
+                            {rule.id && findings.get(rule.id) && (
+                              <Tag
+                                tone="warning"
+                                title={findings.get(rule.id)!.reason}
+                                data-testid="rule-finding"
+                              >
+                                {findings.get(rule.id)!.kind} by #{findings.get(rule.id)!.byNumber}
+                              </Tag>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="min-w-40 whitespace-normal">
@@ -566,11 +649,39 @@ export function FirewallPanel({
                               inbound rule. The server refuses that too; not
                               offering the button is the half the reader can
                               see. */}
-                            {writable && rule.number !== undefined && rule.direction !== "FWD" && (
-                              <IconAction label="Edit rule" onClick={() => setEditing(rule)}>
-                                <Pencil />
+                            {admin && rule.id && (
+                              <IconAction label="Rule history" onClick={() => setHistoryRule(rule)}>
+                                <ClockRewind />
                               </IconAction>
                             )}
+                            {writable &&
+                              rule.number !== undefined &&
+                              rule.direction !== "FWD" &&
+                              !rule.interface && (
+                                <IconAction label="Edit rule" onClick={() => setEditing(rule)}>
+                                  <Pencil />
+                                </IconAction>
+                              )}
+                            {writable &&
+                              rule.id &&
+                              rule.number !== undefined &&
+                              !staged.some((c) => c.op === "delete" && c.ruleId === rule.id) && (
+                                <IconAction
+                                  label="Remove in a plan"
+                                  onClick={() =>
+                                    setStaged([
+                                      ...staged,
+                                      {
+                                        op: "delete",
+                                        ruleId: rule.id!,
+                                        label: `#${rule.number} ${rule.raw}`,
+                                      },
+                                    ])
+                                  }
+                                >
+                                  <ListOrdered />
+                                </IconAction>
+                              )}
                             {writable && rule.number !== undefined && (
                               <IconAction
                                 label="Delete rule"
@@ -579,9 +690,18 @@ export function FirewallPanel({
                                   confirm({
                                     title: "Delete firewall rule",
                                     confirmLabel: "Delete",
-                                    description: <p className="font-mono text-xs">{rule.raw}</p>,
+                                    description: (
+                                      <div className="space-y-3">
+                                        <p className="font-mono text-xs">{rule.raw}</p>
+                                        {rule.id && (
+                                          <FirewallPreflightCheck
+                                            change={{ op: "delete", ruleId: rule.id }}
+                                          />
+                                        )}
+                                      </div>
+                                    ),
                                     action: async (c) => {
-                                      await del(`/firewall/rules/${rule.number}`, { confirm: c })
+                                      await del(rulePath(rule), { confirm: c })
                                       refresh()
                                     },
                                   })
@@ -678,6 +798,16 @@ export function FirewallPanel({
                   onChange={(v) => setPolicy("outgoing", v)}
                 />
               )}
+              {caps.defaultPolicy && status.backend === "ufw" && (
+                <PolicyField
+                  label="Routed"
+                  hint="Traffic this host forwards between networks"
+                  value={policyLabel(status.policy?.routed)}
+                  options={POLICIES}
+                  fallback="deny"
+                  onChange={(v) => setPolicy("routed", v)}
+                />
+              )}
               {caps.logging && (
                 <PolicyField
                   id={LOGGING_CONTROL}
@@ -700,6 +830,9 @@ export function FirewallPanel({
           </Panel>
         )}
       </div>
+
+      <FirewallEnforcement status={status} />
+      {admin && <FirewallHistoryPanel />}
 
       <HostLogSection
         title="Firewall log"
@@ -763,6 +896,12 @@ export function FirewallPanel({
           }}
           onDone={refresh}
           hasProfiles={caps.profiles}
+        />
+      )}
+      {historyRule && (
+        <RuleHistorySheet
+          rule={historyRule}
+          onOpenChange={(open) => !open && setHistoryRule(null)}
         />
       )}
       {editing && !handoffRule && (

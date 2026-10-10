@@ -1,0 +1,12 @@
+=== RUN   TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag
+=== RUN   TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.6
+=== RUN   TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.6.0
+=== RUN   TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.5.0
+=== RUN   TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.7.0
+--- PASS: TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag (10.88s)
+    --- PASS: TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.6 (2.92s)
+    --- PASS: TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.6.0 (2.60s)
+    --- PASS: TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.5.0 (2.81s)
+    --- PASS: TestDNSNativeRecordOwnershipPinsAbsentLegacyFlag/15.7.0 (2.55s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	11.913s

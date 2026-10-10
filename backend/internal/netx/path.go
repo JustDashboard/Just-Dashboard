@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -21,6 +23,9 @@ type Path struct {
 	Device  string `json:"device,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
 	Source  string `json:"source,omitempty"`
+	// Table is the table the kernel says answered, when it names one;
+	// ip omits it for main.
+	Table string `json:"table,omitempty"`
 	// Local is a client on this machine itself (a local process, or an SSH
 	// tunnel whose session could not be found), whose path no network change
 	// can take away.
@@ -31,13 +36,21 @@ type Path struct {
 	// own packets, a WireGuard tunnel's endpoint, the SSH session behind a
 	// tunnel to loopback.
 	anchors []anchorPath
+	// replyUIDs are the owners of the sockets answering the client, read
+	// only when a UID-selecting discard rule needs them.
+	replyUIDs []uint32
 }
 
 // anchorPath is the kernel's answer for one fixed address, as plainly and as
-// tailscaled's marked packets would ask it.
+// tailscaled's marked packets would ask it, or for one WireGuard peer's
+// endpoint as that interface's own socket asks it.
 type anchorPath struct {
 	label string
+	args  []string
 	path  Path
+	// tunnels are the WireGuard devices of a transport anchor: its route may
+	// move between native devices, but never into one of them.
+	tunnels map[string]bool
 }
 
 // routeGet is one entry of `ip -j route get`.
@@ -51,6 +64,7 @@ type routeGet struct {
 	Uid      int      `json:"uid"`
 	Cache    []string `json:"cache"`
 	Protocol string   `json:"protocol"`
+	Table    ipTable  `json:"table"`
 }
 
 // ClientPath resolves the way back to a client address. An address that does
@@ -93,7 +107,7 @@ func parseRouteGet(out string, p Path) (Path, error) {
 		p.Local, p.Device = true, "lo"
 		return p, nil
 	}
-	p.Device, p.Gateway, p.Source = r.Dev, r.Gateway, r.PrefSrc
+	p.Device, p.Gateway, p.Source, p.Table = r.Dev, r.Gateway, r.PrefSrc, string(r.Table)
 	return p, nil
 }
 
@@ -131,13 +145,75 @@ func verifyPath(before Path) func(ctx context.Context) error {
 // Tailscale marks its own packets 0x80000 and looks them up in the main table
 // past its rules, so a route that moves them takes the tailnet down while the
 // browser's tailnet address still resolves to tailscale0.
-var anchorTargets = []struct {
+var anchorTargets = []anchorTarget{
+	{label: "the internet", args: []string{"-j", "route", "get", "1.1.1.1"}},
+	{label: "the internet for Tailscale's own packets", args: []string{"-j", "route", "get", "1.1.1.1", "mark", "0x80000"}},
+	{label: "the internet over IPv6", args: []string{"-j", "-6", "route", "get", "2606:4700:4700::1111"}},
+}
+
+// anchorTarget is one kernel question an anchor is read with.
+type anchorTarget struct {
 	label string
 	args  []string
-}{
-	{"the internet", []string{"-j", "route", "get", "1.1.1.1"}},
-	{"the internet for Tailscale's own packets", []string{"-j", "route", "get", "1.1.1.1", "mark", "0x80000"}},
-	{"the internet over IPv6", []string{"-j", "-6", "route", "get", "2606:4700:4700::1111"}},
+}
+
+// maxTunnelAnchors bounds the tunnel endpoints read beside every change.
+const maxTunnelAnchors = 16
+
+// tunnelAnchorTargets are the Tailscale peers' direct addresses, asked with
+// tailscaled's mark: a route that moves one breaks that path while every fixed
+// anchor still reads the same. WireGuard transports are anchored by
+// wgTransportAnchors, which lets them move between native devices but never
+// into a tunnel. Endpoints are read when the change starts; a roaming peer is
+// checked at the address it had then. A variable so tests about something
+// else can leave the host's tunnels out.
+var tunnelAnchorTargets = readTunnelAnchorTargets
+
+func readTunnelAnchorTargets(ctx context.Context) []anchorTarget {
+	var out []anchorTarget
+	seen := map[string]bool{}
+	add := func(label, ip, mark string) {
+		addr, err := netip.ParseAddr(strings.Trim(ip, "[]"))
+		if err != nil || addr.IsLoopback() || addr.IsUnspecified() || seen[addr.String()+"|"+mark] {
+			return
+		}
+		addr = addr.WithZone("")
+		seen[addr.String()+"|"+mark] = true
+		args := []string{"-j"}
+		if addr.Is6() && !addr.Is4In6() {
+			args = append(args, "-6")
+		}
+		args = append(args, "route", "get", addr.Unmap().String())
+		if mark != "" {
+			args = append(args, "mark", mark)
+		}
+		out = append(out, anchorTarget{label: label, args: args})
+	}
+	if has("tailscale") {
+		if raw, err := run(ctx, "tailscale", "status", "--json"); err == nil {
+			var st tsStatusJSON
+			if json.Unmarshal([]byte(raw), &st) == nil {
+				keys := make([]string, 0, len(st.Peer))
+				for key := range st.Peer {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				for _, key := range keys {
+					peer := st.Peer[key]
+					if peer == nil || peer.CurAddr == "" {
+						continue
+					}
+					if host, _, err := net.SplitHostPort(peer.CurAddr); err == nil {
+						add(fmt.Sprintf("Tailscale's direct path to %s (%s)", firstNonEmpty(peer.HostName, "a peer"), host), host, "0x80000")
+					}
+				}
+			}
+		}
+	}
+	if len(out) > maxTunnelAnchors {
+		out = out[:maxTunnelAnchors]
+	}
+	return out
 }
 
 // anchorPaths reads every anchor that has a route now; a family with no
@@ -145,34 +221,81 @@ var anchorTargets = []struct {
 // leave it out of tests about something else.
 var anchorPaths = func(ctx context.Context) []anchorPath {
 	var out []anchorPath
-	for _, a := range anchorTargets {
-		raw, err := run(ctx, "ip", a.args...)
-		if err != nil {
-			continue
+	for _, a := range append(append([]anchorTarget(nil), anchorTargets...), tunnelAnchorTargets(ctx)...) {
+		if p, ok := readAnchor(ctx, a); ok {
+			out = append(out, anchorPath{label: a.label, args: a.args, path: p})
 		}
-		p, err := parseRouteGet(raw, Path{Address: a.args[len(a.args)-1]})
-		if err != nil {
-			continue
-		}
-		out = append(out, anchorPath{label: a.label, path: p})
 	}
-	return out
+	return append(out, wgTransportAnchors(ctx)...)
+}
+
+// wgTransportAnchors are the endpoints WireGuard peers are dialled at or were
+// last seen from, read from the kernel rather than the files: a host name is
+// already resolved there and a roaming phone is where it is now. A change
+// that would route one of them into a tunnel cuts that peer off, the operator
+// included when they arrive over WireGuard, so every guarded change compares
+// them as it compares the internet anchors. A transport already captured is
+// not anchored: moving it back out is the repair.
+func wgTransportAnchors(ctx context.Context) []anchorPath {
+	if !has("wg") {
+		return nil
+	}
+	out, err := run(ctx, "wg", "show", "all", "dump")
+	if err != nil {
+		return nil
+	}
+	live, err := wgCheckedDump(out)
+	if err != nil {
+		return nil
+	}
+	tunnels := map[string]bool{}
+	for name := range live {
+		tunnels[name] = true
+	}
+	var anchors []anchorPath
+	for _, t := range wgTransportTargets(live) {
+		args := wgTransportArgs(t)
+		raw, err := run(ctx, "ip", args...)
+		if err != nil {
+			continue
+		}
+		p, err := parseRouteGet(raw, Path{Address: t.addr.String()})
+		if err != nil || tunnels[p.Device] {
+			continue
+		}
+		anchors = append(anchors, anchorPath{
+			label: fmt.Sprintf("the WireGuard transport of %s to %s", t.ref.iface, t.addr), args: args, path: p, tunnels: tunnels,
+		})
+	}
+	return anchors
+}
+
+func readAnchor(ctx context.Context, a anchorTarget) (Path, bool) {
+	raw, err := run(ctx, "ip", a.args...)
+	if err != nil {
+		return Path{}, false
+	}
+	target := a.args[slices.Index(a.args, "get")+1]
+	p, err := parseRouteGet(raw, Path{Address: target})
+	return p, err == nil
 }
 
 // verifyAnchors refuses a change that moved how this server reaches the
-// internet, or left it with no way at all.
+// internet or a Tailscale path, or left it with no way at all, and one that
+// routed a WireGuard transport into a tunnel or nowhere. It asks the kernel
+// exactly the questions the anchors were read with, so an endpoint that roams
+// during the change cannot turn into a missing anchor.
 func verifyAnchors(ctx context.Context, before []anchorPath) error {
-	if len(before) == 0 {
-		return nil
-	}
-	now := map[string]Path{}
-	for _, a := range anchorPaths(ctx) {
-		now[a.label] = a.path
-	}
 	for _, a := range before {
-		after, ok := now[a.label]
+		after, ok := readAnchor(ctx, anchorTarget{label: a.label, args: a.args})
 		if !ok {
 			return guarded("this would leave this server with no route to %s, which your connection and every outbound one ride on, so it was put back", a.label)
+		}
+		if a.tunnels != nil {
+			if a.tunnels[after.Device] {
+				return guarded("this would route %s into %s, so the tunnel would carry its own transport and its peer would be cut off; it was put back", a.label, after.Device)
+			}
+			continue
 		}
 		if !samePath(a.path, after) {
 			return guarded("this would move how this server reaches %s (%s instead of %s), which your connection and every outbound one ride on, so it was put back",
@@ -219,13 +342,18 @@ var loopbackRanges = []netip.Prefix{
 }
 
 // trustedFor is the set the gateway table returns early for: loopback, the
-// operator's allowlist ranges and the addresses the spec keeps.
+// operator's allowlist ranges and the addresses the spec keeps without an
+// expiry. An expiring kept address is a rule of its own (allowRules), and is
+// not trusted for the guards: it stops protecting anyone when it expires.
 func (s *Service) trustedFor(sp *Spec) []netip.Prefix {
 	out := append([]netip.Prefix{}, loopbackRanges...)
 	out = append(out, s.trustedRanges...)
+	expiring := expiringTrusted(sp)
 	for _, raw := range sp.Trusted {
 		if p, err := ParsePrefix(raw); err == nil {
-			out = append(out, p.Masked())
+			if _, ends := expiring[p.Masked().String()]; !ends {
+				out = append(out, p.Masked())
+			}
 		}
 	}
 	return mergePrefixes(out)
@@ -245,11 +373,27 @@ func (s *Service) isTrusted(sp *Spec, addr netip.Addr) bool {
 // is not already covered, so the first protection entry an operator makes
 // cannot be the one that refuses them. Returns whether it added one.
 func (s *Service) trustClient(sp *Spec, client string) bool {
+	return s.trustClientBy(sp, client, "", "")
+}
+
+// trustClientBy is trustClient recording who the address was kept for and
+// why. A kept address that was set to expire becomes permanent again rather
+// than being added twice.
+func (s *Service) trustClientBy(sp *Spec, client, actor, reason string) bool {
 	addr, err := ParseAddr(client)
 	if err != nil || addr.IsLoopback() || s.isTrusted(sp, addr) {
 		return false
 	}
-	sp.Trusted = append(sp.Trusted, netip.PrefixFrom(addr, addr.BitLen()).String())
+	key := netip.PrefixFrom(addr, addr.BitLen()).String()
+	if reason == "" {
+		reason = "Kept for the operator's address when a protection entry was saved from it."
+	}
+	if _, ends := expiringTrusted(sp)[key]; ends {
+		recordTrustedNote(sp, key, actor, reason)
+		return true
+	}
+	sp.Trusted = append(sp.Trusted, key)
+	recordTrustedNote(sp, key, actor, reason)
 	return true
 }
 

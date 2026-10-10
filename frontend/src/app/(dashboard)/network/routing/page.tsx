@@ -2,19 +2,24 @@
 
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
-import { useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
-import type { BGPView, NetworkLink, NetworkRouting } from "@/lib/types"
+import type { BGPView, NetworkLink, NetworkRoute, NetworkRouting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Field } from "@/components/form"
 import { DecisionMap } from "@/components/network/routing/decision-map"
 import { RouteTable, RuleTable } from "@/components/network/routing/route-tables"
-import { AddRoute, AddRule } from "@/components/network/routing/add-route"
+import { AddRoute, AddRule, EditRoute } from "@/components/network/routing/add-route"
+import { RouteHistoryPanel } from "@/components/network/routing/route-history"
+import { parseTarget, targetMatches } from "@/components/network/routing/route-reading"
 import { ForwardingSwitches } from "@/components/network/routing/forwarding"
 import { BGPBlock } from "@/components/network/routing/bgp"
 
@@ -30,10 +35,25 @@ import { BGPBlock } from "@/components/network/routing/bgp"
  * routes removable from their rows; then BGP, where FRR runs.
  *
  * The commands sit with what they add to: a route beside the main table, a
- * rule beside the rules.
+ * rule beside the rules. A target narrows every table to the routes that
+ * cover it and marks the one each table selects; the same target narrows
+ * the observed route history under the tables. Another page can open the
+ * route form with a device already chosen (`?route=new&device=dummy0`): a
+ * dummy's sheet hands off "route a destination into it" this way.
  */
 export default function NetworkRoutingPage() {
+  return (
+    // The handoff lives in the query string, which the App Router only hands
+    // out inside a Suspense boundary.
+    <Suspense fallback={<LoadingPanel />}>
+      <Routing />
+    </Suspense>
+  )
+}
+
+function Routing() {
   const { can } = useAuth()
+  const params = useSearchParams()
   const admin = can("system.admin")
   const routing = usePoll<NetworkRouting>(
     (signal) => get("/network/routing", undefined, signal),
@@ -41,7 +61,23 @@ export default function NetworkRoutingPage() {
   )
   const links = usePoll<NetworkLink[]>((signal) => get("/network/links", undefined, signal), 30_000)
   const bgp = usePoll<BGPView>((signal) => get("/network/bgp", undefined, signal), 30_000)
-  const [adding, setAdding] = useState<"route" | "rule">()
+  const [adding, setAdding] = useState<"route" | "rule" | undefined>(() =>
+    params.get("route") === "new" ? "route" : undefined,
+  )
+  const [handoffDevice] = useState(() => params.get("device") ?? undefined)
+  useEffect(() => {
+    if (params.get("route") !== null || params.get("device") !== null) {
+      window.history.replaceState(null, "", window.location.pathname)
+    }
+  }, [params])
+  const [editing, setEditing] = useState<{ route: NetworkRoute; tableId: number }>()
+  const [target, setTarget] = useState("")
+  const parsedTarget = useMemo(() => parseTarget(target), [target])
+  const matches = useMemo(
+    () =>
+      routing.data && parsedTarget ? targetMatches(routing.data.tables, parsedTarget) : undefined,
+    [routing.data, parsedTarget],
+  )
 
   if (!routing.data) {
     return (
@@ -60,7 +96,13 @@ export default function NetworkRoutingPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Routing" />
-      {routing.data && <NetworkReadWarning error={routing.error} refresh={routing.refresh} />}
+      {routing.data && (
+        <NetworkReadWarning
+          error={routing.error}
+          refresh={routing.refresh}
+          lastSuccess={routing.lastSuccess}
+        />
+      )}
 
       <Panel plain>
         <PanelHeader
@@ -82,11 +124,33 @@ export default function NetworkRoutingPage() {
       </Section>
 
       <Section title="Tables">
+        <Field
+          label="Target"
+          htmlFor="route-target"
+          hint="An address or network: each table shows the routes covering it and the one it selects"
+          error={
+            target.trim() && !parsedTarget ? "Use an IPv4 or IPv6 address or network." : undefined
+          }
+        >
+          <Input
+            id="route-target"
+            value={target}
+            onChange={(event) => setTarget(event.target.value)}
+            placeholder="10.8.0.7 or 2001:db8::/48"
+            className="font-mono sm:max-w-sm"
+          />
+        </Field>
         {data.tables.map((table, index) => (
           <RouteTable
             key={table.id}
             table={table}
             onChanged={routing.refresh}
+            match={
+              matches && parsedTarget
+                ? { target: target.trim(), ...matches.get(table.id)! }
+                : undefined
+            }
+            onEdit={(route) => setEditing({ route, tableId: table.id })}
             actions={
               index === 0 ? (
                 <Button
@@ -109,6 +173,8 @@ export default function NetworkRoutingPage() {
           </p>
         )}
       </Section>
+
+      <RouteHistoryPanel target={parsedTarget ? target.trim() : undefined} />
 
       <RuleTable
         rules={data.rules}
@@ -138,7 +204,19 @@ export default function NetworkRoutingPage() {
         routing={data}
         links={links.data ?? []}
         onAdded={routing.refresh}
+        initialDevice={handoffDevice}
       />
+      {editing && (
+        <EditRoute
+          open={admin}
+          onOpenChange={(open) => !open && setEditing(undefined)}
+          route={editing.route}
+          tableId={editing.tableId}
+          routing={data}
+          links={links.data ?? []}
+          onDone={routing.refresh}
+        />
+      )}
       <AddRule
         open={admin && adding === "rule"}
         onOpenChange={(open) => !open && setAdding(undefined)}

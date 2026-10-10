@@ -1,0 +1,4 @@
+=== RUN   TestNativeManagerAutomaticOwnerLive
+    native_manager_auto_live_test.go:35: automatic standalone recovery helper build: exit status 1 go: go.mod file not found in current directory or any parent directory; see 'go help modules'
+--- FAIL: TestNativeManagerAutomaticOwnerLive (0.03s)
+FAIL

@@ -1,0 +1,13 @@
+=== RUN   TestNativeManagerAutomaticOwnerLive
+    native_manager_auto_live_test.go:35: Actual standalone helper SHA256=f7d1ebda899a05e35168e807265f030c3eeddbdcad9b634f4022286125a03ad5 capability=jd-native-manager-v6
+=== RUN   TestNativeManagerAutomaticOwnerLive/networkd
+    native_manager_auto_live_test.go:252: automatic owner acceptance:
+        === RUN   TestNativeManagerAutomaticOwnerLive
+            native_manager_auto_live_test.go:90: networkd saved/loaded/applied automatic intent, actual DHCPv4 lease, SLAAC prefix, DHCP/RA default routes and active-owner DNS/domain acquisition verified
+            native_manager_auto_live_test.go:174: networkd actual auto/manual activation, automatic DNS/routes suppression, independent rollback, applying-backend death, durable confirmation and cleanup retry verified; timer/reboot unmeasured
+            native_manager_auto_live_test.go:197: Owned RA raw socket closed and sender drained; DHCP/manager/bus children reaped; lease/pid files withdrawn; private PID namespace has no remaining child
+        --- PASS: TestNativeManagerAutomaticOwnerLive (12.61s)
+        PASS
+--- PASS: TestNativeManagerAutomaticOwnerLive (22.18s)
+    --- PASS: TestNativeManagerAutomaticOwnerLive/networkd (13.77s)
+PASS

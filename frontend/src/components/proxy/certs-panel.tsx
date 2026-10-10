@@ -29,6 +29,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
+import { JobIssuanceProblems } from "@/components/proxy/issuance-problems"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -427,6 +428,7 @@ export function CertificatesPage() {
         onDismiss={console_.dismiss}
         onCancel={console_.cancel}
       />
+      {admin && <JobIssuanceProblems job={console_.job} />}
 
       {testPassed && admin && (
         <Notice tone="success" icon={CheckCircle} title={`The test run for ${testPassed} passed`}>

@@ -4,10 +4,13 @@ import {
   answersTo,
   endpointsByContainer,
   hostCapacity,
+  isDashboardOwn,
+  isUnused,
   networkChanges,
   networkHue,
   networkOrder,
   networkOwner,
+  ownerLabel,
   parseV4,
   refusesAttach,
 } from "./networks"
@@ -46,6 +49,36 @@ describe("networkOwner", () => {
     ).toEqual({ kind: "dashboard", label: "a deployment's database network" })
     expect(networkOwner(net({ name: "proxy" })).kind).toBe("standalone")
   })
+})
+
+test("the backend's reading of the owner wins over the labels, and a deployment is the dashboard's work", () => {
+  const labelled = { "com.docker.compose.project": "shop" }
+  expect(networkOwner(net({ name: "lab", labels: labelled, owner: { kind: "manual" } }))).toEqual({
+    kind: "standalone",
+    label: "standalone",
+    project: undefined,
+  })
+  expect(
+    networkOwner(
+      net({ name: "jd-e7-db", owner: { kind: "database-link", deployment: "shop · production" } }),
+    ),
+  ).toMatchObject({ kind: "dashboard", label: "database link · shop · production" })
+  expect(ownerLabel({ kind: "deployment" })).toBe("deployment · gone")
+  expect(ownerLabel({ kind: "deployment", deployment: "blog · production" })).toBe(
+    "deployment · blog · production",
+  )
+  expect(ownerLabel({ kind: "compose", project: "shop" })).toBe("compose · shop")
+  expect(isDashboardOwn(net({ name: "x", owner: { kind: "dashboard" } }))).toBe(true)
+  expect(isDashboardOwn(net({ name: "x", owner: { kind: "database-link" } }))).toBe(false)
+})
+
+test("a network whose members could not be read is never unused, nor ranked as unused", () => {
+  const unread = net({ name: "lab", membersKnown: false })
+  expect(isUnused(unread)).toBe(false)
+  expect(isUnused(net({ name: "spare" }))).toBe(true)
+  expect(isUnused(net({ name: "bridge" }))).toBe(false)
+  const list = [net({ name: "spare" }), unread, net({ name: "alpha", usedBy: ["a"] })]
+  expect(list.sort(networkOrder).map((n) => n.name)).toEqual(["alpha", "lab", "spare"])
 })
 
 test("Docker's own take slate and every other network keeps one lane hue", () => {

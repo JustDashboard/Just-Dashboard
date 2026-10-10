@@ -3,12 +3,19 @@
 import { useState } from "react"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
-import type { ProbeResult } from "@/lib/types"
+import type { DiagnosticRequest, DiagnosticResult, WakeDevice } from "@/lib/network-diagnostics"
 import type { ToolDef } from "./tool-defs"
-import { portProblem, toolReady } from "./tool-input"
+import { portProblem, toolReady, verifyProblem } from "./tool-input"
 
 /** What another page hands a tool on arrival: the address it was looking at. */
 export type ToolPrefill = { target?: string; record?: string }
+
+/**
+ * A result kept with the request that produced it, so actions on a shown
+ * result (trusting its keys, forgetting its host) follow that run rather than
+ * whatever the inputs say now.
+ */
+export type HeldResult = DiagnosticResult & { request: DiagnosticRequest }
 
 /**
  * One block's whole state: its inputs, its run, its current result and the
@@ -30,9 +37,11 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
       : (def.recordOptions?.[0] ?? ""),
   )
   const [option, setOption] = useState(def.optionDefault ?? def.optionOptions?.[0]?.value ?? "")
+  const [verify, setVerify] = useState("")
+  const [verifyPort, setVerifyPort] = useState("")
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<ProbeResult | null>(null)
-  const [past, setPast] = useState<ProbeResult[]>([])
+  const [result, setResult] = useState<HeldResult | null>(null)
+  const [past, setPast] = useState<HeldResult[]>([])
   const [error, setError] = useState<Error>()
 
   // A link can choose a different target without leaving the workbench. Keep
@@ -52,22 +61,37 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   }
 
   const portError = def.needsPort && port ? portProblem(port) : undefined
-  const canRun = toolReady(def, target, port, option)
+  const verifyError = def.verify ? verifyProblem(verify, verifyPort) : undefined
+  const canRun = toolReady(def, target, port, option) && !verifyError
+
+  // An optional port left empty runs the tool without that part, so neither
+  // the port nor the protocol that qualifies it is sent.
+  const sendsPort = Boolean(def.needsPort) && (!def.portOptional || port.trim() !== "")
+  const request: DiagnosticRequest = {
+    tool: def.key,
+    target: target.trim(),
+    ...(sendsPort ? { port: Number(port.trim()) } : {}),
+    ...(def.recordOptions ? { record } : {}),
+    ...((def.optionOptions || def.optionPlaceholder) && (!def.portOptional || sendsPort)
+      ? { option: option.trim() }
+      : {}),
+    ...(def.verify && verify.trim()
+      ? {
+          verify: verify.trim(),
+          ...(verifyPort.trim() ? { port: Number(verifyPort.trim()) } : {}),
+        }
+      : {}),
+  }
 
   const run = async () => {
     if (busy || !canRun) return
     setBusy(true)
     setError(undefined)
     try {
-      const res = await post<ProbeResult>("/network/probe", {
-        tool: def.key,
-        target: target.trim(),
-        ...(def.needsPort ? { port: Number(port.trim()) } : {}),
-        ...(def.recordOptions ? { record } : {}),
-        ...(def.optionOptions || def.optionPlaceholder ? { option: option.trim() } : {}),
-      })
+      const sent = { ...request }
+      const res = await post<DiagnosticResult>("/network/probe", sent)
       setPast((prev) => (result ? [result, ...prev].slice(0, 3) : prev))
-      setResult(res)
+      setResult({ ...res, request: sent })
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       notify.error(`Could not run ${def.label}`, err)
@@ -76,7 +100,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     }
   }
 
-  const restore = (res: ProbeResult) => {
+  const restore = (res: HeldResult) => {
     setPast((prev) => (result ? [result, ...prev.filter((p) => p !== res)].slice(0, 3) : prev))
     setResult(res)
   }
@@ -85,6 +109,14 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setError(undefined)
     setResult(null)
     setPast([])
+  }
+
+  /** A saved Wake-on-LAN device fills the inputs; sending is still a press. */
+  const applyDevice = (device: WakeDevice) => {
+    setTarget(device.mac)
+    setOption(device.interface)
+    setVerify(device.verify ?? "")
+    setVerifyPort(device.port ? String(device.port) : "")
   }
 
   return {
@@ -96,12 +128,19 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setRecord,
     option,
     setOption,
+    verify,
+    setVerify,
+    verifyPort,
+    setVerifyPort,
+    verifyError,
+    applyDevice,
     busy,
     error,
     portError,
     result,
     past,
     canRun,
+    request,
     run,
     restore,
     clear,

@@ -197,8 +197,8 @@ test("a new VLAN sends exactly what the create route takes", async ({ page }) =>
 test("the routing page lights the rule that answers this browser", async ({ page }) => {
   await mockNetwork(page)
   await page.goto("/network/routing")
-  await expect(page.getByText("5270 · your replies")).toBeVisible()
-  await expect(page.getByText("table 52 · answers you")).toBeVisible()
+  await expect(page.getByText("5270 · your replies (inferred)")).toBeVisible()
+  await expect(page.getByText("table 52 · answers you (inferred)")).toBeVisible()
   // Forwarding needed by something cannot be switched off from here.
   await expect(page.getByRole("switch", { name: "IPv4 forwarding" })).toBeDisabled()
 })

@@ -27,8 +27,37 @@ strategy, and feature ownership behind those rules.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
   client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
-  posture, login history, sshd, firewall/fail2ban, and six package managers.
+- [`backend/network-recovery.md`](backend/network-recovery.md) — durable network change phases,
+  independent recovery, prerequisites and verification limits.
+- [`backend/network-native-managers.md`](backend/network-native-managers.md) — selected native profile
+  ownership, bounded persistent edits, reconnection confirmation and terminal cleanup.
+- [`backend/network-boot-recovery.md`](backend/network-boot-recovery.md) — reconstructing prior managed
+  dependencies before interrupted-change recovery after a cold start.
+- [`backend/gateway-health.md`](backend/gateway-health.md) — checked firewall layers, per-family
+  admission health and blocklist cache/render/runtime evidence.
+- [`backend/network-investigator.md`](backend/network-investigator.md) — source/container connection
+  explanations, pinned native DNS/route/TCP evidence and unknown foreign/provider layers.
+- [`backend/network-diagnostics.md`](backend/network-diagnostics.md) — bounded saved probe runs,
+  cancellation, restart interruption, comparison, export and retention.
+- [`backend/network-captures.md`](backend/network-captures.md) — bounded private PCAP jobs, native cleanup,
+  artifact integrity, incident references and redacted support export.
+- [`backend/network-file-durability.md`](backend/network-file-durability.md) — owned file identity and durable restoration of prior absence.
+- [`backend/network-external-checks.md`](backend/network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
+- [`backend/network-flow-accounting.md`](backend/network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
+- [`backend/network-ipam.md`](backend/network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`backend/network-dns-evidence.md`](backend/network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
+- [`backend/network-dns-services.md`](backend/network-dns-services.md) — sealed native engine connections, reviewed changes, bounded filter metadata and owned Docker provisions.
+- [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
+- [`backend/network-egress.md`](backend/network-egress.md) — monitored egress groups, hysteresis, guarded failover/failback, connection handling and the gating simulation.
+- [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
+- [`backend/wireguard-lifecycle.md`](backend/wireguard-lifecycle.md) — the WireGuard record, alerts, transport anchors, peer editing, budgets, site verification, archive restore, the Linux kill switch and Tailscale/Headscale inspection.
+- [`backend/network-flow-observer.md`](backend/network-flow-observer.md) — explicit bounded kernel
+  telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
+- [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
+  measured unit activation and generation-bound repair review.
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, posture, login history, sshd and its pending apply,
+  firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
+  and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
   archives, previews, log discovery/search/tailing, the lenses that read each kind of log, and the
   service logs every page embeds.
@@ -73,6 +102,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
+  — scored networking feature map, current implementation gaps, official competitor research and
+  prioritized proposals from single-host recovery through an optional future network fabric.
 - [`../audits/2026-10-08-docker-networks-overhaul/README.md`](../audits/2026-10-08-docker-networks-overhaul/README.md)
   — the Docker Networks page's band, address pool, two tables and live sheet, with before/after
   screenshots.

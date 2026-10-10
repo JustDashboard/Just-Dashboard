@@ -1,0 +1,280 @@
+# Preparing measured native custom-domain decisions
+
+`TestDNSServiceNativeDomainDecisions` is a separate test-only, explicitly opted-in fixture prepared
+from pushed source `d427809d81492945396bd5386395dec4010b7916`. The existing
+`TestDNSServiceNativeOwnedEngine` and its disabled-protection configuration proof are unchanged.
+This preparation is not an actual engine pass. The final native source must first include the
+separately reviewed native query-history shape/name correction and freeze its complete backend,
+modules, static helper, race binary and wrapper. No engine, helper image, container, VM or timer is
+started by ordinary package checks. Broader P17 and the capability ledger remain open.
+
+## Owned source and transport
+
+The fixture requires one of the exact cached AdGuard Home 0.107.71 or Pi-hole FTL 6.7.1 images;
+there is no pull. A separately compiled Go 1.26.8, `CGO_ENABLED=0`, Linux/amd64 static helper is read
+through one bounded `O_NOFOLLOW` file descriptor. Its task-account owner, one link, unchanged file
+receipt, exact reviewed SHA256 and ELF without dynamic loader are required. The eventual reviewed
+wrapper supplies `JD_DNS_DECISION_HELPER` and `JD_DNS_DECISION_HELPER_SHA256`.
+
+Only during a separately released live run, a bounded local Docker API `ImageImport` supplies an
+uncompressed rootfs tar through `fromSrc=-`. It contains exactly one regular `dns-fixture` entry,
+mode 0555, UID/GID zero, with the frozen helper's exact size and digest; there is no Dockerfile,
+link, directory, build step, subscription, remote URL, registry credential or parent pull. Fixed
+`Changes` set Linux/amd64, user/group 65534, `/` working directory, literal executable/nonce argv
+and exactly the nonce/helper-digest labels. The closed one-row response must report a full SHA256
+image ID; it must equal the inspected unique tag's ID. That image must have no parent, exactly the
+rootfs tar's SHA256 layer and the closed expected configuration. A malformed/duplicate/error reply
+or rebound tag acquires no run or cleanup authority. The sidecar has a read-only root filesystem, user/group
+65534, all capabilities dropped, no new privileges, 64 MiB memory/swap, 0.25 CPU, 16 PIDs and bounded
+logs. It has no published port, host mount, volume or extra network. Its exact image/container,
+argv, labels, limits, network ID and observed IPv4/MAC are checked before every query and cleanup.
+Before questions or reviewed effects, the production container identity guard also rechecks the
+engine and the bridge must retain exactly the captured engine and sidecar endpoint IP/MAC pairs.
+
+The production owned bridge is an ordinary Docker bridge; it is **not** `Internal: true`. This
+fixture makes no blanket egress-containment claim. The helper never forwards, accepts only eight
+nonce-bound `.example` names and A/AAAA questions, and returns fixed documentation addresses with
+TTL zero. The reserved `.example` TLD is undelegated, and RFC 6761 tells caching resolvers to
+resolve it normally; pinned FTL 6.7.1 instead always generates `server=/invalid/` and
+`server=/test/`, answering those names locally without forwarding. Reviewed upstream configuration points only to its literal bridge IPv4 and port 5353.
+Client questions run through bounded Docker exec from that same inspected sidecar IPv4/MAC to the
+literal engine IPv4 on port 53. IPv4 client transport carrying AAAA questions does not establish
+IPv6 client transport. Every response must match transaction ID, question, class, owner and type,
+be untruncated NOERROR and contain exactly the known positive or explicit null-IP answer. Timeout,
+SERVFAIL, NXDOMAIN, empty answers, aliases and foreign values are failures.
+
+## Causality and preserved policy
+
+The fixture seeds one literal unselected parent denial. AdGuard receives an ordered custom-rule
+array with a fixed comment, an intentional empty string and `||seed-<nonce>.example^`. Pi-hole
+receives the fixed regex `(^|[.])seed-<nonce>[.]example$`, enabled with group `[0]` and a comment,
+plus a foreign exact client with its own preserved comment and `[0]` membership. This private seed
+is fixture setup, not a public regex or arbitrary-rule control. No subscription is configured.
+
+Complete persistent-client and enabled default-group inventories must prove the selected source
+inherits global AdGuard policy or unmatched Pi-hole group zero. Native local rewrites/hosts/CNAMEs
+must be explicitly empty; AdGuard filtering must be enabled. Actual native null-IP blocking mode
+and the reviewed protection switch are checked, rather than inferred from configured rule counts.
+AdGuard 0.107.71's pinned client writer starts with a nil persistent-client slice: its present
+`clients: null` field means that inventory is empty, as does `clients: []`. This version-specific
+fixture interpretation preserves the raw value and excludes separate auto-discovered runtime
+clients from persistent policy. Missing, malformed or nonempty persistent inventories still
+refuse the fixture; Pi-hole `clients: null` remains unknown and is refused.
+
+| Controlled name | Before reviewed edits | After additions | After removals |
+| --- | --- | --- | --- |
+| Allow target under the seeded parent | Denied | Known positive upstream answer | Denied again |
+| Child of allow target | Denied | AdGuard positive; Pi-hole denied | Denied |
+| Independent deny target | Positive | Denied | Positive again |
+| Child of deny target | Positive | AdGuard denied; Pi-hole positive | Positive |
+| Pi-hole deny with explicit `[]` | Positive | Positive for default client group zero | Positive |
+| Neutral and suffix-lookalike names | Positive | Positive | Positive |
+| Unselected parent | Denied | Denied | Denied |
+
+The same complete matrix also runs with protection disabled before the baseline, when all eight
+names must resolve to the helper's positive values, and after actual engine restart without any
+policy reapply. Every name is checked for A/AAAA over UDP/TCP. Additions/removals use retained
+five-minute reviewed requests, fresh exact-selected `/current` evidence before/after, native
+readback and consumed/duplicate refusal. Unselected raw rule strings, order, comments, client/group
+rows, sources and filter settings are compared at each effect; final removals must restore the
+entire seeded inventory. No cache clear, manual recompilation, failed-effect replay or foreign
+policy restoration is used to force a pass.
+
+Native history corroborates the actual source and matched rule/list identity after the added and
+restarted matrices. AdGuard's pinned writer emits `question.name`, `client_proto` and matched rule
+text/list ID. Its `client_proto` enum describes encryption, not UDP versus TCP: the explicit empty
+string is plain DNS. Controlled matched rows must retain that present empty string; missing/null,
+wrong types, invented `udp`/`tcp` values, encrypted values and unknown values refuse corroboration.
+Pi-hole reports client IP, type, status and selected domainlist ID. Documented nullable
+Pi-hole status/list IDs stay unreported and do not become a positive match. Each added/restarted
+matrix captures actual local Go time immediately before its first questions. AdGuard's RFC3339Nano
+row time and Pi-hole's finite nonnegative epoch time must be at or after that boundary and no later
+than the actual completed native read. Missing, null, malformed or future times refuse complete
+corroboration; old rows with the same selected native IDs/status cannot establish a new phase.
+Both clocks use the same local daemon kernel in this fixture. Each engine requires current-phase
+A and AAAA matches for both selected allow and deny rules. Neither engine's history distinguishes
+UDP from TCP; complete UDP/TCP evidence comes independently from the wire matrices. The logged
+`transportBasis` names that boundary and AdGuard's plain encryption marker. Only controlled scalar evidence is logged; native
+credentials, unrelated queries and raw response bodies are not printed.
+
+Restart diagnostics retain one verified engine/sidecar/bridge receipt immediately before the owned
+restart and the values returned by the original query guard reads at any refusal. These closed
+receipts contain selected IDs, private IPv4/MAC/endpoint identities, running/restarting/PID state,
+roster counts and full configuration/host/mount digests; native configuration values, labels,
+credentials and unrelated names are not printed. Malformed native scalars are represented as
+`malformed`. The original error remains wrapped with its stage, a whitelisted code and SHA256;
+unknown native error text is not emitted. Exec refusals additionally retain the original inspected
+exit/running/container state, stderr digest and only an exact whitelisted helper error code. The
+settling failure retains its first and last original errors. No later native re-read replaces a
+failure receipt, and there is no endpoint rebind or guard/budget/deadline change in this preparation.
+
+## Fixed bounds and failure ownership
+
+The static client-question ceiling is exactly **256**: five matrices × eight names × two types ×
+two transports = 160, plus six settling phases × eight rounds × two sentinels = 96. Each settling
+phase is also at most 20 seconds and requires two consecutive matching observed decisions. Rate is
+at most eight questions per second; exchanges last at most 900 ms and DNS frames are at most 4 KiB.
+Exhausting a count/deadline is failure, not permission to retry a mutation. The helper independently
+bounds its served upstream requests to 256, simultaneous TCP connections to eight and lifetime to
+180 seconds. Native query-history reads use at most 100 rows and eight read attempts per evidence
+phase. The whole fixture has a 180-second native context and separate 40-second cleanup context.
+The future reviewed runner must retain the existing 235-second Go / 240-second wrapper limits.
+
+Cleanup is registered before any image/container creation. It first verifies/stops/removes the exact
+sidecar, then removes only its captured image ID with labels/tag still matching. It does not prune
+other image parents or build caches. Unknown import outcomes or changed receipts remain failures
+requiring technical review; the fixture grants no cleanup authority over an unrecorded image.
+Only after sidecar cleanup succeeds does ordinary owned provision removal touch the engine, two
+volumes and bridge. The existing `Destroy` extra-endpoint refusal is preserved. All helper listeners,
+accepted connections, exec capture FDs, owned resources and task TMP entries must be absent before
+release. The eventual source-matched wrapper must independently retain host resolver, networkd and
+NetworkManager witnesses, full source/binary/argv/raw hashes and exact terminal cleanup. No native
+decision acceptance is claimed until both serial actual runs pass on the assembled frozen source.
+
+## Preparation checks and preserved draft failures
+
+Normal preparation checks keep `JD_DNS_DOMAIN_DECISIONS_LIVE=0`. From `backend/`, the focused
+selection is `go test ./internal/dnsservice ./internal/dnsservice/testdata/native-dns-decisions
+-run 'Test(Finite|MalformedQuestions|FramesAnd|DNSDomainDecision|DNSServiceNativeDomainDecisions)'
+-count=1 -timeout=60s`, with Go 1.26.8, `GOMAXPROCS=2`, `GOFLAGS=-p=2` and a short owned workspace
+`TMPDIR`. The corresponding focused race selection and `scripts/test-changed.sh d427809d` must pass
+before freezing the final fixture. Compile the helper with `CGO_ENABLED=0`, Linux/amd64 and ordinary
+executable mode; compile the separate DNS-service race binary from that same clean final checkout.
+Both frozen executables must have no group/other write permissions; the reviewed root preparation
+uses mode 0555. Compilation is preparation and does not opt into either native fixture.
+
+The original preparation logs remain in
+`/home/ubuntu/Just-Dashboard-network-dns-domain-decisions-artifacts`. These include compiler-only
+failures for Docker's `Os` field and its image-versus-container configuration types, and the mock
+receipt failure that exposed named `Entrypoint`/`Cmd` slices compared without conversion. Those
+draft failures started no native resource. Exact argv comparison remains enforced after converting
+the native named slices. The corrected ownership selection passed with DNS-service child 0.047 s
+and packet-helper child 0.004 s (`decision-ownership-final-preassembly.log`). NativeMan's independent
+read-only review also found the mutable-tag adoption gap. The legacy builder preparation then bound
+its full returned ID and passed its checks, but root's review identified the unavoidable intermediate
+parent from its appended metadata step. No legacy image build or native decision run occurred.
+That complete `b307456d`/`60c02142` source, helper/race binaries, wrappers and receipts remain separately
+attributed preparation. The replacement local import creates one parentless image and tests the
+sole rootfs entry, exact local request, full result ID, rebound tags and foreign-image cleanup
+refusal. These records establish
+preparation only; final assembled-source checks and native results need their own attribution.
+The single-import `9474c056` preparation also passed its required/focused-race checks and froze
+separate helper/race/runner receipts without any invocation. Root's subsequent review identified
+that post-restart history could reuse old matched rows with the same rule IDs. The separate phase
+correction requires real before-matrix/read boundaries and tests old same-ID rows, current rows,
+nullable/missing/malformed/negative/overflow/future times and explicit old epoch zero. The corrected
+selected-client log describes absence of a selected override; the preserved foreign Pi-hole client
+remains present. Historical preparation records are retained, without relabeling any native pass.
+
+The first actual decision attempt used clean `16501fb2` and stopped before client questions because
+the fixture refused the pinned writer's empty `clients: null`. The exact native failure was retained:
+17.372 seconds, no skip, no filtering acceptance, unchanged host/socket/source/binaries, restored
+complete image inventory and zero remaining owned Docker/process/TMP entries. Pi-hole was not
+dispatched. Root separately corrected the frozen executables' group-write permissions and the
+wrapper's TMP accounting to retain held parent/task directory descriptors, recheck their captured
+identities and preserve replaced scope. Five pure directory-ownership regressions passed before
+that attempt. The client-shape correction now tests the pinned null/empty shape, preserves raw
+client evidence, and refuses missing/wrong-type/nonempty overrides without relaxing Pi-hole scope.
+Any later actual attempt requires a new clean-source race binary and separately frozen receipt;
+the original failure and preparation records retain their original attribution.
+
+The next actual attempt used clean `757e9d24` with that client correction. AdGuard completed 108
+controlled questions through the disabled, baseline and added phases, then stopped at native history:
+the fixture incorrectly required `udp`/`tcp` in the pinned encryption enum. Its 53.792-second failure
+is not full decision acceptance; Pi-hole was not dispatched. Host/socket/source/binaries and the
+complete image inventory remained unchanged, with zero owned Docker/process/TMP entries. The
+original raw logs remain separately attributed under
+`/home/ubuntu/Just-Dashboard-network-dns-domain-decisions-artifacts/native-decision-root-adguard.log`
+(SHA256 `fa486f57dddc398fe682bb997e61d02c92e75a47a15c2f812d37731d72f3d180`)
+and `/home/ubuntu/Just-Dashboard-network-dns-decision-client-scope-artifacts/native-decision-client-scope-adguard.log`
+(SHA256 `02d1d1c5d716ca49a8189d2818d4f787f294dc1c677e150b2740e438d7a3f698`).
+The history correction is test-only preparation from clean assembled `c01322d1`. Its regression
+first reproduced rejection of the pinned explicit empty marker, then checks strict malformed marker
+refusal, complete A/AAAA decisions and the existing current-phase/old-same-ID boundaries. Fresh
+frozen assets and an independently reviewed wrapper are required before any later actual attempt.
+
+Clean `438830d7` was then dispatched once for AdGuard. Its first current-phase native history
+corroboration passed after questions 1–108 succeeded. After the owned restart, question attempts
+109–124 failed and the unchanged eight-round/20-second settling bound was exhausted. The 56.302-second
+failure retained zero owned Docker/process/TMP entries and unchanged host/socket/source/binaries
+and complete image inventory; Pi-hole was not dispatched. The original raw is
+`/home/ubuntu/Just-Dashboard-network-dns-decision-history-artifacts/native-decision-history-adguard.log`
+(SHA256 `312111a9230ecd090e3b9084d04f55049587546a3f3645b4357f9a5d416a5359`).
+That log omitted the original refusal and restart endpoint receipts, so it does not establish
+whether the failure came from endpoint ownership, helper/engine readiness or another original
+query stage. The diagnostic-only follow-up starts from root's assembled `f5dbbe21`, with the strict
+engine/client bridge predicates unchanged. Its pure tests demonstrate original-read retention,
+zero exec after endpoint refusal, no diagnostic re-read and closed secret-safe diagnostics. It is
+preparation for a separately reviewed bounded capture, without filtering/restart acceptance.
+
+Pinned Moby [restart](https://github.com/moby/moby/blob/v28.5.2/daemon/restart.go#L51)
+stops and starts the same container. Its [operational endpoint reset and allocation](https://github.com/moby/moby/blob/v28.5.2/daemon/container_operations.go#L565)
+clears runtime endpoint/IP/MAC fields before reconnecting networks. That source permits endpoint
+churn; it does not identify the cause of the preserved `438830d7` failure. Any later planned
+endpoint transition requires its own explicit before/after ownership/configuration evidence and
+unchanged sidecar client identity/two-endpoint roster, rather than admitting arbitrary drift.
+
+Clean `053f0951` was then dispatched once for AdGuard with those diagnostics. Questions 1–108 and
+the first history corroboration passed again; attempts 109–124 were all refused before any exec at
+`bridge_identity`/`engine_endpoint_changed`. The retained receipts show the cause: after the owned
+restart the engine kept its container ID, image, configuration/host/mount digests, single network
+and IPv4 `10.0.3.2`, while Docker assigned a fresh endpoint ID and MAC and a new PID. The sidecar
+receipt, bridge identity and two-endpoint roster were byte-identical. AdGuard was therefore never
+questioned after restart. The 55.894-second failure retained zero owned Docker/process/TMP entries
+and unchanged host/socket/source/binaries and complete image inventory; Pi-hole was not dispatched.
+The original raw is
+`/home/ubuntu/Just-Dashboard-network-dns-decision-restart-artifacts/native-decision-restart-adguard.log`
+(SHA256 `622323e624f0c3b18cfabfce25496a6815c5225a61ca2a6221b3836289390b39`).
+
+The fixture now performs exactly one planned transition immediately after its own successful
+restart. One sidecar, engine and bridge read must reproduce the complete pre-restart receipt except
+the engine PID (which must differ), the engine endpoint ID and the engine MAC (which must be
+well-formed and identical in the container and bridge reads). The engine IPv4 must remain the
+question target. Only then is the captured engine MAC replaced, and the unchanged strict bridge
+predicate must accept that same read. Any other difference refuses with
+`restart_transition`/`engine_restart_transition_changed` and keeps the old MAC; later endpoint
+changes remain ordinary `engine_endpoint_changed` refusals. Both receipts are logged. The query
+budget, settling rounds/deadline, client predicates and production container guard are unchanged.
+
+Clean `17aeaae3` with that transition then passed AdGuard once: all 184 controlled questions,
+both current-phase history corroborations, the post-restart matrix without reapply, removals and
+exact cleanup in 80.656 seconds. Its first Pi-hole dispatch failed on question 1 of the
+protection-disabled matrix: the helper reported `dns_response_shape_changed` because FTL's
+generated `server=/invalid/` answered the `.invalid` name locally, so the upstream was never asked.
+A separate read of the cached pinned image's generated `/etc/pihole/dnsmasq.conf` confirmed that
+line with `dns.domainNeeded=false`. The 26.997-second failure retained zero owned
+Docker/process/TMP entries and unchanged host/socket/source/binaries and complete image inventory.
+Both originals stay attributed to `17aeaae3`, including the AdGuard pass:
+`/home/ubuntu/Just-Dashboard-network-dns-decision-restart-endpoint-artifacts/native-decision-endpoint-adguard.log`
+(SHA256 `3f65d25108e13424108481df9f2eee50e87cf65956f3e6e8729c2756f6d18b6a`) and
+`native-decision-endpoint-pihole.log` beside it
+(SHA256 `12da44ddb0de273c123847b17a4b99dcc89ddf01e6dd9500a4f58b24e9025da9`). The controlled
+names now use `.example`; neither engine's earlier result is relabeled as acceptance of that
+source.
+
+Clean `8301171b` then passed both serial actual runs from one frozen helper/race binary: Pi-hole
+with 186 questions in 95.588 seconds and AdGuard with 184 in 79.426 seconds, without skips. Both
+history corroborations, the post-restart matrix and exact cleanup passed. The
+[acceptance record](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions-acceptance.md)
+retains the raw logs, receipts and boundaries.
+
+The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
+[the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),
+[persistent-client JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/home/clientshttp.go#L86),
+[filter application and precedence](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/filtering.go),
+[null-IP response construction](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/dnsforward/msg.go),
+[FTL default client groups](https://github.com/pi-hole/FTL/blob/v6.7.1/src/database/gravity-db.c),
+[allow-before-deny processing](https://github.com/pi-hole/FTL/blob/v6.7.1/src/dnsmasq_interface.c),
+and [bounded native query metadata](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/queries.yaml).
+The timestamp fields are written by the same pinned
+[AdGuard entry writer](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go#L58)
+and [FTL query writer](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/queries.c#L961).
+The exact already-used Docker SDK is Moby v28.5.2: its [import client](https://github.com/moby/moby/blob/v28.5.2/client/image_import.go)
+sends the local reader and fixed changes, the [HTTP route](https://github.com/moby/moby/blob/v28.5.2/api/server/router/image/image_routes.go)
+uses the request body for `fromSrc=-` and emits the returned full ID, and the
+[classic image store](https://github.com/moby/moby/blob/v28.5.2/daemon/images/image_import.go) and
+[containerd image store](https://github.com/moby/moby/blob/v28.5.2/daemon/containerd/image_import.go)
+each create one parentless image with one imported layer. This is a source-level packaging argument;
+the wrapper must still prove the complete image-ID inventory is unchanged after actual cleanup.
+These intended fixed decisions do not establish arbitrary precedence, subscribed rule content,
+Technitium effects, timer/reboot recovery or full product acceptance.

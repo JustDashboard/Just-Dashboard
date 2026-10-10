@@ -1,0 +1,169 @@
+{
+  "production": "e3ab17e2",
+  "fixture": "ce3fbcff",
+  "exit": 1,
+  "pass": 30,
+  "fail": 10,
+  "files": [
+    {
+      "path": "test-results/.last-run.json",
+      "sha256": "72fd53e8d069d126276ef9c742849f2a345128e335a5d0935b28b2ee4091c065"
+    },
+    {
+      "path": "test-results/network-dns-services-an-ex-65f16-s-readable-and-cannot-apply-chromium/error-context.md",
+      "sha256": "2d447576a46ca241ac29beb7dc9dc9841b8e1789ad41c92741783ebf3339089e"
+    },
+    {
+      "path": "test-results/network-dns-services-an-ex-65f16-s-readable-and-cannot-apply-chromium/test-failed-1.png",
+      "sha256": "5d6a6aefaebaf512cec4b836a6c68fcdfbcb423d8be495c0e6fdb5a8749706eb"
+    },
+    {
+      "path": "test-results/network-dns-services-an-ex-65f16-s-readable-and-cannot-apply-chromium/trace.zip",
+      "sha256": "2d6e579d5dc4b79896b86064926fc3343274cb176e5e23272a6481234d032499"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-080de-selection-aware-unavailable-chromium/error-context.md",
+      "sha256": "9c984888f7bc51e5f5cefc54b2cff42e00efef2589047e6b22434813ab3689dd"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-080de-selection-aware-unavailable-chromium/test-failed-1.png",
+      "sha256": "7e24a35da5809aad9be761e4c7ad30b51bdb111352b9a18cc48463437a589a08"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-080de-selection-aware-unavailable-chromium/trace.zip",
+      "sha256": "eb0fa09a955521d339f1762b7fb0bb6c24a72deb4b9fb02c8f96fb0cd7635f28"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-297eb-en-with-reused-fingerprints-chromium/error-context.md",
+      "sha256": "bb9027ccf293db8aa936a857a3b31ae2e15ae334a97a3a67a62372c1c0b8fcef"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-297eb-en-with-reused-fingerprints-chromium/test-failed-1.png",
+      "sha256": "719bbdbca6aad0daa36f74608d38d05ec3994d0830ba39568dcdc16600fae7ae"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-297eb-en-with-reused-fingerprints-chromium/trace.zip",
+      "sha256": "e1e1fc0e2a6150a2ade855b490eb35265097f79cdde19271842c8613212f3aae"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-29c5e-election-aware-read-failure-chromium/error-context.md",
+      "sha256": "d0613b414e60eb3aae6755c5e87680cc416bd043d06d5e0e53bbea150ed01def"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-29c5e-election-aware-read-failure-chromium/test-failed-1.png",
+      "sha256": "014b6c3573e84eb5b47fe0ebfaa85888e8301b34dad60ac353c3e00e8d282191"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-29c5e-election-aware-read-failure-chromium/trace.zip",
+      "sha256": "847bf5328cc9c6392945892ff1c0af09ae95928ffa8bbb86cfe87ba13efaec82"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-35ca7-ion-aware-missing-selection-chromium/error-context.md",
+      "sha256": "c83ea7820ae8bcc41886ba6e7253641c0d3ba6ef9a7796288b2f2f89df435c90"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-35ca7-ion-aware-missing-selection-chromium/test-failed-1.png",
+      "sha256": "c0f2dcae45da4dbf8ec8c1781e06c0ce8c60692338a73b702ed4ed1e81cdefd4"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-35ca7-ion-aware-missing-selection-chromium/trace.zip",
+      "sha256": "e40c65147602b3703465fddf586677dcb63be73d4f1090e6bbdade1af1f6610c"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-9a649-after-selection-aware-drift-chromium/error-context.md",
+      "sha256": "17271382b0a4e7ee3b2950c059d907686dbc7eb91c5faf6dfe4261e5c6ed44e1"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-9a649-after-selection-aware-drift-chromium/test-failed-1.png",
+      "sha256": "37a84140b2dc89d9b1cfd2cd52e5bc74146624a653b4083df14f25c6f8034c2c"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-9a649-after-selection-aware-drift-chromium/trace.zip",
+      "sha256": "ceffafe8e841c00cf765d7217e1b80f15126df129015fc76a921a258ed7bad57"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-c5c65-ft-although-group-IDs-match-chromium/error-context.md",
+      "sha256": "3dab9a078e4621447267bff3c0050af83fb527c4605f0e50c1932b2051272f52"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-c5c65-ft-although-group-IDs-match-chromium/test-failed-1.png",
+      "sha256": "4e54fe6db0d2d6182acb64896a08aa2b8a3e85f52d83a9d62cd1d7f77ffa05d9"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-c5c65-ft-although-group-IDs-match-chromium/trace.zip",
+      "sha256": "98f8575012c4af92f0252519d5c601e99796894c4f5d3799001f6999249c77f8"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-cdcc0--selection-aware-generation-chromium/error-context.md",
+      "sha256": "ba8f71627b148bdc1dde36f534cbeac504cae2d318fdcac08ddfafe940e1cc29"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-cdcc0--selection-aware-generation-chromium/test-failed-1.png",
+      "sha256": "330dbc383365f569636e468e63e1292eec99b21b8873c1d1f64efe6fa25970a5"
+    },
+    {
+      "path": "test-results/network-dns-services-an-op-cdcc0--selection-aware-generation-chromium/trace.zip",
+      "sha256": "d9fb61c4f5cd738dd54d102b48c3163cfef6b59292b027203ab4dd9019421d6f"
+    },
+    {
+      "path": "test-results/network-dns-services-an-un-0504a-th-selected-review-readable-chromium/error-context.md",
+      "sha256": "c2df5df52837e6c0190a525978d3c67193c3a2bf5a57f638a7c793e481e2ed87"
+    },
+    {
+      "path": "test-results/network-dns-services-an-un-0504a-th-selected-review-readable-chromium/test-failed-1.png",
+      "sha256": "cef644c5f95b305bdd4117b27691a89df477dc4459900fa44e7739ee344bd03e"
+    },
+    {
+      "path": "test-results/network-dns-services-an-un-0504a-th-selected-review-readable-chromium/trace.zip",
+      "sha256": "e78c1816f7638529b3d6a66dc33d7b0961fb34d67be99b48917399a19aa29b99"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-0d611--stay-flat-and-within-390px-chromium/dns-record-inventory-390.png",
+      "sha256": "745368f1c7a61c74114db406463068f9d6c64d4c14da4ee22e98373cf8a8f816"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-0d611--stay-flat-and-within-390px-chromium/dns-record-readback-390.png",
+      "sha256": "7f6908bed45f005f5c0b7d3779a4a4709620193b7ef521d7d117f3aac3dca4fa"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-0d611--stay-flat-and-within-390px-chromium/dns-record-review-390.png",
+      "sha256": "699a2ae2ce55f59d727cf7968c5b020d7ac0e7d075a3decc42f997800878dc97"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-3cc85-stay-flat-and-within-1280px-chromium/dns-record-inventory-1280.png",
+      "sha256": "a6cd06f8d26dc7110d26ec79f86a790e3f2fdfa74af9424224971c4c20340f5f"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-3cc85-stay-flat-and-within-1280px-chromium/dns-record-readback-1280.png",
+      "sha256": "4e6721b3e9593bdf41b45e7c507510bc0b88db167d43464d2c297f24b1d06d0e"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-3cc85-stay-flat-and-within-1280px-chromium/dns-record-review-1280.png",
+      "sha256": "316bd2044417562b0167b80a21547cc18654e65dfdab7a8ce90743357dfd864e"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-f7a37-stay-flat-and-within-1720px-chromium/dns-record-inventory-1720.png",
+      "sha256": "543ed772c77205340933b3e2bacc93ee8d49c874004dfc6736be9066a6af445a"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-f7a37-stay-flat-and-within-1720px-chromium/dns-record-readback-1720.png",
+      "sha256": "d3924512eb00cd915eab0178f58f22de1272a03f788a90f1898b5f8f5e90a9a3"
+    },
+    {
+      "path": "test-results/network-dns-services-nativ-f7a37-stay-flat-and-within-1720px-chromium/dns-record-review-1720.png",
+      "sha256": "186f2441d5905160289c52aaf376879e84d4c93fae66f43b2a8cac0f45a72068"
+    },
+    {
+      "path": "test-results/network-dns-services-recor-f051c-wner-fields-without-staging-chromium/error-context.md",
+      "sha256": "5afa935744f83a774ebfee4b1bb35a010ab198df7c5da050421907f426f2c629"
+    },
+    {
+      "path": "test-results/network-dns-services-recor-f051c-wner-fields-without-staging-chromium/test-failed-1.png",
+      "sha256": "c050c7ec1173bbef4c24d8efc7013dcdeae2a7e0ddab0596c8f990e483d6f681"
+    },
+    {
+      "path": "test-results/network-dns-services-recor-f051c-wner-fields-without-staging-chromium/trace.zip",
+      "sha256": "b5bb8c7143d1628fd2a042016e2e3ac4e9ebf6436915fcb327d88b8cae9e9917"
+    }
+  ]
+}

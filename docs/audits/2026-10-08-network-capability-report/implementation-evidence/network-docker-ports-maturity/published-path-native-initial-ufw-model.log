@@ -1,0 +1,38 @@
+Fri Oct  9 17:27:16 UTC 2026
+465480babe134586801fdaca7d4f6980c02ed004
+sudo -n env JD_PUBLISHED_PATH_LIVE=1 jd-api.test -test.run ^TestLivePublishedPathOnThisHost$ -test.v
+=== RUN   TestLivePublishedPathOnThisHost
+    docker_published_path_live_test.go:65: published port 0.0.0.0:80 of just-dashboard-ingress (euid 0)
+    docker_published_path_live_test.go:69: publication  observed  observed       Docker publishes TCP port 80 of just-dashboard-ingress on host port 80.
+    docker_published_path_live_test.go:71:     Container: just-dashboard-ingress
+    docker_published_path_live_test.go:71:     Host binding: 0.0.0.0:80
+    docker_published_path_live_test.go:71:     Container port: 80/tcp
+    docker_published_path_live_test.go:71:     Address on bridge: 10.0.0.3
+    docker_published_path_live_test.go:71:     Address on jd-e211-db-y23cyxysen3v: 10.0.4.4
+    docker_published_path_live_test.go:69: listener     observed  observed       docker-proxy holds the host socket for Docker's publication.
+    docker_published_path_live_test.go:71:     Address: 0.0.0.0:80
+    docker_published_path_live_test.go:71:     Holder: docker-proxy
+    docker_published_path_live_test.go:71:     Reach: all
+    docker_published_path_live_test.go:71:     Address: [::]:80
+    docker_published_path_live_test.go:71:     Holder: docker-proxy
+    docker_published_path_live_test.go:71:     Reach: all
+    docker_published_path_live_test.go:69: dnat         observed  observed       Docker's rule translates host port 80 to 10.0.0.3:80.
+    docker_published_path_live_test.go:71:     Translates to: 10.0.0.3:80
+    docker_published_path_live_test.go:71:     Matches address: every address
+    docker_published_path_live_test.go:71:     Except from: docker0
+    docker_published_path_live_test.go:71:     Rule: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 80 -j DNAT --to-destination 10.0.0.3:80
+    docker_published_path_live_test.go:69: docker-user  observed  empty          DOCKER-USER holds no rule of the operator's, so nothing there filters connections forwarded to containers.
+    docker_published_path_live_test.go:71:     FORWARD policy: DROP
+    docker_published_path_live_test.go:69: firewall     modeled   modeled        UFW FWD default models deny for this tuple.
+    docker_published_path_live_test.go:71:     Adapter: ufw
+    docker_published_path_live_test.go:71:     Direction: forwarded, to the container's address and port
+    docker_published_path_live_test.go:71:     Adapter prediction: deny
+    docker_published_path_live_test.go:71:     Inbound default: deny
+    docker_published_path_live_test.go:69: gateway      observed  observed       The dashboard's gateway translates nothing on this port, and no other forward-hook table was seen that could drop it.
+    docker_published_path_live_test.go:69: proxy        observed  none           No configured proxy site or stream was associated with this host port.
+    docker_published_path_live_test.go:69: provider     unknown   unknown        No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers are not visible, so whether the outside reaches this host port is not known from here.
+    docker_published_path_live_test.go:71:     Public address on this host: 57.131.21.87
+    docker_published_path_live_test.go:69: external     unknown   unknown        No enrolled source has a retained measurement of this host port.
+    docker_published_path_live_test.go:87: comparison: Docker NAT: observed. Forwarded-leg firewall prediction: deny. Provider policy: unknown. External measurement: none retained.
+--- PASS: TestLivePublishedPathOnThisHost (2.19s)
+PASS

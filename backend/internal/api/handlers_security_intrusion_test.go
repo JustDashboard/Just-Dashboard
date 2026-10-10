@@ -45,6 +45,9 @@ func TestIntrusionCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/security/suricata/", ""},
 		{http.MethodPost, "/api/v1/security/crowdsec/decisions", `{"value":"203.0.113.9","duration":"4h","reason":"x"}`},
 		{http.MethodDelete, "/api/v1/security/crowdsec/decisions/7", ""},
+		{http.MethodPost, "/api/v1/security/suricata/rules/update", `{}`},
+		{http.MethodPost, "/api/v1/security/suricata/interface", `{"interface":"eth0"}`},
+		{http.MethodPost, "/api/v1/security/suricata/start", `{}`},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			if w := viewer.do(tc.method, tc.path, tc.body, nil); w.Code != http.StatusForbidden {
@@ -75,6 +78,17 @@ func TestCrowdSecDecisionValidation(t *testing.T) {
 		cc, _ := newClient(t)
 		if w := cc.do(http.MethodDelete, "/api/v1/security/crowdsec/decisions/"+id, "", nil); w.Code != http.StatusBadRequest {
 			t.Errorf("decision id %q = %d", id, w.Code)
+		}
+	}
+}
+
+// An interface that cannot be one is refused before anything is read or
+// written on the host.
+func TestSuricataInterfaceIsValidatedBeforeTheHost(t *testing.T) {
+	c, _ := newClient(t)
+	for _, body := range []string{`{"interface":"eth0; reboot"}`, `{"interface":""}`, `{"interface":"a-name-far-too-long-for-linux"}`} {
+		if w := c.do(http.MethodPost, "/api/v1/security/suricata/interface", body, nil); w.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d: %s", body, w.Code, w.Body.String())
 		}
 	}
 }

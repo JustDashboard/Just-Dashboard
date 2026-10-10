@@ -1,0 +1,92 @@
+[
+  {
+    "width": 390,
+    "mode": "page",
+    "client": 390,
+    "scroll": 390
+  },
+  {
+    "width": 390,
+    "mode": "inventory",
+    "client": 389,
+    "scroll": 389
+  },
+  {
+    "width": 390,
+    "mode": "connect",
+    "client": 389,
+    "scroll": 389
+  },
+  {
+    "width": 390,
+    "mode": "provision",
+    "client": 389,
+    "scroll": 389
+  },
+  {
+    "width": 390,
+    "mode": "review",
+    "client": 389,
+    "scroll": 389
+  },
+  {
+    "width": 1280,
+    "mode": "page",
+    "client": 1280,
+    "scroll": 1280
+  },
+  {
+    "width": 1280,
+    "mode": "inventory",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1280,
+    "mode": "connect",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1280,
+    "mode": "provision",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1280,
+    "mode": "review",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1720,
+    "mode": "page",
+    "client": 1720,
+    "scroll": 1720
+  },
+  {
+    "width": 1720,
+    "mode": "inventory",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1720,
+    "mode": "connect",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1720,
+    "mode": "provision",
+    "client": 1023,
+    "scroll": 1023
+  },
+  {
+    "width": 1720,
+    "mode": "review",
+    "client": 1023,
+    "scroll": 1023
+  }
+]

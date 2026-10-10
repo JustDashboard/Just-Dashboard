@@ -1,0 +1,134 @@
+$ node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build
+monaco: /home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/public/monaco/vs
+▲ Next.js 16.3.5 (Turbopack)
+✓ Running next.config.ts took 50ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 7.3s
+  Running TypeScript ...
+  Finished TypeScript in 9.1s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/73) ...
+  Generating static pages using 7 workers (18/73)
+  Generating static pages using 7 workers (36/73)
+  Generating static pages using 7 workers (54/73)
+✓ Generating static pages using 7 workers (73/73) in 1034ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ƒ /account/keys
+├ ƒ /account/security
+├ ƒ /account/sessions
+├ ƒ /account/users
+├ ○ /apple-icon.png
+├ ƒ /audit
+├ ƒ /backups
+├ ƒ /backups/[job]
+├ ƒ /boards
+├ ƒ /boards/[id]
+├ ƒ /dashboard
+├ ƒ /dashboard/configuration
+├ ƒ /databases
+├ ƒ /databases/[id]
+├ ƒ /databases/[id]/[...missing]
+├ ƒ /databases/[id]/access
+├ ƒ /databases/[id]/advisor
+├ ƒ /databases/[id]/backups
+├ ƒ /databases/[id]/data
+├ ƒ /databases/[id]/diagram
+├ ƒ /databases/[id]/generate
+├ ƒ /databases/[id]/logs
+├ ƒ /databases/[id]/performance
+├ ƒ /databases/[id]/query
+├ ƒ /databases/[id]/schema
+├ ƒ /databases/[id]/search
+├ ƒ /databases/[id]/settings
+├ ƒ /databases/map
+├ ƒ /databases/new
+├ ƒ /deploy
+├ ƒ /deploy/[id]
+├ ƒ /deploy/[id]/console
+├ ƒ /deploy/[id]/deployments
+├ ƒ /deploy/[id]/game-settings
+├ ƒ /deploy/[id]/logs
+├ ƒ /deploy/[id]/players
+├ ƒ /deploy/[id]/runs/[run]
+├ ƒ /deploy/[id]/runtime
+├ ƒ /deploy/[id]/settings
+├ ƒ /deploy/[id]/settings/automation
+├ ƒ /deploy/[id]/settings/build
+├ ƒ /deploy/[id]/settings/danger
+├ ƒ /deploy/[id]/settings/databases
+├ ƒ /deploy/[id]/settings/domains
+├ ƒ /deploy/[id]/settings/general
+├ ƒ /deploy/[id]/settings/runtime
+├ ƒ /deploy/[id]/settings/storage
+├ ƒ /deploy/[id]/settings/variables
+├ ƒ /deploy/credentials
+├ ƒ /deploy/new
+├ ƒ /deploy/notifications
+├ ƒ /docker
+├ ƒ /docker/containers
+├ ƒ /docker/containers/[id]
+├ ƒ /docker/events
+├ ƒ /docker/images
+├ ƒ /docker/networks
+├ ƒ /docker/stacks
+├ ƒ /docker/stacks/[name]
+├ ƒ /docker/volumes
+├ ƒ /files
+├ ƒ /files/editor
+├ ƒ /git
+├ ○ /icon.svg
+├ ƒ /login
+├ ƒ /logs
+├ ƒ /metrics
+├ ƒ /network
+├ ƒ /network/captures
+├ ƒ /network/connections
+├ ƒ /network/dns
+├ ƒ /network/drift
+├ ƒ /network/external
+├ ƒ /network/firewall
+├ ƒ /network/flows
+├ ƒ /network/gateway
+├ ƒ /network/interfaces
+├ ƒ /network/investigate
+├ ƒ /network/ipam
+├ ƒ /network/protection
+├ ƒ /network/routing
+├ ƒ /network/runs
+├ ƒ /network/tools
+├ ƒ /network/traffic
+├ ƒ /network/vpn
+├ ƒ /packages
+├ ƒ /processes
+├ ƒ /processes/pm2
+├ ƒ /processes/scheduled
+├ ƒ /processes/services
+├ ƒ /proxy
+├ ƒ /proxy/certificates
+├ ƒ /proxy/config
+├ ƒ /proxy/ports
+├ ƒ /proxy/sites
+├ ƒ /proxy/sites/[name]
+├ ƒ /proxy/streams
+├ ƒ /proxy/tls
+├ ƒ /proxy/traffic
+├ ƒ /security
+├ ƒ /security/intrusion
+├ ƒ /security/logins
+├ ƒ /security/ssh
+├ ƒ /system-users
+└ ƒ /terminal
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+Elapsed: 21.85 seconds; Exit: 0

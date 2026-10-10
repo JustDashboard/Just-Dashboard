@@ -1,0 +1,85 @@
+=== RUN   TestNativeManagerOwnerLive
+    native_manager_live_test.go:222: isolated native manager acceptance: exit status 1
+        === RUN   TestNativeManagerOwnerLive
+        === RUN   TestNativeManagerOwnerLive/transport-epoch
+            native_manager_live_test.go:322: Authenticated transport GUID is pinned; mismatched and actual prior-bus epochs refuse before RequestName effects
+        === RUN   TestNativeManagerOwnerLive/netplan-NetworkManager
+            native_manager_live_test.go:448: native owner capabilities: {Manager:NetworkManager Version:1.52.0 Status:supported Reason: Edits:[existing static/automatic addresses per-link DNS and domains explicit unicast routes]} {Manager:networkd Version: Status:absent Reason:systemd-networkd has no running native D-Bus owner. Edits:[]} {Manager:netplan Version:1.1.2-8ubuntu1~25.04.1 Status:supported Reason: Edits:[existing static/automatic addresses per-link DNS and domains explicit unicast routes]}
+            native_manager_live_test.go:451: native refusal evidence busctl: NAME                           PID PROCESS USER CONNECTION UNIT SESSION DESCRIPTION
+                :1.4                             - -       -    -          -    -       -
+                :1.446                           - -       -    -          -    -       -
+                org.freedesktop.DBus             - -       -    -          -    -       -
+                org.freedesktop.NetworkManager   - -       -    -          -    -       -
+                 <nil>
+            native_manager_live_test.go:451: native refusal evidence networkctl: systemd-networkd is not running, output might be incomplete.
+                Failed to get description: The name org.freedesktop.network1 was not provided by any .service files
+                 networkctl --no-pager --json=short status d0: exit status 1: systemd-networkd is not running, output might be incomplete.
+                Failed to get description: The name org.freedesktop.network1 was not provided by any .service files
+            native_manager_live_test.go:451: native refusal evidence ip: [{"ifindex":7,"ifname":"d0","flags":["BROADCAST","NOARP","UP","LOWER_UP"],"mtu":1500,"qdisc":"noqueue","operstate":"UNKNOWN","group":"default","txqlen":1000,"link_type":"ether","address":"02:00:00:00:08:02","broadcast":"ff:ff:ff:ff:ff:ff","addr_info":[{"family":"inet","local":"198.18.8.2","prefixlen":24,"broadcast":"198.18.8.255","scope":"global","noprefixroute":true,"label":"d0","valid_life_time":4294967295,"preferred_life_time":4294967295},{"family":"inet6","local":"2001:db8:18::2","prefixlen":64,"scope":"global","noprefixroute":true,"valid_life_time":4294967295,"preferred_life_time":4294967295},{"family":"inet6","local":"fe80::ff:fe00:802","prefixlen":64,"scope":"link","noprefixroute":true,"valid_life_time":4294967295,"preferred_life_time":4294967295}]}]
+                 <nil>
+            native_manager_live_test.go:453: actual native profile is not editable: &{CheckedAt:2026-10-09 01:47:35.682948799 +0000 UTC Device:d0 Kind:dummy Owner:netplan Renderer:NetworkManager Version:1.1.2-8ubuntu1~25.04.1 Profile:20-fixture.yaml Generation:0e17996a2e9f8e1a1635cd9885f497ce39f9b5c20e5e5426c2ce5cedbd691508 Editable:false Refusal:Review and synchronize the profile through NetworkManager before retrying; no native profile was adopted. Coverage:[existing persistent native profile IPv4/IPv6 addressing methods per-link DNS/domains explicit unicast routes observed native relationships] Contract:{Members:[] BondMode: VRFTable:0 Master:} Intent:0xc00028c3c0 Configured:{Status:drift Reason:The active/loaded native intent differs from its saved profile, or could not be read completely.} Runtime:{Status:unknown Reason:} Boot:{Status:unknown Reason:}}
+            native_manager_live_test.go:99: /home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/extracted/usr/sbin/NetworkManager daemon evidence: <info>  [1791510435.5278] NetworkManager (version 1.52.0) is starting... (boot:78ce34ac-f8c7-40cf-abef-f9c1c6c3c5a7)
+                <info>  [1791510435.5280] Read config: /etc/NetworkManager/NetworkManager.conf, /run/NetworkManager/conf.d/10-globally-managed-devices.conf
+                <info>  [1791510435.5480] manager[0x5649dbb9cba0]: monitoring kernel firmware directory '/lib/firmware'.
+                <info>  [1791510435.5481] monitoring ifupdown state file '/run/network/ifstate'.
+                <info>  [1791510435.5502] hostname: hostname: couldn't get property from hostnamed
+                <info>  [1791510435.5529] dns-mgr: init: dns=none,systemd-resolved rc-manager=unmanaged
+                <info>  [1791510435.5538] manager[0x5649dbb9cba0]: rfkill: Wi-Fi hardware radio set enabled
+                <info>  [1791510435.5538] manager[0x5649dbb9cba0]: rfkill: WWAN hardware radio set enabled
+                <warn>  [1791510435.5593] device plugin: failed to open directory /usr/lib/x86_64-linux-gnu/NetworkManager/1.52.0: Error opening directory “/usr/lib/x86_64-linux-gnu/NetworkManager/1.52.0”: No such file or directory
+                <info>  [1791510435.5593] manager: rfkill: Wi-Fi enabled by radio killswitch; enabled by state file
+                <info>  [1791510435.5594] manager: rfkill: WWAN enabled by radio killswitch; enabled by state file
+                <info>  [1791510435.5595] manager: Networking is enabled by state file
+                <info>  [1791510435.5603] settings: Loaded settings plugin: keyfile (internal)
+                Failed to send reload request: No such file or directory
+                Failed to connect to system scope bus via local transport: No such file or directory
+                Command '['systemctl', 'daemon-reload', '--no-ask-password']' returned non-zero exit status 1.
+                <info>  [1791510435.8450] dhcp: init: Using DHCP client 'internal'
+                <info>  [1791510435.8454] manager: (lo): new Loopback device (/org/freedesktop/NetworkManager/Devices/1)
+                <info>  [1791510435.8462] manager: (d0): new Dummy device (/org/freedesktop/NetworkManager/Devices/2)
+                <info>  [1791510435.8466] device (d0): state change: unmanaged -> unavailable (reason 'managed', managed-type: 'external')
+                <info>  [1791510435.8539] manager: (erspan0): new Generic device (/org/freedesktop/NetworkManager/Devices/3)
+                <info>  [1791510435.8553] manager: (gre0): new IPTunnel device (/org/freedesktop/NetworkManager/Devices/4)
+                <info>  [1791510435.8564] manager: (gretap0): new IPTunnel device (/org/freedesktop/NetworkManager/Devices/5)
+                <info>  [1791510435.8577] manager: (ip6gre0): new IPTunnel device (/org/freedesktop/NetworkManager/Devices/6)
+                <info>  [1791510435.8610] manager: (ip6tnl0): new IPTunnel device (/org/freedesktop/NetworkManager/Devices/7)
+                <info>  [1791510435.8614] failed to open /run/network/ifstate
+                <info>  [1791510435.8621] bus-manager: acquired D-Bus service "org.freedesktop.NetworkManager"
+                <info>  [1791510435.8641] device (d0): state change: unavailable -> disconnected (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8672] policy: auto-activating connection 'd0' (27c153d6-ade1-4dde-988b-7acb135a8495)
+                <info>  [1791510435.8677] device (d0): Activation: starting connection 'd0' (27c153d6-ade1-4dde-988b-7acb135a8495)
+                <info>  [1791510435.8677] device (d0): state change: disconnected -> prepare (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8678] manager: NetworkManager state is now CONNECTING
+                <info>  [1791510435.8680] device (d0): state change: prepare -> config (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8682] device (d0): state change: config -> ip-config (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8793] device (d0): state change: ip-config -> ip-check (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8806] device (d0): state change: ip-check -> secondaries (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8807] device (d0): state change: secondaries -> activated (reason 'none', managed-type: 'full')
+                <info>  [1791510435.8819] manager: NetworkManager state is now CONNECTED_LOCAL
+                <info>  [1791510435.8823] device (d0): Activation: successful, device activated.
+                <info>  [1791510435.9229] audit: op="connections-load" args="/run/NetworkManager/system-connections/netplan-d0.nmconnection" pid=57 uid=0 result="success"
+                <info>  [1791510435.9536] agent-manager: agent[18ba1c2132a28a90,:1.8/nmcli-connect/0]: agent registered
+                <info>  [1791510435.9546] device (d0): state change: activated -> deactivating (reason 'new-activation', managed-type: 'full')
+                <info>  [1791510435.9547] manager: NetworkManager state is now DISCONNECTING
+                <info>  [1791510435.9553] device (d0): disconnecting for new activation request.
+                <info>  [1791510435.9554] audit: op="connection-activate" uuid="27c153d6-ade1-4dde-988b-7acb135a8495" name="d0" pid=62 uid=0 result="success"
+                <info>  [1791510435.9595] device (d0): state change: deactivating -> disconnected (reason 'new-activation', managed-type: 'full')
+                <info>  [1791510435.9646] manager: NetworkManager state is now DISCONNECTED
+                <info>  [1791510435.9647] device (d0): Activation: starting connection 'd0' (27c153d6-ade1-4dde-988b-7acb135a8495)
+                <info>  [1791510435.9653] device (d0): state change: disconnected -> prepare (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9658] manager: NetworkManager state is now CONNECTING
+                <info>  [1791510435.9659] device (d0): state change: prepare -> config (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9663] device (d0): state change: config -> ip-config (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9713] device (d0): state change: ip-config -> ip-check (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9769] device (d0): state change: ip-check -> secondaries (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9771] device (d0): state change: secondaries -> activated (reason 'none', managed-type: 'full')
+                <info>  [1791510435.9774] manager: NetworkManager state is now CONNECTED_LOCAL
+                <info>  [1791510435.9776] device (d0): Activation: successful, device activated.
+        === NAME  TestNativeManagerOwnerLive
+            native_manager_live_test.go:99: dbus-daemon daemon evidence:
+        --- FAIL: TestNativeManagerOwnerLive (21.74s)
+            --- PASS: TestNativeManagerOwnerLive/transport-epoch (0.11s)
+            --- FAIL: TestNativeManagerOwnerLive/netplan-NetworkManager (21.61s)
+        FAIL
+--- FAIL: TestNativeManagerOwnerLive (46.84s)
+FAIL

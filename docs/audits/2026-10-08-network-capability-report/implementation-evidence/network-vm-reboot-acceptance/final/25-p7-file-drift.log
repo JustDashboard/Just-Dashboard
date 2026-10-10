@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-10T01:25:05Z",
+  "bootId": "616fb1b6-8cfa-49bf-9e1a-b1259f4aefbf",
+  "evidence": {
+    "editedSha256": "5fc4d42cd7bbfefa64b720c2a7d49257d8aca2b5ed90754db610dcf0d1825d98"
+  },
+  "failures": [],
+  "phase": "p7-file-drift",
+  "result": "pass",
+  "seconds": 0.0
+}

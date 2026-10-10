@@ -1,0 +1,6 @@
+Command (2026-10-08):
+TMPDIR=/home/ubuntu/jd-network-validation-tmp GOMAXPROCS=2 go test ./internal/api ./cmd/server ./internal/netx -count=1
+
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	247.073s
+?   	github.com/Wayy01/Just-Dashboard/backend/cmd/server	[no test files]
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	10.386s

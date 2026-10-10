@@ -1,0 +1,154 @@
+=== RUN   TestDNSDomainDecisionMatrixAndBudget
+--- PASS: TestDNSDomainDecisionMatrixAndBudget (0.00s)
+=== RUN   TestDNSDomainDecisionDefaultClientRefusesUnknown
+--- PASS: TestDNSDomainDecisionDefaultClientRefusesUnknown (0.00s)
+=== RUN   TestDNSDomainDecisionAdGuardEmptyClientWriter
+=== RUN   TestDNSDomainDecisionAdGuardEmptyClientWriter/null
+=== RUN   TestDNSDomainDecisionAdGuardEmptyClientWriter/[]
+=== RUN   TestDNSDomainDecisionAdGuardEmptyClientWriter/_null_
+--- PASS: TestDNSDomainDecisionAdGuardEmptyClientWriter (0.00s)
+    --- PASS: TestDNSDomainDecisionAdGuardEmptyClientWriter/null (0.00s)
+    --- PASS: TestDNSDomainDecisionAdGuardEmptyClientWriter/[] (0.00s)
+    --- PASS: TestDNSDomainDecisionAdGuardEmptyClientWriter/_null_ (0.00s)
+=== RUN   TestDNSDomainDecisionSeedPreservesOpaquePolicy
+--- PASS: TestDNSDomainDecisionSeedPreservesOpaquePolicy (0.00s)
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/missing
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/null
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/number
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/boolean
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/object
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/array
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/udp_is_not_encryption_enum
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/tcp_is_not_encryption_enum
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/doh
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/dot
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/doq
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/dnscrypt
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/unknown
+=== RUN   TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/pihole
+--- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches (0.21s)
+    --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard (0.15s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/missing (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/null (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/number (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/boolean (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/object (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/array (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/udp_is_not_encryption_enum (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/tcp_is_not_encryption_enum (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/doh (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/dot (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/doq (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/dnscrypt (0.00s)
+        --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/adguard/unknown (0.00s)
+    --- PASS: TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches/pihole (0.05s)
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/foreign_labels
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_image
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_user
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/writable_root
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/host_mount
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/capability
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_network
+=== RUN   TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_source
+--- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup (0.05s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/foreign_labels (0.01s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_image (0.00s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_user (0.01s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/writable_root (0.01s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/host_mount (0.00s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/capability (0.01s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_network (0.00s)
+    --- PASS: TestDNSDomainDecisionSidecarRefusesForeignCleanup/changed_source (0.00s)
+=== RUN   TestDNSDomainDecisionQueryBudgetAndCancellationPreventExec
+--- PASS: TestDNSDomainDecisionQueryBudgetAndCancellationPreventExec (0.00s)
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/internal_bridge
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/foreign_owner
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/extra_endpoint
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/missing_engine
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_engine_ip
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_engine_mac
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_client_ip
+=== RUN   TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_client_mac
+--- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/internal_bridge (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/foreign_owner (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/extra_endpoint (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/missing_engine (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_engine_ip (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_engine_mac (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_client_ip (0.00s)
+    --- PASS: TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine/changed_client_mac (0.00s)
+=== RUN   TestDNSDomainDecisionRefusalRetainsOriginalReadWithoutExecOrReread
+    domain_decisions_live_test.go:644: decision sequence=1 source=172.20.0.3 name=allow.seed-012345abcdef.example type=A protocol=udp answer= success=false
+    domain_decisions_live_test.go:647: decision original refusal sequence=1 stage=bridge_identity code=engine_endpoint_changed originalSHA256=477f70878f3eb0d1a8035ffa8e30508d70e17de500bb000f7abeb0afb2e33c54 runtime={"engine":{"present":true,"id":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","image":"sha256:1111111111111111111111111111111111111111111111111111111111111111","running":true,"restarting":false,"pid":100,"configSHA256":"973f8f849d0d0b53220c1f392417b4b4c9802ee5cf7f85b15d46c331a03c3870","hostSHA256":"43d5fd7324de26d61320f3b2f0fc77f8f58e997a074f478a6606c37b95d34b86","mountsSHA256":"c610d4d41da9562c91ca0958a44eecb6b6624659d536c5267ff8313c9379358c","networkCount":1,"endpoint":{"present":true,"id":"8888888888888888888888888888888888888888888888888888888888888888","address":"172.20.0.8","mac":"02:00:00:00:00:08"}},"sidecar":{"present":true,"id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","image":"sha256:3333333333333333333333333333333333333333333333333333333333333333","running":true,"restarting":false,"pid":200,"configSHA256":"aae2f5dc77c9cddf27ef5a4074dc86c0cd697c490640fec194ab09e364759abd","hostSHA256":"488456e55dddc501ff78d8247086404bd87dc80cab5ed7da89e347de96eb4927","mountsSHA256":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","networkCount":1,"endpoint":{"present":true,"id":"4444444444444444444444444444444444444444444444444444444444444444","address":"172.20.0.3","mac":"02:00:00:00:00:03"}},"bridgePresent":true,"bridgeID":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bridgeOwned":true,"bridgeLocal":true,"bridgeDriver":true,"bridgeInternal":false,"bridgeIngress":false,"endpointCount":2,"bridgeEngine":{"present":true,"id":"8888888888888888888888888888888888888888888888888888888888888888","address":"172.20.0.8/16","mac":"02:00:00:00:00:08"},"bridgeSidecar":{"present":true,"id":"4444444444444444444444444444444444444444444444444444444444444444","address":"172.20.0.3/16","mac":"02:00:00:00:00:03"},"execPresent":false,"execRunning":false,"execExitCode":0,"execContainerID":"","stderrSHA256":"","helperCode":""}
+--- PASS: TestDNSDomainDecisionRefusalRetainsOriginalReadWithoutExecOrReread (0.86s)
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/fresh_endpoint_mac_and_pid
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/unrestarted_pid
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_engine_ip
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/malformed_engine_mac
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/split_engine_endpoint
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_engine_config
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/restarted_client
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_client_mac
+=== RUN   TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/extra_endpoint
+--- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint (7.82s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/fresh_endpoint_mac_and_pid (0.92s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/unrestarted_pid (0.88s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_engine_ip (0.86s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/malformed_engine_mac (0.87s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/split_engine_endpoint (0.85s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_engine_config (0.84s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/restarted_client (0.85s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/changed_client_mac (0.88s)
+    --- PASS: TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint/extra_endpoint (0.88s)
+=== RUN   TestDNSDomainDecisionDiagnosticErrorsAndHelperCodesStayBounded
+--- PASS: TestDNSDomainDecisionDiagnosticErrorsAndHelperCodesStayBounded (0.00s)
+=== RUN   TestDNSDomainDecisionRootFSHasOnlyFrozenRegularExecutable
+--- PASS: TestDNSDomainDecisionRootFSHasOnlyFrozenRegularExecutable (0.00s)
+=== RUN   TestDNSDomainDecisionImportRefusesMalformedAndSpoofedReply
+--- PASS: TestDNSDomainDecisionImportRefusesMalformedAndSpoofedReply (0.00s)
+=== RUN   TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag
+=== RUN   TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag/rebound=false
+=== RUN   TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag/rebound=true
+--- PASS: TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag (0.01s)
+    --- PASS: TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag/rebound=false (0.00s)
+    --- PASS: TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag/rebound=true (0.00s)
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/ID
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/tag
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/parent
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/layer
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/labels
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/user
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/entrypoint
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/command
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/volume
+=== RUN   TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/architecture
+--- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority (0.02s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/ID (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/tag (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/parent (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/layer (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/labels (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/user (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/entrypoint (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/command (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/volume (0.00s)
+    --- PASS: TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority/architecture (0.00s)
+=== RUN   TestDNSDomainDecisionHistoryPhaseRequiresActualBoundedTimes
+--- PASS: TestDNSDomainDecisionHistoryPhaseRequiresActualBoundedTimes (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	10.004s
+=== RUN   TestFiniteUpstreamAnswersAndNoForwarding
+--- PASS: TestFiniteUpstreamAnswersAndNoForwarding (0.00s)
+=== RUN   TestMalformedQuestionsAndResponsesNeverBecomeDecisions
+--- PASS: TestMalformedQuestionsAndResponsesNeverBecomeDecisions (0.00s)
+=== RUN   TestFramesAndTargetBounds
+--- PASS: TestFramesAndTargetBounds (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice/testdata/native-dns-decisions	1.018s

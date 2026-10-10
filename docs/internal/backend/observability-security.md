@@ -68,6 +68,18 @@ Each of the snapshot's `net` rows carries a `kind`
 metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
 running a dozen containers otherwise lists thirty interfaces with the uplink among them.
 
+The recorder also keeps how connections fared. `sysinfo.ReadTCPCounters` reads `/proc/net/snmp`
+and `/proc/net/netstat` (TCP's MIB is shared by both families) and the collector turns them into
+per-second rates; `ReadTCPLatency` asks `sock_diag` (`NETLINK_INET_DIAG`, `INET_DIAG_INFO`) for every
+established socket's `tcpi_rtt` and keeps the median and 90th percentile of those whose peer is off
+this host's networks (loopback, link-local, RFC 1918 and ULA peers are left out; the tailnet's
+100.64/10 is kept). It sends nothing. The rates and the RTT live in additive nullable columns
+(`tcp_out_segs`, `tcp_retrans`, `tcp_attempt_fails`, `tcp_estab_resets`, `tcp_listen_drops`,
+`tcp_rtt_ms`, `tcp_rtt_p90_ms`), so an hour from before they were sampled reads as unmeasured, not as
+clean. `Range` returns the bucket's resent share (`retransPct`) with the worst sample's as its peak,
+failed attempts and accept drops with peaks, and the mean median RTT with the highest 90th percentile
+as its peak; the metrics page charts them as Resent segments, Connection RTT and Failed connections.
+They are recorded and charted; with Health removed, nothing judges them into findings.
 `metrics.Events` (`GET /system/metrics/events`) is the annotation layer, answered from `deploy_runs`,
 `backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. Reboots need no
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
@@ -201,6 +213,20 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from
   minimal cloud images). Each is reported as a finding — silence in a security verdict reads as
   "checked, nothing outstanding".
+- **A layer no check can see is named, not passed.** `Posture.Unknowns` (`posture_unknowns.go`) is
+  neither a finding nor a pass. Provider policy is always unknown — no provider adapter exists — and its
+  detail says whether this host has a public address on an interface (`publicHostAddress`) or is only
+  reached through a provider's translation. Other nftables tables come from the gateway's own reading of
+  the ruleset (`GatewayCapability().Layers`, handed in as `AssessInput.Policy`, so the ruleset is not
+  parsed a second way): a base chain at the input, forward or prerouting hook that is not an iptables-nft
+  table, not firewalld's and not the dashboard's own gateway, whose decision is more than an
+  unconditional accept (`blocked` or `unknown`), is listed as a foreign decision this check does not
+  evaluate; an unread or unreadable ruleset is itself an unknown. The Security page lists them under the
+  findings as "Not seen by these checks", and a clean list beside them reads "No findings in the layers
+  these checks can see". The ports sheet says the same of an exposed socket's provider, and the
+  container reachability verdicts end with it: "reachable from outside" is unproven until an external
+  check measures it. `JD_POSTURE_LIVE=1` (`TestLivePostureUnknownsOnThisHost`, run as root from a
+  compiled test binary) grades the actual host read-only and lists its unknowns.
 
 `netsec.Disconnect` ends an interactive login: the PID is matched against the live session list first,
 or the route is a "kill any process on this host" primitive wearing a sensible name. SIGHUP, not
@@ -244,6 +270,24 @@ restore on failure → reload only then.
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
   deprecated spelling distributions ship as default and a dropdown missing it renders empty.
 - `reloadSSH` tries systemd units, then `rc-service`, then `service`.
+- **A pending apply is kept only once this session returns a fresh dashboard response.** With
+  `X-JD-Network-Apply: pending` (the SSH page sends it wherever `GET /network/changes/current` says the
+  independent watchdog is available, behind a "Restore unless confirmed" switch), `handleSSHApply`
+  plans as before, then `netx.BeginSSHChange` snapshots every file the plan writes
+  (`SSHApplyPlan.Files`: the managed file and, for a socket port move, the socket drop-in) into the
+  network journal with subsystem `sshd`, arms the ninety-second `systemd-run` timer and only then
+  starts the job. The journal accepts only `sshd_config`, `sshd_config.d/99-just-dashboard.conf` and
+  `<ssh|sshd>.socket.d/10-just-dashboard.conf` beside the boot unit, and an undo vocabulary of
+  `reload` (`systemctl reload-or-restart ssh`, then `sshd`) and `socket <unit>` (`daemon-reload`,
+  `restart`); any other file, command or subsystem is refused before recovery touches anything. A
+  reload or socket failure, which an immediate apply reports as partial success
+  (`SSHApplyResult.Failure`), restores the snapshots at once in pending mode. The confirmation is the
+  network one — verify, then confirm within thirty seconds, from the same account, session and
+  source — and the global notice words it as an SSH change. Unconfirmed, the standalone
+  `--network-recover` helper restores the files and reloads sshd without the backend; at boot it
+  uses `--no-block` and `try-reload-or-restart`, since the recovery unit is not ordered against sshd.
+  A journal is one change at a time: a pending SSH change blocks network changes until it is
+  confirmed or recovered, and the other way round.
 
 **Where sshd listens is not always sshd's decision.** Ubuntu ships socket-activated SSH by default on
 24.04+: `ssh.socket` holds the listener, `sshd_config`'s `Port` is read, reported by `sshd -T`, and
@@ -274,7 +318,8 @@ The page is `/network/firewall` since 0.7.1, in the Network section beside the g
 admits its own connections past these rules by a connection mark, so it needs no rule here
 ([forward admission](network.md#gateway-and-protection)).
 
-`netsec/firewall.go` dispatches to ufw, firewalld or iptables (`firewall_{ufw,firewalld,iptables}.go`).
+`netsec/firewall.go` dispatches to ufw, firewalld, the network module's owned nftables table or
+iptables (`firewall_{ufw,firewalld,nft,iptables}.go`).
 **Validation and both lockout guards live in the dispatcher**, so a fourth backend cannot be added
 without them — that placement is the reason the refactor was worth doing. The shared `run` is a
 **variable** so recorded transcripts can stand behind it; the fixtures in the three test files are copied
@@ -305,12 +350,28 @@ ufw's grammar has shapes that are accepted and mean something else, checked agai
 - `AddRule` has `insert` because ufw stops at the first match — a deny added after a broad allow does
   nothing at all, which looks exactly like a deny that works. **A source-only deny or reject with no
   position goes in front on its own** (`blocksASource`, `frontPosition`): that is what "block this
-  address" from the Connections, Intrusion and Logins pages writes, and appended after `allow 22` it
+  address" from the Connections, Intrusion and Logins pages writes (the Connections page's as a
+  recorded block, below), and appended after `allow 22` it
   never saw the SSH traffic it was written to refuse. The positions are ufw's, checked with
   `--dry-run` against a real dual-stack host: an IPv4 block at 1, an IPv6 block at one past the last
   IPv4 rule (ufw numbers the v6 rules after the v4 ones and refuses an insert outside the family's own
   range), and an empty family appended to, because ufw refuses `insert 1` into nothing. An explicit
   `position` is kept.
+- **A block from the Connections page has a reason and an end** (`netsec/blocks.go`,
+  `network_address_blocks`). `POST /firewall/blocks` (admin, audited) validates one remote address
+  (no loopback, unspecified or multicast), a one-line reason, a length of five minutes to ninety days
+  or none, and an optional saved diagnostic run as its incident (checked to exist), then writes the
+  same source-only deny through `AddRule` with the caller's address — so the lockout guard refuses
+  the operator's own address — commented `jd-block <id>`. The rule goes in before the record; a
+  record that cannot be written takes its rule back. An address already blocked, or already denied by
+  a plain rule somebody wrote, is refused rather than shadowed. A loop started with the server lifts
+  ended blocks every minute, removing exactly the block's rule — found by its comment, or on a
+  firewall that keeps no comments by its exact shape, which creation refused to duplicate — reading
+  the list again before each delete; a failed removal leaves the block active with its error and is
+  retried, and each outcome is a `system` audit entry (`firewall.block.expire`). Lifting only ever
+  opens the firewall, so the loop can cut nobody off. `GET /firewall/blocks` (the rules' standing)
+  lists them with whether the firewall still lists each rule; `DELETE /firewall/blocks/{id}` (admin,
+  destructive) lifts one now. The Intrusion and Logins pages keep the plain permanent deny.
 - **A ban is a deny rule wearing another name**: `netsec.Ban` refuses the caller's own address, the same
   guard the firewall route has, and the jail sheet now reaches it. `IgnoreIP` writes through to the
   jail.d drop-in — `addignoreip` changes only the running server.
@@ -344,9 +405,8 @@ Cross-cutting:
   replacement goes in **first**; deleting first and failing to add leaves a hole in the firewall, the one
   outcome an edit must never produce. The rule is read before anything is added and found again by what
   it says rather than where it sat. Ordering lives in `replaceRule`, separate from backend detection.
-- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody; ambiguous cases go to ordinary
-  confirmation, since a rule list admitting *something* cannot be judged without knowing which port the
-  browser arrived on.
+- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody. With the request's access
+  context (below) it also refuses a default that would refuse a required way in.
 - `ServiceCatalogue` (`GET /security/services`) is the rule form's teaching layer, served from the server
   so the form's warning and the audit's finding are the same claim. `annotateRule` attaches it centrally
   so firewalld's rules read like ufw's — and `parseUFWRule` must find the port, since `ufw allow 6379`
@@ -363,9 +423,183 @@ Cross-cutting:
   an address, a network or a path, and prose is not.
 - **No start/stop for a jail**: `fail2ban-client status` lists only running jails, so one stopped from the
   UI would vanish with nothing left to start it. A control usable once is a trap.
-- `FailedLoginVolume` counts inside a **window** and reports `Capped`. The posture verdict used `len()`
+- **A jail's policy is explained, not only shown.** `GET /fail2ban/{jail}/policy` (`JailPolicy`, read
+  like the config) reads the running values, `logpath`, `journalmatch`, `ignoreself`, the actions and
+  each action's `port` and `type`, and `ExplainJailPolicy` turns them into the rule as a sentence
+  ("5 failures within 10 minutes earn a 2-hour ban"), what the jail reads, what each action does
+  with a ban (firewall, blackhole route, Cloudflare edge, report only, unknown — classified by the
+  action's name; `allports`, `type=allports` or `0:65535` cover every port), and findings: no action
+  that blocks is critical, a watch with neither file nor journal match is a warning, and for the
+  `sshd` jail a ban whose ports do not cover a port sshd actually listens on (service names from
+  `/etc/services`, ranges included) is critical. Values in `jail.d/99-just-dashboard.local` that differ
+  from the running server are marked as what a restart will load — the dashboard's drop-in only; the
+  distribution's files are not merged. `get <jail> actions` prints several actions on one
+  comma-separated line, which the address-list parser read as prose; `parseActionList` reads it.
+- **Every engine's refused addresses are folded by address.** `GET /security/blocks` reads fail2ban's
+  banned addresses, CrowdSec's `ban` decisions on an address or range (`CrowdSecDecisions`, the
+  decision list alone) and the firewall's inbound `DENY`/`REJECT`/`DROP` sources concurrently, and
+  `MergeBlocks` keys them by canonical prefix: each entry names every source holding it and the
+  broader blocks (any engine) that already contain it. Community decisions no local source touches
+  are counted, not listed; an engine that was not read is reported as such. The Intrusion page draws
+  it first, and both ban forms say which engine already holds the address being typed. The posture verdict used `len()`
   of a 500-record btmp listing, which made the 2000-attempt threshold unreachable and the 200-attempt
   notice permanent on every host with a public SSH port.
+
+### Which firewall, which rules, and who can still get in
+
+- **Selection is by activity, not presence** (`firewall_detect.go`). Each candidate reports
+  `active`, `inactive`, `unknown` or `not_checked`: `ufw status`, `firewall-cmd --state` (read even
+  from its non-zero exit), the owned table's own state and `iptables -S` holding rules or a non-accept
+  policy. The first active front end is in charge; otherwise the first installed one that can be
+  switched on; then the owned table; then raw iptables for reading. Both front ends are always asked,
+  and two active at once is a conflict: `capabilitiesFor` withdraws every write with the reason. Past
+  an active front end the rest are not probed. `availableOnHost` is a variable for tests.
+- **An inactive ufw lists nothing** — `ufw status numbered` prints only its status line — though it
+  holds rules it loads the moment it is enabled. `show added` is read instead (`parseUFWAdded`, the
+  command grammar ufw echoes), `rulesFrom: "configured"` says so, and the rules stay **unnumbered**:
+  ufw numbers its IPv6 twins only once it loads them, and a number-based delete then (checked against a
+  real ufw in a sandbox) leaves the twin behind. Its defaults come from `/etc/default/ufw` the same way.
+  `(out)` closes an outbound source column, an IPv6 source carries no `(v6)` marker, and `on <device>`
+  sits in either column, before or after `(v6)`; all three are parsed. An interface-scoped rule cannot
+  be edited from the form (it would widen to every device) and is refused like a route rule.
+- **Every rule has a stable identity** (`assignRuleIDs`, `fw-` and twelve hex digits): a digest of
+  what a ufw rule says, or of firewalld's handle and zone. Edit and removal routes take `?id=`; a stale
+  identity is `409 rule_changed` instead of whichever rule took the number. **Ordering findings**
+  (`analyzeRules`) mark a ufw or owned-table rule shadowed or redundant when an earlier rule selects
+  everything it does (family, direction, interface, protocol, source and destination containment,
+  port ranges); firewalld evaluates denials before allowances whatever the listing shows, so it gets a
+  note instead of invented findings.
+- **The access guard** (`firewall_analysis.go`, `firewall_change.go`). The API puts an
+  `AccessContext` on the request: the operator's address and arrival device, the port the dashboard was
+  reached on, sshd's ports, the uplink, and Caddy's public ingress on 80 and 443 in both families.
+  Every rule add, replace and delete, enable/disable, default and reset is first simulated on a copy of
+  the status and each required check evaluated before and after — first match for ufw and the owned
+  table, the landing zone (source binding, then interface, then default) with denials before
+  allowances and the zone target for firewalld. A required way in that is admitted, limited or
+  unfiltered now and refused afterwards is `AccessRefusal` (`409 would_lock_you_out`, with the check
+  and the deciding rule). A rule the evaluator cannot read (a destination address, an unresolved
+  profile, a device when the arrival device is unknown) is followed both ways, up to four deep: when
+  both reach the same decision that is the verdict, so an allow that may or may not apply in front of
+  one that admits anyway changes nothing. Otherwise the verdict is `unknown`, never admitted, and a
+  required way in that is admitted now and `unknown` afterwards is refused like one that is refused.
+  A status that cannot be read refuses a guarded change (`ErrUnreadable`, `503 firewall_unreadable`).
+  A browser that reached the dashboard through an SSH tunnel is judged by the SSH session's address
+  (`netx.OperatorAddress`), so its SSH check is kept.
+  `GET /firewall/preflight?op=` returns the same comparison for the confirm dialogs, and the page shows
+  the current verdicts as "Preserved access" (`GET /firewall/access`).
+- **Staged verification and timed recovery.** ufw and firewalld changes run inside the network
+  journal (`netx.ProtectFirewallChange`). Under its lock the change runs first with
+  `netsec.Scoped(…, checkOnly)`, which stops every mutation at `ErrChecked` after its validation and
+  access guard: a refused or invalid request opens no journal and sets off no recovery that would
+  rewrite and reload an unchanged firewall. Both passes are bound to the firewall the journal was
+  prepared for; one that changed hands in between is `409 firewall_changed`, never written through
+  another path. A rule named by identity is resolved inside the protected change. The tool's own files
+  (`/etc/ufw/*.rules`, `ufw.conf`, `/etc/default/ufw`; firewalld's `firewalld.conf` and the zone file)
+  and whether it ran are snapshotted first; firewalld's boot unit is restored only from a plain
+  `enabled` or `disabled` (`systemctl is-enabled`), any other answer leaving it alone. A firewall whose
+  state cannot be read is not changed at all, since neither the guard nor the recovery can be prepared. After the change the firewall is read back and the access comparison repeated
+  (`VerifyAccessAfter`); a failure restores the snapshot at once. With `X-JD-Network-Apply: pending` the
+  change waits for the same reconnection confirmation as a network change and the independent host
+  helper restores it at the deadline. Recovery is a closed vocabulary: those files and `ufw --force
+  enable|disable`, `ufw reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd
+  --reload`. ufw's enable starts a stopped firewall but does nothing to a running one, so an enabled
+  state is restored by enable then reload — found by the real-ufw sandbox test.
+- **Plans** (`firewall_plan.go`, `POST /firewall/plans/preview` and `/plans`): up to twenty adds,
+  replacements and removals named by identity, validated and guarded together, run adds first and
+  removals last, each re-resolved by identity just before it runs. A failure takes back the steps
+  already made in reverse and the review says which steps applied, failed, were skipped or compensated.
+  A device-scoped or forwarding rule cannot be removed in a plan: the form could not write it back as it
+  was if a later step failed.
+- **History** (`firewall_history.go`, `firewall_rule_events`): every dashboard rule change, refusal
+  and failure is filed under the rule's identity, a replacement linking new to previous so a rule's
+  history follows its edits; `GET /firewall/history?rule=` (administrators, as the audit log). Edits made
+  with the tools directly leave no event, and the response says so.
+- **firewalld zones and reset.** Status lists the active zones with their interfaces, sources, target
+  and rules (read-only beyond the default zone), and the effective policy per family and interface.
+  Reset reloads the default zone's shipped definition (`--load-zone-defaults`), only for a zone
+  firewalld ships under `/usr/lib/firewalld/zones` (read through `/host`); the result is simulated
+  from that file and judged by the access guard first.
+- **The owned nftables table** (`BackendNFTOwned`, `netx/firewall_owned.go`): where no ufw or firewalld
+  runs, table `inet jd_firewall` filters input for both families from the network spec, rendered to
+  `firewall.nft`, checked with `nft -c`, loaded, read back and restored by the boot unit (never removed
+  by its stop). Before its rules it admits established and related traffic, loopback, ICMP and ICMPv6,
+  DHCP client replies, the gateway's translated connections by mark and the trusted operator sets.
+  Changes go through the ordinary commit, journal and pending confirmation. Any other change that alters
+  its render, such as a trusted address added or revoked on the Protection page, loads the table beside
+  its own runtime change (`withFirewallLoad`) and takes both back together; otherwise a revoked address
+  would stay admitted ahead of every rule until the next boot. No other table is read as
+  its own or changed; their names are listed, since an accept here cannot override a drop there.
+
+Routes under `/firewall`: `GET /`, `/apps` and `/access` (the requester's checks, kept off the status
+several pages poll) for any reader;
+for administrators `GET /history` and `GET /preflight`, `POST /plans/preview`, `POST /rules`,
+`PUT /rules/{n}?id=`, `POST /logging`, and inside `s.destructive` `POST /enabled`, `/policy`, `/reset`,
+`/plans` and `DELETE /rules/{n}?id=`. Every change is audited; the covered ones accept pending apply.
+
+## CrowdSec: enforcement is verified, not assumed
+
+`CrowdSecView.enforcement` (`AssessEnforcement`, pure) decides whether the decisions are dropping
+anything. A bouncer counts only if its key is valid, it pulled within three minutes and, for the
+firewall bouncer, `crowdsec-firewall-bouncer` is active. A fresh firewall bouncer is `enforcing` only
+when the kernel holds a CrowdSec set with a drop or reject rule in a chain attached to a netfilter
+hook — read from `nft -j list tables` and `nft -j list table <family> <crowdsec…>`, or from
+`ipset list -t` with the `iptables -S`/`ip6tables -S` rule matching the set — and the sets are not
+empty while ban decisions are in force; otherwise `degraded`. Proxy bouncers alone are `partial`
+(HTTP only; their drop cannot be read here); an unreadable kernel or an unknown bouncer kind is
+`unverified`; no fresh pull is `stale`; none registered is `unenforced`; a stopped engine is
+`stopped`. An unreadable bouncer list is `unverified`, never `unenforced`. Every read is a listing.
+The panel claims protection only for `enforcing` and `partial`, and the posture raises
+`intrusion.crowdsec-unenforced` (warning), `-partial` or `-unverified` (notices) from the same
+verdict. The nft fixtures are nft's own JSON from a throwaway namespace; the ipset one follows
+`ipset list -t`'s format.
+
+## Suricata: setup after installing
+
+The view carries the setup evidence: the newest `stats` event in the eve.json tail (kernel packets,
+kernel drops, decoder packets, uptime — absent where there is none), the af-packet interfaces in
+`suricata.yaml` with the host's up, non-loopback interfaces as candidates, the rule file's age and
+the enabled `suricata-update` sources, and every NFQUEUE rule (`iptables-save`, `ip6tables-save`,
+`nft -j list ruleset`) with whether it bypasses when nothing reads the queue. The mode is read from
+the service's command line first: Debian ships `LISTENMODE=nfqueue` beside a unit that runs
+`--af-packet` and never reads that file, so the defaults file decides only where the command line
+does not say.
+
+Three admin jobs, each a fixed argv: `POST /security/suricata/interface` rewrites the first
+non-default af-packet `interface:` line in place (every other line kept), tests with
+`suricata -T`, restores the file on failure, and restarts a running Suricata — restoring the
+previous interface and restarting again if it does not come back; it is refused in inline mode, when
+the unit names its interface on its command line, and for an interface that is not up.
+`POST /security/suricata/rules/update` runs `suricata-update` (which tests the rule set with Suricata
+itself) and reloads a running Suricata; `POST /security/suricata/start` runs
+`systemctl enable --now suricata` and checks it stayed up. Inline queue rules are read and never
+changed: a queue without bypass drops what it queues while Suricata is not reading, the dashboard's
+own traffic included if it is queued.
+
+## The access boundary
+
+`netsec.DescribeBoundary` (pure; `GET /security/boundary`, readable by every role) reads five checks
+from evidence the API gathers concurrently: **ingress** (Caddy holds the configured port and no
+other dashboard socket answers on a routable address — the listener walk with owners), **allowlist**
+(this request's address is inside the running allowlist; a loopback request names the SSH session
+carrying it), **tailnet** (an allowlist that admits 100.64/10 has a tailscale interface up),
+**ssh** (a socket listens on sshd's port, for a tunnel) and **previews** (every served port in
+21000–21999 maps to a loopback upstream and is not funnelled, from `ServedTailnetPorts`). Each is
+`held`, `broken` or `unknown` — unread evidence is never held.
+
+`BoundaryImpacts` judges a proposal (`ban`, `firewall.rule`, `firewall.policy`, `ssh`) against it:
+a ban or a deny covering this session's address or tunnel peer on the dashboard's or sshd's port
+`cuts`; one overlapping an allowlisted network other than loopback or `0.0.0.0/0`, or the tailnet
+previews are served to, `affects`; a deny of UDP 41641 from everywhere sends tailnet peers through
+DERP; an inbound deny default leaves the dashboard and sshd to their rules; an SSH port move,
+`AllowTcpForwarding no|remote` (a cut from a tunnel session) and `AllowUsers` affect who can open a
+tunnel. `GET /security/boundary/check` answers it for the forms; `api.boundaryGate` enforces it on
+the fail2ban ban, CrowdSec decision and SSH routes. A pending network change (any route that takes
+`X-JD-Network-Apply: pending`, and a pending SSH apply) has the boundary read before it is applied;
+the verification returns the boundary now beside that picture (`CompareBoundaries`, `lost` for a
+boundary that held and does not), and the confirmation notice lists it and words its button
+"Confirm anyway" when one was lost. The before-picture is held in memory for ten minutes; after a
+backend restart the verification says it has none. Firewall, gateway and other Network forms can
+ask the check route; wiring their own forms to it belongs with those owners.
 
 ## Packages: six managers, one interface
 

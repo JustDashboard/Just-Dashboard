@@ -1,0 +1,34 @@
+{
+  "source": "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3",
+  "engine": "adguard",
+  "exit_code": 0,
+  "wall_seconds": 69.079,
+  "raw_sha256": "f8c7881f6a32b04171f47818881a4074b24dbf8cbebe07837e303bde3a4e6dcf",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true,
+  "frozen_source_unchanged": true,
+  "binary_sha256_after": "b262c01738792ca6c964056a2f3b578c5ed394a44d1db6f1ed8f5a6375dd592c",
+  "docker_socket_after": {
+    "device": 25,
+    "inode": 8470426,
+    "uid": 0,
+    "gid": 987,
+    "mode": 49584
+  },
+  "docker_socket_unchanged": true
+}

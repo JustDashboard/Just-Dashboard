@@ -558,7 +558,10 @@ func TestVPNJSONKeysAreTheContract(t *testing.T) {
 			for i := 0; i < rt.NumField(); i++ {
 				f := rt.Field(i)
 				tag, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-				if tag == "" || tag == "-" {
+				if !f.IsExported() || tag == "-" {
+					continue
+				}
+				if tag == "" {
 					t.Errorf("%s.%s has no json tag", rt.Name(), f.Name)
 					continue
 				}
@@ -607,6 +610,75 @@ func TestVPNJSONKeysAreTheContract(t *testing.T) {
 			if !have[k] {
 				t.Errorf("%s lost the key %q", name, k)
 			}
+		}
+	}
+}
+
+// What the tailnet grants is read from this node's own status: an advertised
+// subnet it is primary for is served, one it is not is awaiting approval or
+// served by another router; the exit is served once offered to the tailnet.
+func TestTailscaleApprovalOfWhatThisServerAdvertises(t *testing.T) {
+	s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
+	prefs := strings.Replace(fixture(t, "tailscale-prefs-exit.json"), `"192.0.2.0/24",`, `"192.0.2.0/24", "198.51.100.0/24",`, 1)
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "tailscale debug prefs", out: prefs}}, rec.replies...)
+	rec.mu.Unlock()
+	v, err := s.Tailscale(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Approval.ExitNode != "serving" || len(v.Approval.Routes) != 2 ||
+		v.Approval.Routes[0] != (TSRouteApproval{"192.0.2.0/24", "serving"}) ||
+		v.Approval.Routes[1] != (TSRouteApproval{"198.51.100.0/24", "not_serving"}) {
+		t.Fatalf("approval = %+v", v.Approval)
+	}
+
+	status := strings.Replace(fixture(t, "tailscale-status.json"), `"ExitNodeOption": true,`, `"ExitNodeOption": false,`, 1)
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "tailscale status --json", out: status}}, rec.replies...)
+	rec.mu.Unlock()
+	if v, _ := s.Tailscale(context.Background(), ""); v.Approval.ExitNode != "not_serving" {
+		t.Fatalf("an exit node not yet granted = %+v", v.Approval)
+	}
+}
+
+func TestTailscaleUnreadablePreferencesClaimNoApproval(t *testing.T) {
+	s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "tailscale debug prefs", err: errors.New("permission denied")}}, rec.replies...)
+	rec.mu.Unlock()
+	v, _ := s.Tailscale(context.Background(), "")
+	if v.PrefsReadable || v.Approval.ExitNode != "" || v.Approval.Routes == nil || len(v.Approval.Routes) != 0 {
+		t.Fatalf("approval without preferences = %+v", v.Approval)
+	}
+}
+
+func TestTailscaleWarnsBeforeThisNodesKeyExpires(t *testing.T) {
+	for _, tc := range []struct {
+		expiry string
+		want   string
+	}{
+		{"2026-09-25T10:00:00Z", "expires on 25 September 2026"},
+		{"2026-09-01T10:00:00Z", "expired on 1 September 2026"},
+		{"2027-09-01T10:00:00Z", ""},
+	} {
+		s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
+		status := strings.Replace(fixture(t, "tailscale-status.json"), `"Capabilities": [`, `"KeyExpiry": "`+tc.expiry+`",
+  "Capabilities": [`, 1)
+		rec.mu.Lock()
+		rec.replies = append([]reply{{prefix: "tailscale status --json", out: status}}, rec.replies...)
+		rec.mu.Unlock()
+		v, err := s.Tailscale(context.Background(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		expiry, _ := time.Parse(time.RFC3339, tc.expiry)
+		if v.Self == nil || v.Self.KeyExpiry != expiry.Unix() {
+			t.Fatalf("self = %+v", v.Self)
+		}
+		got := strings.Join(v.Warnings, " ")
+		if (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: warnings = %q", tc.expiry, got)
 		}
 	}
 }

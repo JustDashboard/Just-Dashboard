@@ -6,7 +6,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Address, jailProduct } from "@/components/security/marks"
 import { get } from "@/lib/api"
 import { lensFor } from "@/lib/log-lenses"
-import type { Fail2banJail } from "@/lib/types"
+import type { BlocksView, Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { PageContext } from "@/components/page"
@@ -22,6 +22,7 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { AreaFindings } from "@/components/security/posture-panel"
+import { BlocksPanel } from "@/components/security/blocks-panel"
 import { CrowdSecPanel } from "@/components/security/crowdsec-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
 import { OffendersPanel } from "@/components/security/offenders-panel"
@@ -39,12 +40,21 @@ import { SuricataPanel } from "@/components/security/suricata-panel"
  * hides the others.
  */
 export function IntrusionPanels() {
+  // One read of every engine's refused addresses, shared by the merged list
+  // and by both ban forms, which say what already holds an address.
+  const blocks = usePoll<BlocksView>((signal) => get("/security/blocks", undefined, signal), 30_000)
   return (
     <>
       <PageContext eyebrow="Security" title="Intrusion prevention" />
-      <Fail2banSection />
+      <BlocksPanel
+        data={blocks.data}
+        error={blocks.error}
+        loading={blocks.loading}
+        onRetry={blocks.refresh}
+      />
+      <Fail2banSection blocks={blocks.data} onBlocked={blocks.refresh} />
       <ToolSection name="CrowdSec">
-        <CrowdSecPanel />
+        <CrowdSecPanel blocks={blocks.data} onBlocked={blocks.refresh} />
       </ToolSection>
       <ToolSection name="Suricata">
         <SuricataPanel />
@@ -85,7 +95,7 @@ function ToolSection({ name, children }: { name: string; children: React.ReactNo
  * writes to the journal said there was nothing to read; the journal is read
  * now instead.
  */
-function Fail2banSection() {
+function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked: () => void }) {
   const { can } = useAuth()
   const { posture, exposure, applyFix } = useSecurity()
   const { data, error, loading, refresh } = usePoll(
@@ -220,7 +230,11 @@ function Fail2banSection() {
         jails={jails}
         canManage={can("system.admin")}
         clientIp={exposure?.client}
-        onChanged={refresh}
+        blocks={blocks}
+        onChanged={() => {
+          refresh()
+          onBlocked()
+        }}
       />
 
       <OffendersPanel onBlocked={refresh} journal={activity.data?.kind === "journal"} />

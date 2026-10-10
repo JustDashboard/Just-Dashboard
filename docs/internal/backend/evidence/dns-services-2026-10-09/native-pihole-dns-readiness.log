@@ -1,0 +1,5 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:203: native management request failed; destination, trust, timeout or redirect check did not complete
+    provision_live_test.go:52: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-services-artifacts/native-logs/pihole-6cffdbc2c26ad8dce9acf52d0b23ee4f.log (9943 bytes)
+--- FAIL: TestDNSServiceNativeOwnedEngine (26.57s)
+FAIL

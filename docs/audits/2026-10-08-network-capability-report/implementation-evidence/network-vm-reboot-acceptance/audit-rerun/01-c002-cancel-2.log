@@ -1,0 +1,167 @@
+{
+  "at": "2026-10-10T01:37:19Z",
+  "bootId": "8bc157f9-22c0-4876-85db-8942ed240c74",
+  "evidence": {
+    "auditRows": [
+      [
+        "network.route.add",
+        "10.240.2.0/24",
+        400,
+        0
+      ]
+    ],
+    "drift": {
+      "boot": {
+        "activeState": "failed",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          1,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          1,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          1,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          1,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          1,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          1,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          1,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ],
+        [
+          "/etc/just-dashboard/network/network-recovery",
+          1,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [],
+      "execution": {
+        "bootId": "8bc157f9-22c0-4876-85db-8942ed240c74",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:34:44 UTC",
+        "invocationId": "42d1d6f6f310422d8d16e6850cc617fb",
+        "reason": "The measured activation or one of its commands failed, including commands whose errors the unit ignores.",
+        "result": "exit-code",
+        "startedAt": "Sat 2026-10-10 01:34:44 UTC",
+        "status": "failed"
+      },
+      "files": 0,
+      "notMatching": [],
+      "repairPlan": {
+        "blockers": [
+          "A readable supported saved configuration is required.",
+          "Recovery journal cannot be established."
+        ],
+        "executable": false,
+        "items": [],
+        "status": "blocked"
+      },
+      "runtime": 0,
+      "status": "unknown"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:34:22.429997728Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/shaping.batch",
+        "/etc/systemd/system/just-dashboard-network.service",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "146964f86aea889ee13a5caf8a67f1d3a69904f2e5a83b9b57ce58151ba7d693",
+      "id": "71f359c11d5bafa1da17780cf6fc7def",
+      "persistence": "written",
+      "phase": "saved",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:34:22.855504552Z",
+      "watchdog": "completed"
+    },
+    "routeInKernel": false,
+    "routeInSpec": false
+  },
+  "failures": [],
+  "phase": "c002-cancel 2",
+  "result": "pass",
+  "seconds": 2.2
+}

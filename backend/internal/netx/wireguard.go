@@ -94,8 +94,13 @@ type WGInterface struct {
 	// their traffic through this server.
 	ExitNode bool `json:"exitNode"`
 	// Subnet is the tunnel's network, the first address masked.
-	Subnet string   `json:"subnet"`
-	Peers  []WGPeer `json:"peers"`
+	Subnet               string     `json:"subnet"`
+	IPv6Enabled          bool       `json:"ipv6Enabled"`
+	Families             WGFamilies `json:"families"`
+	EndpointReachability string     `json:"endpointReachability"`
+	Peers                []WGPeer   `json:"peers"`
+	// Alerts are what needs a look on this tunnel, read with it.
+	Alerts []WGAlert `json:"alerts"`
 }
 
 // WGPeer is one far end of a tunnel. It never carries a key but the public one.
@@ -109,6 +114,7 @@ type WGPeer struct {
 	PublicKey string `json:"publicKey"`
 	// Address is the peer's own address inside the tunnel.
 	Address    string   `json:"address"`
+	Address6   string   `json:"address6,omitempty"`
 	AllowedIPs []string `json:"allowedIps"`
 	// Endpoint is where the peer was last seen from, or the address this
 	// server dials when it is configured with one.
@@ -119,10 +125,19 @@ type WGPeer struct {
 	RxBytes         uint64 `json:"rxBytes"`
 	TxBytes         uint64 `json:"txBytes"`
 	Keepalive       int    `json:"keepalive"`
+	// HandshakeState is online, stale (a peer that keeps its session alive
+	// has gone quiet), idle (a peer that does not, quiet) or never.
+	HandshakeState string `json:"handshakeState"`
 	// HasConfig is a stored client configuration that has not been forgotten.
 	HasConfig bool `json:"hasConfig"`
+	// ClientRoutes are a device's own AllowedIPs as last generated here; nil
+	// when they are not known (a peer made before they were recorded).
+	ClientRoutes []string `json:"clientRoutes,omitempty"`
 	// CreatedAt is unix seconds, zero when unknown.
 	CreatedAt int64 `json:"createdAt"`
+	// Transport is the last check of where its encrypted packets are routed.
+	Transport *WGTransport `json:"transport,omitempty"`
+	Quota     *WGQuota     `json:"quota,omitempty"`
 }
 
 // WireGuard reads every tunnel: the union of what `wg show` reports live and
@@ -177,9 +192,28 @@ func (s *Service) readWireGuard(ctx context.Context, only string, withStore bool
 		}
 	}
 	sort.Strings(sorted)
+	var host wgHostState
+	var hostErr error
+	var cap Capability
+	var admission AdmissionState
+	uncertain := ""
+	if len(sorted) > 0 {
+		host, hostErr = wgReadHostState(ctx)
+		cap = s.GatewayCapability(ctx)
+		if sp != nil {
+			admission = s.admissionState(ctx, sp)
+		}
+		if change, err := readChange(s.paths.Dir); err == nil {
+			if !changeTerminal(change.Phase) {
+				uncertain = "An unresolved network change prevents a reliable exit-state reading; inspect its recovery status."
+			}
+		} else if !os.IsNotExist(err) {
+			uncertain = "The network recovery journal could not be read; exit state is uncertain."
+		}
+	}
 
 	for _, name := range sorted {
-		ifc := WGInterface{Name: name, Addresses: []string{}, DNS: []string{}, Peers: []WGPeer{}}
+		ifc := WGInterface{Name: name, Addresses: []string{}, DNS: []string{}, Peers: []WGPeer{}, Alerts: []WGAlert{}}
 		var clients map[string]VPNClient
 		if withStore {
 			clients, err = s.vpn.byPublicKey(ctx, name)
@@ -190,6 +224,18 @@ func (s *Service) readWireGuard(ctx context.Context, only string, withStore bool
 		conf := confs[name]
 		l := live[name]
 		s.fillInterface(&ifc, conf, l, clients, sp)
+		if withStore {
+			if err := s.fillRecord(ctx, &ifc); err != nil {
+				return v, err
+			}
+		}
+		s.wgFamilyEvidence(ctx, &ifc, conf, host, hostErr, sp, cap, admission)
+		if uncertain != "" {
+			for _, family := range []*WGFamilyState{&ifc.Families.IPv4, &ifc.Families.IPv6} {
+				family.Exit.Runtime, family.Exit.Reason = "unknown", uncertain
+				family.Exit.Capability.Writable, family.Exit.Capability.Reason = false, uncertain
+			}
+		}
 		if v.Systemd && conf != nil {
 			unit := "wg-quick@" + name
 			enabled, _ := run(ctx, "systemctl", "is-enabled", unit)
@@ -242,16 +288,22 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 		}
 	}
 	for _, a := range ifc.Addresses {
-		if p, err := ParsePrefix(a); err == nil {
+		if p, err := ParsePrefix(a); err == nil && p.Addr().Is4() {
 			ifc.Subnet = p.Masked().String()
 			break
 		}
 	}
 	if sp != nil {
-		for _, n := range sp.NAT {
-			if n.Owner == wgOwner(ifc.Name) && n.Enabled {
-				ifc.ExitNode = true
-			}
+		ifc.ExitNode = wgExitEnabled(sp, ifc.Name, false)
+	}
+	if conf != nil && conf.iface() != nil {
+		ifc.IPv6Enabled = wgIPv6Enabled(conf)
+		v4, v6 := wgInterfacePrefixes(conf)
+		if v4.IsValid() {
+			ifc.Families.IPv4.Subnet = v4.Masked().String()
+		}
+		if v6.IsValid() {
+			ifc.Families.IPv6.Subnet = v6.Masked().String()
 		}
 	}
 
@@ -290,9 +342,21 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 			}
 			p.Online = lp.handshake > 0 && now-lp.handshake <= wgOnlineWithin
 		}
+		// A keepalive on this side is what makes a peer always-on: the kernel's
+		// value when it runs, the file's when it is down.
+		p.HandshakeState = wgHandshakeState(p.LatestHandshake, now, p.Keepalive > 0 && (lp == nil || lp.keepalive > 0))
 		p.Address = wgPeerAddress(p.AllowedIPs, ifc.Subnet)
-		if c, ok := clients[p.PublicKey]; ok && c.HasConfig && (p.ID == 0 || int(c.ID) == p.ID) {
-			p.HasConfig = true
+		if ifc.Families.IPv6.Subnet != "" {
+			p.Address6 = wgPeerAddress(p.AllowedIPs, ifc.Families.IPv6.Subnet)
+			if !strings.Contains(p.Address6, ":") {
+				p.Address6 = ""
+			}
+		}
+		if c, ok := clients[p.PublicKey]; ok && (p.ID == 0 || int(c.ID) == p.ID) {
+			p.HasConfig = c.HasConfig
+			if c.ClientRoutes != "" {
+				p.ClientRoutes = wgSplitList(c.ClientRoutes)
+			}
 		}
 		return p
 	}
@@ -398,7 +462,10 @@ type wgLiveIface struct {
 	name       string
 	publicKey  string
 	listenPort int
-	peers      []wgLivePeer
+	// fwmark marks the interface's own encrypted packets, so a full tunnel's
+	// policy routing sends them out natively; empty when off.
+	fwmark string
+	peers  []wgLivePeer
 }
 
 type wgLivePeer struct {
@@ -428,6 +495,9 @@ func parseWGDump(out string) map[string]*wgLiveIface {
 		case 5:
 			port, _ := strconv.Atoi(f[3])
 			res[f[0]] = &wgLiveIface{name: f[0], publicKey: wgNoneIsEmpty(f[2]), listenPort: port}
+			if mark := strings.TrimSpace(f[4]); mark != "off" && mark != "0" {
+				res[f[0]].fwmark = mark
+			}
 		case 9:
 			ifc := res[f[0]]
 			if ifc == nil {

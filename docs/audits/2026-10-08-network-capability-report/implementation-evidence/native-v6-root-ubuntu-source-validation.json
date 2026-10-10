@@ -1,0 +1,44 @@
+{
+  "head": "3e0c20161b721de9f769a13439b9813f3f7dfed3",
+  "source": "/home/ubuntu/Just-Dashboard/.network-worktrees/native-v6-root-compat",
+  "status": "clean",
+  "capability": "jd-native-manager-v6",
+  "case": "netplan-NetworkManager",
+  "owner_bundle": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/extracted",
+  "test_binary": {
+    "path": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-manager-v6-root-compat.test",
+    "sha256": "3e42149bb4f81dd865e499e7889c9fa84bb684d3485a4591f62b7e01470e0ada"
+  },
+  "raw_log": {
+    "path": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-v6-root-ubuntu-exact-origin-final.log",
+    "sha256": "89b93cf62a4e5d4b6b9f73a815e2f08602dab8ed00ab9fc152f9d856c87e8e99"
+  },
+  "source_files_identical_to_d096": {
+    "backend/internal/netx/native_manager_domains_test.go": "3b3fd5eeeb00b31b4e453519c31eaf545dec13fdbf6669b0719d8b2ad330dffe",
+    "backend/internal/netx/native_manager_epoch.go": "a6d17161df8150c6242fafd6cd36699f1e6ed13b1478df890268c2244f28c122",
+    "backend/internal/netx/native_manager_recovery.go": "cb74c296df28a805c7da7bfb16cd7bf1ff5811547ee9b7400a2367121f35e9fb",
+    "backend/internal/netx/native_manager_recovery_preflight.go": "bb6423bafecfd7535d882302ee9f832c464db1c24d36bb43718d8ebafce304ca",
+    "backend/internal/netx/native_manager_recovery_preflight_test.go": "93bdcfbe641accae43c497fcc1e383ad1fb6f6b93d0d8c2458f40e74a9da3403"
+  },
+  "result": {
+    "wrapper_seconds": 53.53,
+    "child_seconds": 20.0,
+    "skip": false,
+    "transport_epoch": "PASS",
+    "exact_origin_no_checkpoint": "PASS",
+    "selected_authored_generated_inode_and_bytes": "PASS",
+    "ordinary_rollback_confirmation": "PASS",
+    "applying_death_fresh_helper": "PASS",
+    "durable_confirm_failure_and_lost_cleanup": "PASS"
+  },
+  "cleanup": {
+    "owned_test_bus_manager_processes": [],
+    "production_networkd": "883 systemd-network",
+    "host_nm_state_absent": true
+  },
+  "experimental_d096_refusal": {
+    "path": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-v6-ubuntu-exact-origin-final.log",
+    "sha256": "d0dea1d86898120ff663e6dd539fc1034c46774028e932c2241612dd85a84630",
+    "reason": "strict structural baseline ancestry differs; no successful generated-origin claim for that experimental source"
+  }
+}

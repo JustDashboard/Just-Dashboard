@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { portProblem } from "../tools/tool-input"
+import { tunnelProblems } from "./tunnel-input"
 
 type Kind =
   "bridge" | "vlan" | "vxlan" | "gre" | "gretap" | "ip6gre" | "ip6gretap" | "dummy" | "macvlan"
@@ -90,14 +91,28 @@ type LinkRequest = {
   vni?: number
   local?: string
   remote?: string
+  group?: string
   port?: number
   ttl?: number
   key?: number
   mode?: string
   mtu?: number
   stp?: boolean
+  vlanFiltering?: boolean
+  multicastSnooping?: boolean
   addresses?: string[]
   up: boolean
+}
+
+/** What each macvlan mode means for the host and its siblings, said before it is made. */
+const MACVLAN_MODES: Record<string, string> = {
+  bridge:
+    "Macvlans on the same card reach each other directly. This server cannot reach them through the card, nor they the server: give the host its own macvlan to talk to them.",
+  private:
+    "Each macvlan reaches only the outside network: not this server through the card, and not the other macvlans on it.",
+  vepa: "Traffic between macvlans on the card goes out to the switch, which must reflect it back (802.1Qbg). This server still cannot reach them through the card.",
+  passthru:
+    "One macvlan takes the card: every frame it receives goes to the macvlan and the host's own stack sees none. Refused on a card that carries the uplink or your connection.",
 }
 
 /**
@@ -125,11 +140,17 @@ export function CreateDevice({
   const [vni, setVni] = useState("")
   const [local, setLocal] = useState("")
   const [remote, setRemote] = useState("")
+  const [destination, setDestination] = useState<"remote" | "group">("remote")
+  const [group, setGroup] = useState("")
   const [port, setPort] = useState("4789")
+  const [ttl, setTtl] = useState("")
+  const [key, setKey] = useState("")
   const [mode, setMode] = useState("bridge")
   const [address, setAddress] = useState("")
   const [mtu, setMtu] = useState("")
   const [stp, setStp] = useState(false)
+  const [vlanFiltering, setVlanFiltering] = useState(false)
+  const [snooping, setSnooping] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -148,13 +169,25 @@ export function CreateDevice({
   const needsParent = kind === "vlan" || kind === "macvlan"
   const tunnel = kind.includes("gre")
   const portError = kind === "vxlan" ? portProblem(port) : undefined
+  const selectedRemote = kind === "vxlan" && destination === "group" ? "" : remote
+  const selectedGroup = kind === "vxlan" && destination === "group" ? group : ""
+  const problems = tunnelProblems(kind, {
+    vni,
+    remote: selectedRemote,
+    group: selectedGroup,
+    local,
+    parent,
+    ttl,
+    key,
+  })
   const ready =
     !nameError &&
     !portError &&
+    !Object.values(problems).some(Boolean) &&
     (!needsParent || parent) &&
     (kind !== "vlan" || vlanId) &&
-    (kind !== "vxlan" || (vni && (remote || parent))) &&
-    (!tunnel || remote)
+    (kind !== "vxlan" || (vni.trim() && (selectedRemote.trim() || selectedGroup.trim()))) &&
+    (!tunnel || remote.trim())
 
   const submit = async () => {
     if (!ready || busy) return
@@ -164,13 +197,22 @@ export function CreateDevice({
     if (kind === "vxlan") {
       body.vni = Number(vni)
       body.port = Number(port.trim())
+      if (selectedGroup.trim()) body.group = selectedGroup.trim()
     }
     if (kind === "vxlan" || tunnel) {
       if (local.trim()) body.local = local.trim()
-      if (remote.trim()) body.remote = remote.trim()
+      if (selectedRemote.trim()) body.remote = selectedRemote.trim()
+    }
+    if (tunnel) {
+      if (ttl.trim()) body.ttl = Number(ttl.trim())
+      if (key.trim()) body.key = Number(key.trim())
     }
     if (kind === "macvlan") body.mode = mode
-    if (kind === "bridge") body.stp = stp
+    if (kind === "bridge") {
+      body.stp = stp
+      if (vlanFiltering) body.vlanFiltering = true
+      if (!snooping) body.multicastSnooping = false
+    }
     if (mtu.trim()) body.mtu = Number(mtu)
     if (address.trim()) body.addresses = [address.trim()]
     setBusy(true)
@@ -240,7 +282,14 @@ export function CreateDevice({
             <Field
               label={kind === "vxlan" ? "Send from" : "Rides on"}
               htmlFor="device-parent"
-              hint={kind === "vxlan" ? "Optional: the card the tunnel leaves through" : undefined}
+              error={problems.parent}
+              hint={
+                kind === "vxlan"
+                  ? destination === "group"
+                    ? "Required for a multicast group"
+                    : "Optional: the card the tunnel leaves through"
+                  : undefined
+              }
             >
               <Select value={parent} onValueChange={setParent}>
                 <SelectTrigger id="device-parent" className="w-full">
@@ -285,11 +334,13 @@ export function CreateDevice({
             <Field
               label="VNI"
               htmlFor="device-vni"
-              hint="The network's number, the same at both ends"
+              error={problems.vni}
+              hint="1 to 16777215, the same at both ends"
             >
               <Input
                 id="device-vni"
                 inputMode="numeric"
+                aria-invalid={Boolean(problems.vni)}
                 value={vni}
                 placeholder="42"
                 onChange={(event) => setVni(event.target.value)}
@@ -306,24 +357,66 @@ export function CreateDevice({
             </Field>
           </FieldRow>
         )}
+        {kind === "vxlan" && (
+          <Field label="Destination mode" htmlFor="device-destination">
+            <Select
+              value={destination}
+              onValueChange={(value) => setDestination(value as "remote" | "group")}
+            >
+              <SelectTrigger id="device-destination" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="remote">Unicast remote</SelectItem>
+                <SelectItem value="group">Multicast group</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         {(kind === "vxlan" || tunnel) && (
           <FieldRow>
-            <Field label="Remote end" htmlFor="device-remote" hint="The other server's address">
-              <Input
-                id="device-remote"
-                value={remote}
-                placeholder={kind.startsWith("ip6") ? "2001:db8::7" : "198.51.100.7"}
-                onChange={(event) => setRemote(event.target.value)}
-                className="font-mono"
-              />
-            </Field>
+            {kind === "vxlan" && destination === "group" ? (
+              <Field
+                label="Multicast group"
+                htmlFor="device-group"
+                error={problems.group}
+                hint="An IPv4 or IPv6 multicast address on the underlay"
+              >
+                <Input
+                  id="device-group"
+                  value={group}
+                  placeholder="239.1.1.1 or ff05::42"
+                  aria-invalid={Boolean(problems.group)}
+                  onChange={(event) => setGroup(event.target.value)}
+                  className="font-mono"
+                />
+              </Field>
+            ) : (
+              <Field
+                label="Remote end"
+                htmlFor="device-remote"
+                error={problems.remote}
+                hint="The other server's IP address"
+              >
+                <Input
+                  id="device-remote"
+                  aria-invalid={Boolean(problems.remote)}
+                  value={remote}
+                  placeholder={kind.startsWith("ip6") ? "2001:db8::7" : "198.51.100.7"}
+                  onChange={(event) => setRemote(event.target.value)}
+                  className="font-mono"
+                />
+              </Field>
+            )}
             <Field
               label="Local end"
               htmlFor="device-local"
+              error={problems.local}
               hint="Optional: this server's address to send from"
             >
               <Input
                 id="device-local"
+                aria-invalid={Boolean(problems.local)}
                 value={local}
                 placeholder="any"
                 onChange={(event) => setLocal(event.target.value)}
@@ -332,8 +425,40 @@ export function CreateDevice({
             </Field>
           </FieldRow>
         )}
+        {tunnel && (
+          <FieldRow>
+            <Field
+              label={kind.startsWith("ip6") ? "Hop limit" : "TTL"}
+              htmlFor="device-ttl"
+              error={problems.ttl}
+              hint="1 to 255; blank or 0 keeps the kernel default"
+            >
+              <Input
+                id="device-ttl"
+                inputMode="numeric"
+                value={ttl}
+                aria-invalid={Boolean(problems.ttl)}
+                onChange={(event) => setTtl(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Tunnel key"
+              htmlFor="device-key"
+              error={problems.key}
+              hint="Decimal 1 to 4294967295; blank or 0 leaves the tunnel unkeyed. This is an identifier, not encryption."
+            >
+              <Input
+                id="device-key"
+                inputMode="numeric"
+                value={key}
+                aria-invalid={Boolean(problems.key)}
+                onChange={(event) => setKey(event.target.value)}
+              />
+            </Field>
+          </FieldRow>
+        )}
         {kind === "macvlan" && (
-          <Field label="Mode" htmlFor="device-mode">
+          <Field label="Mode" htmlFor="device-mode" hint={MACVLAN_MODES[mode]}>
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger id="device-mode" className="w-full">
                 <SelectValue />
@@ -373,10 +498,68 @@ export function CreateDevice({
             </Field>
           )}
         </FieldRow>
+        {kind === "bridge" && (
+          <FieldRow>
+            <Field
+              label="Filter by VLAN"
+              hint="Each port carries only its VLANs, tagged or untagged; set them on each port's sheet"
+            >
+              <label className="flex h-9 items-center gap-2 text-body">
+                <Switch
+                  checked={vlanFiltering}
+                  onCheckedChange={setVlanFiltering}
+                  aria-label="Filter by VLAN"
+                />
+                {vlanFiltering ? "On — ports start on VLAN 1, untagged" : "Off"}
+              </label>
+            </Field>
+            <Field
+              label="Multicast snooping"
+              hint="Off floods multicast to every port, which some IPTV and discovery setups need"
+            >
+              <label className="flex h-9 items-center gap-2 text-body">
+                <Switch
+                  checked={snooping}
+                  onCheckedChange={setSnooping}
+                  aria-label="Multicast snooping"
+                />
+                {snooping ? "On" : "Off"}
+              </label>
+            </Field>
+          </FieldRow>
+        )}
+        {kind === "vlan" && (
+          <Notice title="Tagged on its card">
+            Frames on this device leave its card tagged with its id. To carry several VLANs on one
+            port, or one untagged, make a bridge that filters by VLAN and set the port&rsquo;s
+            native and tagged VLANs on its sheet.
+          </Notice>
+        )}
+        {kind === "macvlan" && (
+          <Notice title="Provider MAC filtering">
+            A macvlan sends with a MAC address of its own. Cloud providers and switch port security
+            usually drop frames from addresses they did not assign, so on a virtual machine&rsquo;s
+            card it may never reach the network. Its sheet checks the card after it is made;
+            connectivity beyond this server is not probed.
+          </Notice>
+        )}
+        {kind === "dummy" && (
+          <Notice title="What a dummy is for">
+            As a service address: give it a /32 or /128 and bind services to it — it stays up when
+            every card is down. As a route sink: leave it without an address and route destinations
+            into it from its sheet.
+          </Notice>
+        )}
         {tunnel && (
           <Notice title="Not encrypted">
             GRE carries the packets as they are. Across the internet, put it inside WireGuard or use
-            WireGuard instead.
+            WireGuard instead. Creating the device does not test endpoint reachability.
+          </Notice>
+        )}
+        {kind === "vxlan" && destination === "group" && (
+          <Notice title="Multicast underlay not verified">
+            The selected network must carry this group between peers. Creating the device does not
+            check multicast forwarding or prove the remote peers are reachable.
           </Notice>
         )}
         {error && (

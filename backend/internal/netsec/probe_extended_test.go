@@ -42,7 +42,7 @@ func TestExtendedToolsRejectBadTargets(t *testing.T) {
 	if _, err := s.MXCheck(ctx, bad); err == nil {
 		t.Error("MXCheck accepted a bad target")
 	}
-	if _, err := s.HTTPSecurity(ctx, bad, 443); err == nil {
+	if _, err := s.HTTPSecurity(ctx, bad, 443, "auto"); err == nil {
 		t.Error("HTTPSecurity accepted a bad target")
 	}
 	if _, err := s.SiteAudit(ctx, bad, 443); err == nil {
@@ -145,14 +145,14 @@ func TestHTTPSecurityGradesHeaders(t *testing.T) {
 	}))
 	defer hardened.Close()
 	host, port := hostPort(t, hardened.URL)
-	res, err := New().HTTPSecurity(context.Background(), host, port)
+	res, err := New().HTTPSecurity(context.Background(), host, port, "auto")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.OK {
 		t.Fatalf("not ok: %+v", res)
 	}
-	if !strings.Contains(res.Output, "5 of 5 hardened") {
+	if !strings.Contains(res.Output, "5 of 5 applicable headers hardened") {
 		t.Errorf("fully hardened server did not score 5/5:\n%s", res.Output)
 	}
 	if len(res.Records) != 0 {
@@ -162,7 +162,7 @@ func TestHTTPSecurityGradesHeaders(t *testing.T) {
 	bare := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer bare.Close()
 	bhost, bport := hostPort(t, bare.URL)
-	bres, err := New().HTTPSecurity(context.Background(), bhost, bport)
+	bres, err := New().HTTPSecurity(context.Background(), bhost, bport, "auto")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestSiteAuditMergesThreeSections(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("not ok: output=%q error=%q", res.Output, res.Error)
 	}
-	for _, want := range []string{"── HTTP ──", "── TLS ──", "── Headers ──"} {
+	for _, want := range []string{"── HTTP ──", "── Certificate ──", "── Headers ──"} {
 		if !strings.Contains(res.Output, want) {
 			t.Errorf("audit missing section %q:\n%s", want, res.Output)
 		}

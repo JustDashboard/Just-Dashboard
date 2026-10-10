@@ -1,0 +1,144 @@
+{
+  "at": "2026-10-10T01:26:26Z",
+  "bootId": "5c9eed23-5a7f-44e4-ade8-a02a1644d3a2",
+  "evidence": {
+    "confirmed": {
+      "appliedAt": "2026-10-10T01:26:24.89462334Z",
+      "boot": "enabled",
+      "cleanup": "complete",
+      "expiresAt": "2026-10-10T01:27:54.783643006Z",
+      "generation": "dbac28f57b7de5bca63c135301c5313cb9be1e2bdfc0268ceea414509c7eef19",
+      "id": "cea83c3b7f829fe7ef8407f78498a66e",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:26:26.137324483Z",
+      "verifiedAt": "2026-10-10T01:26:25.775830106Z",
+      "watchdog": "completed"
+    },
+    "fileAfter": {
+      "inode": 16295,
+      "mode": "0o600",
+      "path": "/etc/netplan/60-jdvm-networkd.yaml",
+      "sha256": "0f029772181f44f6f29c318ade964d1ea5f6c559ba4d4759a886ab82631e6570"
+    },
+    "fileBefore": {
+      "inode": 9495,
+      "mode": "0o600",
+      "path": "/etc/netplan/60-jdvm-networkd.yaml",
+      "sha256": "31f4ca74d1e917443822296686a013a9b32483e4015c6a1e315b947082760811"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:26:24.89462334Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "complete",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:27:54.783643006Z",
+      "files": [],
+      "generation": "dbac28f57b7de5bca63c135301c5313cb9be1e2bdfc0268ceea414509c7eef19",
+      "id": "cea83c3b7f829fe7ef8407f78498a66e",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:26:26.137324483Z",
+      "verifiedAt": "2026-10-10T01:26:25.775830106Z",
+      "watchdog": "completed"
+    },
+    "journalPending": {
+      "appliedAt": "2026-10-10T01:26:24.89462334Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "pending",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:27:54.783643006Z",
+      "files": [],
+      "generation": "dbac28f57b7de5bca63c135301c5313cb9be1e2bdfc0268ceea414509c7eef19",
+      "id": "cea83c3b7f829fe7ef8407f78498a66e",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:26:25.325508954Z",
+      "watchdog": "armed"
+    },
+    "networkdSettled": true,
+    "profileAfter": {
+      "boot": {
+        "reason": "The existing persistent profile's native owner is enabled; no reboot was measured.",
+        "status": "matching"
+      },
+      "configured": {
+        "reason": "Supported intent was read from the existing selected native profile.",
+        "status": "matching"
+      },
+      "contract": {
+        "members": []
+      },
+      "device": "enp0s4",
+      "editable": true,
+      "intent": {
+        "ipv4": {
+          "addresses": [
+            "10.0.4.15/24",
+            "10.0.4.16/24"
+          ],
+          "dns": [
+            "10.0.4.3"
+          ],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": [
+            {
+              "destination": "10.90.4.0/24",
+              "gateway": "10.0.4.2",
+              "metric": 100,
+              "table": 254
+            },
+            {
+              "destination": "10.91.4.0/24",
+              "gateway": "10.0.4.2",
+              "metric": 100,
+              "table": 254
+            }
+          ]
+        },
+        "ipv6": {
+          "addresses": [
+            "fd00:4::15/64"
+          ],
+          "dns": [],
+          "domains": [
+            "nd.jdvm.test"
+          ],
+          "ignoreAutoDns": false,
+          "ignoreAutoRoutes": false,
+          "method": "manual",
+          "routes": []
+        }
+      },
+      "owner": "netplan",
+      "refusal": null,
+      "renderer": "networkd",
+      "runtime": {
+        "reason": "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed.",
+        "status": "matching"
+      },
+      "version": "1.1.2-8ubuntu1~24.04.3"
+    }
+  },
+  "failures": [],
+  "phase": "p11-confirm netplan-networkd",
+  "result": "pass",
+  "seconds": 7.2
+}

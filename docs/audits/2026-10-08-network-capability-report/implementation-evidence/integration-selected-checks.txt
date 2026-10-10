@@ -1,0 +1,16 @@
+2026-10-08: fixed application source 652ddd30; docs/test corrections through d1cc65df.
+Production: cd frontend && bun run build (pass, including TypeScript).
+Browser server: bun run start --hostname 127.0.0.1 --port 43133.
+Required command: TMPDIR=/home/ubuntu/jd-network-validation-tmp GOMAXPROCS=2 JD_BROWSER_BASE_URL=http://127.0.0.1:43133 scripts/test-changed.sh 58e1089c
+The worktree-specific bunx wrapper sets Playwright --workers=1.
+Prettier/ESLint/tsc: pass.
+Bun: 3,104 pass, 229 files, 13,632 assertions.
+Go build/vet: pass.
+Selected Go packages: api (244.360s), dockerx (0.181s), netpath (0.290s), netdiag (6.185s), netx (0.366s), store (3.721s), netsec (0.233s); all pass.
+Selected browser specs: 11, 331 cases; 292 pass, 38 optional evidence skips, one failure; 20.3 minutes.
+Original gate exit: 1.
+Exact browser rerun: cd frontend && JD_BROWSER_BASE_URL=http://127.0.0.1:43133 TMPDIR=/home/ubuntu/jd-network-validation-tmp bunx playwright test tests/browser/design-system.spec.ts --workers=1 --grep 'the databases pages keep the rules$'
+Result: one pass (40.1s case, 41.1s invocation).
+Combined accounting: all 293 selected executable cases pass, 38 optional evidence skips.
+No application source changes occurred between build, selected checks and rerun.
+Complete local logs: /tmp/jd-network-next-frontend-build.log, /tmp/jd-network-next-changed-gate.log, /tmp/jd-network-next-gate-browser-rerun.log.

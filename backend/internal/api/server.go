@@ -129,6 +129,25 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	dnsCtx, dnsCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := s.modules.network.ReconcileDNSEvidence(dnsCtx); err != nil {
+		s.Log.Warn("interrupted DNS investigations could not be reconciled", "err", err)
+	}
+	dnsCancel()
+	dnsServicesCtx, dnsServicesCancel := context.WithTimeout(ctx, 40*time.Second)
+	if err := s.modules.dnsServices.Reconcile(dnsServicesCtx); err != nil {
+		s.Log.Warn("interrupted native DNS changes could not be reconciled", "err", err)
+	}
+	dnsServicesCancel()
+	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
+		s.Log.Warn("network socket history is unavailable", "err", err)
+	}
+	if err := s.modules.diagnostics.Start(ctx); err != nil {
+		s.Log.Warn("durable network diagnostics are unavailable", "err", err)
+	}
+	if err := s.modules.captures.Start(ctx); err != nil {
+		s.Log.Warn("durable packet captures are unavailable", "err", err)
+	}
 	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := s.modules.backupRunner.RecoverInterruptedRuns(cleanupCtx); err != nil {
 		s.Log.Warn("interrupted backup runs could not be recovered", "err", err)
@@ -157,9 +176,18 @@ func (s *Server) Start(ctx context.Context) error {
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
 	s.modules.network.Start(ctx)
+	// The attention list is judged on a schedule too, so its history holds
+	// what happened while nobody had the Overview open.
+	s.startNetworkIncidents(ctx)
+	// A block made from the connection table with an end is lifted when it
+	// ends, whether or not anybody has the page open.
+	go s.expireBlocks(ctx)
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)
+	// Route changes are only seen if something reads the tables while they
+	// happen, whether or not anybody has the Routing page open.
+	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
@@ -248,14 +276,32 @@ func (s *Server) Shutdown() {
 	s.stopDatabaseMetrics()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
+	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {
+		s.Log.Warn("native DNS runtime client shutdown failed", "err", err)
+	}
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()
 	s.modules.selfUpdate.Stop()
 	s.modules.certKeeper.Stop()
 	s.modules.term.Shutdown()
 	s.modules.dbs.Shutdown()
+	flowCtx, flowCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.flowAccounting.Shutdown(flowCtx); err != nil && s.Log != nil {
+		s.Log.Warn("network socket collector cleanup is unverified", "err", err)
+	}
+	flowCancel()
 	s.modules.docker.Close()
-	// Jobs are deliberately not cancelled: a certificate issuance or a package
+	captureCtx, captureCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.captures.Shutdown(captureCtx); err != nil && s.Log != nil {
+		s.Log.Warn("packet capture cleanup is unverified", "err", err)
+	}
+	captureCancel()
+	diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.diagnostics.Shutdown(diagnosticCtx); err != nil && s.Log != nil {
+		s.Log.Warn("network diagnostics did not finish stopping before shutdown", "err", err)
+	}
+	diagnosticCancel()
+	// Other jobs are deliberately not cancelled: a certificate issuance or a package
 	// upgrade interrupted halfway is worse than one that completes into a
 	// dashboard that has restarted. Only the subscribers are released.
 	s.modules.jobs.Shutdown()

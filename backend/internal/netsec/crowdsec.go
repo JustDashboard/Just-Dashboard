@@ -95,6 +95,10 @@ type CrowdSecView struct {
 	Decisions []CrowdSecDecision `json:"decisions"`
 	Alerts    []CrowdSecAlert    `json:"alerts"`
 	Bouncers  []CrowdSecBouncer  `json:"bouncers"`
+	// Enforcement is whether any bouncer is actually turning the decisions
+	// into dropped traffic, judged from its pulls and the kernel's sets
+	// rather than from the engine running.
+	Enforcement *CrowdSecEnforcement `json:"enforcement,omitempty"`
 	// Error is what cscli said when it could not answer; the lists it could
 	// not fill are empty.
 	Error string `json:"error,omitempty"`
@@ -128,11 +132,27 @@ func (s *Service) CrowdSec(ctx context.Context) (*CrowdSecView, error) {
 		note("alerts", err)
 		v.Alerts = []CrowdSecAlert{}
 	}
+	bouncersRead := true
 	if out, err := run(ctx, "cscli", "bouncers", "list", "-o", "json"); err != nil {
 		note("bouncers", err)
+		bouncersRead = false
 	} else if v.Bouncers, err = parseCrowdSecBouncers(out); err != nil {
 		note("bouncers", err)
 		v.Bouncers = []CrowdSecBouncer{}
+		bouncersRead = false
+	}
+	now := crowdsecNow()
+	if bouncersRead {
+		e := s.crowdsecEnforcement(ctx, v, now)
+		v.Enforcement = &e
+	} else {
+		// An unreadable bouncer list is not an empty one: saying nothing
+		// enforces the decisions would be as unfounded as saying something does.
+		v.Enforcement = &CrowdSecEnforcement{
+			State: EnforcementUnverified, Checked: now.UTC(), Fresh: bouncerFreshness.String(),
+			Summary:  "The bouncer list could not be read, so whether anything enforces the decisions is unknown.",
+			Bouncers: []BouncerEvidence{}, Enforced: []string{},
+		}
 	}
 	v.Error = strings.Join(problems, "; ")
 	return v, nil
@@ -335,6 +355,19 @@ func (s *Service) AddDecision(ctx context.Context, value, duration, reason, call
 		return "", ErrCrowdSecMissing
 	}
 	return run(ctx, "cscli", "decisions", "add", flag, target, "--duration", duration, "--reason", reason, "--type", "ban")
+}
+
+// ValidateDecision runs AddDecision's checks on the request alone, so a
+// caller can refuse an invalid decision before judging what a valid one does.
+func ValidateDecision(value, duration, reason string) error {
+	if _, _, _, err := parseDecisionTarget(strings.TrimSpace(value)); err != nil {
+		return err
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(duration)); err != nil || d < minDecisionDuration || d > maxDecisionDuration {
+		return fmt.Errorf("a duration is a length of time such as 4h, 24h or 168h, from 1m to 8760h")
+	}
+	_, err := cleanDecisionReason(reason)
+	return err
 }
 
 // parseDecisionTarget reads an address or a range and says which cscli flag

@@ -1,0 +1,6 @@
+-P INPUT ACCEPT
+-P FORWARD DROP
+-P OUTPUT ACCEPT
+-N CROWDSEC_CHAIN
+-A INPUT -j CROWDSEC_CHAIN
+-A CROWDSEC_CHAIN -m set --match-set crowdsec-blacklists src -j DROP

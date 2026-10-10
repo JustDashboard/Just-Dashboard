@@ -8,6 +8,11 @@ import type { GatewayView } from "@/lib/types"
 import { Warning } from "@/components/icons"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/confirm-dialog"
+import { Detail, DetailList } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Tag } from "@/components/tag"
+import { FlowSummary } from "@/components/network/gateway/impacts"
 
 /**
  * What the gateway says before anything is pressed: that this host's firewall
@@ -16,7 +21,9 @@ import { Button } from "@/components/ui/button"
  * firewall is missing. Each is a fact the reader would otherwise find out
  * from a refusal, or from a forward that was saved and never worked.
  */
-export function GatewayNotices({ view }: { view: GatewayView }) {
+export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefresh?: () => void }) {
+  const { can } = useAuth()
+  const { confirm, dialog } = useConfirm()
   const { capability, loaded, admission, forwards, nat } = view
   const entries = forwards.some((f) => f.enabled) || nat.some((n) => n.enabled)
   return (
@@ -43,12 +50,111 @@ export function GatewayNotices({ view }: { view: GatewayView }) {
         </Notice>
       )}
       {admission.needed && !admission.present && (
-        <Notice tone="warning" icon={Warning} title="Forwarded connections are not admitted">
-          The firewall rule that lets a translated connection through is missing, so a forward can
-          be refused by the firewall after it has been translated. It is put back when an entry is
-          saved and at every boot.
+        <Notice tone="warning" icon={Warning} title="Owned admission rules need attention">
+          <p>
+            A required rule is missing, unsupported or unreadable. A saved forward may be refused
+            after translation. Inspect each chain below; the presence of these rules does not prove
+            the complete connection works.
+          </p>
+          {can("system.admin") &&
+            capability.writable &&
+            admission.chains?.some((chain) => chain.needed && chain.status === "absent") && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() =>
+                  confirm({
+                    title: "Repair owned admission rules",
+                    description: (
+                      <p>
+                        Restore the dashboard&rsquo;s marked admission rules for its active
+                        translations. This may admit traffic previously refused by the missing
+                        rules.
+                      </p>
+                    ),
+                    confirmLabel: "Repair rules",
+                    action: async () => {
+                      await post("/network/gateway/admission/repair")
+                      onRefresh?.()
+                    },
+                  })
+                }
+              >
+                Repair owned rules
+              </Button>
+            )}
         </Notice>
       )}
+      {(admission.chains || capability.layers || Boolean(view.flows?.length)) && (
+        <Panel plain>
+          <PanelHeader title="Policy evidence" />
+          <PanelBody className="space-y-3">
+            <DetailList>
+              {admission.chains
+                ?.filter((chain) => chain.needed)
+                .map((chain) => (
+                  <Detail
+                    key={`${chain.family}:${chain.chain}`}
+                    label={`${chain.family === "inet6" ? "IPv6" : "IPv4"} ${chain.chain}`}
+                  >
+                    <span className="space-x-2">
+                      <Tag tone={chain.status === "present" ? "success" : "warning"}>
+                        {chain.status === "present" ? "Owned rule present" : chain.status}
+                      </Tag>
+                      {chain.reason && (
+                        <span className="text-muted-foreground">{chain.reason}</span>
+                      )}
+                    </span>
+                  </Detail>
+                ))}
+            </DetailList>
+            {Boolean(view.flows?.length) && (
+              <div className="space-y-1.5">
+                <p className="text-hint font-medium">Each entry&rsquo;s flow, as modeled</p>
+                <FlowSummary flows={view.flows ?? []} named />
+                <p className="text-hint text-muted-foreground">
+                  Each enabled entry&rsquo;s flow is walked through the host&rsquo;s other chains in
+                  their supported rule forms, following jumps. A drop that only names some sources
+                  restricts it rather than blocking it. This is a model, not a packet trace.
+                </p>
+              </div>
+            )}
+            {Boolean(capability.layers?.length) && (
+              <details className="text-hint text-muted-foreground">
+                <summary className="cursor-pointer focus-ring">Checked policy layers</summary>
+                <ul className="mt-2 space-y-1">
+                  {capability.layers?.map((layer, index) => (
+                    <li key={index}>
+                      <span className="font-mono">
+                        {layer.family} {layer.table} {layer.chain}
+                      </span>
+                      : {layer.status}
+                      {layer.type === "nat" ? " (nat)" : ""}
+                      {layer.reason ? ` — ${layer.reason}` : ""}
+                      {layer.uncertain && layer.uncertain.length > 0 && (
+                        <span className="block pl-4">Not read: {layer.uncertain.join("; ")}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            <p className="text-hint text-muted-foreground">
+              {capability.unknownLayers?.length
+                ? `Unverified: ${capability.unknownLayers.join("; ")}.`
+                : "Provider policy and end-to-end reachability remain unverified."}
+            </p>
+            {admission.checkedAt && (
+              <p className="text-hint text-muted-foreground">
+                Checked <time dateTime={admission.checkedAt}>{admission.checkedAt}</time>
+              </p>
+            )}
+          </PanelBody>
+        </Panel>
+      )}
+      {dialog}
     </>
   )
 }

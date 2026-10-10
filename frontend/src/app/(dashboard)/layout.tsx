@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { NavScopeProvider } from "@/components/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
+import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { status, loading } = useAuth()
@@ -72,6 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   {/* A folder coloured in Files is that colour on every page
                   that draws it, not only on the one that coloured it. */}
+                  <NetworkChangeConfirmation />
                   <SavedFolderColours>{children}</SavedFolderColours>
                 </div>
               </SidebarInset>

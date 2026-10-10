@@ -6,7 +6,11 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // procSysRoot is where the kernel's settings are read from; a variable so
@@ -54,6 +58,166 @@ type ForwardingState struct {
 	NeededBy []string `json:"neededBy"`
 	// Guard is why it cannot be turned off, when it cannot.
 	Guard string `json:"guard,omitempty"`
+	// DockerBasis says how the Docker dependency was counted for this
+	// family, where Docker runs bridge networks.
+	DockerBasis string `json:"dockerBasis,omitempty"`
+	// Health is forwarding as measured rather than switched.
+	Health ForwardingHealth `json:"health"`
+}
+
+// ForwardingHealth is what the kernel's counters and per-device switches say.
+// Status is off, measuring (the first reading, with no rate yet),
+// forwarding, idle, partial (some devices do not forward) or unknown.
+// Datagrams forwarded show the switch is doing something; they cannot say
+// whether a particular flow was meant to pass or reached its destination.
+type ForwardingHealth struct {
+	Status        string    `json:"status"`
+	Forwarded     *uint64   `json:"forwarded,omitempty"`
+	RatePerSecond *float64  `json:"ratePerSecond,omitempty"`
+	WindowSeconds float64   `json:"windowSeconds,omitempty"`
+	Disabled      []string  `json:"disabled"`
+	CheckedAt     time.Time `json:"checkedAt"`
+	Reason        string    `json:"reason,omitempty"`
+}
+
+// procNetRoot is where the kernel's protocol counters are read from; a
+// variable so tests can stand a directory behind it.
+var procNetRoot = "/proc/net"
+
+// forwardingSamples keeps the previous counter reading per family, so the
+// next read can turn the difference into a rate.
+type forwardingSamples struct {
+	mu   sync.Mutex
+	last map[string]forwardingSample
+}
+
+type forwardingSample struct {
+	at    time.Time
+	value uint64
+	rate  *float64
+	span  float64
+}
+
+// forwardedDatagrams reads the kernel's count of datagrams it forwarded:
+// ForwDatagrams in the Ip block of snmp, Ip6OutForwDatagrams in snmp6.
+func forwardedDatagrams(canon string) (uint64, error) {
+	if canon == "ipv6" {
+		b, err := os.ReadFile(filepath.Join(procNetRoot, "snmp6"))
+		if err != nil {
+			return 0, err
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[0] == "Ip6OutForwDatagrams" {
+				return strconv.ParseUint(fields[1], 10, 64)
+			}
+		}
+		return 0, fmt.Errorf("snmp6 has no Ip6OutForwDatagrams")
+	}
+	b, err := os.ReadFile(filepath.Join(procNetRoot, "snmp"))
+	if err != nil {
+		return 0, err
+	}
+	var header []string
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "Ip:" {
+			continue
+		}
+		if header == nil {
+			header = fields
+			continue
+		}
+		for i, name := range header {
+			if name == "ForwDatagrams" && i < len(fields) {
+				return strconv.ParseUint(fields[i], 10, 64)
+			}
+		}
+	}
+	return 0, fmt.Errorf("snmp has no Ip ForwDatagrams")
+}
+
+// devicesNotForwarding lists the IPv4 devices whose own forwarding switch
+// is off while the family's is on; traffic arriving on them is not
+// forwarded. IPv6 has no such switch: a device's forwarding setting chooses
+// host or router behaviour (router advertisements), and only all/forwarding
+// decides whether the kernel forwards.
+func devicesNotForwarding() ([]string, error) {
+	dir := filepath.Join(procSysRoot, "net", "ipv4", "conf")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "all" || name == "default" || name == "lo" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name, "forwarding"))
+		if err == nil && strings.TrimSpace(string(b)) == "0" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// measure reads one family's health and remembers the counter for the next
+// read. A window shorter than a second keeps the previous rate.
+func (f *forwardingSamples) measure(canon string, enabled bool, now time.Time) ForwardingHealth {
+	h := ForwardingHealth{Status: "unknown", Disabled: []string{}, CheckedAt: now}
+	value, err := forwardedDatagrams(canon)
+	if err != nil {
+		h.Reason = "The kernel's forwarding counter could not be read: " + err.Error()
+		return h
+	}
+	h.Forwarded = &value
+	f.mu.Lock()
+	if f.last == nil {
+		f.last = map[string]forwardingSample{}
+	}
+	prev, had := f.last[canon]
+	next := forwardingSample{at: now, value: value, rate: prev.rate, span: prev.span}
+	if had && value >= prev.value {
+		if span := now.Sub(prev.at).Seconds(); span >= 1 {
+			rate := float64(value-prev.value) / span
+			next.rate, next.span = &rate, span
+		} else {
+			next.at, next.value = prev.at, prev.value
+		}
+	} else if had {
+		// A counter that went backwards was reset; start measuring again.
+		next.rate, next.span = nil, 0
+	}
+	f.last[canon] = next
+	f.mu.Unlock()
+	h.RatePerSecond, h.WindowSeconds = next.rate, next.span
+	if !enabled {
+		h.Status, h.Reason = "off", "The family's forwarding switch is off; the counter shows what was forwarded before."
+		return h
+	}
+	if canon == "ipv4" {
+		disabled, err := devicesNotForwarding()
+		if err != nil {
+			h.Reason = "Per-device forwarding could not be read: " + err.Error()
+			return h
+		}
+		h.Disabled = disabled
+	}
+	disabled := h.Disabled
+	switch {
+	case len(disabled) > 0:
+		h.Status = "partial"
+		h.Reason = "Traffic arriving on " + strings.Join(disabled, ", ") + " is not forwarded: " + plural(len(disabled), "its", "their") + " own forwarding switch is off."
+	case next.rate == nil:
+		h.Status, h.Reason = "measuring", "The first reading has no rate yet; the next one will."
+	case *next.rate > 0:
+		h.Status = "forwarding"
+	default:
+		h.Status, h.Reason = "idle", "No datagram was forwarded between the last two readings."
+	}
+	return h
 }
 
 // forwardingKey maps a family name to its sysctl key and canonical spelling.
@@ -143,7 +307,20 @@ func (s *Service) Forwarding(ctx context.Context, needs ForwardingNeeds) Forward
 	if err != nil {
 		sp = emptySpec()
 	}
-	return forwardingFrom(sp, needs)
+	return s.forwardingFrom(sp, needs)
+}
+
+// dockerBasis explains the Docker count beside a family's dependencies.
+func dockerBasis(needs ForwardingNeeds, canon string) string {
+	switch {
+	case needs.DockerNetworksUnknown:
+		return "Docker's networks could not be read, so both families are treated as needed until they can be."
+	case needs.DockerNetworks == 0:
+		return ""
+	case canon == "ipv4":
+		return fmt.Sprintf("Counts all %d Docker bridge %s: Docker's inventory does not say whether a network disabled IPv4 or relies on custom IPAM without a listed subnet, so each is assumed to forward IPv4.", needs.DockerNetworks, plural(needs.DockerNetworks, "network", "networks"))
+	}
+	return fmt.Sprintf("Counts the %d of %d Docker bridge networks with IPv6 enabled or an IPv6 subnet.", needs.DockerIPv6Networks, needs.DockerNetworks)
 }
 
 // SetForwarding turns a family's forwarding on or off. Off is refused while
@@ -224,17 +401,21 @@ func (s *Service) SetForwarding(ctx context.Context, family string, on bool, nee
 	if err != nil {
 		return nil, err
 	}
-	view := forwardingFrom(next, needs)
+	view := s.forwardingFrom(next, needs)
 	return &view, nil
 }
 
 // forwardingFrom is Forwarding over a spec already in hand, which SetForwarding
 // holds the lock for.
-func forwardingFrom(sp *Spec, needs ForwardingNeeds) ForwardingView {
+func (s *Service) forwardingFrom(sp *Spec, needs ForwardingNeeds) ForwardingView {
+	now := time.Now().UTC()
 	state := func(key, canon string) ForwardingState {
-		st := ForwardingState{NeededBy: forwardingNeeds(sp, needs, canon)}
+		st := ForwardingState{NeededBy: forwardingNeeds(sp, needs, canon), DockerBasis: dockerBasis(needs, canon)}
 		if v, err := readSysctl(key); err == nil {
 			st.Available, st.Enabled = true, v == "1"
+			st.Health = s.forwardingSample.measure(canon, st.Enabled, now)
+		} else {
+			st.Health = ForwardingHealth{Status: "unknown", Disabled: []string{}, CheckedAt: now, Reason: "This host has no " + canon + " forwarding setting."}
 		}
 		_, st.Persisted = sp.Sysctls[key]
 		if len(st.NeededBy) > 0 {

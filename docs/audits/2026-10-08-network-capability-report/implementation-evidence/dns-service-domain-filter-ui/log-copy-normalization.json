@@ -1,0 +1,93 @@
+{
+  "normalization": "Remove carriage returns and trailing line/EOF whitespace only; deterministic gzip preserves original bytes.",
+  "records": [
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-build-first.log",
+      "text": "build-first-f6.log",
+      "gzip": "build-first-f6.log.raw.gz",
+      "original_sha256": "a86a21f74471b5b55427eed3324fe989edb5f6b512d7c72e508f11582f16a044",
+      "text_sha256": "25c09569ce331477bb91fdb4aea2fc07293364eb47391a298be419466b85fc55",
+      "gzip_sha256": "8f7d09a03455f69be781428a39326558ec7262c32203abf8148208b38f11e719"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-build-b703.log",
+      "text": "build-b703.log",
+      "gzip": "build-b703.log.raw.gz",
+      "original_sha256": "2cc01dd4fb50a07cc1029f3aab0e25063f174322c5c244323bde4722a9d8f34f",
+      "text_sha256": "8ca72e3863a94030c4dd0758384078856c9d1ec2db7badf00135fb1f51b85347",
+      "gzip_sha256": "c5268b6dddfdee3dea4d9e4837e7f443fc2f23fd17273a0fd2b6997a29ad46ed"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-build-final.log",
+      "text": "build-final.log",
+      "gzip": "build-final.log.raw.gz",
+      "original_sha256": "1a4a412a7385f6efc20eee5e124c4c97128ed3a3c7d0efb496cc5bc01bd14500",
+      "text_sha256": "124abcbb4a301cb5caf411c84166510a21ecd14ee2c31cc1b8d3261ecf170c52",
+      "gzip_sha256": "7e1178b31a722d67f05fc873fc6292fa676b4cecc029c81ed429574cb740daa8"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-browser-first.log",
+      "text": "browser-first.log",
+      "gzip": "browser-first.log.raw.gz",
+      "original_sha256": "cac2932d7c5872ac8d25f4dd9e2925c326af71e3a9aa7a581bc3afbb8a281390",
+      "text_sha256": "cf7ec72078b02b3686363cf64301ec818fbaf972f1a9eac0bc58fe2660dc18a4",
+      "gzip_sha256": "9c5bbcab62028f711d44c357adfdec21e82b2b63dacfda45021495933f23058c"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-browser-confirmation-corrected.log",
+      "text": "browser-confirmation-corrected.log",
+      "gzip": "browser-confirmation-corrected.log.raw.gz",
+      "original_sha256": "a94e5134cd656f103ac9e3479f671bc30e840a495e3621e5af53944a227201fb",
+      "text_sha256": "a94e5134cd656f103ac9e3479f671bc30e840a495e3621e5af53944a227201fb",
+      "gzip_sha256": "f7690705b69a07a4163cbfde8faf93dc730049bff5c58409023589073e2aaf0d"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-install.log",
+      "text": "install-frozen.log",
+      "gzip": "install-frozen.log.raw.gz",
+      "original_sha256": "33abbcef6389549b5465af92c52b1e88998dee132bc9cb54845275ee4e2211bc",
+      "text_sha256": "33abbcef6389549b5465af92c52b1e88998dee132bc9cb54845275ee4e2211bc",
+      "gzip_sha256": "08f63098bc66e1decefd05e86eff1f819a710d1afae31e941173527a46ae6f7a"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-logic.log",
+      "text": "logic-focused.log",
+      "gzip": "logic-focused.log.raw.gz",
+      "original_sha256": "ac0e54bea5da0198836523e1c94ae8a1ee6599c0a8bfb58f1314f8dfa76d49ca",
+      "text_sha256": "ac0e54bea5da0198836523e1c94ae8a1ee6599c0a8bfb58f1314f8dfa76d49ca",
+      "gzip_sha256": "2482f45876aeebff6b25c669afb044dac2606df129897b48df6b90f66829407e"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-required-final.log",
+      "text": "required-final.log",
+      "gzip": "required-final.log.raw.gz",
+      "original_sha256": "2c3e311fdb3cd59e0e1f6a82ed8c510ab37e844d4440790a0832935ce21be735",
+      "text_sha256": "2c3e311fdb3cd59e0e1f6a82ed8c510ab37e844d4440790a0832935ce21be735",
+      "gzip_sha256": "9f2e572d7ef3a3a35a859e2ee2ec034ed93e5b356ae6f6173fb646978000c5cd"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-race-final.log",
+      "text": "race-final.log",
+      "gzip": "race-final.log.raw.gz",
+      "original_sha256": "212701c7eca9625339653f2c266821d9dfffc8a9f87a266c227d9954275a1b14",
+      "text_sha256": "212701c7eca9625339653f2c266821d9dfffc8a9f87a266c227d9954275a1b14",
+      "gzip_sha256": "97f4a43906fff27225de19452b55f627130ac327ae0bc89619e56e5f97ccfc1c"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-race-selection.log",
+      "text": "race-selection.log",
+      "gzip": "race-selection.log.raw.gz",
+      "original_sha256": "fd847c0340821957afd5f07ab524cf56fb50094499777d010dbb50207b176240",
+      "text_sha256": "fd847c0340821957afd5f07ab524cf56fb50094499777d010dbb50207b176240",
+      "gzip_sha256": "10d84f9dcb49019c7e1d48489590345fdb7e9126c880833745f509e9f627d6fc"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-docs-final.log",
+      "text": "docs-final.log",
+      "gzip": "docs-final.log.raw.gz",
+      "original_sha256": "e091cae577eeb5018c9b40eb189dd30c752b860531f0e88091730dbea61e5804",
+      "text_sha256": "e091cae577eeb5018c9b40eb189dd30c752b860531f0e88091730dbea61e5804",
+      "gzip_sha256": "355860e46e7de3e336ea31024a140d7b8fb14e073c668591cb862799c1564d04"
+    }
+  ]
+}

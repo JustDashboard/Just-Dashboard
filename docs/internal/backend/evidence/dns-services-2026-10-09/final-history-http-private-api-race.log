@@ -1,0 +1,32 @@
+=== RUN   TestDNSServiceRetainedHistoryIsBoundedPrivateMetadataWithoutNativeAccess
+--- PASS: TestDNSServiceRetainedHistoryIsBoundedPrivateMetadataWithoutNativeAccess (3.86s)
+=== RUN   TestDNSNativeTLSIdentityRedirectAndProxyBoundary
+2026/10/09 00:38:20 http: TLS handshake error from 127.0.0.1:38256: remote error: tls: bad certificate
+2026/10/09 00:38:20 http: TLS handshake error from 127.0.0.1:38266: remote error: tls: bad certificate
+--- PASS: TestDNSNativeTLSIdentityRedirectAndProxyBoundary (0.05s)
+=== RUN   TestDNSNativePiHoleSessionHeaderAndVersionContract
+--- PASS: TestDNSNativePiHoleSessionHeaderAndVersionContract (0.01s)
+=== RUN   TestDNSNativeTechnitiumBearerPOSTAndTypedNativeViews
+--- PASS: TestDNSNativeTechnitiumBearerPOSTAndTypedNativeViews (0.01s)
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/error
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/oversized
+=== RUN   TestDNSNativeResponseBoundsAndErrorSecretRefusal/missing
+--- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal (0.03s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/error (0.00s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/oversized (0.02s)
+    --- PASS: TestDNSNativeResponseBoundsAndErrorSecretRefusal/missing (0.01s)
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/later_boot_same_pid
+=== RUN   TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/unknown_process_refused
+--- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation (8.64s)
+    --- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/later_boot_same_pid (4.96s)
+    --- PASS: TestDNSServicePiHoleWaitsForNativeRestartWithoutRepeatingMutation/unknown_process_refused (3.68s)
+=== RUN   TestDNSNativeFTLRestartRejectsRequestLatencyAsNewBoot
+--- PASS: TestDNSNativeFTLRestartRejectsRequestLatencyAsNewBoot (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	13.678s
+=== RUN   TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit
+--- PASS: TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit (3.36s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	4.640s

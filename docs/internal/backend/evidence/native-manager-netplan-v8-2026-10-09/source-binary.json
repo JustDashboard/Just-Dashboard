@@ -1,0 +1,63 @@
+{
+  "commit": "7c99cc5d1ae58e9bf562af8d51e5911cf3bb60d5",
+  "base": "d99173ef019afbf5162cdcc958dea4ff8a9a2e94",
+  "capability": "jd-native-manager-v8",
+  "worktree": "/home/ubuntu/Just-Dashboard-network-netplan-domains",
+  "source": {
+    "backend/internal/netx/native_manager_admission_test.go": "ffc7d7e87cabfdf0f1dd8e9fef7d89cfb7589d1f761ac5ae4bbe55f6dc1b30dc",
+    "backend/internal/netx/native_manager_apply.go": "72374a994ba423b52edfecb9fea39f60469bfec70be007eeda03316b576725e5",
+    "backend/internal/netx/native_manager_auto_live_test.go": "de886b5c7ff8fc8014ab6d6e04836c4c349d54e460e813707909d6cc56b18497",
+    "backend/internal/netx/native_manager_domains.go": "a36e9addf95442252b61101b05c22e0379521bf86c23621bc2eda99bc97f0c04",
+    "backend/internal/netx/native_manager_domains_test.go": "3b3fd5eeeb00b31b4e453519c31eaf545dec13fdbf6669b0719d8b2ad330dffe",
+    "backend/internal/netx/native_manager_epoch.go": "a6d17161df8150c6242fafd6cd36699f1e6ed13b1478df890268c2244f28c122",
+    "backend/internal/netx/native_manager_exchange.go": "a0770a21c1c8e7229c807efecc814338dcb02486a65e54a9c8dda24bdf058e2a",
+    "backend/internal/netx/native_manager_formats.go": "3cf9a04d9d0a1ce18e44e201a0be60642df4e3ac42d09c32abc1c4c50402a99e",
+    "backend/internal/netx/native_manager_ini.go": "09288daca6afec7c99d8a13049cca1bff50482ee0fd4ef0f120b928fe6cb692e",
+    "backend/internal/netx/native_manager_io.go": "fdae70f215d3264f562a54461aec7e139046f8236164ba3026225040f943e293",
+    "backend/internal/netx/native_manager_io_test.go": "e9678ba0b79add145929af201caa5925f966aaadb3540c79d70651f8fc9ce130",
+    "backend/internal/netx/native_manager_live_test.go": "881817c20782d281792af6d43270f21b5d67fdc35f9d15f62f6032daebaacebe",
+    "backend/internal/netx/native_manager_model.go": "cd8ff750d2b7c06557dc6d3bf4e16903893ffffff4bbb78ba2039d749025792b",
+    "backend/internal/netx/native_manager_netplan.go": "808e598d85404df4a496bedce300426512eb406dd6f35562ed93bcf1c6163615",
+    "backend/internal/netx/native_manager_netplan_policy.go": "be16adf4eb3e2c5d13a2120d2841e197697441a2dab26dc052d0618b474742ad",
+    "backend/internal/netx/native_manager_netplan_policy_test.go": "6467d676176c06035eb5fe5f60a8fa27ac89cf9e146f56258786829a75d01126",
+    "backend/internal/netx/native_manager_nm_domains_test.go": "aaed0e63089386b06214ccfab16edb438c433090f520cc3281a241a0970c6804",
+    "backend/internal/netx/native_manager_nm_loaded.go": "234323fffd9d8b27d145a694c901109497147271d5f2d760c6af1fc0c83b2935",
+    "backend/internal/netx/native_manager_owner_epoch_test.go": "42ef89c4b7c1d0e43af3ee2a8ed05a6ebc162c8a762e97dd99afb6fd2c773ef5",
+    "backend/internal/netx/native_manager_ownership.go": "80eb01b194da8e131c42b96022167f1afc811e6e53d0b5f003ead00cde87463c",
+    "backend/internal/netx/native_manager_ownership_test.go": "e0ba4805c9a1daa72fd6ee70abb349bdec9fd7d428f2583d8c180ccbcbe0e747",
+    "backend/internal/netx/native_manager_peer.go": "5751efd962d1aafafab9fc3e07c1994b8147ae713ab7eefaee75b13443093747",
+    "backend/internal/netx/native_manager_peer_test.go": "fd68a085bc0b37663fea1b5d974f6e57895b62ea04476565880e5bfa1302ecb1",
+    "backend/internal/netx/native_manager_profile_guard.go": "0614395d9674264a3727ca18422e4914bfe8bd5cec69c72cb8b7572a2b8ccdb9",
+    "backend/internal/netx/native_manager_read.go": "97a1cb72e4669345fe57f62643fb1866e04a68b562b168e8a7656943d31aa053",
+    "backend/internal/netx/native_manager_recovery.go": "54e525854da7a320627423c501019d4166078e347e144ab48012d1fffbbd85ea",
+    "backend/internal/netx/native_manager_recovery_preflight.go": "bb6423bafecfd7535d882302ee9f832c464db1c24d36bb43718d8ebafce304ca",
+    "backend/internal/netx/native_manager_recovery_preflight_test.go": "93bdcfbe641accae43c497fcc1e383ad1fb6f6b93d0d8c2458f40e74a9da3403",
+    "backend/internal/netx/native_manager_recovery_test.go": "ca6efbe21a5659e79f600b05a21006cbce34dc0931688e1155a7e803169208dc",
+    "backend/internal/netx/native_manager_runtime.go": "eaf9a4d23f2ea6dcbff8f2e2cf2beb2ccf7f92d1b3680c30cf9641fdc7c80dd2",
+    "backend/internal/netx/native_manager_runtime_test.go": "72a7bc43cb6f628931899e89ab92854267048009b6b9ee6ff1065d301d493064",
+    "backend/internal/netx/native_manager_strategy.go": "35e387f42216deba435ebdf77a9095aa394eb496ad7d129dcd267e5968c96a98",
+    "backend/internal/netx/native_manager_strategy_test.go": "e527423d1cc838738f232658a4aa64e437cd4d3aa6e6981ceedd4d20b263e04e",
+    "backend/internal/netx/native_manager_structure.go": "1b192bc89131d145be42f0b685f9116d2ce5a2f403f9fb6d39d419bd252cecbe",
+    "backend/internal/netx/native_manager_structure_plan.go": "6db9dc847949f4ad6c61f30bc198496e47b037bc0ea1a828ba2b343aa9ea50b2",
+    "backend/internal/netx/native_manager_structure_plan_test.go": "0569b575a6bc4ac673960358e535d1a9ee37c04a6a1d53ffcedacb49e8634448",
+    "backend/go.mod": "5f680b84b898ab166ace9fad284ad09ecb73c921ef9b949d2a4a3db82bea76e4",
+    "backend/go.sum": "fac9be6bd85b383d4215b58ae314514070caf7276fcae4caee77b84deaa755fc",
+    "backend/cmd/server/main.go": "24a3b99ca6d350ad80ac48806bdd5114d87b09f901356206c55005cf370702d5"
+  },
+  "required": {
+    "command": "scripts/test-changed.sh d99173ef019afbf5162cdcc958dea4ff8a9a2e94",
+    "exit": 0,
+    "build": "pass",
+    "vet": "pass",
+    "netx_seconds": 1.341
+  },
+  "targeted_race": {
+    "command": "go test -race ./internal/netx -run '^TestNative' -count=1",
+    "exit": 0,
+    "netx_seconds": 27.005
+  },
+  "fixture_binary": {
+    "path": "/home/ubuntu/jd-network-validation-tmp/native-netplan-v8/netx-auto.test",
+    "sha256": "645dfcd66cb87c71052ed5197d3b8a8fa4f0f00a0a3ba69d763f8a04ecef9fa8"
+  }
+}

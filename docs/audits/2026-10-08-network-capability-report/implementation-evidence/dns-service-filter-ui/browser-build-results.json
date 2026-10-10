@@ -1,0 +1,41 @@
+{
+  "source": "2dc3d86cd26a8c016721bad4259236f922247ce0",
+  "build": {
+    "exit_code": 0,
+    "wall_seconds": 23.71,
+    "static_pages": 73
+  },
+  "required": {
+    "base": "6ebbf2d744c2680e5b163e9010b97e1659275f4d",
+    "exit_code": 0,
+    "wall_seconds": 496.84,
+    "bun_passed": 3255,
+    "bun_assertions": 14323,
+    "browser_selected": 188,
+    "browser_passed": 180,
+    "browser_skipped": 8,
+    "optional_skips": "JD_NETWORK_SHOTS captures, unverified",
+    "go_packages": [
+      "./internal/api",
+      "./internal/dnsservice"
+    ],
+    "go_results": "cached successful package results; build/vet executed"
+  },
+  "new_browser_cases": 17,
+  "new_logic_cases": 10,
+  "new_logic_assertions": 70,
+  "screenshots": {
+    "final": 12,
+    "initial_retained": 12,
+    "inspected_final": [
+      "native-filters-pihole-390.png",
+      "native-filter-rules-adguard-390.png",
+      "native-filters-technitium-390.png",
+      "native-filters-pihole-1280.png",
+      "native-filters-adguard-1720.png",
+      "native-filters-technitium-1280.png"
+    ],
+    "containment": "actual settled sheet x>=0 and right<=viewport+1, internal overflow<=1"
+  },
+  "scope": "mocked readonly native metadata browser behavior; actual native filtering unmeasured"
+}

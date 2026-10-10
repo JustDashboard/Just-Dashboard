@@ -1,0 +1,60 @@
+
+Running 12 tests using 1 worker
+
+[1/12] [chromium] › tests/browser/network-tools.spec.ts:147:5 › an unanswered ping reads as inconclusive with its evidence, and its next step sends nothing
+[2/12] [chromium] › tests/browser/network-tools.spec.ts:170:5 › a quick result is saved from the server's hold without running the tool again
+[3/12] [chromium] › tests/browser/network-tools.spec.ts:188:5 › a route lookup with a port sends its protocol and shows the joined path layers
+  1) [chromium] › tests/browser/network-tools.spec.ts:188:5 › a route lookup with a port sends its protocol and shows the joined path layers 
+
+    Error: locator.fill: Error: strict mode violation: locator('[data-slot=security-tools]').getByLabel('Port', { exact: true }) resolved to 10 elements:
+        1) <input value="" data-slot="input" aria-label="Port" inputmode="numeric" id="tool-route-port" aria-invalid="false" placeholder="optional" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none di…/> aka getByRole('textbox', { name: 'Port' })
+        2) <input value="443" data-slot="input" aria-label="Port" placeholder="port" id="tool-port-port" inputmode="numeric" aria-invalid="false" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disa…/> aka locator('#tool-port-port')
+        3) <input value="22" data-slot="input" aria-label="Port" placeholder="port" inputmode="numeric" aria-invalid="false" id="tool-banner-port" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none dis…/> aka locator('#tool-banner-port')
+        4) <input value="22" data-slot="input" aria-label="Port" id="tool-ssh-port" placeholder="port" inputmode="numeric" aria-invalid="false" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabl…/> aka locator('#tool-ssh-port')
+        5) <input value="443" data-slot="input" aria-label="Port" placeholder="port" id="tool-http-port" inputmode="numeric" aria-invalid="false" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disa…/> aka locator('#tool-http-port')
+        6) <input value="443" data-slot="input" aria-label="Port" placeholder="port" inputmode="numeric" aria-invalid="false" id="tool-httpsec-port" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none d…/> aka locator('#tool-httpsec-port')
+        7) <input value="443" data-slot="input" aria-label="Port" id="tool-tls-port" placeholder="port" inputmode="numeric" aria-invalid="false" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disab…/> aka locator('#tool-tls-port')
+        8) <input value="443" data-slot="input" aria-label="Port" placeholder="port" inputmode="numeric" aria-invalid="false" id="tool-tlssurvey-port" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none…/> aka locator('#tool-tlssurvey-port')
+        9) <input value="443" data-slot="input" aria-label="Port" placeholder="port" inputmode="numeric" aria-invalid="false" id="tool-siteaudit-port" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none…/> aka locator('#tool-siteaudit-port')
+        10) <input value="25" data-slot="input" aria-label="Port" placeholder="port" inputmode="numeric" aria-invalid="false" id="tool-starttls-port" class="h-11 min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs focus-ring transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none d…/> aka locator('#tool-starttls-port')
+
+    Call log:
+      - waiting for locator('[data-slot=security-tools]').getByLabel('Port', { exact: true })
+
+
+      214 |   await page.goto("/network/tools?tool=route")
+      215 |   await panel(page).getByRole("textbox", { name: "Target", exact: true }).fill("192.0.2.1")
+    > 216 |   await panel(page).getByLabel("Port", { exact: true }).fill("53")
+          |                                                         ^
+      217 |   await panel(page).getByRole("combobox", { name: "Protocol", exact: true }).click()
+      218 |   await page.getByRole("option", { name: "UDP", exact: true }).click()
+      219 |   await run(page).click()
+        at /home/ubuntu/Just-Dashboard-net-diagnostics/frontend/tests/browser/network-tools.spec.ts:216:57
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-tools-a-route-look-83a5a-hows-the-joined-path-layers-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-tools-a-route-look-83a5a-hows-the-joined-path-layers-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-tools-a-route-look-83a5a-hows-the-joined-path-layers-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-tools-a-route-look-83a5a-hows-the-joined-path-layers-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[4/12] [chromium] › tests/browser/network-tools.spec.ts:234:5 › listeners link each socket to Ports and hop tables render for traceroute
+[5/12] [chromium] › tests/browser/network-tools.spec.ts:292:5 › SSH host keys are trusted from a scan or entered by hand and forgotten with confirmation
+[6/12] [chromium] › tests/browser/network-tools.spec.ts:349:5 › saved Wake-on-LAN devices fill the inputs and verification is measured on request
+[7/12] [chromium] › tests/browser/network-tools.spec.ts:421:5 › a packet snapshot hands its settings to retained capture setup without capturing
+[8/12] [chromium] › tests/browser/network-tools.spec.ts:469:5 › the subnet calculator compares prefixes locally and checks shared IPAM for admins
+[9/12] [chromium] › tests/browser/network-tools.spec.ts:488:5 › readers keep the local calculator and comparison but never query IPAM
+[10/12] [chromium] › tests/browser/network-tools.spec.ts:505:5 › a saved run shows its structured evidence, metric history and measurement changes
+[11/12] [chromium] › tests/browser/network-tools.spec.ts:603:7 › structured results stay inside the page at 375px
+[12/12] [chromium] › tests/browser/network-tools.spec.ts:603:7 › structured results stay inside the page at 1280px
+  1 failed
+    [chromium] › tests/browser/network-tools.spec.ts:188:5 › a route lookup with a port sends its protocol and shows the joined path layers 
+  11 passed (22.0s)

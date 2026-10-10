@@ -1,3 +1,4 @@
+import { membersKnown } from "@/lib/docker-networks"
 import { hueFor, LANES } from "@/lib/hue"
 import type {
   Container,
@@ -5,6 +6,7 @@ import type {
   DockerNetwork,
   DockerNetworkingInfo,
   NetworkEndpoint,
+  NetworkOwner as BackendOwner,
 } from "@/lib/types"
 
 /**
@@ -34,17 +36,63 @@ export type NetworkOwner = {
 export const OWNER_KINDS: { kind: OwnerKind; label: string; title: string }[] = [
   { kind: "compose", label: "Compose", title: "Made by a compose project" },
   { kind: "standalone", label: "Standalone", title: "Made with docker network create" },
-  { kind: "dashboard", label: "Just Dashboard", title: "Made by this dashboard for a deployment" },
+  {
+    kind: "dashboard",
+    label: "Just Dashboard",
+    title: "Made by this dashboard, for itself or for a deployment",
+  },
   { kind: "docker", label: "Docker's own", title: "bridge, host and none: made by Docker" },
 ]
 
 /**
- * Who made a network, from its labels: Docker's own three, a compose project
- * (whose `docker compose down` will remove it), this dashboard for a
- * deployment's database, or anything else — `docker network create`, or a
- * tool that does the same.
+ * What a backend owner is called where a row says who made the network. A
+ * deployment's networks are the dashboard's own work, so they share its chip
+ * and say which deployment on the line.
  */
-export function networkOwner(network: Pick<DockerNetwork, "name" | "labels">): NetworkOwner {
+export function ownerLabel(owner: BackendOwner): string {
+  switch (owner.kind) {
+    case "system":
+      return "Docker's own"
+    case "dashboard":
+      return "made by this dashboard"
+    case "database-link":
+      return owner.deployment ? `database link · ${owner.deployment}` : "database link"
+    case "deployment":
+      return owner.deployment ? `deployment · ${owner.deployment}` : "deployment · gone"
+    case "compose":
+      return owner.project ? `compose · ${owner.project}` : "compose"
+    case "manual":
+      return "standalone"
+  }
+}
+
+const OWNER_CHIP: Record<BackendOwner["kind"], OwnerKind> = {
+  system: "docker",
+  dashboard: "dashboard",
+  "database-link": "dashboard",
+  deployment: "dashboard",
+  compose: "compose",
+  manual: "standalone",
+}
+
+/**
+ * Who made a network. The backend's reading of its labels where it has made
+ * one — it alone can tell a deployment's network from a database link, and
+ * the dashboard's own stack from a compose project — and otherwise the
+ * labels themselves: Docker's own three, a compose project (whose `docker
+ * compose down` will remove it), this dashboard for a deployment's database,
+ * or anything else — `docker network create`, or a tool that does the same.
+ */
+export function networkOwner(
+  network: Pick<DockerNetwork, "name" | "labels"> & { owner?: BackendOwner },
+): NetworkOwner {
+  if (network.owner) {
+    return {
+      kind: OWNER_CHIP[network.owner.kind],
+      label: ownerLabel(network.owner),
+      project: network.owner.project,
+    }
+  }
   if (isSystem(network)) return { kind: "docker", label: "Docker's own" }
   const project = network.labels?.["com.docker.compose.project"]
   if (project) return { kind: "compose", label: `compose · ${project}`, project }
@@ -72,7 +120,7 @@ export function networkHue(name: string) {
 
 /** Every network a container is on, with nothing attached last and Docker's own after them. */
 export function networkOrder(a: DockerNetwork, b: DockerNetwork) {
-  const rank = (n: DockerNetwork) => (isSystem(n) ? 2 : n.usedBy.length === 0 ? 1 : 0)
+  const rank = (n: DockerNetwork) => (isSystem(n) ? 2 : isUnused(n) ? 1 : 0)
   return rank(a) - rank(b) || a.name.localeCompare(b.name)
 }
 
@@ -85,9 +133,19 @@ export function refusesAttach(network: Pick<DockerNetwork, "scope" | "attachable
   return network.scope === "swarm" && !network.attachable
 }
 
-/** Removable from this page: not Docker's own, and nothing attached (Docker refuses otherwise). */
+/**
+ * Removable from this page: not Docker's own, and nothing attached (Docker
+ * refuses otherwise). Members that could not be read are not none: a failed
+ * container listing leaves `usedBy` empty, and a network must never look
+ * unused for that.
+ */
 export function isUnused(network: DockerNetwork) {
-  return !isSystem(network) && network.usedBy.length === 0
+  return !isSystem(network) && membersKnown(network) && network.usedBy.length === 0
+}
+
+/** The dashboard's own private network, which takes no other container. */
+export function isDashboardOwn(network: Pick<DockerNetwork, "owner">) {
+  return network.owner?.kind === "dashboard"
 }
 
 // ------------------------------------------------------------- addresses ---

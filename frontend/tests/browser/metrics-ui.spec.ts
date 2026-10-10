@@ -254,3 +254,16 @@ test("workspace: a pinned moment has readings, adjacent samples and a precise lo
   await page.getByRole("button", { name: "Release moment" }).click()
   await expect(page.getByRole("link", { name: "Logs around this moment" })).toHaveCount(0)
 })
+
+test("connections are charted by how they fared", async ({ page }) => {
+  await page.goto("/metrics")
+  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+  const panel = (title: string) =>
+    page.locator("[data-slot=panel]", { has: page.getByRole("heading", { name: title }) })
+  for (const title of ["Resent segments", "Connection RTT", "Failed connections"]) {
+    await expect(panel(title).locator(".recharts-surface").first()).toBeVisible()
+  }
+  const reading = panel("Resent segments").locator("[data-slot=panel-header]")
+  await expect(reading).toContainText("0.25%")
+  await expect(reading).toContainText("38 ms")
+})

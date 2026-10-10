@@ -1,0 +1,73 @@
+{
+  "complete_base": "7be11ba08c63252fd94fd1d7f86b0ee6683d837e",
+  "complete_changed_files": 574,
+  "markdown_files": 56,
+  "local_links_checked": 495,
+  "missing_links": [],
+  "ledger_ids": 187,
+  "unique_ledger_ids": 187,
+  "ledger_status_counts": {
+    "in progress": 53,
+    "verified": 6,
+    "pending": 128
+  },
+  "frozen_source_files_match": true,
+  "protected_changes_this_batch": [],
+  "production_source": "7c99cc5d1ae58e9bf562af8d51e5911cf3bb60d5",
+  "previous_published_head": "d99173ef019afbf5162cdcc958dea4ff8a9a2e94",
+  "reviewed_documents": [
+    "docs/internal/",
+    "AGENTS.md",
+    "README.md",
+    "CONTRIBUTING.md"
+  ],
+  "updated_documents": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/internal/backend/network-native-managers.md",
+    "docs/internal/backend/network-recovery.md",
+    "docs/internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-status.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-evidence/native-editor-integrated-acceptance.md",
+    "docs/audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md"
+  ],
+  "no_update_needed": {
+    "AGENTS.md": "Existing isolated-worktree, same-PR authorization, scoped local checks and pre-push documentation rules remain applicable; this batch changes no workflow instruction.",
+    "other_internal_guides": "No routes, public DTO, schema, authentication, pending confirmation, deployment, frontend or release contract changed; owning native policy/recovery and acceptance guides are updated."
+  },
+  "independent_source_review": "native_managers: exact committed policy/stage/runtime/undo reviewed read-only; no material defect.",
+  "independent_document_review": "kernel_observer: all source/log/hash/timing/cleanup records and owning/source-specific documents verified read-only; no material correction.",
+  "local_checks": {
+    "targeted_race_seconds": 27.005,
+    "working_required_netx_seconds": 1.341,
+    "final_required_exit": 0,
+    "final_required_log_sha256": "b6d7cec1d482c7bb51ef152966603c11ad3de4226e1668ef30361a8c19e2217d",
+    "final_required_netx": "cached pass",
+    "git_diff_check": "pass"
+  },
+  "native_acceptance": {
+    "cases": 4,
+    "exits": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "skips": 0,
+    "cleanup": "zero owned processes/temp directories after every wrapper; host networkd883 unchanged; host NM directories absent"
+  },
+  "scope_still_open": [
+    "default Netplan DHCP MTU",
+    "actual DHCPv6 acquisition",
+    "existing bond/VRF structural lifecycle",
+    "actual timer/cold boot/reboot",
+    "wider platform owners"
+  ],
+  "prior_review": "The published d99173ef complete-diff documentation review remains the earlier source-specific baseline; this record reviews the complete current inventory and every new affected contract.",
+  "native_raw_artifacts_sha256": {
+    "direct-networkd-automatic-run01.log": "e00e024f3d76734caca58f378a2b253e0a3ff49e2bbc6f2e9f71b529354531cf",
+    "direct-nm-automatic-run01.log": "e9fb2a09e815085a4c1c5b9756f20d9635d2a714a215c12d9b8a52ddebea3e3a",
+    "netplan-explicit-run01.log": "70798cc98fe64eddffbc3d63210031218a9865fcdacd133830250e8af8f8fee1",
+    "ubuntu-exact-origin-run01.log": "784628b703fa953c92b76486ec038455d5ddaa616941ace0bbfca1641905ba64"
+  }
+}

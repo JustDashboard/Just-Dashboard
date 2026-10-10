@@ -1,0 +1,14 @@
+=== RUN   TestLiveCaptureCostAtFullBounds
+    native_cost_live_test.go:34: root fixture:
+        === RUN   TestLiveCaptureCostAtFullBounds
+        === RUN   TestLiveCaptureCostAtFullBounds/flood_at_full_byte_and_packet_bounds
+            native_cost_live_test.go:132: COST flood at full byte and packet bounds: wall=103ms packets=4578 artifact=2096748 bytes stop=byte_limit native_tree_cpu=28ms native_max_rss=16768 KiB backend_cpu=36ms backend_peak_heap_growth=3952 KiB
+        === RUN   TestLiveCaptureCostAtFullBounds/idle_until_the_time_bound
+            native_cost_live_test.go:132: COST idle until the time bound: wall=10.038s packets=0 artifact=24 bytes stop=time_limit native_tree_cpu=21ms native_max_rss=17024 KiB backend_cpu=149ms backend_peak_heap_growth=240 KiB
+        --- PASS: TestLiveCaptureCostAtFullBounds (10.46s)
+            --- PASS: TestLiveCaptureCostAtFullBounds/flood_at_full_byte_and_packet_bounds (0.41s)
+            --- PASS: TestLiveCaptureCostAtFullBounds/idle_until_the_time_bound (10.04s)
+        PASS
+--- PASS: TestLiveCaptureCostAtFullBounds (10.48s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netcapture	10.489s

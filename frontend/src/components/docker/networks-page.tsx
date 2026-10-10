@@ -1,29 +1,28 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Box, Cross, NetworkDevice, Plus, Trash } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useConfirm } from "@/components/confirm-dialog"
 import { useNow } from "@/components/deploy/vocabulary"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
-import { get, post } from "@/lib/api"
+import { get } from "@/lib/api"
 import { containerRates } from "@/lib/container-usage"
 import { plural } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import type {
   Container,
   ContainerStats,
@@ -33,6 +32,7 @@ import type {
   NetworkLivePoint,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { membersKnown } from "@/lib/docker-networks"
 import { useSessionState } from "@/lib/view-state"
 import { HueKey, NetworkBand, type NetworkRate } from "@/components/docker/network-band"
 import { NetworkRows } from "@/components/docker/network-table"
@@ -42,12 +42,12 @@ import {
   type Placement,
 } from "@/components/docker/network-members"
 import { NetworkSheet } from "@/components/docker/network-sheet"
-import { AttachDialog, NewNetworkDialog } from "@/components/docker/network-dialogs"
+import { AttachDialog, PruneDialog, RemoveNetworkDialog } from "@/components/docker/network-dialogs"
+import { NewNetworkDialog } from "@/components/docker/network-create"
 import {
   OWNER_KINDS,
   addressPlan,
   endpointsByContainer,
-  isSystem,
   isUnused,
   networkChanges,
   networkHue,
@@ -90,7 +90,11 @@ const LENSES: { value: Exclude<Lens, "">; label: string; title: string; tone?: "
  * `compose up` fail; the networks nothing is attached to, which hold a block
  * of that pool each and narrow the table to them when pressed; or that every
  * network is in use. Create network and Remove unused are the list's own
- * commands, in its toolbar.
+ * commands, in its toolbar. Creating takes the Engine's drivers into account
+ * and a shared address plan's reservation by link; removing a network, one or
+ * all the unused, first reads what it would disturb, as attaching and
+ * detaching a container do, and where the container listing failed no network
+ * is called unused or offered for removal.
  *
  * Then `NetworkBand`: which networks are carrying the traffic, read off their
  * bridges every two seconds; the address space as blocks in each network's
@@ -112,10 +116,25 @@ export function Networks() {
   const router = useRouter()
   const { can } = useAuth()
   const { host } = useMetrics()
-  const { confirm, dialog } = useConfirm()
   const [selected, select] = useQuerySelection("network")
   const [creating, setCreating] = useState(false)
   const [attachTo, setAttachTo] = useState<DockerNetwork | null>(null)
+  const [removing, setRemoving] = useState<DockerNetwork | null>(null)
+  const [pruning, setPruning] = useState(false)
+  // A shared address plan can hand its reservation to this form through the
+  // URL; once the form is closed the link has been spent.
+  const [dismissedReservation, setDismissedReservation] = useState("")
+  const reservation = useSearchParams().get("ipamReservation") ?? ""
+  const initialReservationId =
+    /^[a-f0-9]{32}$/.test(reservation) &&
+    can("system.admin") &&
+    dismissedReservation !== reservation
+      ? reservation
+      : ""
+  const onCreatingChange = (open: boolean) => {
+    setCreating(open)
+    if (!open && initialReservationId) setDismissedReservation(initialReservationId)
+  }
   const [query, setQuery] = useSessionState("docker.networks.query", "")
   const [rememberedShelf, setShelf] = useSessionState<string>("docker.networks.shelf", "")
   const shelf = (
@@ -298,48 +317,6 @@ export function Networks() {
     containersPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" })
   }
 
-  // Docker's prune counts endpoints, and a stopped container holds none, so
-  // it also removes a network whose members are all stopped — which then
-  // fail to start. The confirmation names those too.
-  const stoppedOnly = networks.filter(
-    (n) =>
-      !isUnused(n) &&
-      !isSystem(n) &&
-      (n.endpoints ?? []).every((e) => {
-        const state = byContainer.get(e.container)?.state
-        return state !== undefined && state !== "running" && state !== "paused"
-      }),
-  )
-  const prune = () =>
-    confirm({
-      title: "Remove unused networks",
-      confirmLabel: "Remove",
-      description: (
-        <div className="space-y-2">
-          <p>
-            Removes the {plural(unused.length, "network")} nothing is attached to:{" "}
-            <b>{unused.map((n) => n.name).join(", ")}</b>, and returns{" "}
-            {unused.length === 1 ? "its subnet" : "their subnets"} to the pool. Docker recreates a
-            compose network the next time its stack comes up.
-          </p>
-          {stoppedOnly.length > 0 && (
-            <p className="text-warning">
-              Docker also removes networks whose containers are all stopped:{" "}
-              <b>{stoppedOnly.map((n) => n.name).join(", ")}</b>. Those containers will not start
-              until their network is made again.
-            </p>
-          )}
-        </div>
-      ),
-      action: async () => {
-        const rep = await post<{ items: string[] }>("/docker/networks/prune")
-        notify.success(
-          rep.items.length ? `Removed ${plural(rep.items.length, "network")}` : "Nothing to remove",
-        )
-        list.refresh()
-      },
-    })
-
   const header = <PageContext eyebrow="Docker" title="Networks" />
 
   if (list.loading && !list.data) {
@@ -360,6 +337,8 @@ export function Networks() {
   }
 
   const attached = new Set(networks.flatMap((n) => (n.endpoints ?? []).map((e) => e.container)))
+  // A failed container listing leaves members unread, which is not none.
+  const unread = networks.filter((n) => !membersKnown(n))
   const version = info.data?.ServerVersion
   const selectedNetwork = networks.find((n) => n.id === selected)
 
@@ -397,6 +376,19 @@ export function Networks() {
       <Page className="animate-rise">
         {header}
 
+        <NetworkReadWarning
+          error={list.error}
+          refresh={list.refresh}
+          lastSuccess={list.lastSuccess}
+          reading="Docker networks"
+        />
+        {unread.length > 0 && (
+          <Notice title="Which containers use each network could not be read" tone="warning">
+            Docker listed the networks but not the containers on them, so no network is shown as
+            unused and none can be removed or pruned until a refresh reads them.
+          </Notice>
+        )}
+
         <HostIdentity
           mark="docker"
           fallback={Box}
@@ -416,7 +408,11 @@ export function Networks() {
                 here
               </span>
               <FactDot />
-              <span className="numeric">{plural(attached.size, "container")} on them</span>
+              <span className="numeric">
+                {unread.length > 0
+                  ? "members unread"
+                  : `${plural(attached.size, "container")} on them`}
+              </span>
               {lensCounts.several > 0 && (
                 <>
                   <FactDot />
@@ -430,6 +426,7 @@ export function Networks() {
               <Verdict
                 plan={plan}
                 unused={unused.length}
+                unread={unread.length}
                 pressed={shelf === "unused"}
                 onUnused={() => setShelf(shelf === "unused" ? "" : "unused")}
               />
@@ -515,7 +512,7 @@ export function Networks() {
                   size="sm"
                   variant="outline"
                   title="docker network prune: remove every network nothing is attached to"
-                  onClick={prune}
+                  onClick={() => setPruning(true)}
                 >
                   <Trash className="size-3.5" />
                   Remove unused
@@ -562,10 +559,9 @@ export function Networks() {
                 rows={visibleNetworks}
                 rates={rates}
                 containers={byContainer}
-                confirm={confirm}
                 onOpen={(network) => select(network.id)}
                 onAttach={setAttachTo}
-                onChanged={list.refresh}
+                onRemove={setRemoving}
               />
             )}
           </PanelBody>
@@ -671,9 +667,9 @@ export function Networks() {
           rate={selectedNetwork ? rates.get(selectedNetwork.id) : undefined}
           traffic={containerTraffic}
           containers={byContainer}
-          confirm={confirm}
           onOpenChange={(open) => !open && select(null)}
           onChanged={list.refresh}
+          onRemove={setRemoving}
         />
         <AttachDialog
           open={attachTo !== null}
@@ -683,8 +679,24 @@ export function Networks() {
           onAttached={list.refresh}
           attached={new Set((attachTo?.endpoints ?? []).map((e) => e.container))}
         />
-        <NewNetworkDialog open={creating} onOpenChange={setCreating} onCreated={list.refresh} />
-        {dialog}
+        <RemoveNetworkDialog
+          network={removing}
+          onOpenChange={(open) => !open && setRemoving(null)}
+          onRemoved={(network) => {
+            if (network.id === selected) select(null)
+            list.refresh()
+          }}
+        />
+        <PruneDialog open={pruning} onOpenChange={setPruning} onPruned={list.refresh} />
+        <NewNetworkDialog
+          open={creating || initialReservationId !== ""}
+          onOpenChange={onCreatingChange}
+          onCreated={list.refresh}
+          networks={networks}
+          inventoryError={list.error}
+          refreshInventory={list.refresh}
+          initialReservationId={initialReservationId}
+        />
       </Page>
     </Workspace>
   )
@@ -692,17 +704,21 @@ export function Networks() {
 
 /**
  * The line's verdict: the pool spent or nearly, which is what fails the next
- * network; else the networks nothing is attached to, a press of which narrows
- * the table to them; else that every network is in use.
+ * network; else that who is on the networks could not be read, since then
+ * none can be called unused or in use; else the networks nothing is attached
+ * to, a press of which narrows the table to them; else that every network is
+ * in use.
  */
 function Verdict({
   plan,
   unused,
+  unread,
   pressed,
   onUnused,
 }: {
   plan?: ReturnType<typeof addressPlan>
   unused: number
+  unread: number
   pressed: boolean
   onUnused: () => void
 }) {
@@ -711,6 +727,9 @@ function Verdict({
   }
   if (plan?.pressure === "warning") {
     return <Status tone="warning" label={`Address pool ${plan.used} of ${plan.total} taken`} />
+  }
+  if (unread > 0) {
+    return <Status tone="warning" label="Who is on them is unread" />
   }
   if (unused > 0) {
     return (

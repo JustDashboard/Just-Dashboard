@@ -1,7 +1,8 @@
 "use client"
 
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { useState } from "react"
+import { Suspense, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { Plus, Trash } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
@@ -19,11 +20,15 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { TunnelPicture } from "@/components/network/vpn/tunnel-picture"
 import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
+import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
 import { TailscaleBlock } from "@/components/network/vpn/tailscale"
+import { TunnelAlerts, TunnelRecord } from "@/components/network/vpn/record"
+import { ArchivedTunnels } from "@/components/network/vpn/archive"
+import { Modal } from "@/components/modal"
 
 /**
  * The tunnels into and out of this server.
@@ -41,6 +46,20 @@ import { TailscaleBlock } from "@/components/network/vpn/tailscale"
  * as the SSH configuration is.
  */
 export default function NetworkVPNPage() {
+  return (
+    <Suspense
+      fallback={
+        <Page>
+          <PageContext eyebrow="Network" title="VPN" />
+        </Page>
+      }
+    >
+      <NetworkVPNContent />
+    </Suspense>
+  )
+}
+
+function NetworkVPNContent() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const vpn = usePoll<VPNView>((signal) => get("/network/vpn", undefined, signal), 10_000, [], {
@@ -52,6 +71,15 @@ export default function NetworkVPNPage() {
   )
   const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
   const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
+  const [creating, setCreating] = useState(false)
+  const [dismissedReservationId, setDismissedReservationId] = useState("")
+  const query = useSearchParams().get("ipamReservation") ?? ""
+  const initialReservationId =
+    admin && /^[a-f0-9]{32}$/.test(query) && query !== dismissedReservationId ? query : ""
+  const closeCreation = () => {
+    setCreating(false)
+    if (initialReservationId) setDismissedReservationId(initialReservationId)
+  }
 
   if (!admin) {
     return (
@@ -76,6 +104,7 @@ export default function NetworkVPNPage() {
   const { wireguard, tailscale, headscale } = vpn.data
   const peers = wireguard.interfaces.flatMap((t) => t.peers)
   const online = peers.filter((p) => p.online).length
+  const alerts = wireguard.interfaces.reduce((n, t) => n + (t.alerts?.length ?? 0), 0)
   const moved = peers.reduce((n, p) => n + p.rxBytes + p.txBytes, 0)
   const tsOnline = tailscale.peers.filter((p) => p.online).length
   const exits = [
@@ -86,8 +115,7 @@ export default function NetworkVPNPage() {
     ...(overview.data?.dockerNetworks.flatMap((n) => n.subnets) ?? []),
     ...(overview.data?.links
       .filter((l) => l.managed && l.role === "bridge")
-      .flatMap((l) => l.addresses.filter((a) => a.family === "inet").map((a) => network(a.cidr))) ??
-      []),
+      .flatMap((l) => l.addresses.map((a) => network(a.cidr))) ?? []),
   ]
   const addingTunnel = wireguard.interfaces.find((t) => t.name === adding?.tunnel)
   const openTunnel = wireguard.interfaces.find((t) => t.name === opened?.tunnel)
@@ -96,7 +124,9 @@ export default function NetworkVPNPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="VPN" />
-      {vpn.data && <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} />}
+      {vpn.data && (
+        <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} lastSuccess={vpn.lastSuccess} />
+      )}
 
       <StatGrid columns={4}>
         <StatTile
@@ -119,7 +149,7 @@ export default function NetworkVPNPage() {
           trailing={wireguard.interfaces.length ? "peers online" : undefined}
           hint={
             wireguard.interfaces.length
-              ? `${plural(wireguard.interfaces.length, "tunnel")} · ${wireguard.interfaces.map((t) => t.name).join(", ")}`
+              ? `${plural(wireguard.interfaces.length, "tunnel")} · ${wireguard.interfaces.map((t) => t.name).join(", ")}${alerts ? ` · ${plural(alerts, "alert")}` : ""}`
               : wireguard.installed
                 ? "one step to set up"
                 : "wireguard-tools is not installed"
@@ -153,7 +183,7 @@ export default function NetworkVPNPage() {
           value={exits.length ? exits.join(" · ") : "None"}
           hint={
             exits.length
-              ? "clients browse through this server"
+              ? "configured exit offers; provider path untested"
               : "this server routes no client's internet"
           }
         />
@@ -164,8 +194,18 @@ export default function NetworkVPNPage() {
         />
       </StatGrid>
 
-      <Section title="WireGuard">
+      <Section
+        title="WireGuard"
+        actions={
+          wireguard.installed && wireguard.interfaces.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+              Create another tunnel
+            </Button>
+          ) : undefined
+        }
+      >
         {wireguard.error && <Notice title="WireGuard could not be read">{wireguard.error}</Notice>}
+        {wireguard.installed && <InstallFollowUp pkg="wireguard-tools" />}
         {!wireguard.installed ? (
           <InstallHandoff
             pkg="wireguard-tools"
@@ -178,7 +218,13 @@ export default function NetworkVPNPage() {
           <Panel plain>
             <PanelHeader title="Set up a tunnel" />
             <PanelBody>
-              <WireGuardSetup onCreated={() => vpn.refresh()} />
+              <WireGuardSetup
+                initialReservationId={initialReservationId}
+                onCreated={() => {
+                  closeCreation()
+                  vpn.refresh()
+                }}
+              />
             </PanelBody>
           </Panel>
         ) : (
@@ -192,7 +238,25 @@ export default function NetworkVPNPage() {
             />
           ))
         )}
+        {wireguard.installed && <ArchivedTunnels onRestored={vpn.refresh} />}
       </Section>
+      {wireguard.installed && wireguard.interfaces.length > 0 && (
+        <Modal
+          open={creating || Boolean(initialReservationId)}
+          onOpenChange={(open) => (open ? setCreating(true) : closeCreation())}
+          title="Create WireGuard tunnel"
+          description="WireGuard validates and creates its native tunnel. Selected shared plans recheck current ownership and overlap."
+          size="lg"
+        >
+          <WireGuardSetup
+            initialReservationId={initialReservationId}
+            onCreated={() => {
+              closeCreation()
+              vpn.refresh()
+            }}
+          />
+        </Modal>
+      )}
 
       <Section title="Tailscale">
         {tailscale.error ? (
@@ -257,6 +321,7 @@ function TunnelBlock({
 }) {
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [record, setRecord] = useState(false)
   const base = `/network/vpn/wireguard/${encodeURIComponent(tunnel.name)}`
   const act = async (run: () => Promise<unknown>, label: string) => {
     setBusy(true)
@@ -305,9 +370,7 @@ function TunnelBlock({
     const apply = () =>
       act(
         () => post(`${base}/exit`, { on }),
-        on
-          ? `${tunnel.name} routes its clients' internet`
-          : `${tunnel.name} is a private network only`,
+        on ? `${tunnel.name} has IPv4 exit rules` : `${tunnel.name} is a private network only`,
       )
     if (on) return void apply()
     confirm({
@@ -326,6 +389,22 @@ function TunnelBlock({
       },
     })
   }
+  const setIPv6Exit = (on: boolean) => {
+    if (on)
+      return void act(
+        () => post(`${base}/exit`, { on: true, ipv6: true }),
+        `${tunnel.name} has IPv4 and IPv6 exit rules`,
+      )
+    confirm({
+      title: `Turn off ${tunnel.name}'s IPv6 exit`,
+      confirmLabel: "Turn off IPv6",
+      description: "Full-tunnel clients lose IPv6 internet access. IPv4 exit remains configured.",
+      action: async () => {
+        await post(`${base}/exit`, { on: true, ipv6: false })
+        onChanged()
+      },
+    })
+  }
   const online = tunnel.peers.filter((p) => p.online).length
   return (
     <Panel plain>
@@ -340,20 +419,40 @@ function TunnelBlock({
           <span className="flex flex-wrap items-center gap-3">
             <Status
               tone={tunnel.up ? "running" : "stopped"}
-              live={tunnel.up && online > 0}
               label={tunnel.up ? `${online} of ${tunnel.peers.length} online` : "Down"}
             />
+            <Button size="xs" variant="ghost" onClick={() => setRecord(true)}>
+              History
+            </Button>
             {tunnel.managed && (
               <>
                 <label className="flex items-center gap-2 text-hint text-muted-foreground">
-                  Exit node
+                  IPv4 exit
                   <Switch
                     checked={tunnel.exitNode}
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      (!tunnel.exitNode && tunnel.families?.ipv4.exit.capability.writable === false)
+                    }
                     onCheckedChange={setExit}
                     aria-label={`${tunnel.name} as an exit node`}
                   />
                 </label>
+                {tunnel.ipv6Enabled && (
+                  <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                    IPv6 exit
+                    <Switch
+                      checked={Boolean(tunnel.families?.ipv6.exit.configured)}
+                      disabled={
+                        busy ||
+                        (!tunnel.families?.ipv6.exit.configured &&
+                          tunnel.families?.ipv6.exit.capability.writable === false)
+                      }
+                      onCheckedChange={setIPv6Exit}
+                      aria-label={`${tunnel.name} IPv6 exit`}
+                    />
+                  </label>
+                )}
                 {tunnel.up ? (
                   <Button size="xs" variant="outline" onClick={down} disabled={busy}>
                     Take down
@@ -386,6 +485,8 @@ function TunnelBlock({
         }
       />
       <PanelBody>
+        <TunnelAlerts tunnel={tunnel} />
+        <WireGuardFamilyEvidence tunnel={tunnel} />
         {!tunnel.managed && (
           <Notice title="Written by hand">
             This tunnel&rsquo;s file was not written here, so it is read and never changed.
@@ -393,6 +494,7 @@ function TunnelBlock({
         )}
         <TunnelPicture tunnel={tunnel} onPeer={onPeer} onAdd={onAdd} />
       </PanelBody>
+      {record && <TunnelRecord tunnel={tunnel.name} open onOpenChange={setRecord} />}
       {dialog}
     </Panel>
   )

@@ -172,6 +172,9 @@ function DeviceRow({
 
 /** The second half of a row's second line: what this device is attached to, and who keeps it. */
 function describe(link: NetworkLink) {
+  if (link.dockerJoin === "unresolved")
+    return `container not joined · on ${link.master ?? "no bridge"}`
+  if (link.dockerJoin === "unknown") return "Docker network unknown"
   if (link.container) return `${link.container} · on ${link.master ?? "no bridge"}`
   if (link.dockerNetwork) return `Docker network ${link.dockerNetwork}`
   if (link.role === "bridge" && link.members?.length)

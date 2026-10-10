@@ -1,0 +1,56 @@
+{
+  "sourceHeadBeforeDocumentationCommit": "65b2105c47e2ff1d2d3ab5daa47411d5c9bbb94e",
+  "fullPRBase": "7be11ba08c63252fd94fd1d7f86b0ee6683d837e",
+  "previousPushedHead": "4f9f2b4f291d0dfd30d0752641bc4cd1cb6476d9",
+  "fullPRChangedFiles": 555,
+  "filesSincePreviousPush": 177,
+  "documentationReview": {
+    "docs/internal/": "Compared complete changed-file inventory and cumulative owning-guide updates with previous assembled acceptance. Native owner/DNS behavior, additive storage, route capabilities, lifecycles, feature ownership, operator limits and selected local commands are documented. Final source-specific proof is linked; stale core-handoff UI-pending wording corrected.",
+    "AGENTS.md": "Existing JD_BROWSER_WORKERS workflow update matches changed selector. No further update needed for this native/DNS assembly or evidence-only additions.",
+    "README.md": "Operator-facing native L3 profiles, native DNS read-only default, reviewed changes, owned cached-image setup/removal, recovery and known limits already updated. No further update needed for final proof records.",
+    "CONTRIBUTING.md": "Updated narrow private native/DNS commands, cached-image requirements, workspace TMPDIR and optional fixture selection. Default all-owner Netplan refusals remain failures, not successful skips."
+  },
+  "securityReview": "No changes to allowlist ordering, routable listeners, per-account 2FA, backend capabilities/auditing/destructive wrappers, closed host argv/path containment or shipped migrations in this final evidence update. DNS uses system.admin/private no-store routes; native profiles require administrator sessions. Current guides distinguish both contracts.",
+  "forbiddenScopeChanges": [],
+  "requirementCounts": {
+    "in progress": 53,
+    "verified": 6,
+    "pending": 128
+  },
+  "requirements": 187,
+  "verification": {
+    "assembledApplicationSource": "3e0c20161b721de9f769a13439b9813f3f7dfed3",
+    "combinedRequiredGate": {
+      "exit": 0,
+      "browserPassed": 410,
+      "optionalBrowserSkippedUnverified": 60,
+      "logicPassed": 3232,
+      "go": "API/netx/store/dnsservice build, vet and selected tests passed"
+    },
+    "earlierNativeEditorGate": {
+      "originalExit": 1,
+      "browserPassedInitially": 897,
+      "optionalBrowserSkippedUnverified": 60,
+      "databaseTimeout": 1,
+      "unchangedSourceExactCaseRerun": "PASS; all 898 executable cases have passed"
+    },
+    "fixtureOnlyCorrection": "scripts/test-changed.sh 3e0c2016 PASS; compilation/ordinary opt-out is not live acceptance",
+    "actualAssembledNative": "Direct NetworkManager 30.69/23.18s, networkd 17.08/10.45s, Ubuntu generated-origin 53.53/20.00s PASS; zero skips, exact cleanup; experimental ancestry refusal remains separate",
+    "wholeBrowserSuiteOrGoTestAll": "Not run",
+    "finalDocumentationOnlyGate": "scripts/test-changed.sh 65b2105c PASS, five documentation files; git diff --check PASS"
+  },
+  "localMarkdownLinkReview": {
+    "files": 55,
+    "linksChecked": 487,
+    "missing": []
+  },
+  "evidenceHashes": {
+    "native-v6-assembly/direct-nm.log": "a0a3fa1eda3c6955f164dd9f794201651a58522d704b25925d64834682722d5c",
+    "native-v6-assembly/networkd.log": "52b4d3674081016dfd10d81cc1d2c2acc9899bc70c49b3fc55783bee1ba00eec",
+    "native-v6-assembly/source-binary.json": "77228403e1735bfa0f48456701b52958cbe048c8cc9baf01682a18f7eebf5245",
+    "native-v6-root-ubuntu-exact-origin-final.log": "89b93cf62a4e5d4b6b9f73a815e2f08602dab8ed00ab9fc152f9d856c87e8e99",
+    "native-v6-root-ubuntu-source-validation.json": "03f9a161db2a3aeabcbf1b55380376ec969826d853554d04d390116049814689",
+    "dns-services-native-combined-required.txt": "e165bbfa7163d2ee91909997a04ce7a840ab5c7e4675c883de0c11e923d84653"
+  },
+  "independentEvidenceReview": "Kernel observer reviewed final combined record read-only: exact3e production, fixture-only ancestry, helper8a6, separate experimental refusal and earlier nonzero/browser skips correctly attributed; no material correction."
+}

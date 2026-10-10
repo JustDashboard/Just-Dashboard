@@ -1,0 +1,24 @@
+{
+  "source": "f3fe06aac9ffd4921a3740925650f442cc1a6988",
+  "engine": "pihole",
+  "exit_code": 0,
+  "wall_seconds": 87.575,
+  "raw_sha256": "532d875ab791245bde1ce5a6890f6c3e804d77b3ce451acd1f1edffb2044388b",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true
+}

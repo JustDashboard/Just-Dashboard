@@ -1,0 +1,2 @@
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	26.269s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	11.956s

@@ -10,6 +10,7 @@ func TestHeadscaleBinaryNodesAndUsers(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
 	rec.on("headscale nodes list -o json", fixture(t, "headscale-nodes.json")).
+		on("headscale routes list -o json", fixture(t, "headscale-routes.json")).
 		on("headscale users list -o json", fixture(t, "headscale-users.json"))
 	v := s.Headscale(context.Background())
 	if !v.Installed || v.Container != "" || v.Error != "" {
@@ -47,10 +48,47 @@ func TestHeadscaleBinaryNodesAndUsers(t *testing.T) {
 			t.Errorf("a node's key leaked: %s", secret)
 		}
 	}
+	// Before 0.26 a node's routes were their own listing; an advertised exit
+	// pair that is not enabled is offered, not approved.
+	if !laptop.RoutesKnown || strings.Join(laptop.AvailableRoutes, ",") != "192.168.10.0/24,0.0.0.0/0" ||
+		strings.Join(laptop.ApprovedRoutes, ",") != "192.168.10.0/24" {
+		t.Errorf("legacy routes = %+v", laptop)
+	}
 	// Reading never changes anything.
 	for _, c := range rec.commands() {
 		if !strings.HasSuffix(c, "list -o json") {
 			t.Errorf("ran %q", c)
+		}
+	}
+}
+
+// Headscale's CLI prints its protobuf messages through encoding/json, so a
+// real listing has snake_case keys, numeric ids and the node-level routes
+// 0.26 introduced; no separate routes command is asked.
+func TestHeadscaleSnakeCaseNodesWithTheirOwnRoutes(t *testing.T) {
+	s := vpnService(t)
+	rec := record(t)
+	rec.on("headscale nodes list -o json", fixture(t, "headscale-nodes-v026.json")).
+		on("headscale users list -o json", `[{"id": 2, "name": "bob", "created_at": {"seconds": 1760000000}}]`)
+	v := s.Headscale(context.Background())
+	if v.Error != "" || len(v.Nodes) != 1 || len(v.Users) != 1 || v.Users[0].Nodes != 1 {
+		t.Fatalf("view = %+v", v)
+	}
+	n := v.Nodes[0]
+	if n.ID != "7" || n.GivenName != "bob-router" || n.User != "bob" || n.LastSeen != 1789999990 || n.Expiry != 1791000000 ||
+		strings.Join(n.IPAddresses, ",") != "100.64.0.7,fd7a:115c:a1e0::7" || strings.Join(n.ValidTags, ",") != "tag:router" {
+		t.Errorf("node = %+v", n)
+	}
+	if !n.RoutesKnown || strings.Join(n.AvailableRoutes, ",") != "192.168.20.0/24,192.168.30.0/24" || strings.Join(n.ApprovedRoutes, ",") != "192.168.20.0/24" {
+		t.Errorf("routes = %+v", n)
+	}
+	if rec.ran("headscale routes") {
+		t.Error("a Headscale whose nodes carry their routes was asked the old routes command")
+	}
+	raw := wgMustString(t, v)
+	for _, secret := range []string{"mkey:", "nodekey:", "discokey:"} {
+		if strings.Contains(raw, secret) {
+			t.Errorf("a node's key leaked: %s", secret)
 		}
 	}
 }
@@ -85,13 +123,21 @@ func TestHeadscaleContainer(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
 	rec.on("docker exec "+id+" headscale nodes list -o json", fixture(t, "headscale-nodes.json")).
+		// A Headscale without the old routes command leaves routes unknown,
+		// never reported as none, and is not an error of the view.
+		fail("docker exec "+id+" headscale routes list -o json", "Error: unknown command \"routes\" for \"headscale\"").
 		on("docker exec "+id+" headscale users list -o json", fixture(t, "headscale-users.json"))
 	v := s.HeadscaleContainer(context.Background(), id, "headscale")
 	if v.Installed || v.Container != "headscale" || len(v.Nodes) != 3 || len(v.Users) != 3 || v.Error != "" {
 		t.Fatalf("view = %+v", v)
 	}
+	for _, n := range v.Nodes {
+		if n.RoutesKnown {
+			t.Errorf("routes claimed known without a source: %+v", n)
+		}
+	}
 	cmds := rec.commands()
-	if len(cmds) != 2 || cmds[0] != "docker exec "+id+" headscale nodes list -o json" {
+	if len(cmds) != 3 || cmds[0] != "docker exec "+id+" headscale nodes list -o json" {
 		t.Errorf("ran %v", cmds)
 	}
 

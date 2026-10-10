@@ -1,0 +1,108 @@
+import hashlib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+root = pathlib.Path('/home/ubuntu/Just-Dashboard-network-native-v10-acceptance')
+artifacts = pathlib.Path('/home/ubuntu/Just-Dashboard-network-native-managers-artifacts')
+evidence = artifacts / 'v10-inode-acceptance-final'
+binary = artifacts / 'native-profile-inodes-v10-final.test'
+case, run = sys.argv[1:3]
+choices = {
+    'networkd': ('TestNativeManagerAutomaticOwnerLive', {
+        'JD_NATIVE_AUTO_CASE': 'networkd',
+        'JD_NATIVE_MANAGER_NM_ROOT': str(artifacts / 'native-tools/debian/extracted'),
+    }),
+    'NetworkManager': ('TestNativeManagerAutomaticOwnerLive', {
+        'JD_NATIVE_AUTO_CASE': 'NetworkManager',
+        'JD_NATIVE_MANAGER_NM_ROOT': str(artifacts / 'native-tools/debian/extracted'),
+    }),
+    'netplan': ('TestNativeManagerAutomaticOwnerLive', {
+        'JD_NATIVE_AUTO_CASE': 'netplan',
+        'JD_NATIVE_NETPLAN_AUTO_POLICY': 'explicit',
+        'JD_NATIVE_MANAGER_NM_ROOT': str(artifacts / 'native-tools/debian/extracted'),
+    }),
+    'netplan-NetworkManager': ('TestNativeManagerOwnerLive', {
+        'JD_NATIVE_MANAGER_CASE': 'netplan-NetworkManager',
+        'JD_NATIVE_MANAGER_NM_ROOT': str(artifacts / 'native-tools/extracted'),
+    }),
+}
+test, selected = choices[case]
+if subprocess.check_output(['git', 'status', '--porcelain'], cwd=root):
+    raise SystemExit('source must be clean before native acceptance')
+source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+prefix = evidence / f'{case}-run{run}'
+if any(prefix.with_suffix(ext).exists() for ext in ('.log', '.json')):
+    raise SystemExit('preserve prior evidence: use a new run number')
+task_tmp = pathlib.Path(tempfile.mkdtemp(prefix=f'v10-{case}-', dir=artifacts / 'go-tmp'))
+env = os.environ.copy()
+for name in tuple(env):
+    if name.startswith('JD_NATIVE_') or name == 'JD_NETNS_LIVE':
+        del env[name]
+env.update({'GOMAXPROCS': '2', 'GOFLAGS': '-p=2', 'TMPDIR': str(task_tmp), 'JD_NETNS_LIVE': '1'})
+env.update(selected)
+argv = ['timeout', '--kill-after=5s', '240s', str(binary), '-test.run', '^' + test + '$', '-test.count=1', '-test.timeout=235s', '-test.v']
+cwd = root / 'backend/internal/netx'
+sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+host_paths = ['/etc/NetworkManager', '/var/lib/NetworkManager']
+def host_state():
+    result = {'networkd883_start': pathlib.Path('/proc/883/stat').read_text().rsplit(')', 1)[1].split()[19]}
+    result['paths'] = {p: os.path.lexists(p) for p in host_paths}
+    return result
+before = host_state()
+manifest = {
+    'source': source,
+    'binary': str(binary),
+    'binary_sha256': sha(binary),
+    'source_sha256': {str(p.relative_to(root)): sha(p) for p in sorted((root / 'backend').rglob('*.go'))},
+    'argv': argv,
+    'cwd': str(cwd),
+    'wrapper_sha256': sha(pathlib.Path(__file__)),
+    'environment': {name: env[name] for name in ('GOMAXPROCS', 'GOFLAGS', 'TMPDIR', 'JD_NETNS_LIVE', *selected)},
+    'host_before': before,
+}
+prefix.with_suffix('.source-binary.json').write_text(json.dumps(manifest, indent=2) + '\n')
+start = time.monotonic()
+with prefix.with_suffix('.log').open('xb') as log:
+    completed = subprocess.run(argv, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
+elapsed = time.monotonic() - start
+raw = prefix.with_suffix('.log').read_text(errors='replace')
+owned = []
+for entry in pathlib.Path('/proc').iterdir():
+    if not entry.name.isdigit():
+        continue
+    try:
+        args = (entry / 'cmdline').read_bytes().split(b'\0')
+    except (FileNotFoundError, PermissionError, ProcessLookupError):
+        continue
+    if str(binary).encode() in args or b'--pid-file=/run/jd-native-nm/pid' in args or b'/run/jd-auto/udhcpd.conf' in args or b'--config-file=/run/dbus/fixture.conf' in args:
+        owned.append({'pid': int(entry.name), 'argv': [a.decode(errors='replace') for a in args if a]})
+after = host_state()
+tmp_entries = [p.name for p in task_tmp.iterdir()]
+if not tmp_entries:
+    task_tmp.rmdir()
+result = {
+    'source': source,
+    'exit_code': completed.returncode,
+    'wall_seconds': round(elapsed, 3),
+    'raw_sha256': sha(prefix.with_suffix('.log')),
+    'actual_helper_sha256': sorted(set(re.findall(r'(?:helper SHA256=|bound helper SHA256=)([0-9a-f]{64})', raw))),
+    'skipped': '--- SKIP:' in raw,
+    'owned_processes_remaining': owned,
+    'owned_tmp_entries_remaining': tmp_entries,
+    'host_after': after,
+    'host_unchanged': before == after,
+}
+prefix.with_suffix('.result.json').write_text(json.dumps(result, indent=2) + '\n')
+print(json.dumps(result, indent=2), flush=True)
+if completed.returncode or owned or tmp_entries or before != after or result['skipped']:
+    print('\n'.join(raw.splitlines()[-24:]), flush=True)
+    raise SystemExit(1)
+for line in raw.splitlines():
+    if 'canonical unchanged-intent path=' in line or 'shipped helper v10 equal-byte' in line or 'Actual standalone helper' in line or 'actual bound helper SHA256=' in line:
+        print(line, flush=True)

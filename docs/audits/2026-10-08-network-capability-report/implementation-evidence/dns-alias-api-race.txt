@@ -1,0 +1,76 @@
+=== RUN   TestDNSEvidenceAPIPrivateCapabilitiesAndAudit
+--- PASS: TestDNSEvidenceAPIPrivateCapabilitiesAndAudit (2.95s)
+=== RUN   TestDNSEvidenceNarrowedAdminTokenCannotReadPrivateAnswers
+--- PASS: TestDNSEvidenceNarrowedAdminTokenCannotReadPrivateAnswers (0.27s)
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/dns/
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/dns/
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/dns/hosts
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/dns/hosts
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/traffic/containers
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/traffic/containers
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/traffic/containers?window=24h
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/traffic/containers?window=24h
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/ebpf
+=== RUN   TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/ebpf
+--- PASS: TestNetworkDNSAndTrafficReadsAnswer (0.62s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/dns/ (0.14s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/dns/ (0.09s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/dns/hosts (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/dns/hosts (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/traffic/containers (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/traffic/containers (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/traffic/containers?window=24h (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/traffic/containers?window=24h (0.00s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/admin_/api/v1/network/ebpf (0.01s)
+    --- PASS: TestNetworkDNSAndTrafficReadsAnswer/readonly_/api/v1/network/ebpf (0.01s)
+=== RUN   TestNetworkDNSWritesNeedAnAdministrator
+=== RUN   TestNetworkDNSWritesNeedAnAdministrator/POST_/api/v1/network/dns/
+=== RUN   TestNetworkDNSWritesNeedAnAdministrator/DELETE_/api/v1/network/dns/
+=== RUN   TestNetworkDNSWritesNeedAnAdministrator/PUT_/api/v1/network/dns/hosts
+--- PASS: TestNetworkDNSWritesNeedAnAdministrator (0.24s)
+    --- PASS: TestNetworkDNSWritesNeedAnAdministrator/POST_/api/v1/network/dns/ (0.00s)
+    --- PASS: TestNetworkDNSWritesNeedAnAdministrator/DELETE_/api/v1/network/dns/ (0.00s)
+    --- PASS: TestNetworkDNSWritesNeedAnAdministrator/PUT_/api/v1/network/dns/hosts (0.00s)
+=== RUN   TestNetworkDNSSetValidatesFirst
+=== RUN   TestNetworkDNSSetValidatesFirst/dot_without_names
+=== RUN   TestNetworkDNSSetValidatesFirst/not_an_address
+=== RUN   TestNetworkDNSSetValidatesFirst/the_stub_itself
+=== RUN   TestNetworkDNSSetValidatesFirst/unknown_setting
+=== RUN   TestNetworkDNSSetValidatesFirst/nothing_at_all
+=== RUN   TestNetworkDNSSetValidatesFirst/an_unknown_field
+=== RUN   TestNetworkDNSSetValidatesFirst/newline_in_a_name
+--- PASS: TestNetworkDNSSetValidatesFirst (1.79s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/dot_without_names (0.27s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/not_an_address (0.27s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/the_stub_itself (0.25s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/unknown_setting (0.23s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/nothing_at_all (0.26s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/an_unknown_field (0.27s)
+    --- PASS: TestNetworkDNSSetValidatesFirst/newline_in_a_name (0.23s)
+=== RUN   TestNetworkDNSHostsRoundTrip
+--- PASS: TestNetworkDNSHostsRoundTrip (0.55s)
+=== RUN   TestNetworkDNSLookupValidation
+=== RUN   TestNetworkDNSLookupValidation/an_address_for_an_A_lookup
+=== RUN   TestNetworkDNSLookupValidation/a_name_for_a_PTR
+=== RUN   TestNetworkDNSLookupValidation/a_space_in_the_name
+=== RUN   TestNetworkDNSLookupValidation/a_server_of_the_caller's
+=== RUN   TestNetworkDNSLookupValidation/comparison_without_disclosure
+=== RUN   TestNetworkDNSLookupValidation/a_record_type_outside
+=== RUN   TestNetworkDNSLookupValidation/an_empty_name
+=== RUN   TestNetworkDNSLookupValidation/legacy_public_fan-out
+=== RUN   TestNetworkDNSLookupValidation/comparison_without_destinations
+=== RUN   TestNetworkDNSLookupValidation/arbitrary_comparison_destination
+--- PASS: TestNetworkDNSLookupValidation (0.63s)
+    --- PASS: TestNetworkDNSLookupValidation/an_address_for_an_A_lookup (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/a_name_for_a_PTR (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/a_space_in_the_name (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/a_server_of_the_caller's (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/comparison_without_disclosure (0.07s)
+    --- PASS: TestNetworkDNSLookupValidation/a_record_type_outside (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/an_empty_name (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/legacy_public_fan-out (0.01s)
+    --- PASS: TestNetworkDNSLookupValidation/comparison_without_destinations (0.04s)
+    --- PASS: TestNetworkDNSLookupValidation/arbitrary_comparison_destination (0.03s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	8.359s

@@ -39,10 +39,13 @@ export function Namespaces({
   namespaces,
   links,
   onChanged,
+  onOpen,
 }: {
   namespaces: NetworkNamespace[] | undefined
   links: NetworkLink[]
   onChanged: () => void
+  /** Opens a namespace's own reading: its routes, resolver and listeners. */
+  onOpen: (ns: NetworkNamespace) => void
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -107,12 +110,21 @@ export function Namespaces({
                   />
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 text-body font-medium">
-                      <span className="truncate font-mono">{ns.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => onOpen(ns)}
+                        aria-label={`Inspect ${ns.name}`}
+                        className="truncate font-mono underline-offset-2 focus-ring hover:underline"
+                      >
+                        {ns.name}
+                      </button>
                       {ns.managed && <Tag>made here</Tag>}
                       {ns.kind === "container" && <Tag>container</Tag>}
                     </p>
                     <p className="truncate text-hint text-muted-foreground">
-                      {ns.devices.length} device{ns.devices.length === 1 ? "" : "s"}
+                      {ns.readError
+                        ? "devices unknown"
+                        : `${ns.devices.length} device${ns.devices.length === 1 ? "" : "s"}`}
                       {ns.pid ? ` · pid ${ns.pid}` : ""}
                     </p>
                   </div>
@@ -127,6 +139,14 @@ export function Namespaces({
                     </Button>
                   )}
                 </div>
+                {ns.readError && (
+                  <p
+                    role="status"
+                    className="mt-2 border-l border-rule-warning pl-4 text-hint text-warning"
+                  >
+                    Its devices could not be read: {ns.readError}
+                  </p>
+                )}
                 <ul className="mt-2 flex flex-col gap-1 border-l border-hairline pl-4">
                   {ns.devices.map((d) => (
                     <li key={d.name} className="flex min-w-0 items-center gap-2 text-hint">

@@ -1,0 +1,6 @@
+=== RUN   TestLiveBridgeVLANRecoveryAfterProcessDeath
+--- PASS: TestLiveBridgeVLANRecoveryAfterProcessDeath (0.34s)
+=== RUN   TestBridgeRecoveryProcessFixture
+--- PASS: TestBridgeRecoveryProcessFixture (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.386s

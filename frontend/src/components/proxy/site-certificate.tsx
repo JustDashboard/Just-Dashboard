@@ -6,6 +6,7 @@ import { notify } from "@/lib/toast"
 import type { Job, SiteCertificates, SiteRead, SiteResult, SiteSpec } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { JobConsole, useJobConsole } from "@/components/job-console"
+import { JobIssuanceProblems } from "@/components/proxy/issuance-problems"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -298,6 +299,7 @@ export function SiteCertificate({
         </ol>
       )}
       <JobConsole job={jobs.job} lines={jobs.lines} onCancel={jobs.cancel} />
+      <JobIssuanceProblems job={jobs.job} />
     </div>
   )
 }

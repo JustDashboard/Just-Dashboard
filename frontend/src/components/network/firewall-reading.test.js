@@ -1,5 +1,16 @@
 import { expect, test } from "bun:test"
-import { deniedSources, isAnywhere, openings, refusesByDefault } from "./firewall-reading"
+import {
+  accessAdmits,
+  accessLosses,
+  accessUnknowns,
+  deniedSources,
+  findingsByRule,
+  isAnywhere,
+  openings,
+  planOperations,
+  refusesByDefault,
+  rulePath,
+} from "./firewall-reading"
 
 const rule = (fields) => ({
   action: "ALLOW",
@@ -50,4 +61,57 @@ test("a default refuses when it denies, rejects or drops", () => {
   expect(refusesByDefault("reject")).toBe(true)
   expect(refusesByDefault("allow")).toBe(false)
   expect(refusesByDefault(undefined)).toBe(false)
+})
+
+test("findings are keyed by rule identity", () => {
+  const map = findingsByRule({
+    findings: [
+      { ruleId: "fw-b", number: 2, kind: "shadowed", byId: "fw-a", byNumber: 1, reason: "r" },
+    ],
+  })
+  expect(map.get("fw-b")?.byNumber).toBe(1)
+  expect(map.get("fw-a")).toBeUndefined()
+})
+
+test("a change loses only required access that was admitted before", () => {
+  const check = (name, required, before, verdict) => ({
+    name,
+    required,
+    before,
+    verdict,
+    port: 1,
+    protocol: "tcp",
+    family: "ipv4",
+    source: "x",
+    reason: "",
+  })
+  const losses = accessLosses([
+    check("dashboard", true, "unfiltered", "refused"),
+    check("ssh", true, "admitted", "admitted"),
+    check("http", true, "refused", "refused"),
+    check("extra", false, "admitted", "refused"),
+    check("limited", true, "limited", "refused"),
+  ])
+  expect(losses.map((c) => c.name)).toEqual(["dashboard", "limited"])
+  expect(accessUnknowns([check("a", true, "admitted", "unknown")])).toHaveLength(1)
+  expect(accessAdmits("unfiltered")).toBe(true)
+  expect(accessAdmits("unknown")).toBe(false)
+})
+
+test("staged changes become plan operations and rules are addressed by identity", () => {
+  expect(
+    planOperations([
+      { op: "add", rule: { action: "allow", port: "22" }, label: "allow 22" },
+      { op: "delete", ruleId: "fw-1", label: "rule 3" },
+    ]),
+  ).toEqual([
+    { op: "add", rule: { action: "allow", port: "22" } },
+    { op: "delete", ruleId: "fw-1" },
+  ])
+  expect(rulePath({ number: 3, id: "fw-0a1b", action: "ALLOW", from: "", to: "", raw: "" })).toBe(
+    "/firewall/rules/3?id=fw-0a1b",
+  )
+  expect(rulePath({ number: 3, action: "ALLOW", from: "", to: "", raw: "" })).toBe(
+    "/firewall/rules/3",
+  )
 })

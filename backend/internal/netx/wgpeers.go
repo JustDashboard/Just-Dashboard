@@ -121,17 +121,31 @@ func wgLastAddr(p netip.Prefix) netip.Addr {
 // starting after the server's.
 func wgNextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Prefix) (netip.Addr, error) {
 	last := wgLastAddr(subnet)
-	for a := server.Next(); subnet.Contains(a) && a != last; a = a.Next() {
+	a := server.Next()
+	// Jump past covering prefixes. Walking every occupied IPv6 address could
+	// take forever when a native peer already owns half a /64.
+	for range len(taken) + 1 {
+		if !a.IsValid() || !subnet.Contains(a) || a == last {
+			break
+		}
 		free := true
+		next := a.Next()
 		for _, t := range taken {
 			if t.Contains(a) {
 				free = false
-				break
+				end := wgLastAddr(t)
+				if end.Compare(last) >= 0 {
+					return netip.Addr{}, fmt.Errorf("every remaining address in %s is taken", subnet)
+				}
+				if end.Compare(next) >= 0 {
+					next = end.Next()
+				}
 			}
 		}
 		if free {
 			return a, nil
 		}
+		a = next
 	}
 	return netip.Addr{}, fmt.Errorf("every address in %s is taken", subnet)
 }
@@ -141,6 +155,7 @@ func wgNextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Pre
 type wgClientConfig struct {
 	privateKey string
 	address    netip.Addr
+	address6   netip.Addr
 	dns        []string
 	mtu        int
 	listenPort int
@@ -155,11 +170,11 @@ type wgClientConfig struct {
 func (c wgClientConfig) render() string {
 	var b strings.Builder
 	b.WriteString("[Interface]\n")
-	if c.fullTunnel {
+	if c.fullTunnel && !c.address6.IsValid() {
 		b.WriteString("# This tunnel carries IPv4. IPv6 is routed into it to prevent a native\n# IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.\n")
 	}
 	fmt.Fprintf(&b, "PrivateKey = %s\n", c.privateKey)
-	fmt.Fprintf(&b, "Address = %s/%d\n", c.address, c.address.BitLen())
+	fmt.Fprintf(&b, "Address = %s\n", wgJoinAddresses(c.address, c.address6))
 	if c.listenPort > 0 {
 		fmt.Fprintf(&b, "ListenPort = %d\n", c.listenPort)
 	}
@@ -225,16 +240,14 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 	isec := conf.iface()
 
-	var subnet netip.Prefix
-	var serverAddr netip.Addr
-	for _, a := range isec.list("address") {
-		if p, err := ParsePrefix(a); err == nil && p.Addr().Is4() {
-			subnet, serverAddr = p.Masked(), p.Addr()
-			break
-		}
-	}
+	v4, v6 := wgInterfacePrefixes(conf)
+	subnet, serverAddr := v4.Masked(), v4.Addr()
 	if !subnet.IsValid() {
 		return nil, fmt.Errorf("%s has no IPv4 address to hand clients one from", iface)
+	}
+	dual := wgIPv6Enabled(conf)
+	if dual && (!v6.IsValid() || v6.Bits() != 64 || !v6.Addr().IsPrivate()) {
+		return nil, fmt.Errorf("%s opted into IPv6 but has no usable unique-local /64", iface)
 	}
 	meta := isec.bodyMeta()
 	endpoint := meta["endpoint"]
@@ -260,10 +273,43 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 	taken = append(taken, netip.PrefixFrom(serverAddr, serverAddr.BitLen()))
+	if dual {
+		host, err := wgReadHostState(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range host.addrs[iface] {
+			taken = append(taken, netip.PrefixFrom(p.Addr(), p.Addr().BitLen()))
+		}
+		out, err := run(ctx, "wg", "show", "all", "dump")
+		if err != nil {
+			return nil, fmt.Errorf("reading native peer allocation before provisioning: %w", err)
+		}
+		inventory, err := wgCheckedDump(out)
+		if err != nil {
+			return nil, err
+		}
+		if err := wgPeerDrift(iface, conf, out, inventory); err != nil {
+			return nil, err
+		}
+		if live := inventory[iface]; live != nil {
+			for _, peer := range live.peers {
+				for _, raw := range peer.allowedIPs {
+					if p, err := ParsePrefix(raw); err == nil {
+						taken = append(taken, p.Masked())
+					}
+				}
+			}
+		}
+		taken = append(taken, netip.PrefixFrom(v6.Addr(), 128))
+	}
 
 	for _, r := range remote {
 		if r.Overlaps(subnet) {
 			return nil, fmt.Errorf("remoteNetworks: %s overlaps the tunnel's own network %s", r, subnet)
+		}
+		if dual && r.Overlaps(v6.Masked()) {
+			return nil, fmt.Errorf("remoteNetworks: %s overlaps the tunnel's IPv6 network %s", r, v6.Masked())
 		}
 		for _, t := range taken {
 			if t.Overlaps(r) {
@@ -272,50 +318,21 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 	if len(remote) > 0 {
-		// The route to a tunnel's public endpoint must stay outside it.
-		// Default routes do not appear in host.overlap, so a remote LAN can
-		// otherwise capture the very UDP packets that carry that LAN.
-		endpoints := []netip.Addr{}
-		if a := wgEndpointAddress(req.Endpoint); a.IsValid() {
-			endpoints = append(endpoints, a)
-		}
-		confs, err := s.listWGConfs()
-		if err != nil {
+		if err := s.refuseSiteRoutes(ctx, iface, remote, req.Endpoint, client); err != nil {
 			return nil, err
-		}
-		for _, other := range confs {
-			for _, peer := range other.peers() {
-				if a := wgEndpointAddress(wgPeerOf(peer).endpoint); a.IsValid() {
-					endpoints = append(endpoints, a)
-				}
-			}
-		}
-		host, err := wgReadHostState(ctx)
-		if err != nil {
-			return nil, err
-		}
-		var clientAddr netip.Addr
-		if client != "" {
-			clientAddr, _ = ParseAddr(client)
-		}
-		for _, r := range remote {
-			if hp, hit := host.overlap(r, iface); hit {
-				return nil, guarded("%s overlaps %s, which is %s; routing it into the tunnel would take it away from there", r, hp.prefix, hp.what)
-			}
-			if clientAddr.IsValid() && r.Contains(clientAddr) {
-				return nil, guarded("%s contains your own address (%s), so routing it into the tunnel would cut your connection to the dashboard", r, clientAddr)
-			}
-			for _, endpoint := range endpoints {
-				if r.Contains(endpoint) {
-					return nil, guarded("%s contains the WireGuard endpoint %s; routing its transport into %s would disconnect the tunnel", r, endpoint, iface)
-				}
-			}
 		}
 	}
 
 	addr, err := wgNextPeerAddress(subnet, serverAddr, taken)
 	if err != nil {
 		return nil, err
+	}
+	var addr6 netip.Addr
+	if dual {
+		addr6, err = wgNextPeerAddress(v6.Masked(), v6.Addr(), taken)
+		if err != nil {
+			return nil, err
+		}
 	}
 	priv, pub, err := newWGKeyPair()
 	if err != nil {
@@ -327,21 +344,27 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 
 	cc := wgClientConfig{
-		privateKey: priv, address: addr, mtu: mtu,
+		privateKey: priv, address: addr, address6: addr6, mtu: mtu,
 		serverKey: serverPub, psk: psk, endpoint: endpoint, keepalive: keepalive,
 		fullTunnel: req.FullTunnel,
 	}
 	cc.allowedIPs = []string{subnet.String()}
+	if dual {
+		cc.allowedIPs = append(cc.allowedIPs, v6.Masked().String())
+	}
 	if req.FullTunnel {
 		cc.allowedIPs = []string{"0.0.0.0/0", "::/0"}
 	}
 	for _, n := range share {
-		if n != subnet && !req.FullTunnel {
+		if n != subnet && (!dual || n != v6.Masked()) && !req.FullTunnel {
 			cc.allowedIPs = append(cc.allowedIPs, n.String())
 		}
 	}
 	settings := [][2]string{{"PublicKey", pub}, {"PresharedKey", psk}}
 	serverAllowed := []string{netip.PrefixFrom(addr, addr.BitLen()).String()}
+	if dual {
+		serverAllowed = append(serverAllowed, netip.PrefixFrom(addr6, 128).String())
+	}
 	serverAllowed = append(serverAllowed, wgPrefixStrings(remote)...)
 	settings = append(settings, [2]string{"AllowedIPs", strings.Join(serverAllowed, ", ")})
 
@@ -374,56 +397,82 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	if !wgIPForwarding("ipv4") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
 		warnings = append(warnings, wgForwardingWarning)
 	}
+	if dual && !wgIPForwarding("ipv6") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
+		warnings = append(warnings, "IPv6 forwarding is off; IPv6 reaches this server only. Enable it from Routing before using shared networks or exit egress.")
+	}
 	if req.FullTunnel {
-		warnings = append(warnings, "This full tunnel carries IPv4. IPv6 is blocked inside the tunnel to prevent a native IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.")
+		warnings = append(warnings, wgIPv6Containment(dual))
 		if sp, err := s.loadSpec(); err == nil {
-			exit := false
-			for _, n := range sp.NAT {
-				exit = exit || (n.Owner == wgOwner(iface) && n.Enabled)
-			}
-			if !exit {
+			if !wgExitEnabled(sp, iface, false) {
 				warnings = append(warnings, "This device sends all its traffic through "+iface+", which is not an exit node, so it will have no internet until it is made one.")
+			}
+			if dual && !wgExitEnabled(sp, iface, true) {
+				warnings = append(warnings, "IPv6 is captured by this full tunnel, but its IPv6 exit is off; IPv6 internet traffic has no egress through this server.")
 			}
 		}
 	}
 
 	original := conf.render()
 	now := wgNow()
+	clientRoutes := ""
+	if req.Kind == wgKindDevice {
+		clientRoutes = strings.Join(cc.allowedIPs, ", ")
+	}
 	id, err := s.saveClient(ctx, conf, VPNClient{
 		Iface: iface, PublicKey: pub, Name: name, Kind: req.Kind,
-		Address: addr.String(), CreatedBy: actor, CreatedAt: now,
+		Address: addr.String(), CreatedBy: actor, CreatedAt: now, ClientRoutes: clientRoutes,
 	}, config)
 	if err != nil {
 		return nil, err
 	}
-	rollback := func(reload bool) {
+	// rollback puts the file and the kernel back and records what came of it:
+	// a restore or reload that also failed leaves the tunnel degraded.
+	rollback := func(cause error, reload bool) error {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		_ = s.vpn.Delete(cleanup, iface, id) // the row may already be gone; either way nothing refers to it
+		var left []string
+		if err := s.vpn.Delete(cleanup, iface, id); err != nil && !errors.Is(err, ErrNotFound) {
+			left = append(left, "its stored configuration: "+err.Error())
+		}
 		if path, err := s.wgConfPath(iface); err == nil {
-			_ = writeFileAtomic(path, []byte(original), 0o600) // best effort; the failure being reported is the first one
+			if err := writeFileAtomic(path, []byte(original), 0o600); err != nil {
+				left = append(left, "the tunnel's file: "+err.Error())
+			}
 		}
 		if reload {
-			_, _ = s.syncWG(cleanup, iface)
+			if _, err := s.syncWG(cleanup, iface); err != nil {
+				left = append(left, "the running interface: "+err.Error())
+			}
 		}
+		e := WGEvent{Iface: iface, Kind: "peer_add_failed", Outcome: wgOutcomeFailed, Peer: pub, PeerName: name, Actor: actor, Detail: cause.Error() + "; rolled back"}
+		if len(left) > 0 {
+			e.Outcome, e.Detail = wgOutcomeDegraded, cause.Error()+"; not restored: "+strings.Join(left, "; ")
+		}
+		s.wg.note(cleanup, e)
+		return cause
 	}
 
 	conf.appendPeer(wgNewPeerSection(int(id), name, req.Kind, now, settings))
 	if err := s.writeWGConf(iface, conf); err != nil {
-		rollback(false)
-		return nil, err
+		return nil, rollback(err, false)
 	}
 	live, err := s.syncWG(ctx, iface)
 	if err != nil {
-		rollback(true)
-		return nil, err
+		return nil, rollback(err, true)
 	}
 	if live && len(remote) > 0 {
 		if err := s.addPeerRoutes(ctx, iface, remote, client); err != nil {
-			rollback(true)
-			return nil, err
+			return nil, rollback(err, true)
 		}
 	}
+	detail := req.Kind + " " + wgJoinAddresses(addr, addr6)
+	if req.FullTunnel {
+		detail += ", full tunnel"
+	}
+	if len(remote) > 0 {
+		detail += ", routes " + strings.Join(wgPrefixStrings(remote), ", ")
+	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "peer_added", Peer: pub, PeerName: name, Actor: actor, Detail: detail})
 	if !live {
 		warnings = append(warnings, iface+" is not running, so the peer takes effect when it is started.")
 	}
@@ -531,7 +580,7 @@ func (s *Service) addPeerRoutes(ctx context.Context, iface string, nets []netip.
 
 // RemoveWireGuardPeer removes a peer's block from its tunnel, the tunnel's
 // knowledge of it, and its stored configuration.
-func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int, client string) error {
+func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int, client, actor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	conf, err := s.managedWG(iface)
@@ -571,7 +620,11 @@ func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int,
 			restore()
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer cancel()
-			_, _ = s.syncWG(cleanup, iface)
+			e := WGEvent{Iface: iface, Kind: "peer_remove_failed", Outcome: wgOutcomeFailed, Peer: target.publicKey, PeerName: target.name, Actor: actor, Detail: err.Error() + "; the peer was kept"}
+			if _, rerr := s.syncWG(cleanup, iface); rerr != nil {
+				e.Outcome, e.Detail = wgOutcomeDegraded, err.Error()+"; the running interface could not be reloaded from the restored file: "+rerr.Error()
+			}
+			s.wg.note(cleanup, e)
 			return err
 		}
 	} else if has("wg") {
@@ -599,6 +652,12 @@ func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int,
 	if err := s.vpn.Delete(ctx, iface, int64(id)); err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
+	// A budget belongs to the peer it measured; its usage stays in the record
+	// until retention takes it.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM network_wg_quotas WHERE iface = ? AND public_key = ?`, iface, target.publicKey); err != nil {
+		return fmt.Errorf("%s was removed, but its usage budget could not be: %w", target.name, err)
+	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "peer_removed", Peer: target.publicKey, PeerName: target.name, Actor: actor, Detail: strings.Join(target.allowedIPs, ", ")})
 	return nil
 }
 
@@ -608,7 +667,7 @@ func (s *Service) WireGuardPeerConfig(ctx context.Context, iface string, id int)
 	if err := validWGName(iface); err != nil {
 		return nil, err
 	}
-	c, err := s.vpn.Get(ctx, iface, int64(id))
+	c, err := s.peerClient(ctx, iface, id)
 	if err != nil {
 		return nil, err
 	}
@@ -619,11 +678,45 @@ func (s *Service) WireGuardPeerConfig(ctx context.Context, iface string, id int)
 	return &WGPeerConfig{Name: c.Name, Config: c.Config, QR: qr}, nil
 }
 
+// peerClient is a stored client whose public key still matches the peer of
+// that id in the tunnel's file. A row left by a tunnel removed by hand, or a
+// file restored from an archive, can share an id with a different peer; its
+// configuration must not be shown as this one's.
+func (s *Service) peerClient(ctx context.Context, iface string, id int) (VPNClient, error) {
+	c, err := s.vpn.Get(ctx, iface, int64(id))
+	if err != nil && !errors.Is(err, ErrForgotten) {
+		return c, err
+	}
+	conf, cerr := s.readWGConf(iface)
+	if cerr != nil {
+		return VPNClient{}, cerr
+	}
+	for _, sec := range conf.peers() {
+		if p := wgPeerOf(sec); p.id == id && p.publicKey == c.PublicKey {
+			return c, err
+		}
+	}
+	return VPNClient{}, fmt.Errorf("client %d of %s: %w", id, iface, ErrNotFound)
+}
+
 // ForgetWireGuardPeerConfig destroys the stored copy of a client's private
-// key. The peer keeps working; it can no longer be shown again.
-func (s *Service) ForgetWireGuardPeerConfig(ctx context.Context, iface string, id int) error {
+// key. The peer keeps working; it can no longer be shown again. Revoking its
+// access is removing the peer, which is a different action.
+func (s *Service) ForgetWireGuardPeerConfig(ctx context.Context, iface string, id int, actor string) error {
 	if err := validWGName(iface); err != nil {
 		return err
 	}
-	return s.vpn.Forget(ctx, iface, int64(id))
+	c, err := s.peerClient(ctx, iface, id)
+	if errors.Is(err, ErrForgotten) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.vpn.Forget(ctx, iface, int64(id)); err != nil {
+		return err
+	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "config_forgotten", Peer: c.PublicKey, PeerName: c.Name, Actor: actor,
+		Detail: "the stored copy is gone; the peer's key still works until it is removed"})
+	return nil
 }

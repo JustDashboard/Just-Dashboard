@@ -1,0 +1,839 @@
+# 2026-10-10T02:50:44Z commit 530b4c12
+Against c31e9329: 103 changed files.
+Checking formatting...
+All matched files use Prettier code style!
+bun test v1.3.11 (af24e281)
+
+ 3309 pass
+ 0 fail
+ 14968 expect() calls
+Ran 3309 tests across 247 files. [2.11s]
+Go packages: ./internal/api ./internal/sysinfo ./internal/metrics ./internal/netx ./internal/store ./internal/netsec
+Browser specs: tests/browser/account-ui.spec.ts tests/browser/database-query.spec.ts tests/browser/database-redis.spec.ts tests/browser/deploy-notifications.spec.ts tests/browser/deploy-project.spec.ts tests/browser/deploy-settings-a.spec.ts tests/browser/deploy-source.spec.ts tests/browser/design-system.spec.ts tests/browser/docker-ui.spec.ts tests/browser/files-ui.spec.ts tests/browser/git-ui.spec.ts tests/browser/logs-buffer.spec.ts tests/browser/logs-lens.spec.ts tests/browser/logs-ui.spec.ts tests/browser/logs-views.spec.ts tests/browser/metrics-ui.spec.ts tests/browser/navigation.spec.ts tests/browser/network-confirmation.spec.ts tests/browser/network-dns-evidence.spec.ts tests/browser/network-flows.spec.ts tests/browser/network-runs.spec.ts tests/browser/network-tools.spec.ts tests/browser/overview-ui.spec.ts tests/browser/processes-ui.spec.ts tests/browser/proxy-sites-list.spec.ts tests/browser/proxy-sites-tools.spec.ts tests/browser/proxy-tls.spec.ts tests/browser/proxy-ui.spec.ts tests/browser/security-intrusion.spec.ts tests/browser/security-ui.spec.ts tests/browser/server-advisor.spec.ts tests/browser/system-ui.spec.ts tests/browser/terminal-ui.spec.ts
+
+Running 815 tests using 1 worker
+
+[1/815] [chromium] › tests/browser/account-ui.spec.ts:182:5 › the profile opens on the account's identity line and its readings
+[2/815] [chromium] › tests/browser/account-ui.spec.ts:211:5 › sessions are the browser, the system and the network each came from
+[3/815] [chromium] › tests/browser/account-ui.spec.ts:238:5 › keys are read as credentials and drawn as what holds them
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo	(cached)
+[4/815] [chromium] › tests/browser/account-ui.spec.ts:267:5 › users are cards drawn by their faces, opening their editor
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/metrics	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	(cached)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	(cached)
+[5/815] [chromium] › tests/browser/account-ui.spec.ts:292:5 › security is a form with its state under each head
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	(cached)
+[6/815] [chromium] › tests/browser/account-ui.spec.ts:308:7 › the account pages look right at 1280
+[7/815] [chromium] › tests/browser/account-ui.spec.ts:308:7 › the account pages look right at 1720
+[8/815] [chromium] › tests/browser/account-ui.spec.ts:308:7 › the account pages look right at 390
+[9/815] [chromium] › tests/browser/database-query.spec.ts:709:5 › Ctrl+Enter runs the statement under the cursor as one statement
+[10/815] [chromium] › tests/browser/database-query.spec.ts:729:5 › a selection is what runs, and several statements go as one script with a result each
+[11/815] [chromium] › tests/browser/database-query.spec.ts:780:5 › a statement that destroys is classified as it is run, and asked about with what it does
+[12/815] [chromium] › tests/browser/database-query.spec.ts:812:5 › a classification that does not come back is a run that does not happen
+[13/815] [chromium] › tests/browser/database-query.spec.ts:826:5 › a role without the destructive capability is told why Run is refused, and nothing is sent
+[14/815] [chromium] › tests/browser/database-query.spec.ts:849:5 › a protected connection runs what reads and says why it refuses the rest
+[15/815] [chromium] › tests/browser/database-query.spec.ts:869:5 › a role that may not run statements has no Run, and can still read a plan
+[16/815] [chromium] › tests/browser/database-query.spec.ts:910:5 › a result the server cut says so, fetches more on request and exports every row
+[17/815] [chromium] › tests/browser/database-query.spec.ts:943:5 › a statement that changes data is not run again to fetch more of what it returned
+[18/815] [chromium] › tests/browser/database-query.spec.ts:967:5 › a statement handed over in the address opens in a tab of its own and is read once
+[19/815] [chromium] › tests/browser/database-query.spec.ts:997:5 › tabs are kept per connection, closed with an undo, and named in place
+[20/815] [chromium] › tests/browser/database-query.spec.ts:1028:5 › completion offers this connection's schema, and another connection's after a switch
+[21/815] [chromium] › tests/browser/database-query.spec.ts:1070:5 › Cancel takes Run's place while a statement is out, and stops it by its name
+[22/815] [chromium] › tests/browser/database-query.spec.ts:1099:5 › Explain draws the plan as a tree; measuring it says it runs the statement and asks the gate
+[23/815] [chromium] › tests/browser/database-query.spec.ts:1145:5 › a statement is saved under a name, saved again, renamed and deleted
+[24/815] [chromium] › tests/browser/database-query.spec.ts:1195:5 › the history, the schema and the snippets lead into the editor without replacing a draft
+[25/815] [chromium] › tests/browser/database-query.spec.ts:1266:5 › Format lays the statement out and changes nothing but space and capitals
+[26/815] [chromium] › tests/browser/database-query.spec.ts:1280:5 › a search is asked once, drawn by table with the value marked, and each row opens Data filtered to it
+[27/815] [chromium] › tests/browser/database-query.spec.ts:1377:5 › one scan at a time: Enter while it is out starts no second one, and Stop drops it
+[28/815] [chromium] › tests/browser/database-query.spec.ts:1409:5 › every generator the server lists is reachable, and the request carries what was chosen
+[29/815] [chromium] › tests/browser/database-query.spec.ts:1518:5 › the run key pressed twice before the statement has been classified sends it once
+[30/815] [chromium] › tests/browser/database-query.spec.ts:1542:5 › a confirmation the reader declines leaves the tab free to run, with the keyboard in the editor
+[31/815] [chromium] › tests/browser/database-query.spec.ts:1559:5 › fetching more of one statement of a script keeps the other statements' results
+[32/815] [chromium] › tests/browser/database-query.spec.ts:1596:5 › a quoted name is completed inside its quotes, the closing one the editor typed included
+[33/815] [chromium] › tests/browser/database-query.spec.ts:1611:5 › a name of the reader's own is not completed, and a join is written from the foreign key
+[34/815] [chromium] › tests/browser/database-query.spec.ts:1638:5 › Escape, then Tab, leaves the editor: forward to the commands, back to the tabs
+[35/815] [chromium] › tests/browser/database-query.spec.ts:1672:5 › a tab keeps its undo while another is looked at, and closing one hands the keyboard on
+[36/815] [chromium] › tests/browser/database-query.spec.ts:1701:5 › with more tabs than fit the one in front stays in view, and every tab is in one menu
+[37/815] [chromium] › tests/browser/database-query.spec.ts:1727:5 › at the limit of tabs an opening says so, and a hand-over waits in the address for a tab
+[38/815] [chromium] › tests/browser/database-query.spec.ts:1779:5 › a table made from the editor is known to the tree and the completion without asking
+[39/815] [chromium] › tests/browser/database-query.spec.ts:1796:5 › a failed statement is marked at the word the engine names, where it names one
+[40/815] [chromium] › tests/browser/database-query.spec.ts:1816:5 › series of different magnitudes are not drawn on one axis; each measure is a chip
+[41/815] [chromium] › tests/browser/database-query.spec.ts:1867:5 › the keys a hint names are the reader's own keyboard's
+[42/815] [chromium] › tests/browser/database-query.spec.ts:1885:5 › on a narrow pane a cut result keeps its rows: one control for find and columns, one for more
+[43/815] [chromium] › tests/browser/database-query.spec.ts:1914:5 › a search of ticked tables reads those tables and no others, and says which hold more
+[44/815] [chromium] › tests/browser/database-query.spec.ts:1980:5 › a generator remembered from another engine does not open the page on a refusal
+[45/815] [chromium] › tests/browser/database-query.spec.ts:2094:7 › the editor, the search and the generator keep the design system's rules with their data on screen
+[46/815] [chromium] › tests/browser/database-query.spec.ts:2094:7 › the editor, the search and the generator keep the design system's rules with their data on screen at a phone's width
+[47/815] [chromium] › tests/browser/database-redis.spec.ts:768:7 › keys › the picker starts on the database the connection string names, and no request names one until the reader does
+[48/815] [chromium] › tests/browser/database-redis.spec.ts:789:7 › keys › the tree is the server's namespaces, read a level at a time, and a walk that stopped says how far it got
+[49/815] [chromium] › tests/browser/database-redis.spec.ts:815:7 › keys › Redis scan cursors retain all unsigned 64-bit digits in requests
+[50/815] [chromium] › tests/browser/database-redis.spec.ts:842:7 › keys › the key and its database are in the address: a reload opens the same key and Back the one before
+[51/815] [chromium] › tests/browser/database-redis.spec.ts:864:7 › keys › saving a string sends the value and no expiry, and what was typed survives opening another key
+[52/815] [chromium] › tests/browser/database-redis.spec.ts:895:7 › keys › a value that is not text opens as bytes and is never offered to a text box
+[53/815] [chromium] › tests/browser/database-redis.spec.ts:925:7 › keys › text a box would rewrite is read as bytes, and lines that end in CR LF are saved as they were
+[54/815] [chromium] › tests/browser/database-redis.spec.ts:955:7 › keys › an expiry typed wrong is refused and nothing is sent; removing one is its own control
+[55/815] [chromium] › tests/browser/database-redis.spec.ts:999:7 › keys › a role that may write and not remove is offered no removal
+[56/815] [chromium] › tests/browser/database-redis.spec.ts:1020:9 › keys › a reader is drawn nothing that writes
+[57/815] [chromium] › tests/browser/database-redis.spec.ts:1020:9 › keys › a protected connection is drawn nothing that writes
+[58/815] [chromium] › tests/browser/database-redis.spec.ts:1038:7 › keys › a hash says how many fields it has, renames in one step and removes the empty field as a member
+[59/815] [chromium] › tests/browser/database-redis.spec.ts:1094:7 › keys › a dialog put away with Escape opens again on what was typed; Cancel is what discards it
+[60/815] [chromium] › tests/browser/database-redis.spec.ts:1118:7 › keys › a list edit carries what was seen, and adding at a position inserts
+[61/815] [chromium] › tests/browser/database-redis.spec.ts:1160:7 › keys › sorted-set members that share a score are two rows
+[62/815] [chromium] › tests/browser/database-redis.spec.ts:1171:7 › keys › a read that fails says so and tries again; a key that is gone says it is gone
+[63/815] [chromium] › tests/browser/database-redis.spec.ts:1189:7 › keys › a failed re-read leaves the keys on screen
+[64/815] [chromium] › tests/browser/database-redis.spec.ts:1209:7 › keys › bulk delete counts first and names the count; every key is not a bulk action
+[65/815] [chromium] › tests/browser/database-redis.spec.ts:1251:7 › keys › a new key is made by its type and never over an existing one
+[66/815] [chromium] › tests/browser/database-redis.spec.ts:1283:7 › keys › renaming onto a name that is taken is refused, as the hint says
+[67/815] [chromium] › tests/browser/database-redis.spec.ts:1301:7 › keys › JSON is offered where the server has it, and a number keeps every digit
+[68/815] [chromium] › tests/browser/database-redis.spec.ts:1318:7 › keys › a fact the server cannot give says why instead of reading as nothing
+[69/815] [chromium] › tests/browser/database-redis.spec.ts:1329:7 › keys › formatting a JSON string changes its spacing and none of its digits
+[70/815] [chromium] › tests/browser/database-redis.spec.ts:1351:7 › keys › removing expiries in bulk is asked about once more, like the other two
+[71/815] [chromium] › tests/browser/database-redis.spec.ts:1395:7 › keys › an edit on a later page of a large key leaves the reader where they were
+[72/815] [chromium] › tests/browser/database-redis.spec.ts:1437:7 › keys › the tree opens to the key in the address, and a pattern that is one namespace opens it
+[73/815] [chromium] › tests/browser/database-redis.spec.ts:1462:7 › keys › the tree is one tab stop, and a namespace's keys are listed from the keyboard
+[74/815] [chromium] › tests/browser/database-redis.spec.ts:1491:7 › keys › the keyboard goes back to what opened a dialog when the dialog closes
+[75/815] [chromium] › tests/browser/database-redis.spec.ts:1519:7 › keys › adding a member a set already has says so, and the empty member is named
+[76/815] [chromium] › tests/browser/database-redis.spec.ts:1539:7 › keys › with no key open the pane says what the database is made of, and each part is a way in
+[77/815] [chromium] › tests/browser/database-redis.spec.ts:1574:7 › keys › a field's own expiry is set with the server's command, every name quoted
+[78/815] [chromium] › tests/browser/database-redis.spec.ts:1618:7 › keys › a stream is trimmed before an entry, and a pending entry is handed to another consumer
+[79/815] [chromium] › tests/browser/database-redis.spec.ts:1671:7 › keys › how long a key had been idle is read once, and never from the page's own reads
+[80/815] [chromium] › tests/browser/database-redis.spec.ts:1696:7 › keys › on a phone a key's rows are drawn down instead of across, with their controls on screen
+[81/815] [chromium] › tests/browser/database-redis.spec.ts:1746:7 › console › the server's verdict decides: a read runs, a removal is confirmed first, a blocked command is refused
+[82/815] [chromium] › tests/browser/database-redis.spec.ts:1782:7 › console › a role without the capability a command wants is told which, and nothing is sent
+[83/815] [chromium] › tests/browser/database-redis.spec.ts:1796:7 › console › a protected connection runs what reads and refuses the rest before sending it
+[84/815] [chromium] › tests/browser/database-redis.spec.ts:1810:7 › console › a reader has no prompt, and still has the reference
+[85/815] [chromium] › tests/browser/database-redis.spec.ts:1818:7 › console › Tab completes a command from the server's reference, the syntax is shown, and Up walks the history
+[86/815] [chromium] › tests/browser/database-redis.spec.ts:1848:7 › console › a server that does not describe its commands still lists them
+[87/815] [chromium] › tests/browser/database-redis.spec.ts:1857:7 › console › the live feeds are an administrator's; the channel list and publishing are not
+[88/815] [chromium] › tests/browser/database-redis.spec.ts:1871:7 › console › the monitor records over its socket, ends on its own and does not start again
+[89/815] [chromium] › tests/browser/database-redis.spec.ts:1904:7 › console › MONITOR typed at the prompt is refused with the view that does it
+[90/815] [chromium] › tests/browser/database-redis.spec.ts:1927:7 › console › what was heard on Pub/Sub is still there after looking at another view
+[91/815] [chromium] › tests/browser/database-redis.spec.ts:1954:7 › performance › performance keeps its charts and derives rates without metric cards
+[92/815] [chromium] › tests/browser/database-redis.spec.ts:1972:7 › performance › memory is analysed when asked, and says how much was measured
+[93/815] [chromium] › tests/browser/database-redis.spec.ts:1993:7 › performance › emptying the slow log and disconnecting a client are confirmed, and neither is offered to a role that may not remove
+[94/815] [chromium] › tests/browser/database-redis.spec.ts:2019:7 › performance › a role that may not remove is offered neither
+[95/815] [chromium] › tests/browser/database-redis.spec.ts:2029:7 › performance › commands are ranked by the time they cost, and a save is asked of the server
+[96/815] [chromium] › tests/browser/database-redis.spec.ts:2050:7 › performance › a flavour without a feature draws no control for it
+[97/815] [chromium] › tests/browser/database-redis.spec.ts:2066:7 › performance › a server that answers nothing is an error with a way to try again
+[98/815] [chromium] › tests/browser/database-redis.spec.ts:2184:7 › the Redis pages keep the design system's rules
+[99/815] [chromium] › tests/browser/database-redis.spec.ts:2184:7 › the Redis pages keep the design system's rules at a phone's width
+[100/815] [chromium] › tests/browser/deploy-notifications.spec.ts:12:5 › editing an e-mail channel waits for its host, sender and recipients, then sends them
+[101/815] [chromium] › tests/browser/deploy-notifications.spec.ts:66:5 › editing a Discord channel keeps its webhook hidden until Replace delivery settings is opened
+[102/815] [chromium] › tests/browser/deploy-notifications.spec.ts:110:5 › each channel says how its last message went, and its sheet reads every attempt
+[103/815] [chromium] › tests/browser/deploy-project.spec.ts:30:5 › a legacy ?tab= link lands on the new runtime route
+[104/815] [chromium] › tests/browser/deploy-project.spec.ts:36:5 › a run deployed from a specific version names that version, not the branch
+[105/815] [chromium] › tests/browser/deploy-project.spec.ts:65:5 › the website preview is a desktop-width page shrunk into one tile that opens the site
+[106/815] [chromium] › tests/browser/deploy-project.spec.ts:105:5 › runtime services link to the exact Docker containers and stacks
+[107/815] [chromium] › tests/browser/deploy-project.spec.ts:168:5 › runtime evidence distinguishes unavailable Docker from an empty managed inventory
+[108/815] [chromium] › tests/browser/deploy-project.spec.ts:194:5 › the deployments tab reports delivery figures with their basis and window
+[109/815] [chromium] › tests/browser/deploy-project.spec.ts:248:5 › a window nothing succeeded in draws no release time, and a lone cause no bar
+[110/815] [chromium] › tests/browser/deploy-project.spec.ts:331:5 › a retained release's row compares against the live one
+[111/815] [chromium] › tests/browser/deploy-project.spec.ts:359:5 › the live release's row opens what changed in it
+[112/815] [chromium] › tests/browser/deploy-project.spec.ts:371:5 › a retained release's row rolls back to live through the dialog
+[113/815] [chromium] › tests/browser/deploy-project.spec.ts:393:5 › pin and unpin a release from its row menu
+[114/815] [chromium] › tests/browser/deploy-project.spec.ts:476:5 › Load older deployments appends a page using the environment and cursor
+[115/815] [chromium] › tests/browser/deploy-project.spec.ts:518:5 › a project whose newest page has no cursor never offers older deployments
+[116/815] [chromium] › tests/browser/deploy-project.spec.ts:527:5 › a rolled-back run offers no Retry
+[117/815] [chromium] › tests/browser/deploy-project.spec.ts:543:5 › a legacy project's commit rollback uses ordinary confirmation
+[118/815] [chromium] › tests/browser/deploy-project.spec.ts:560:5 › the console tab opens the default shell with only actions and fullscreen
+[119/815] [chromium] › tests/browser/deploy-project.spec.ts:629:5 › Runtime hands a service straight to its own console preselected
+[120/815] [chromium] › tests/browser/deploy-project.spec.ts:664:5 › the game workspace sends commands, moderates players and edits only declared settings
+[121/815] [chromium] › tests/browser/deploy-project.spec.ts:808:5 › a stopped project reads Stopped and starts from the primary button
+[122/815] [chromium] › tests/browser/deploy-project.spec.ts:825:7 › delete project is accessible and confirmed for legacy deployments
+[123/815] [chromium] › tests/browser/deploy-project.spec.ts:825:7 › delete project is accessible and confirmed for normalized deployments
+[124/815] [chromium] › tests/browser/deploy-project.spec.ts:854:5 › delete project keeps the project open when the server refuses
+[125/815] [chromium] › tests/browser/deploy-project.spec.ts:876:5 › delete project is hidden without destructive capability
+[126/815] [chromium] › tests/browser/deploy-project.spec.ts:886:5 › Duplicate project names a copy and navigates to its resumed draft
+[127/815] [chromium] › tests/browser/deploy-project.spec.ts:910:5 › Duplicate project refuses a name already in use
+[128/815] [chromium] › tests/browser/deploy-project.spec.ts:932:5 › Duplicate project is hidden for an archived project
+[129/815] [chromium] › tests/browser/deploy-project.spec.ts:947:5 › overview, logs and runtime read cleanly at phone and desktop widths
+[130/815] [chromium] › tests/browser/deploy-project.spec.ts:993:5 › the identity line describes the project as itself and leads from its state to what needs attention
+[131/815] [chromium] › tests/browser/deploy-project.spec.ts:1020:5 › the rail marks the settings page that holds a change not yet live
+[132/815] [chromium] › tests/browser/deploy-project.spec.ts:1036:5 › a setting saved on its own page marks that page in the rail without a reload
+[133/815] [chromium] › tests/browser/deploy-project.spec.ts:1088:5 › a run in flight opens the overview as a card that follows it
+[134/815] [chromium] › tests/browser/deploy-project.spec.ts:1119:5 › Deploy a specific version offers what the project deployed and names what it will build
+[135/815] [chromium] › tests/browser/deploy-project.spec.ts:1191:5 › the overview lists the repository's pull requests with the preview built from each
+[136/815] [chromium] › tests/browser/deploy-project.spec.ts:1238:5 › Test this pull request posts the head, the variables choice and the fork acceptance, then opens the run
+[137/815] [chromium] › tests/browser/deploy-project.spec.ts:1293:5 › merging from the overview posts to the project's route, pins the head and re-reads the listing
+[138/815] [chromium] › tests/browser/deploy-project.spec.ts:1333:5 › Close preview asks first, then posts to the close route
+[139/815] [chromium] › tests/browser/deploy-project.spec.ts:1362:5 › Test a pull request… in the header menu picks from the open pull requests
+[140/815] [chromium] › tests/browser/deploy-project.spec.ts:1389:5 › a head that moved under the dialog is re-read, shown, and sent on the next press
+[141/815] [chromium] › tests/browser/deploy-project.spec.ts:1466:5 › a pull-request listing the server cannot answer hides the panel, and an unreadable one says why
+[142/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:28:7 › General settings › shows source facts and saves a new project name
+[143/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:68:7 › General settings › renaming to a name already in use shows a field error
+[144/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:86:7 › General settings › saves a manual-only deployment policy with path filters and commit statuses off
+[145/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:128:7 › General settings › says what the last check decided under the picture, not in the head
+[146/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:165:7 › General settings › a read-only role sees no save buttons
+[147/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:185:7 › Build settings › rewrites build and start commands for the chosen package manager, keeping dependencies
+[148/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:245:7 › Build settings › adds and saves a release task
+[149/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:288:7 › Build settings › a read-only role sees no save button
+[150/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:309:7 › Runtime settings › saves memory, CPU, process limits and the restart policy
+[151/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:354:7 › Runtime settings › adds and saves a health check
+[152/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:397:7 › Runtime settings › a read-only role sees no save buttons
+[153/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:415:7 › Runtime settings, drafts and refusals › a switch turned on and off again leaves nothing to save, and a cleared host port keeps its field
+[154/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:462:7 › Runtime settings, drafts and refusals › a plan refusal that names no field is the form's own sentence, not a toast
+[155/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:491:7 › Runtime settings, drafts and refusals › a command check takes one argument per line as it is typed
+[156/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:525:7 › Build settings for a Compose stack › a repository built as Compose keeps its root, platform and cache, and offers no builder
+[157/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:554:7 › Environment variables › adds a variable and shows it pending beside the existing secret
+[158/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:584:7 › Environment variables › reveals and hides a variable's stored value
+[159/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:595:7 › Environment variables › rotating or generating a secret shows the value once
+[160/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:614:7 › Environment variables › removing a variable asks for confirmation before deleting it
+[161/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:634:7 › Environment variables › imports a dotenv paste with the chosen scopes and sensitivity
+[162/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:662:7 › Environment variables › a paste the server's dry run refuses as a whole says why, and cannot be imported
+[163/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:683:7 › Environment variables › a read-only role sees no add, generate or save controls
+[164/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:703:7 › Environment variables › editing a variable requires a real value again, and saves it non-empty
+[165/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:746:7 › Environment variables › rotating a secret disables the row's other actions while pending, and retries a stale revision once
+[166/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:785:7 › Environment variables › an unrecoverable row action error shows as a toast, never inside the editor
+[167/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:818:7 › Danger zone › a stop refusal shows the server's message as a toast and re-reads the state
+[168/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:854:7 › Danger zone › without the destructive capability there is no Stop or Restart, only Rebuild
+[169/815] [chromium] › tests/browser/deploy-settings-a.spec.ts:886:7 › Build settings for static output and Python › static output offers the single-page fallback and Python shows its version
+[170/815] [chromium] › tests/browser/deploy-source.spec.ts:92:7 › Source setting card › prefills a saved Git source, including its credential, and saves an edit
+[171/815] [chromium] › tests/browser/deploy-source.spec.ts:156:7 › Source setting card › derives the URL for a connected GitHub repository instead of asking again
+[172/815] [chromium] › tests/browser/deploy-source.spec.ts:187:7 › Source setting card › asks for the repository again for a connected provider it cannot derive a URL for
+[173/815] [chromium] › tests/browser/deploy-source.spec.ts:208:7 › Source setting card › keeps the connected repository shape when the derived URL is left unedited
+[174/815] [chromium] › tests/browser/deploy-source.spec.ts:249:7 › Source setting card › switches to a plain URL once the operator types a different one
+[175/815] [chromium] › tests/browser/deploy-source.spec.ts:280:7 › Source setting card › falls back to the fleet summary when the backend has not shipped a source yet
+[176/815] [chromium] › tests/browser/deploy-source.spec.ts:295:7 › Source setting card › shows an unresolved remote as the card's own line, not a toast
+[177/815] [chromium] › tests/browser/deploy-source.spec.ts:324:7 › Source setting card › routes a field refusal to the credential control instead of a toast
+[178/815] [chromium] › tests/browser/deploy-source.spec.ts:349:7 › Source setting card › shows the image fields, with a registry credential, for an image-sourced project
+[179/815] [chromium] › tests/browser/deploy-source.spec.ts:385:7 › Source setting card › a read-only role sees the source but no Save button
+[180/815] [chromium] › tests/browser/design-system.spec.ts:147:5 › reading pages begin with content while retaining an accessible page name
+[181/815] [chromium] › tests/browser/design-system.spec.ts:272:5 › hover, selection and focus are three different marks on a row
+[182/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /audit has an accessible name
+[183/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /system-users has an accessible name
+[184/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /packages has an accessible name
+[185/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /security has an accessible name
+[186/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /backups has an accessible name
+[187/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /deploy has an accessible name
+[188/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /deploy?view=archived has an accessible name
+[189/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /deploy/notifications has an accessible name
+[190/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /deploy/credentials has an accessible name
+[191/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /deploy/new has an accessible name
+[192/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /account has an accessible name
+[193/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /account/security has an accessible name
+[194/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /account/sessions has an accessible name
+[195/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /account/keys has an accessible name
+[196/815] [chromium] › tests/browser/design-system.spec.ts:379:7 › every icon-only control on /account/users has an accessible name
+[197/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy has an accessible name, with a project
+[198/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy?view=archived has an accessible name, with a project
+[199/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/runtime has an accessible name, with a project
+[200/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/general has an accessible name, with a project
+[201/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/build has an accessible name, with a project
+[202/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/runtime has an accessible name, with a project
+[203/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/variables has an accessible name, with a project
+[204/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/domains has an accessible name, with a project
+[205/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/storage has an accessible name, with a project
+[206/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/databases has an accessible name, with a project
+[207/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/automation has an accessible name, with a project
+[208/815] [chromium] › tests/browser/design-system.spec.ts:390:7 › every icon-only control on /deploy/7/settings/danger has an accessible name, with a project
+[209/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy has an accessible name
+[210/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy?view=archived has an accessible name
+[211/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/runtime has an accessible name
+[212/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/general has an accessible name
+[213/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/build has an accessible name
+[214/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/runtime has an accessible name
+[215/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/variables has an accessible name
+[216/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/domains has an accessible name
+[217/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/storage has an accessible name
+[218/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/databases has an accessible name
+[219/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/automation has an accessible name
+[220/815] [chromium] › tests/browser/design-system.spec.ts:411:9 › at a phone's width › every icon-only control on /deploy/7/settings/danger has an accessible name
+[221/815] [chromium] › tests/browser/design-system.spec.ts:435:7 › the databases pages keep the rules
+[222/815] [chromium] › tests/browser/design-system.spec.ts:463:7 › a database's switcher and its Connect popover keep the rules
+[223/815] [chromium] › tests/browser/design-system.spec.ts:435:7 › the databases pages keep the rules at a phone's width
+[224/815] [chromium] › tests/browser/design-system.spec.ts:463:7 › a database's switcher and its Connect popover keep the rules at a phone's width
+[225/815] [chromium] › tests/browser/design-system.spec.ts:494:9 › with no hover available › row actions on /audit are visible without a pointer
+[226/815] [chromium] › tests/browser/design-system.spec.ts:494:9 › with no hover available › row actions on /system-users are visible without a pointer
+[227/815] [chromium] › tests/browser/design-system.spec.ts:515:5 › a centred row sets every item's text on its centre line
+[228/815] [chromium] › tests/browser/design-system.spec.ts:526:5 › a centred row sets every item's text on its centre line, with a project
+[229/815] [chromium] › tests/browser/design-system.spec.ts:545:5 › no page renders a filled pill
+[230/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy renders no filled pill
+[231/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy?view=archived renders no filled pill
+[232/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/runtime renders no filled pill
+[233/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/general renders no filled pill
+[234/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/build renders no filled pill
+[235/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/runtime renders no filled pill
+[236/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/variables renders no filled pill
+[237/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/domains renders no filled pill
+[238/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/storage renders no filled pill
+[239/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/databases renders no filled pill
+[240/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/automation renders no filled pill
+[241/815] [chromium] › tests/browser/design-system.spec.ts:560:7 › /deploy/7/settings/danger renders no filled pill
+[242/815] [chromium] › tests/browser/design-system.spec.ts:577:7 › /deploy/credentials renders no filled pill
+[243/815] [chromium] › tests/browser/design-system.spec.ts:577:7 › /deploy/notifications renders no filled pill
+[244/815] [chromium] › tests/browser/design-system.spec.ts:591:5 › reduced motion is honoured globally
+[245/815] [chromium] › tests/browser/design-system.spec.ts:624:5 › every page declares one register, and only a flow page has a foreground
+[246/815] [chromium] › tests/browser/design-system.spec.ts:645:5 › the deployment pages are reading pages with no foreground
+[247/815] [chromium] › tests/browser/docker-ui.spec.ts:522:5 › the overview separates runtime health from attention
+[248/815] [chromium] › tests/browser/docker-ui.spec.ts:544:5 › attention lists posture findings and never calls them health
+[249/815] [chromium] › tests/browser/docker-ui.spec.ts:573:5 › a stack that was never deployed says so
+[250/815] [chromium] › tests/browser/docker-ui.spec.ts:587:5 › a stack opens as its own page
+[251/815] [chromium] › tests/browser/docker-ui.spec.ts:602:5 › a link to the old stack query lands on the stack
+[252/815] [chromium] › tests/browser/docker-ui.spec.ts:610:5 › a volume in use offers no delete button
+[253/815] [chromium] › tests/browser/docker-ui.spec.ts:629:5 › published ports say what their binding means
+[254/815] [chromium] › tests/browser/docker-ui.spec.ts:644:5 › the containers table keeps status runtime-only and counts issues apart
+[255/815] [chromium] › tests/browser/docker-ui.spec.ts:662:5 › memory says no limit rather than inventing one
+[256/815] [chromium] › tests/browser/docker-ui.spec.ts:717:5 › attention collapses one problem repeated across containers into one row
+[257/815] [chromium] › tests/browser/docker-ui.spec.ts:764:5 › on a phone the containers are a list rather than a table with columns removed
+[258/815] [chromium] › tests/browser/docker-ui.spec.ts:801:5 › the image, volume and network lists read down the row on a phone
+[259/815] [chromium] › tests/browser/docker-ui.spec.ts:835:5 › a container's actions are reachable on a touch screen
+[260/815] [chromium] › tests/browser/docker-ui.spec.ts:861:5 › the destructive verbs are words, not glyphs
+[261/815] [chromium] › tests/browser/docker-ui.spec.ts:883:5 › the state filters narrow the list and carry their own counts
+[262/815] [chromium] › tests/browser/docker-ui.spec.ts:909:5 › runtime health keeps every count, including the zeroes
+[263/815] [chromium] › tests/browser/docker-ui.spec.ts:929:5 › the container page can act on the container it is describing
+[264/815] [chromium] › tests/browser/docker-ui.spec.ts:948:5 › a link to the old container query lands on the container
+[265/815] [chromium] › tests/browser/docker-ui.spec.ts:961:5 › asking for a container's logs opens the logs
+[266/815] [chromium] › tests/browser/docker-ui.spec.ts:1254:5 › a container's logs read as what its image writes
+[267/815] [chromium] › tests/browser/docker-ui.spec.ts:1281:5 › a container's events fold its restart loop under its health check
+[268/815] [chromium] › tests/browser/docker-ui.spec.ts:1344:5 › the crash window chip and the pane stay in step
+[269/815] [chromium] › tests/browser/docker-ui.spec.ts:1394:5 › the failure's notice opens the logs on its window
+[270/815] [chromium] › tests/browser/docker-ui.spec.ts:1421:5 › a crash window let go of while the page was away is not what it opens on
+[271/815] [chromium] › tests/browser/docker-ui.spec.ts:1451:5 › a stack's logs are one log with a lane per service
+[272/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 320px
+[273/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 320px
+[274/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 390px
+[275/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 390px
+[276/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 640px
+[277/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 640px
+[278/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 768px
+[279/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 768px
+[280/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1024px
+[281/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1024px
+[282/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1280px
+[283/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1280px
+[284/815] [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1600px
+[285/815] [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1600px
+[286/815] [chromium] › tests/browser/docker-ui.spec.ts:1551:5 › a running container's dot says the reading is live
+[287/815] [chromium] › tests/browser/docker-ui.spec.ts:1571:5 › a container's card keeps every reading on a wide desktop
+[288/815] [chromium] › tests/browser/docker-ui.spec.ts:1593:5 › the inspect tab does not undo the masking the environment tab applies
+[289/815] [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away
+[290/815] [chromium] › tests/browser/docker-ui.spec.ts:1676:5 › the storage browser draws a directory the way the file manager does
+[291/815] [chromium] › tests/browser/docker-ui.spec.ts:1713:5 › the storage tab opens onto what is in a mount
+[292/815] [chromium] › tests/browser/docker-ui.spec.ts:1736:5 › the storage tab switches the listing between mounts
+[293/815] [chromium] › tests/browser/docker-ui.spec.ts:1897:5 › usage separates live rates from totals, waits for intervals, and keeps idle history
+[294/815] [chromium] › tests/browser/docker-ui.spec.ts:1920:5 › usage stays live with history disabled and removes stale figures
+[295/815] [chromium] › tests/browser/docker-ui.spec.ts:1933:5 › host networking explains unavailable attribution and stopped containers keep history
+[296/815] [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 1280px
+[297/815] [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 1720px
+[298/815] [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 390px
+[299/815] [chromium] › tests/browser/docker-ui.spec.ts:1980:5 › workspace: container name typing, adjacent details and Back retain list focus
+[300/815] [chromium] › tests/browser/docker-ui.spec.ts:2006:5 › workspace: Back restores a long container list's scroll and focused row
+[301/815] [chromium] › tests/browser/git-ui.spec.ts:201:5 › the list answers what is waiting before the rows are read
+[302/815] [chromium] › tests/browser/git-ui.spec.ts:252:5 › open pull requests sit on the card and open the checkout on them
+[303/815] [chromium] › tests/browser/git-ui.spec.ts:348:5 › worktrees are listed apart from the cards and checkouts are removed knowingly
+[304/815] [chromium] › tests/browser/git-ui.spec.ts:491:5 › a file staged and edited again is listed on both sides
+[305/815] [chromium] › tests/browser/git-ui.spec.ts:519:5 › the tree draws folders in the colours chosen in Files
+[306/815] [chromium] › tests/browser/git-ui.spec.ts:566:5 › discarding a file uses ordinary confirmation
+[307/815] [chromium] › tests/browser/git-ui.spec.ts:592:5 › a column cannot be dragged over the preview
+[308/815] [chromium] › tests/browser/git-ui.spec.ts:622:5 › a width left over from a wider screen is fitted on arrival
+[309/815] [chromium] › tests/browser/git-ui.spec.ts:643:7 › /git labels its icon-only controls and draws no pill
+[310/815] [chromium] › tests/browser/git-ui.spec.ts:643:7 › /git?repo=%2Fsrv%2Fapp labels its icon-only controls and draws no pill
+[311/815] [chromium] › tests/browser/git-ui.spec.ts:685:5 › workspace: Git retains its commit draft and walks changed files without a mouse
+[312/815] [chromium] › tests/browser/logs-lens.spec.ts:20:5 › a lensed log reads as its events, folds a record and counts a repeat
+[313/815] [chromium] › tests/browser/logs-lens.spec.ts:42:5 › a quick view and a field's value narrow the stream on the server
+[314/815] [chromium] › tests/browser/logs-lens.spec.ts:66:5 › paused, a new question's lines are held, and the pane says so rather than that none match
+[315/815] [chromium] › tests/browser/logs-lens.spec.ts:82:5 › a line opens in place, and the lines around it are two searches either side
+[316/815] [chromium] › tests/browser/logs-lens.spec.ts:116:5 › Insights ranks the window's values and a press narrows it in place
+[317/815] [chromium] › tests/browser/logs-lens.spec.ts:160:5 › the source is named over the workbench with its readings, and the strip is its views
+[318/815] [chromium] › tests/browser/logs-lens.spec.ts:201:5 › on a laptop's window the readings are the lens row's counts, and the lines keep the height
+[319/815] [chromium] › tests/browser/logs-lens.spec.ts:212:5 › the rail draws a stack as what it runs and offers the journal's readings a host lacks
+[320/815] [chromium] › tests/browser/logs-lens.spec.ts:229:5 › a service page's logs open on the lens's defaults and drop them for another vocabulary
+[321/815] [chromium] › tests/browser/logs-ui.spec.ts:73:5 › a failure, the address and the program are found without reading
+[322/815] [chromium] › tests/browser/logs-ui.spec.ts:87:5 › a status is read by its class
+[323/815] [chromium] › tests/browser/logs-ui.spec.ts:93:5 › a structured line is its message and fields, and the raw line is one click away
+[324/815] [chromium] › tests/browser/logs-ui.spec.ts:108:5 › the sources are drawn as their products
+[325/815] [chromium] › tests/browser/logs-views.spec.ts:337:5 › /logs offers a container's Events and, for a saved database's server, its Queries
+[326/815] [chromium] › tests/browser/logs-views.spec.ts:381:5 › /logs offers a unit's Runs, and a run opens its own lines in History
+[327/815] [chromium] › tests/browser/logs-views.spec.ts:407:5 › /logs lists the request records, and reads a deployment's in the workbench
+[328/815] [chromium] › tests/browser/logs-views.spec.ts:472:5 › /logs reads a site's record, and its access log's Requests view, with nginx's errors beside a failure
+[329/815] [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view
+[330/815] [chromium] › tests/browser/logs-views.spec.ts:549:5 › workspace: match navigation wraps and Escape closes the inspected record
+[331/815] [chromium] › tests/browser/navigation.spec.ts:66:5 › the account menu supports keyboard navigation and returns focus on Escape
+[332/815] [chromium] › tests/browser/navigation.spec.ts:96:5 › the account menu keeps role visibility, two-factor state and sign out
+[333/815] [chromium] › tests/browser/navigation.spec.ts:117:5 › uploaded account pictures stay circular in the button and menu
+[334/815] [chromium] › tests/browser/navigation.spec.ts:150:5 › desktop navigation stays expanded despite old preferences and sidebar shortcuts
+[335/815] [chromium] › tests/browser/navigation.spec.ts:178:7 › the expanded account menu fits the viewport with circular avatar fallbacks
+[336/815] [chromium] › tests/browser/navigation.spec.ts:178:7 › the mobile account menu fits the viewport with circular avatar fallbacks
+[337/815] [chromium] › tests/browser/navigation.spec.ts:239:5 › opening a section replaces the rail with that section's pages
+[338/815] [chromium] › tests/browser/navigation.spec.ts:267:5 › a deep link opens with the rail already inside the section
+[339/815] [chromium] › tests/browser/navigation.spec.ts:276:5 › stepping back out shows everything without leaving the page
+[340/815] [chromium] › tests/browser/navigation.spec.ts:293:5 › a group opens its panel without leaving the page
+[341/815] [chromium] › tests/browser/navigation.spec.ts:315:5 › a deep link inside a group opens every level of it
+[342/815] [chromium] › tests/browser/navigation.spec.ts:331:5 › a project is a third level, and back from it lands on Deployments
+[343/815] [chromium] › tests/browser/navigation.spec.ts:353:5 › a game server gets the two pages nothing else has
+[344/815] [chromium] › tests/browser/network-confirmation.spec.ts:40:5 › a supported mutation opts in and requires a received response before explicit confirmation
+[345/815] [chromium] › tests/browser/network-confirmation.spec.ts:102:5 › pending changes remain visible outside Network and expire without a success claim
+[346/815] [chromium] › tests/browser/network-confirmation.spec.ts:124:5 › an unavailable dashboard response retains pending status and cannot enable confirmation
+[347/815] [chromium] › tests/browser/network-confirmation.spec.ts:146:5 › another administrator sees pending recovery evidence without owner actions
+[348/815] [chromium] › tests/browser/network-confirmation.spec.ts:159:5 › verification shows the access boundary after the change and names what was lost
+[349/815] [chromium] › tests/browser/network-confirmation.spec.ts:205:5 › a pending SSH apply is confirmed through the same banner in SSH's words
+[350/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:176:5 › retained DNS evidence separates answering links, native trust and application scope
+[351/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:206:7 › retained alias questions expose scope, answers and per-question trust at 390
+[352/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:206:7 › retained alias questions expose scope, answers and per-question trust at 1280
+[353/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:230:5 › explicit launch sends only the question and expected native policy link
+[354/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:245:5 › failed launch preserves dated selected evidence without an automatic retry
+[355/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:262:5 › interrupted saved questions have no fabricated trust and never rerun on read
+[356/815] [chromium] › tests/browser/network-dns-evidence.spec.ts:275:5 › reader sees the diagnostic boundary without private-history requests
+[357/815] [chromium] › tests/browser/network-flows.spec.ts:78:5 › history stays opt-in and has unknown totals before recording
+[358/815] [chromium] › tests/browser/network-flows.spec.ts:102:5 › full tuple and container proof keep UDP bytes and loss unknown
+[359/815] [chromium] › tests/browser/network-flows.spec.ts:134:5 › failed refresh retains dates and blocks recorder mutations and exports
+[360/815] [chromium] › tests/browser/network-flows.spec.ts:149:5 › period filters send UTC boundaries and full container identity
+[361/815] [chromium] › tests/browser/network-flows.spec.ts:167:5 › retention changes review erasure and keep recording as a separate intent
+[362/815] [chromium] › tests/browser/network-flows.spec.ts:188:5 › read-only role sees the privacy boundary without requesting flow metadata
+[363/815] [chromium] › tests/browser/network-flows.spec.ts:210:7 › mobile socket evidence › long identities and tuple table scroll inside the reading
+[364/815] [chromium] › tests/browser/network-flows.spec.ts:261:5 › kernel activation is separate, reviewed and never triggered by reading or ordinary history
+[365/815] [chromium] › tests/browser/network-flows.spec.ts:286:5 › observer needs history first and remains unavailable to an admin without destructive capability
+[366/815] [chromium] › tests/browser/network-flows.spec.ts:310:5 › retained partial attachments survive a failed stop and offer a truthful retry
+[367/815] [chromium] › tests/browser/network-flows.spec.ts:341:5 › failed refresh blocks observer activation and a review already open
+[368/815] [chromium] › tests/browser/network-flows.spec.ts:360:5 › kernel subtotals keep TCP channels separate, show UDP bytes and retain dated gaps
+[369/815] [chromium] › tests/browser/network-flows.spec.ts:413:5 › interrupted restart needs a new explicit opt-in and historical IDs do not imply retained attachments
+[370/815] [chromium] › tests/browser/network-flows.spec.ts:436:7 › observer evidence and its review stay within 390px
+[371/815] [chromium] › tests/browser/network-flows.spec.ts:436:7 › observer evidence and its review stay within 1280px
+[372/815] [chromium] › tests/browser/network-flows.spec.ts:436:7 › observer evidence and its review stay within 1720px
+[373/815] [chromium] › tests/browser/network-runs.spec.ts:219:7 › a 409 launch keeps the named IPv6 tool draft and runs only on retry
+[374/815] [chromium] › tests/browser/network-runs.spec.ts:219:7 › a 500 launch keeps the named IPv6 tool draft and runs only on retry
+[375/815] [chromium] › tests/browser/network-runs.spec.ts:259:5 › a cancellation stays pending until cleanup is observed
+[376/815] [chromium] › tests/browser/network-runs.spec.ts:292:5 › saved names survive failed writes, explicit reruns compare and export, and deletion confirms
+[377/815] [chromium] › tests/browser/network-runs.spec.ts:334:5 › restart interruption remains saved across reload and never launches itself
+[378/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained timed_out is a typed outcome with expandable evidence
+[379/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained refused is a typed outcome with expandable evidence
+[380/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained dns_failure is a typed outcome with expandable evidence
+[381/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained permission_denied is a typed outcome with expandable evidence
+[382/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained unsupported is a typed outcome with expandable evidence
+[383/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained invalid_certificate is a typed outcome with expandable evidence
+[384/815] [chromium] › tests/browser/network-runs.spec.ts:365:7 › retained completed_with_findings is a typed outcome with expandable evidence
+[385/815] [chromium] › tests/browser/network-runs.spec.ts:385:5 › initial list and result failures offer retry without inventing an empty inventory
+[386/815] [chromium] › tests/browser/network-runs.spec.ts:405:5 › a failed later result read retains dated evidence and refresh retries
+[387/815] [chromium] › tests/browser/network-runs.spec.ts:420:5 › retention is bounded and confirms deletion, keeping the draft after refusal
+[388/815] [chromium] › tests/browser/network-runs.spec.ts:444:5 › read access opens local tools without reading or starting retained runs
+[389/815] [chromium] › tests/browser/network-runs.spec.ts:459:7 › saved runs fit a 375px reporting page
+[390/815] [chromium] › tests/browser/network-runs.spec.ts:459:7 › saved runs fit a 1280px reporting page
+[391/815] [chromium] › tests/browser/network-runs.spec.ts:459:7 › saved runs fit a 1720px reporting page
+[392/815] [chromium] › tests/browser/network-tools.spec.ts:148:5 › an unanswered ping reads as inconclusive with its evidence, and its next step sends nothing
+[393/815] [chromium] › tests/browser/network-tools.spec.ts:171:5 › a quick result is saved from the server's hold without running the tool again
+[394/815] [chromium] › tests/browser/network-tools.spec.ts:189:5 › a route lookup with a port sends its protocol and shows the joined path layers
+[395/815] [chromium] › tests/browser/network-tools.spec.ts:235:5 › listeners link each socket to Ports and hop tables render for traceroute
+[396/815] [chromium] › tests/browser/network-tools.spec.ts:293:5 › SSH host keys are trusted from the held scan or entered by hand, replacement and forgetting confirmed
+[397/815] [chromium] › tests/browser/network-tools.spec.ts:398:5 › saved Wake-on-LAN devices fill the inputs and verification is measured on request
+[398/815] [chromium] › tests/browser/network-tools.spec.ts:470:5 › a packet snapshot hands its settings to retained capture setup without capturing
+[399/815] [chromium] › tests/browser/network-tools.spec.ts:518:5 › the subnet calculator compares prefixes locally and checks shared IPAM for admins
+[400/815] [chromium] › tests/browser/network-tools.spec.ts:537:5 › readers keep the local calculator and comparison but never query IPAM
+[401/815] [chromium] › tests/browser/network-tools.spec.ts:554:5 › a saved run shows its structured evidence, metric history and measurement changes
+[402/815] [chromium] › tests/browser/network-tools.spec.ts:652:7 › structured results stay inside the page at 375px
+[403/815] [chromium] › tests/browser/network-tools.spec.ts:652:7 › structured results stay inside the page at 1280px
+[404/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › dns shows its structured readings
+[405/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › dnsauth shows its structured readings
+[406/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › mtu shows its structured readings
+[407/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › port shows its structured readings
+[408/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › scan shows its structured readings
+[409/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › banner shows its structured readings
+[410/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › http shows its structured readings
+[411/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › httpsec shows its structured readings
+[412/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › tls shows its structured readings
+[413/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › tlssurvey shows its structured readings
+[414/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › siteaudit shows its structured readings
+[415/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › mx shows its structured readings
+[416/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › starttls shows its structured readings
+[417/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › dnsbl shows its structured readings
+[418/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › asn shows its structured readings
+[419/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › whois shows its structured readings
+[420/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › egress shows its structured readings
+[421/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › neigh shows its structured readings
+[422/815] [chromium] › tests/browser/network-tools.spec.ts:699:7 › capabilities shows its structured readings
+[423/815] [chromium] › tests/browser/overview-ui.spec.ts:17:5 › the host is drawn as itself, and its facts are one line
+[424/815] [chromium] › tests/browser/overview-ui.spec.ts:31:5 › each moving reading carries its last hour in its tile
+[425/815] [chromium] › tests/browser/overview-ui.spec.ts:44:5 › the readings say they are live and lead on to Metrics
+[426/815] [chromium] › tests/browser/overview-ui.spec.ts:62:5 › every filesystem is a bar of its own under the readings
+[427/815] [chromium] › tests/browser/overview-ui.spec.ts:88:5 › what every module found is one Health list, worst first
+[428/815] [chromium] › tests/browser/overview-ui.spec.ts:113:5 › the projects are the fleet's cards, worst first
+[429/815] [chromium] › tests/browser/overview-ui.spec.ts:135:5 › a longer fleet shows two rows and says how many it left out
+[430/815] [chromium] › tests/browser/overview-ui.spec.ts:148:5 › an empty fleet asks for its first project
+[431/815] [chromium] › tests/browser/overview-ui.spec.ts:161:5 › who is spending the machine sits beside the day's activity
+[432/815] [chromium] › tests/browser/overview-ui.spec.ts:179:7 › activity shows product identities and truthful outcomes at 1280
+[433/815] [chromium] › tests/browser/overview-ui.spec.ts:179:7 › activity shows product identities and truthful outcomes at 390
+[434/815] [chromium] › tests/browser/overview-ui.spec.ts:235:5 › an empty activity panel keeps the way to the audit trail
+[435/815] [chromium] › tests/browser/overview-ui.spec.ts:245:5 › read-only accounts see activity without an administrator's audit-log link
+[436/815] [chromium] › tests/browser/overview-ui.spec.ts:264:5 › a service tile names what it counts with the products
+[437/815] [chromium] › tests/browser/overview-ui.spec.ts:290:7 › looks right at 1280
+[438/815] [chromium] › tests/browser/overview-ui.spec.ts:290:7 › looks right at 1720
+[439/815] [chromium] › tests/browser/processes-ui.spec.ts:556:5 › the live table reads the host and every process verb is a word
+[440/815] [chromium] › tests/browser/processes-ui.spec.ts:630:5 › a kernel thread and a zombie are not offered signals they cannot take
+[441/815] [chromium] › tests/browser/processes-ui.spec.ts:650:5 › a workload narrows the table to its processes
+[442/815] [chromium] › tests/browser/processes-ui.spec.ts:675:5 › a process that exits while its sheet is open says so and stops
+[443/815] [chromium] › tests/browser/processes-ui.spec.ts:707:5 › a process named by its whole command line stays inside its cell
+[444/815] [chromium] › tests/browser/processes-ui.spec.ts:737:5 › the wheel over a half-shown table brings all of it on screen before its rows move
+[445/815] [chromium] › tests/browser/processes-ui.spec.ts:798:5 › PM2 says whether it survives a reboot and offers the housekeeping verbs
+[446/815] [chromium] › tests/browser/processes-ui.spec.ts:870:5 › PM2's verdict reads the saved list, and saving it again is one press
+[447/815] [chromium] › tests/browser/processes-ui.spec.ts:894:5 › a PM2 application's sheet reads its process live and scales its cluster
+[448/815] [chromium] › tests/browser/processes-ui.spec.ts:947:5 › services list failed units first and the sheet offers reload where it applies
+[449/815] [chromium] › tests/browser/processes-ui.spec.ts:981:5 › scheduled says what each schedule means and builds a new one in words
+[450/815] [chromium] › tests/browser/processes-ui.spec.ts:1079:5 › a unit's journal reads its runs, folds a loop and opens one run's own lines
+[451/815] [chromium] › tests/browser/processes-ui.spec.ts:1147:5 › sshd's journal is an administrator's, and the sheet says so rather than asking
+[452/815] [chromium] › tests/browser/processes-ui.spec.ts:1174:5 › a journal the server refuses is said to be refused, in its words, and nothing is read
+[453/815] [chromium] › tests/browser/processes-ui.spec.ts:1199:5 › on a phone a unit's lines start at the sheet's edge and its controls stay in reach
+[454/815] [chromium] › tests/browser/processes-ui.spec.ts:1228:5 › a PM2 application's logs are its own lensed stream, beside PM2's count of its restarts
+[455/815] [chromium] › tests/browser/processes-ui.spec.ts:1266:5 › scheduled reads cron's own log and each timer's runs where they are
+[456/815] [chromium] › tests/browser/processes-ui.spec.ts:1309:7 › with no hover available › every row's verbs are reachable on a phone
+[457/815] [chromium] › tests/browser/processes-ui.spec.ts:1338:7 › looks right at 1280
+[458/815] [chromium] › tests/browser/processes-ui.spec.ts:1338:7 › looks right at 1720
+[459/815] [chromium] › tests/browser/processes-ui.spec.ts:1370:5 › workspace: process focus holds row order and paused searches remain usable
+[460/815] [chromium] › tests/browser/processes-ui.spec.ts:1394:5 › workspace: changing process rankings keep focused rows steady and Pause stops polling
+[461/815] [chromium] › tests/browser/processes-ui.spec.ts:1433:5 › automatic focus retains the table, scroll and readings while its next ranking is slow
+[462/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › live at 390: a background state change preserves hovered rows and their open menu
+[463/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › live at 1720: a background state change preserves hovered rows and their open menu
+[464/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › pm2 at 390: a background state change preserves hovered rows and their open menu
+[465/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › pm2 at 1720: a background state change preserves hovered rows and their open menu
+[466/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › services at 390: a background state change preserves hovered rows and their open menu
+[467/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › services at 1720: a background state change preserves hovered rows and their open menu
+[468/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › timers at 390: a background state change preserves hovered rows and their open menu
+[469/815] [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › timers at 1720: a background state change preserves hovered rows and their open menu
+[470/815] [chromium] › tests/browser/processes-ui.spec.ts:1616:5 › cron disable updates its existing row and keeps keyboard focus on the toggle
+[471/815] [chromium] › tests/browser/processes-ui.spec.ts:1643:5 › a timer opened by deep link holds the list's first loaded order while its sheet is open
+[472/815] [chromium] › tests/browser/processes-ui.spec.ts:1675:7 › pm2: start and stop refresh the existing table in place
+[473/815] [chromium] › tests/browser/processes-ui.spec.ts:1675:7 › services: start and stop refresh the existing table in place
+[474/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:227:5 › an enable nginx refuses says why, shows nginx's output, and leaves the site off
+[475/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:263:5 › a switch that landed but did not reload says so instead of 'completed'
+[476/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:303:5 › a switch keeps its card busy until the list is read again, then says what nginx serves
+[477/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:388:5 › a change with no nginx running says so, not that nginx keeps serving
+[478/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:445:5 › with nginx stopped no nginx site reads serving, and the page says why
+[479/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:513:5 › a reader sees nginx is not running, without the way to start it
+[480/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:531:5 › a switch nginx did not reload reads not reloaded until nginx has loaded it
+[481/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:647:5 › a reload that finds no pid file while systemd has nginx up says it did not reload
+[482/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:673:5 › where nginx has no unit, a reload that found none says nginx is not running until one goes through
+[483/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:719:5 › with Caddy's unit stopped, its Caddyfile sites do not read serving
+[484/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:754:5 › a switch whose list could not be read again does not show the state from before
+[485/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:821:5 › a disable another site needs is refused, says so, and leaves the site serving
+[486/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:863:5 › a delete whose reload failed says a running nginx still serves the site
+[487/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:911:5 › a ?site= link gives a reader the config viewer and an administrator the form
+[488/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:959:5 › every place nginx reads a site from is listed, a link to nothing first
+[489/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1043:5 › a copy in sites-enabled opens as the served copy and is never deleted
+[490/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1080:5 › a site file kept outside the nginx directory keeps its switch
+[491/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1122:5 › an enable that re-points a stale link asks first when it takes another file out of nginx
+[492/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1218:5 › a site served through a link under another name reads serving and names that link
+[493/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1242:5 › the overview names a link to nothing as critical
+[494/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1254:5 › the password-file warning says what nginx really does without the file
+[495/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1266:5 › a deployment's route leads to its deployment and is edited only after asking
+[496/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1362:5 › a reader sees who manages a route and reaches its deployment, and nothing to edit
+[497/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1378:5 › the overview's finding for a link to nothing leads to its removal
+[498/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1419:5 › the distribution's untouched default site waits on nobody
+[499/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1463:5 › a card names the servers behind its upstream block, what the site does, and the logs it writes
+[500/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1490:7 › every kind of entry fits the sites list at 390
+[501/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1490:7 › every kind of entry fits the sites list at 1280
+[502/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1553:5 › a change nginx has not loaded reads not live, and the strip tests and reloads it
+[503/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1630:5 › a reload nginx does not take keeps the strip and says nginx kept what it had
+[504/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1659:5 › a configuration nginx refuses is named, with no Reload to press, and a refused reload says why
+[505/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1712:5 › a reader sees what nginx has not loaded, without Test or Reload
+[506/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1728:5 › a switch that reloaded holds its card until nginx is read again after the reload
+[507/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1761:5 › nothing is called not live where no running nginx reads the configuration
+[508/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1782:5 › a long list of changes folds and fits a phone
+[509/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1812:5 › a switch whose reload nginx did not take says so after its own toast
+[510/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1842:5 › a save that did not reload is read at once, and one that did waits for nginx's load
+[511/815] [chromium] › tests/browser/proxy-sites-list.spec.ts:1895:5 › the Disabled tile does not call a site nginx still serves not serving
+[512/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:96:5 › a new list is saved as the form shows it and listed with its include line
+[513/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:177:5 › an edit reaches every site that includes the list, with what was typed but not added
+[514/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:217:5 › a save nginx refuses keeps the form open and shows nginx's reason and output
+[515/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:259:5 › a save whose reload failed says the sites keep the previous rules
+[516/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:290:5 › each list says what it allows, who includes it, and when it refuses the reader
+[517/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:329:5 › a list a site includes is not deleted; one no site includes is, after asking
+[518/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:354:5 › a list whose password file is gone, or that was written by hand, says so
+[519/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:382:5 › a list that cannot be read is an error in its own section only
+[520/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:397:5 › a read-only account neither sees nor asks for the access lists
+[521/815] [chromium] › tests/browser/proxy-sites-tools.spec.ts:413:5 › the lists and their form fit a phone
+[522/815] [chromium] › tests/browser/proxy-tls.spec.ts:25:5 › a watched endpoint's link scans the port it names
+[523/815] [chromium] › tests/browser/proxy-tls.spec.ts:48:5 › a link may give the port beside the name, and is rewritten the way links spell it
+[524/815] [chromium] › tests/browser/proxy-tls.spec.ts:73:5 › the address follows each scan, so Back and reload ask again
+[525/815] [chromium] › tests/browser/proxy-tls.spec.ts:127:5 › the field says what it will scan, and a port that disagrees is refused before sending
+[526/815] [chromium] › tests/browser/proxy-tls.spec.ts:208:5 › Cancel stops a scan in flight, with a clock until then
+[527/815] [chromium] › tests/browser/proxy-tls.spec.ts:237:5 › Cancelling a scan asked for again keeps the report it was asked over
+[528/815] [chromium] › tests/browser/proxy-tls.spec.ts:259:5 › Back after a cancelled scan and its answer is a page with nothing scanning
+[529/815] [chromium] › tests/browser/proxy-tls.spec.ts:322:5 › a long name in the hint or the refusal wraps under the field
+[530/815] [chromium] › tests/browser/proxy-tls.spec.ts:371:5 › the field offers recent scans and the names this server knows
+[531/815] [chromium] › tests/browser/proxy-tls.spec.ts:409:5 › a read-only account is offered nothing and scans nothing
+[532/815] [chromium] › tests/browser/proxy-tls.spec.ts:422:5 › a pasted URL scans its host, and what is not an address is refused before sending
+[533/815] [chromium] › tests/browser/proxy-tls.spec.ts:452:5 › a link that is not an address is shown with its reason and nothing is scanned
+[534/815] [chromium] › tests/browser/proxy-tls.spec.ts:464:5 › a failed scan request shows its error and not the empty state
+[535/815] [chromium] › tests/browser/proxy-tls.spec.ts:478:5 › a version the server refuses reads as refused, in the server's words
+[536/815] [chromium] › tests/browser/proxy-tls.spec.ts:510:5 › a service that is not a website is not graded on HTTP headers
+[537/815] [chromium] › tests/browser/proxy-tls.spec.ts:585:5 › a redirect through another host is drawn hop by hop and counts
+[538/815] [chromium] › tests/browser/proxy-tls.spec.ts:618:5 › a closed port 80 is named for what happened
+[539/815] [chromium] › tests/browser/proxy-tls.spec.ts:640:5 › the serial is hex and OCSP is only asked of a certificate that names a responder
+[540/815] [chromium] › tests/browser/proxy-tls.spec.ts:659:5 › watching takes what is pasted and keeps each port
+[541/815] [chromium] › tests/browser/proxy-tls.spec.ts:700:5 › a read-only account reads the last check and cannot ask for another
+[542/815] [chromium] › tests/browser/proxy-tls.spec.ts:727:5 › a scan asked for again says it is scanning until the answer replaces the report
+[543/815] [chromium] › tests/browser/proxy-tls.spec.ts:758:5 › a scan asked for again that fails shows the error, not a spinner
+[544/815] [chromium] › tests/browser/proxy-tls.spec.ts:778:5 › a redirect into this machine reads as not followed, not as broken
+[545/815] [chromium] › tests/browser/proxy-tls.spec.ts:830:5 › re-checking the watch list says so until the new checks arrive
+[546/815] [chromium] › tests/browser/proxy-tls.spec.ts:856:5 › stopping a watch says what happened, and a failure keeps the row
+[547/815] [chromium] › tests/browser/proxy-tls.spec.ts:923:5 › on a phone every watched row keeps how old its check is in full
+[548/815] [chromium] › tests/browser/proxy-tls.spec.ts:943:5 › a new watch shows its row waiting for the server's first check
+[549/815] [chromium] › tests/browser/proxy-tls.spec.ts:1062:5 › a server that refused the handshake is not said to be silent
+[550/815] [chromium] › tests/browser/proxy-tls.spec.ts:1091:5 › a server that takes only an older offer is reported with what it took
+[551/815] [chromium] › tests/browser/proxy-tls.spec.ts:1125:5 › a full-length serial wraps inside its panel
+[552/815] [chromium] › tests/browser/proxy-tls.spec.ts:1145:5 › a failed scan says where to look next, and only where the fault can be here
+[553/815] [chromium] › tests/browser/proxy-tls.spec.ts:1201:5 › a name that does not resolve stops at the name
+[554/815] [chromium] › tests/browser/proxy-tls.spec.ts:1229:5 › plain HTTP on the TLS port is named, with the listen directive to fix
+[555/815] [chromium] › tests/browser/proxy-tls.spec.ts:1262:5 › plain HTTP on port 80 is not a fault, and the report sends the scan to 443
+[556/815] [chromium] › tests/browser/proxy-tls.spec.ts:1312:5 › the preload checklist gives every rule, and a subdomain the name to scan
+[557/815] [chromium] › tests/browser/proxy-tls.spec.ts:1414:5 › on a phone the preload checklist wraps its prose between words
+[558/815] [chromium] › tests/browser/proxy-tls.spec.ts:1449:5 › the live certificate gives its term, where it came from and its pin
+[559/815] [chromium] › tests/browser/proxy-ui.spec.ts:26:5 › the reverse proxy is named once, in the identity line
+[560/815] [chromium] › tests/browser/proxy-ui.spec.ts:46:5 › the overview's sites are cards drawn as the engine serving them
+[561/815] [chromium] › tests/browser/proxy-ui.spec.ts:65:5 › the overview's attention list is folded from conditions worth acting on
+[562/815] [chromium] › tests/browser/proxy-ui.spec.ts:83:5 › a Docker Caddy route is listed without an editor it cannot use
+[563/815] [chromium] › tests/browser/proxy-ui.spec.ts:113:5 › the raw editor reads its file afresh on every opening
+[564/815] [chromium] › tests/browser/proxy-ui.spec.ts:146:5 › the ports page filters what it lists and names a database on a public address
+[565/815] [chromium] › tests/browser/proxy-ui.spec.ts:162:5 › a stream cannot be created as though nginx were reading it
+[566/815] [chromium] › tests/browser/proxy-ui.spec.ts:180:5 › once nginx is reading them, the stream form promises a live forward again
+[567/815] [chromium] › tests/browser/proxy-ui.spec.ts:193:5 › the certificates page offers to turn the renewal timer on
+[568/815] [chromium] › tests/browser/proxy-ui.spec.ts:212:5 › a stream is drawn as the service its port is
+[569/815] [chromium] › tests/browser/proxy-ui.spec.ts:261:7 › every proxy page has readable content and contained controls at 390
+[570/815] [chromium] › tests/browser/proxy-ui.spec.ts:261:7 › every proxy page has readable content and contained controls at 1280
+[571/815] [chromium] › tests/browser/proxy-ui.spec.ts:261:7 › every proxy page has readable content and contained controls at 1720
+[572/815] [chromium] › tests/browser/proxy-ui.spec.ts:308:5 › certificate cards filter, reveal complete details and link to their owning site
+[573/815] [chromium] › tests/browser/proxy-ui.spec.ts:331:5 › a watched service retains its port when opening the live report
+[574/815] [chromium] › tests/browser/proxy-ui.spec.ts:341:5 › site routing choices keep each kind's fields and the save guard
+[575/815] [chromium] › tests/browser/proxy-ui.spec.ts:355:5 › read-only users can inspect certificates without proxy mutation controls or network scans
+[576/815] [chromium] › tests/browser/proxy-ui.spec.ts:377:5 › unreadable certificates keep their error in the detail surface without overflowing a phone
+[577/815] [chromium] › tests/browser/proxy-ui.spec.ts:420:5 › proxy editors and lower sections remain usable on a phone
+[578/815] [chromium] › tests/browser/proxy-ui.spec.ts:711:5 › /proxy/sites/app.example.com reads the site's requests, and what nginx said about a failed one
+[579/815] [chromium] › tests/browser/proxy-ui.spec.ts:797:5 › /proxy/sites/app.example.com reads its error log by what failed
+[580/815] [chromium] › tests/browser/proxy-ui.spec.ts:842:5 › a site's Logs verb opens its page rather than the host Logs page
+[581/815] [chromium] › tests/browser/proxy-ui.spec.ts:854:5 › /proxy reads the engine's own log inline
+[582/815] [chromium] › tests/browser/proxy-ui.spec.ts:872:5 › /proxy/certificates reads every renewal certbot ran
+[583/815] [chromium] › tests/browser/proxy-ui.spec.ts:888:5 › /proxy/sites/app.example.com's upstream figure opens its failures, and lets go when pressed again
+[584/815] [chromium] › tests/browser/proxy-ui.spec.ts:916:5 › /proxy/sites/legacy.example.com says why it has no requests to read, and reads nginx's shared error log for its names
+[585/815] [chromium] › tests/browser/proxy-ui.spec.ts:1026:5 › /proxy/sites/just-dashboard-shop reads its route's requests, and what Caddy said about a failed one
+[586/815] [chromium] › tests/browser/proxy-ui.spec.ts:1124:5 › the Caddyfile's page reads Caddy's journal whole, since its names are addresses no line carries
+[587/815] [chromium] › tests/browser/proxy-ui.spec.ts:1172:5 › /proxy reads the Docker Caddy ingress beside nginx, once it is there
+[588/815] [chromium] › tests/browser/proxy-ui.spec.ts:1189:5 › /proxy does not offer an ingress that is only the name one would have
+[589/815] [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 390 wide › /security/intrusion at 390
+[590/815] [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 390 wide › /security/ssh at 390
+[591/815] [chromium] › tests/browser/security-intrusion.spec.ts:94:11 › screenshots › 390 wide › intrusion without CrowdSec and Suricata at 390
+[592/815] [chromium] › tests/browser/security-intrusion.spec.ts:100:11 › screenshots › 390 wide › ssh as a jump host, staged, at 390
+[593/815] [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 1440 wide › /security/intrusion at 1440
+[594/815] [chromium] › tests/browser/security-intrusion.spec.ts:87:13 › screenshots › 1440 wide › /security/ssh at 1440
+[595/815] [chromium] › tests/browser/security-intrusion.spec.ts:94:11 › screenshots › 1440 wide › intrusion without CrowdSec and Suricata at 1440
+[596/815] [chromium] › tests/browser/security-intrusion.spec.ts:100:11 › screenshots › 1440 wide › ssh as a jump host, staged, at 1440
+[597/815] [chromium] › tests/browser/security-intrusion.spec.ts:114:5 › CrowdSec reads its decisions, alerts and bouncers
+[598/815] [chromium] › tests/browser/security-intrusion.spec.ts:152:5 › a bouncer pulling into a flushed kernel table is not called protection
+[599/815] [chromium] › tests/browser/security-intrusion.spec.ts:170:5 › a CrowdSec ban sends exactly the value, the duration and the reason
+[600/815] [chromium] › tests/browser/security-intrusion.spec.ts:194:5 › a ban that would lock the operator out is refused beside its field
+[601/815] [chromium] › tests/browser/security-intrusion.spec.ts:216:5 › releasing a decision asks first, then deletes that decision
+[602/815] [chromium] › tests/browser/security-intrusion.spec.ts:232:5 › with no valid bouncer CrowdSec says nothing is enforcing its decisions
+[603/815] [chromium] › tests/browser/security-intrusion.spec.ts:259:5 › every engine's refused addresses are folded into one list by address
+[604/815] [chromium] › tests/browser/security-intrusion.spec.ts:277:5 › both ban forms say which engine already holds the address
+[605/815] [chromium] › tests/browser/security-intrusion.spec.ts:298:5 › the sshd jail's policy says its ban misses the port sshd moved to
+[606/815] [chromium] › tests/browser/security-intrusion.spec.ts:312:5 › a ban across the access boundary is shown first and sent acknowledged
+[607/815] [chromium] › tests/browser/security-intrusion.spec.ts:334:5 › a ban that would cut this session cannot be sent
+[608/815] [chromium] › tests/browser/security-intrusion.spec.ts:358:5 › an SSH change applies until confirmed, with what it does to the tunnel shown first
+[609/815] [chromium] › tests/browser/security-intrusion.spec.ts:397:5 › an SSH change on a host without the watchdog applies immediately as before
+[610/815] [chromium] › tests/browser/security-intrusion.spec.ts:419:5 › Suricata's setup moves the capture, fetches rules and reads the queue it depends on
+[611/815] [chromium] › tests/browser/security-intrusion.spec.ts:460:5 › Suricata reads its mode, its severities, its signatures and its latest alerts
+[612/815] [chromium] › tests/browser/security-intrusion.spec.ts:492:5 › an IPS Suricata says it can drop, and a blocked alert says it was
+[613/815] [chromium] › tests/browser/security-intrusion.spec.ts:509:5 › a Suricata log it may not read names the path and why
+[614/815] [chromium] › tests/browser/security-intrusion.spec.ts:530:5 › tools that are not installed hand off to their packages
+[615/815] [chromium] › tests/browser/security-intrusion.spec.ts:551:5 › a reader without the admin capability cannot ban, release or read Suricata
+[616/815] [chromium] › tests/browser/security-intrusion.spec.ts:562:5 › the jump host's preset stages four values and applies nothing until Test and apply
+[617/815] [chromium] › tests/browser/security-intrusion.spec.ts:608:5 › a staged jump-host setting goes through the same apply bar and can be discarded
+[618/815] [chromium] › tests/browser/security-intrusion.spec.ts:621:5 › the snippet names the jump through this server and each host picked
+[619/815] [chromium] › tests/browser/security-intrusion.spec.ts:671:5 › a typed host that is not a host is refused beside its field
+[620/815] [chromium] › tests/browser/security-intrusion.spec.ts:681:5 › a server that sends no forwarding directives has no jump host section
+[621/815] [chromium] › tests/browser/security-intrusion.spec.ts:699:7 › without Tailscale or Docker data › the suggestions are quiet and typing still works
+[622/815] [chromium] › tests/browser/security-ui.spec.ts:607:5 › the overview reads as readings, findings and how the panel is reached
+[623/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /security keeps non-table Panels plain
+[624/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /security has an accessible name
+[625/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /network/firewall keeps non-table Panels plain
+[626/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /network/firewall has an accessible name
+[627/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /security/ssh keeps non-table Panels plain
+[628/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /security/ssh has an accessible name
+[629/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /security/intrusion keeps non-table Panels plain
+[630/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /security/intrusion has an accessible name
+[631/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /network/connections keeps non-table Panels plain
+[632/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /network/connections has an accessible name
+[633/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /security/logins keeps non-table Panels plain
+[634/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /security/logins has an accessible name
+[635/815] [chromium] › tests/browser/security-ui.spec.ts:687:7 › /network/tools keeps non-table Panels plain
+[636/815] [chromium] › tests/browser/security-ui.spec.ts:696:7 › every icon-only control on /network/tools has an accessible name
+[637/815] [chromium] › tests/browser/security-ui.spec.ts:717:5 › the firewall page opens on its defaults and offers the controls that set them
+[638/815] [chromium] › tests/browser/security-ui.spec.ts:747:5 › ssh changes are staged as a page state and applied together
+[639/815] [chromium] › tests/browser/security-ui.spec.ts:779:5 › a jail's sheet bans an address by hand and the tuning offers the caller's own
+[640/815] [chromium] › tests/browser/security-ui.spec.ts:809:5 › an offender is blocked with a plain deny and looked up on the tools page
+[641/815] [chromium] › tests/browser/security-ui.spec.ts:837:5 › connections offers a block only for an address that is not private
+[642/815] [chromium] › tests/browser/security-ui.spec.ts:854:5 › the logins page folds the failed record into attackers
+[643/815] [chromium] › tests/browser/security-ui.spec.ts:877:5 › the ssh page reads its auth log through the lens, the day's counts in its one grid
+[644/815] [chromium] › tests/browser/security-ui.spec.ts:944:5 › an attacker in the auth log is blocked from its line; a tailnet address is not
+[645/815] [chromium] › tests/browser/security-ui.spec.ts:978:5 › without the admin capability the ssh page says so and reads no auth data
+[646/815] [chromium] › tests/browser/security-ui.spec.ts:992:5 › a host with no auth.log reads sshd and sudo through the journal
+[647/815] [chromium] › tests/browser/security-ui.spec.ts:1006:5 › an auth.log outside the log roots is said to be, not said to be missing
+[648/815] [chromium] › tests/browser/security-ui.spec.ts:1022:5 › the firewall page reads what its rules did, with the day's counts in its grid
+[649/815] [chromium] › tests/browser/security-ui.spec.ts:1068:5 › with no ufw.log the firewall's drops are read from kern.log, then the kernel ring
+[650/815] [chromium] › tests/browser/security-ui.spec.ts:1095:5 › a host with neither file reads the firewall's drops from the kernel ring
+[651/815] [chromium] › tests/browser/security-ui.spec.ts:1113:5 › with logging off the firewall log points at the control that turns it on
+[652/815] [chromium] › tests/browser/security-ui.spec.ts:1129:5 › intrusion's activity is fail2ban's own log, strikes and repeat offenders included
+[653/815] [chromium] › tests/browser/security-ui.spec.ts:1165:5 › with no fail2ban.log the activity is read from its unit's journal
+[654/815] [chromium] › tests/browser/security-ui.spec.ts:1189:9 › with no hover available › row controls on /network/connections are reachable without a pointer
+[655/815] [chromium] › tests/browser/security-ui.spec.ts:1189:9 › with no hover available › row controls on /security/logins are reachable without a pointer
+[656/815] [chromium] › tests/browser/security-ui.spec.ts:1189:9 › with no hover available › row controls on /security/intrusion are reachable without a pointer
+[657/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /security at 390
+[658/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /network/firewall at 390
+[659/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /security/ssh at 390
+[660/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /security/intrusion at 390
+[661/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /network/connections at 390
+[662/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /security/logins at 390
+[663/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 390 wide › /network/tools at 390
+[664/815] [chromium] › tests/browser/security-ui.spec.ts:1251:11 › screenshots › 390 wide › rule and jail dialogs at 390
+[665/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /security at 1280
+[666/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /network/firewall at 1280
+[667/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /security/ssh at 1280
+[668/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /security/intrusion at 1280
+[669/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /network/connections at 1280
+[670/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /security/logins at 1280
+[671/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1280 wide › /network/tools at 1280
+[672/815] [chromium] › tests/browser/security-ui.spec.ts:1251:11 › screenshots › 1280 wide › rule and jail dialogs at 1280
+[673/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /security at 1720
+[674/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /network/firewall at 1720
+[675/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /security/ssh at 1720
+[676/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /security/intrusion at 1720
+[677/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /network/connections at 1720
+[678/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /security/logins at 1720
+[679/815] [chromium] › tests/browser/security-ui.spec.ts:1226:13 › screenshots › 1720 wide › /network/tools at 1720
+[680/815] [chromium] › tests/browser/security-ui.spec.ts:1251:11 › screenshots › 1720 wide › rule and jail dialogs at 1720
+[681/815] [chromium] › tests/browser/security-ui.spec.ts:1274:5 › jail policy inputs keep edits and send all three values together
+[682/815] [chromium] › tests/browser/security-ui.spec.ts:1292:5 › reverting an SSH setting removes the pending change
+[683/815] [chromium] › tests/browser/security-ui.spec.ts:1302:5 › a source-only firewall deny stays editable and preserves its source
+[684/815] [chromium] › tests/browser/security-ui.spec.ts:1321:5 › the rule builder shows the service warning and requires a deliberate source choice
+[685/815] [chromium] › tests/browser/security-ui.spec.ts:1343:5 › limited readers see no SSH, diagnostic, firewall or failed-login mutations
+[686/815] [chromium] › tests/browser/security-ui.spec.ts:1380:7 › firewall keeps its unavailable state distinct from a healthy reading
+[687/815] [chromium] › tests/browser/security-ui.spec.ts:1380:7 › ssh keeps its unavailable state distinct from a healthy reading
+[688/815] [chromium] › tests/browser/security-ui.spec.ts:1380:7 › intrusion keeps its unavailable state distinct from a healthy reading
+[689/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security keeps its content in the viewport at 390
+[690/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/firewall keeps its content in the viewport at 390
+[691/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/ssh keeps its content in the viewport at 390
+[692/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/intrusion keeps its content in the viewport at 390
+[693/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/connections keeps its content in the viewport at 390
+[694/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/logins keeps its content in the viewport at 390
+[695/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/tools keeps its content in the viewport at 390
+[696/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security keeps its content in the viewport at 1280
+[697/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/firewall keeps its content in the viewport at 1280
+[698/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/ssh keeps its content in the viewport at 1280
+[699/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/intrusion keeps its content in the viewport at 1280
+[700/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/connections keeps its content in the viewport at 1280
+[701/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/logins keeps its content in the viewport at 1280
+[702/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/tools keeps its content in the viewport at 1280
+[703/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security keeps its content in the viewport at 1720
+[704/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/firewall keeps its content in the viewport at 1720
+[705/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/ssh keeps its content in the viewport at 1720
+[706/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/intrusion keeps its content in the viewport at 1720
+[707/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/connections keeps its content in the viewport at 1720
+[708/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /security/logins keeps its content in the viewport at 1720
+[709/815] [chromium] › tests/browser/security-ui.spec.ts:1390:9 › /network/tools keeps its content in the viewport at 1720
+[710/815] [chromium] › tests/browser/security-ui.spec.ts:1414:5 › diagnostics retain drafts and finish requests while another tool is selected
+[711/815] [chromium] › tests/browser/security-ui.spec.ts:1456:5 › a new diagnostic deep link overrides only that tool's saved input and never runs itself
+[712/815] [chromium] › tests/browser/security-ui.spec.ts:1491:5 › the overview reads the access boundary and names the part that broke
+[713/815] [chromium] › tests/browser/security-ui.spec.ts:1503:5 › firewall and SSH changes use ordinary confirmation
+[714/815] [chromium] › tests/browser/security-ui.spec.ts:1527:5 › workspace: security filters are shareable and Back restores the previous question
+[715/815] [chromium] › tests/browser/server-advisor.spec.ts:206:5 › storage evidence is requested on demand and reviewed cleanup retains a copy
+[716/815] [chromium] › tests/browser/server-advisor.spec.ts:236:5 › partial scans stay explicit and readers can inspect without cleanup controls
+[717/815] [chromium] › tests/browser/server-advisor.spec.ts:251:5 › a CPU finding names the workloads and fixes them as groups
+[718/815] [chromium] › tests/browser/server-advisor.spec.ts:317:5 › a failed service shows why it stopped and is restarted in place
+[719/815] [chromium] › tests/browser/server-advisor.spec.ts:406:5 › storage investigation fits desktop and mobile widths
+[720/815] [chromium] › tests/browser/server-advisor.spec.ts:518:5 › Docker overview applies a restart policy in place and singleton dismissal works
+[721/815] [chromium] › tests/browser/server-advisor.spec.ts:547:5 › Docker findings direct Compose configuration changes to their owner
+[722/815] [chromium] › tests/browser/server-advisor.spec.ts:556:5 › reviewed configuration replacement preserves credentials and needs explicit confirmation
+[723/815] [chromium] › tests/browser/server-advisor.spec.ts:621:5 › Health names unassessed sources instead of claiming every check passed
+[724/815] [chromium] › tests/browser/server-advisor.spec.ts:644:5 › host storage investigation opens the verified filesystem in Files
+[725/815] [chromium] › tests/browser/server-advisor.spec.ts:654:5 › an unavailable first Health read stays visible and can be retried
+[726/815] [chromium] › tests/browser/files-ui.spec.ts:259:7 › native Files interactions › folder history ends at the prior page and deep links survive a fresh tab
+[727/815] [chromium] › tests/browser/files-ui.spec.ts:284:7 › native Files interactions › browser and toolbar history traverse folders, survive reload and branch after Back
+[728/815] [chromium] › tests/browser/files-ui.spec.ts:328:7 › native Files interactions › Back restores selection, active item, scroll and keyboard focus
+[729/815] [chromium] › tests/browser/files-ui.spec.ts:363:7 › native Files interactions › refresh, find, hidden files, new folder and Escape belong to Files
+[730/815] [chromium] › tests/browser/files-ui.spec.ts:403:7 › native Files interactions › path inputs, menus, dialogs and the app rail keep their own keys
+[731/815] [chromium] › tests/browser/files-ui.spec.ts:445:7 › native Files interactions › name typing and tile arrows work from the item name and wrapper
+[732/815] [chromium] › tests/browser/files-ui.spec.ts:486:7 › native Files interactions › restricted roots disable parent navigation and readonly shortcuts never write
+[733/815] [chromium] › tests/browser/files-ui.spec.ts:511:7 › native Files interactions › record the Files workflow at desktop and phone widths
+[734/815] [chromium] › tests/browser/files-ui.spec.ts:562:7 › native Files interactions › navigation and shortcut help fit a small phone and landscape
+[735/815] [chromium] › tests/browser/files-ui.spec.ts:588:5 › large listings retain find, selection and keyboard menu focus
+[736/815] [chromium] › tests/browser/files-ui.spec.ts:623:5 › the sidebar is a fixed list of places that stays put while browsing
+[737/815] [chromium] › tests/browser/files-ui.spec.ts:664:5 › the commands sit in the workbench's strip, not in a page header
+[738/815] [chromium] › tests/browser/files-ui.spec.ts:679:5 › tiles stay compact and toolbar controls share a height
+[739/815] [chromium] › tests/browser/files-ui.spec.ts:717:5 › find responds from the current listing before a disk search and opens from the keyboard
+[740/815] [chromium] › tests/browser/files-ui.spec.ts:736:5 › content search highlights matches, opens at the line and rejects stale results
+[741/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › names keeps its frame still through every result state on desktop
+[742/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › content keeps its frame still through every result state on desktop
+[743/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › names keeps its frame still through every result state on phone
+[744/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › content keeps its frame still through every result state on phone
+[745/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › names keeps its frame still through every result state on landscape
+[746/815] [chromium] › tests/browser/files-ui.spec.ts:785:11 › fixed search palette › content keeps its frame still through every result state on landscape
+[747/815] [chromium] › tests/browser/files-ui.spec.ts:981:7 › fixed search palette › reduced motion shows results immediately and scope controls remain reachable
+[748/815] [chromium] › tests/browser/files-ui.spec.ts:1020:5 › the full editor preserves the sheet draft, saves it and navigates through a collapsible tree
+[749/815] [chromium] › tests/browser/files-ui.spec.ts:1052:5 › unsaved full-page edits are guarded when changing files or leaving
+[750/815] [chromium] › tests/browser/files-ui.spec.ts:1086:5 › local name results remain usable when the disk search fails
+[751/815] [chromium] › tests/browser/files-ui.spec.ts:1105:5 › a deep-linked file unfolds its ancestor folders in the full editor
+[752/815] [chromium] › tests/browser/files-ui.spec.ts:1126:5 › image edits have crop handles, redo and a full editor that keeps the edit
+[753/815] [chromium] › tests/browser/files-ui.spec.ts:1149:5 › full editors and the search palette fit desktop and phone widths
+[754/815] [chromium] › tests/browser/files-ui.spec.ts:1193:5 › image export saves live adjustments and a copy keeps the source dirty
+[755/815] [chromium] › tests/browser/files-ui.spec.ts:1241:5 › a folder's colour is drawn everywhere it is and saved on the server
+[756/815] [chromium] › tests/browser/files-ui.spec.ts:1279:5 › the compact toolbar control colours all folders and individual colours still work
+[757/815] [chromium] › tests/browser/files-ui.spec.ts:1338:5 › pictures are visible in the listing and Space opens the viewer
+[758/815] [chromium] › tests/browser/files-ui.spec.ts:1367:5 › a right-click offers the row's verbs, or the folder's between rows
+[759/815] [chromium] › tests/browser/files-ui.spec.ts:1386:5 › an upload whose name is taken asks first, and keep-both sends a numbered name
+[760/815] [chromium] › tests/browser/files-ui.spec.ts:1418:5 › every icon-only control on /files has an accessible name
+[761/815] [chromium] › tests/browser/files-ui.spec.ts:1442:7 › with no hover available › row actions on /files are visible without a pointer
+[762/815] [chromium] › tests/browser/files-ui.spec.ts:1463:7 › list: selection toggles from the whole entry without shifting the listing
+[763/815] [chromium] › tests/browser/files-ui.spec.ts:1502:7 › list: modifier selection, checkbox ranges and keyboard opening remain available
+[764/815] [chromium] › tests/browser/files-ui.spec.ts:1530:7 › list: a marquee selects, shrinks, adds and cancels without opening entries
+[765/815] [chromium] › tests/browser/files-ui.spec.ts:1586:7 › list: native dragging moves the selected group and Alt copies
+[766/815] [chromium] › tests/browser/files-ui.spec.ts:1463:7 › grid: selection toggles from the whole entry without shifting the listing
+[767/815] [chromium] › tests/browser/files-ui.spec.ts:1502:7 › grid: modifier selection, checkbox ranges and keyboard opening remain available
+[768/815] [chromium] › tests/browser/files-ui.spec.ts:1530:7 › grid: a marquee selects, shrinks, adds and cancels without opening entries
+[769/815] [chromium] › tests/browser/files-ui.spec.ts:1586:7 › grid: native dragging moves the selected group and Alt copies
+[770/815] [chromium] › tests/browser/files-ui.spec.ts:1667:5 › marquee autoscroll reaches off-screen entries and stops on release
+[771/815] [chromium] › tests/browser/files-ui.spec.ts:1695:5 › selection actions fit a phone and respect reduced motion
+[772/815] [chromium] › tests/browser/files-ui.spec.ts:1719:5 › touch long-press opens the entry's verbs and allows ordinary selection
+[773/815] [chromium] › tests/browser/files-ui.spec.ts:1743:5 › desktop file drops still upload into the accepting folder
+[774/815] [chromium] › tests/browser/files-ui.spec.ts:1764:5 › a failed native move keeps its source preview available
+[775/815] [chromium] › tests/browser/metrics-ui.spec.ts:40:5 › the metrics page is readings on the page, not boxes
+[776/815] [chromium] › tests/browser/metrics-ui.spec.ts:84:5 › each resource reads what it is now beside what it did
+[777/815] [chromium] › tests/browser/metrics-ui.spec.ts:129:5 › a moment zooms the charts and the zoom is a link
+[778/815] [chromium] › tests/browser/metrics-ui.spec.ts:146:5 › the window exports as a spreadsheet
+[779/815] [chromium] › tests/browser/metrics-ui.spec.ts:160:5 › the interfaces are the real devices until everything is asked for
+[780/815] [chromium] › tests/browser/metrics-ui.spec.ts:174:5 › the live feed can be paused
+[781/815] [chromium] › tests/browser/metrics-ui.spec.ts:189:7 › looks right at 1280
+[782/815] [chromium] › tests/browser/metrics-ui.spec.ts:189:7 › looks right at 1720
+[783/815] [chromium] › tests/browser/metrics-ui.spec.ts:205:5 › the controls stay reachable beside the machine facts on a phone
+[784/815] [chromium] › tests/browser/metrics-ui.spec.ts:219:5 › workspace: a pinned moment has readings, adjacent samples and a precise log handoff
+[785/815] [chromium] › tests/browser/metrics-ui.spec.ts:259:5 › connections are charted by how they fared and a network finding cites its probes
+[786/815] [chromium] › tests/browser/system-ui.spec.ts:297:7 › system users › opens on four readings and draws every account as a card
+[787/815] [chromium] › tests/browser/system-ui.spec.ts:323:7 › system users › the chips narrow the cards and system accounts are their own shelf
+[788/815] [chromium] › tests/browser/system-ui.spec.ts:343:7 › system users › a card opens the account's keys, each drawn as where it lives
+[789/815] [chromium] › tests/browser/system-ui.spec.ts:358:7 › audit log › opens on the last day and draws each entry as what it touched
+[790/815] [chromium] › tests/browser/system-ui.spec.ts:391:7 › audit log › a section chip narrows the trail to its actions
+[791/815] [chromium] › tests/browser/system-ui.spec.ts:410:7 › looks right at 1280
+[792/815] [chromium] › tests/browser/system-ui.spec.ts:410:7 › looks right at 1720
+[793/815] [chromium] › tests/browser/system-ui.spec.ts:431:7 › on a phone › nothing scrolls sideways
+[794/815] [chromium] › tests/browser/system-ui.spec.ts:448:5 › workspace: audit filter history and incoming entries preserve the row being read
+[795/815] [chromium] › tests/browser/system-ui.spec.ts:478:5 › workspace: mobile audit navigation respects input and sidebar focus
+[796/815] [chromium] › tests/browser/terminal-ui.spec.ts:237:5 › explains unavailable restart protection while keeping existing terminals usable
+[797/815] [chromium] › tests/browser/terminal-ui.spec.ts:286:7 › preserves busy terminal windows and sessions with dom
+[798/815] [chromium] › tests/browser/terminal-ui.spec.ts:286:7 › preserves busy terminal windows and sessions with webgl
+[799/815] [chromium] › tests/browser/terminal-ui.spec.ts:363:5 › says its size again on every return, unchanged or not
+[800/815] [chromium] › tests/browser/terminal-ui.spec.ts:386:5 › fits the pane again when the WebGL context is lost
+[801/815] [chromium] › tests/browser/terminal-ui.spec.ts:414:5 › names windows after their work and remembers where you were
+[802/815] [chromium] › tests/browser/terminal-ui.spec.ts:504:5 › a dropped connection is red until it is back
+[803/815] [chromium] › tests/browser/terminal-ui.spec.ts:663:7 › terminal splits › rejects same-group and undersized drops and ignores unrelated drag types
+[804/815] [chromium] › tests/browser/terminal-ui.spec.ts:702:7 › terminal splits › recovers a null saved layout before opening a split
+[805/815] [chromium] › tests/browser/terminal-ui.spec.ts:725:7 › terminal splits › keeps a divider drag when a pending split is created before pointer release
+[806/815] [chromium] › tests/browser/terminal-ui.spec.ts:768:7 › terminal splits › ignores an older in-flight listing after creating a split
+[807/815] [chromium] › tests/browser/terminal-ui.spec.ts:820:7 › terminal splits › keeps a successfully created split when the following window listing fails
+[808/815] [chromium] › tests/browser/terminal-ui.spec.ts:860:9 › terminal splits › detaches panes and drags windows into dynamic split zones with dom
+[809/815] [chromium] › tests/browser/terminal-ui.spec.ts:1005:9 › terminal splits › splits in all four directions without remounting the shell with dom
+[810/815] [chromium] › tests/browser/terminal-ui.spec.ts:1062:9 › terminal splits › resizes nested panes and routes keyboard focus with dom
+[811/815] [chromium] › tests/browser/terminal-ui.spec.ts:860:9 › terminal splits › detaches panes and drags windows into dynamic split zones with webgl
+[812/815] [chromium] › tests/browser/terminal-ui.spec.ts:1005:9 › terminal splits › splits in all four directions without remounting the shell with webgl
+[813/815] [chromium] › tests/browser/terminal-ui.spec.ts:1062:9 › terminal splits › resizes nested panes and routes keyboard focus with webgl
+[814/815] [chromium] › tests/browser/terminal-ui.spec.ts:1191:7 › terminal splits › runs agents in the focused shell, and gives one its own window only when a program holds it
+[815/815] [chromium] › tests/browser/logs-buffer.spec.ts:8:5 › rolling eviction retains the marked line and its DOM identity
+  32 skipped
+  783 passed (33.6m)
+exit 0

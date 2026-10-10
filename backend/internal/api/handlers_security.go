@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
@@ -33,6 +34,7 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/security/posture", s.handle(s.handleSecurityPosture))
 	r.Method(http.MethodGet, "/security/services", s.handle(s.handleServiceCatalogue))
 	r.Method(http.MethodGet, "/connections", s.handle(s.handleConnections))
+	s.mountConnectionDetailRoutes(r)
 
 	// Listing the logins and ending one are the same subtree, and they have to
 	// be registered in the same place: chi mounts a Route as a subrouter, so a
@@ -74,6 +76,7 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	// owns everything under /network.
 
 	s.mountSecurityIntrusionRoutes(r)
+	s.mountSecurityBoundaryRoutes(r)
 }
 
 // handleSecurityPosture gathers every input and grades the host.
@@ -108,8 +111,26 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 			in.Fail2ban = st
 		}
 	})
+	run(func() {
+		if view, err := s.modules.netsec.CrowdSec(ctx); err == nil {
+			in.CrowdSec = view
+		}
+	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
 	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
+	run(func() {
+		address, err := publicHostAddress()
+		in.PublicAddress, in.PublicAddressRead = address, err == nil
+	})
+	run(func() {
+		// The gateway's reading of the nftables ruleset already classifies
+		// every filtering base chain; the posture names the ones no adapter
+		// models as unknown rather than reading the ruleset a second way.
+		if s.modules.network == nil {
+			return
+		}
+		in.Policy = policyCoverage(s.modules.network.GatewayCapability(ctx))
+	})
 	run(func() {
 		// The containers are read beside the walk, as the ports page reads
 		// them, so a port Docker publishes is graded as the page grades it —
@@ -200,57 +221,6 @@ func (s *Server) handleFirewallApps(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-type firewallPolicyRequest struct {
-	Direction string `json:"direction"`
-	Policy    string `json:"policy"`
-}
-
-func (s *Server) handleFirewallPolicy(w http.ResponseWriter, r *http.Request) error {
-	var req firewallPolicyRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.SetDefaultPolicy(r.Context(), req.Direction, req.Policy)
-	if err != nil {
-		if errors.Is(err, netsec.ErrLockout) {
-			httpx.SetAudit(r, "firewall.policy", req.Direction, map[string]any{"result": "refused_lockout"})
-			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
-		}
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.policy", req.Direction, map[string]any{"policy": req.Policy})
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-type firewallLoggingRequest struct {
-	Level string `json:"level"`
-}
-
-func (s *Server) handleFirewallLogging(w http.ResponseWriter, r *http.Request) error {
-	var req firewallLoggingRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.SetLogging(r.Context(), req.Level)
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.logging", req.Level, nil)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-func (s *Server) handleFirewallReset(w http.ResponseWriter, r *http.Request) error {
-	out, err := s.modules.netsec.Reset(r.Context())
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.reset", "", nil)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
 func (s *Server) handleSSHConfig(w http.ResponseWriter, r *http.Request) error {
 	httpx.JSON(w, http.StatusOK, s.modules.netsec.SSHDStatus(r.Context()))
 	return nil
@@ -258,6 +228,9 @@ func (s *Server) handleSSHConfig(w http.ResponseWriter, r *http.Request) error {
 
 type sshApplyRequest struct {
 	Settings map[string]string `json:"settings"`
+	// AcknowledgeBoundary says the operator saw what the change does to the
+	// way the dashboard is reached (a moved port, forwarding, AllowUsers).
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 // handleSSHApply plans synchronously and applies as a job.
@@ -285,6 +258,13 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 				"you reach the dashboard through an SSH tunnel, which needs sshd's TCP forwarding; turning it off would refuse your next tunnel")
 		}
 	}
+	pending, err := s.pendingSSHApply(r)
+	if err != nil {
+		return err
+	}
+	if err := s.boundaryGate(r, "ssh.config", netsec.BoundaryProposal{Kind: "ssh", Settings: req.Settings}, req.AcknowledgeBoundary); err != nil {
+		return err
+	}
 	plan, err := s.modules.netsec.PlanSSHSettings(r.Context(), req.Settings)
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
@@ -292,6 +272,9 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
 		}
 		return httpx.BadRequest("%v", err)
+	}
+	if pending {
+		return s.startPendingSSHApply(w, r, plan)
 	}
 	httpx.SetAudit(r, "ssh.config", plan.File,
 		map[string]any{"applied": plan.Applied, "streamed": true})
@@ -311,6 +294,76 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 		if res.ReloadError != "" {
 			return fmt.Errorf("the configuration is valid and written, but sshd did not reload: %s", res.ReloadError)
 		}
+		return nil
+	})
+	return nil
+}
+
+// pendingSSHApply reads the opt-in a network mutation uses. It is refused
+// for anything but an administrator's interactive session, because only a
+// session can return the reconnection challenge that keeps the change.
+func (s *Server) pendingSSHApply(r *http.Request) (bool, error) {
+	mode := r.Header.Get(networkApplyHeader)
+	if mode == "" {
+		return false, nil
+	}
+	if mode != "pending" {
+		return false, httpx.BadRequest("%s accepts only pending", networkApplyHeader)
+	}
+	p := httpx.MustPrincipal(r)
+	if p.Kind != "session" || p.SessionID == "" || p.UserID() <= 0 || !p.Can(auth.CapSystemAdmin) {
+		return false, httpx.Err(http.StatusForbidden, "session_required",
+			"Pending SSH apply requires an administrator's interactive session.")
+	}
+	if s.modules.network == nil {
+		return false, httpx.Err(http.StatusServiceUnavailable, "network_unavailable",
+			"The network module that keeps the recovery journal is not running.")
+	}
+	return true, nil
+}
+
+// startPendingSSHApply enrols the apply in the network journal before the
+// first write, so the independent host watchdog restores the previous files
+// and reloads sshd unless this session confirms a fresh response in time.
+// Every guard PlanSSHSettings ran still applies; this adds recovery, not
+// permission.
+func (s *Server) startPendingSSHApply(w http.ResponseWriter, r *http.Request, plan *netsec.SSHApplyPlan) error {
+	files := []netx.SSHFile{}
+	for _, f := range plan.Files() {
+		files = append(files, netx.SSHFile{Path: f.Path, Candidate: []byte(f.Content)})
+	}
+	ctx := netx.WithPendingConfirmation(r.Context(), httpx.MustPrincipal(r).UserID())
+	readCtx, cancel := timeoutCtx(r, 30*time.Second)
+	before := s.accessBoundary(readCtx, r)
+	cancel()
+	change, err := s.modules.network.BeginSSHChange(ctx, files, plan.SocketUnit())
+	if err != nil {
+		httpx.SetAudit(r, "ssh.config", plan.File, map[string]any{"result": "refused_pending", "pending": true})
+		return mapNetworkConfirmationError(err)
+	}
+	rememberBoundary(change.ID, before)
+	httpx.SetAudit(r, "ssh.config", plan.File,
+		map[string]any{"applied": plan.Applied, "streamed": true, "pending": true, "change": change.ID})
+	w.Header().Set("X-JD-Network-Change", change.ID)
+	w.Header().Set("X-JD-Network-Expires", change.ExpiresAt.Format(time.RFC3339Nano))
+	s.startJob(w, r, jobs.Spec{
+		Kind:   "ssh.apply",
+		Title:  "Applying SSH settings until confirmed: " + strings.Join(plan.Applied, ", "),
+		Target: plan.File, Timeout: 2 * time.Minute,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		res, err := s.modules.netsec.ApplySSHPlan(ctx, plan, out)
+		if err == nil {
+			err = res.Failure()
+		}
+		status, finishErr := s.modules.network.FinishSSHChange(ctx, change, err)
+		if finishErr != nil {
+			if status != nil && status.Phase == "recovered" {
+				return fmt.Errorf("the previous SSH configuration was restored: %w", finishErr)
+			}
+			return fmt.Errorf("SSH recovery needs attention: %w", finishErr)
+		}
+		out.Status("Applied until confirmed. Verify a new dashboard response and confirm before %s, or the host restores the previous SSH configuration.",
+			change.ExpiresAt.Local().Format(time.TimeOnly))
 		return nil
 	})
 	return nil
@@ -355,25 +408,40 @@ func (s *Server) handleNetworkInfo(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-type probeRequest struct {
-	Tool   string `json:"tool"`
-	Target string `json:"target"`
-	Port   int    `json:"port,omitempty"`
-	Record string `json:"record,omitempty"`
-	// Option carries a tool's closed-set choice — the STARTTLS protocol — and
-	// is ignored by tools that take none, so one shape serves every card.
-	Option string `json:"option,omitempty"`
-}
+type probeRequest = netsec.ProbeRequest
 
 func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) error {
 	var req probeRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	req.Target = strings.TrimSpace(req.Target)
+	var err error
+	req, err = netsec.ValidateProbeRequest(req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	detail := map[string]any{"target": req.Target}
+	if req.Option != "" {
+		detail["option"] = req.Option
+	}
+	if req.Verify != "" {
+		detail["verify"], detail["port"] = req.Verify, req.Port
+	}
+	httpx.SetAudit(r, "network.probe", req.Tool, detail)
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
+	started := time.Now()
+	res, err := s.executeNetworkProbe(ctx, req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	res.ResultID = quickResults.keep(httpx.MustPrincipal(r).Username(), req, res, started, time.Now())
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
 
+// Both quick and retained probes use the same existing tools and explicit argv.
+func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeRequest) (*netsec.ProbeResult, error) {
 	var res *netsec.ProbeResult
 	var err error
 	switch req.Tool {
@@ -385,6 +453,9 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 		res, err = s.modules.netsec.Lookup(ctx, req.Target, req.Record)
 	case "port":
 		res, err = s.modules.netsec.PortCheck(ctx, req.Target, req.Port)
+		if err == nil {
+			s.correlatePortCheck(ctx, req, res)
+		}
 	case "scan":
 		res, err = s.modules.netsec.PortScan(ctx, req.Target)
 	case "http":
@@ -399,6 +470,9 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 		res, err = s.modules.netsec.BannerGrab(ctx, req.Target, req.Port)
 	case "ssh":
 		res, err = s.modules.netsec.SSHScan(ctx, req.Target, req.Port)
+		if err == nil {
+			s.compareSSHTrust(ctx, req, res)
+		}
 	case "starttls":
 		res, err = s.modules.netsec.STARTTLSCheck(ctx, req.Target, req.Port, req.Option)
 	case "tlssurvey":
@@ -410,9 +484,12 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	case "mx":
 		res, err = s.modules.netsec.MXCheck(ctx, req.Target)
 	case "httpsec":
-		res, err = s.modules.netsec.HTTPSecurity(ctx, req.Target, req.Port)
+		res, err = s.modules.netsec.HTTPSecurity(ctx, req.Target, req.Port, req.Option)
 	case "siteaudit":
 		res, err = s.modules.netsec.SiteAudit(ctx, req.Target, req.Port)
+		if err == nil {
+			netsec.AttributeSiteOwner(res, s.proxySiteFor(ctx, req.Target))
+		}
 	case "listeners":
 		res, err = s.modules.netsec.Listeners(ctx)
 	case "egress":
@@ -421,28 +498,21 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 		res, err = s.modules.netsec.Neighbours(ctx)
 	case "route":
 		res, err = s.modules.netsec.RouteLookup(ctx, req.Target)
+		if err == nil && req.Port > 0 {
+			s.joinRouteLayers(ctx, req, res)
+		}
 	case "mtu":
 		res, err = s.modules.netsec.PathMTU(ctx, req.Target)
 	case "capture":
 		res, err = s.modules.netsec.PacketSnapshot(ctx, req.Target, req.Option)
 	case "wol":
-		res, err = s.modules.netsec.WakeOnLAN(ctx, req.Target, req.Option)
+		res, err = s.modules.netsec.WakeOnLAN(ctx, req.Target, req.Option, req.Verify, req.Port)
 	case "capabilities":
 		res = networkSupportProbe(s.modules.network.HostSupport(ctx))
 	default:
-		return httpx.BadRequest("tool must be ping, traceroute, dns, port, scan, http, tls, whois, " +
-			"dnsauth, banner, ssh, starttls, tlssurvey, dnsbl, asn, mx, httpsec, siteaudit, listeners, egress, neigh, route, mtu, capture, wol or capabilities")
+		return nil, fmt.Errorf("unknown network diagnostic tool %q", req.Tool)
 	}
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	detail := map[string]any{"target": req.Target}
-	if req.Option != "" {
-		detail["option"] = req.Option
-	}
-	httpx.SetAudit(r, "network.probe", req.Tool, detail)
-	httpx.JSON(w, http.StatusOK, res)
-	return nil
+	return res, err
 }
 
 func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error {
@@ -451,6 +521,24 @@ func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.JSON(w, http.StatusOK, cfg)
+	return nil
+}
+
+func (s *Server) handleJailPolicy(w http.ResponseWriter, r *http.Request) error {
+	jail := chi.URLParam(r, "jail")
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	var ports []string
+	if jail == "sshd" {
+		// Only the listening ports leave this read; the keyed accounts the
+		// full SSH configuration names stay behind system.admin.
+		ports = s.modules.netsec.SSHDStatus(ctx).Ports
+	}
+	policy, err := s.modules.netsec.JailPolicy(ctx, jail, ports)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, policy)
 	return nil
 }
 
@@ -536,4 +624,19 @@ func (s *Server) handleBanOffenders(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, netsec.SummariseBans(events, top))
 	return nil
+}
+
+// policyCoverage is the gateway's classification of the filtering base
+// chains, as the posture reads it. A capability with no layers and a reason
+// is a ruleset that could not be read — nft missing, unreadable or printed in
+// a form not understood — which the posture names as an unknown.
+func policyCoverage(capability netx.Capability) *netsec.PolicyCoverage {
+	coverage := &netsec.PolicyCoverage{}
+	if len(capability.Layers) == 0 && capability.Reason != "" && !capability.Writable {
+		coverage.Error = capability.Reason
+	}
+	for _, l := range capability.Layers {
+		coverage.Layers = append(coverage.Layers, netsec.PolicyLayer{Family: l.Family, Table: l.Table, Chain: l.Chain, Hook: l.Hook, Policy: l.Policy, Status: l.Status})
+	}
+	return coverage
 }

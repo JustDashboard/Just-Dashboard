@@ -70,6 +70,7 @@ func newGwHost(t *testing.T, allowlist ...string) *gwHost {
 	rec.on("nft -c -f", "")
 	rec.on("nft -f", "")
 	rec.on("nft list set", "")
+	rec.on("nft -j list set", `{"nftables":[]}`)
 	rec.on("nft delete table", "")
 	rec.on("nft -t -j list table inet jd_gateway", fixture(t, "gateway-table.json"))
 	rec.fail("ip -j addr show dev nope", "Device \"nope\" does not exist.")
@@ -79,6 +80,7 @@ func newGwHost(t *testing.T, allowlist ...string) *gwHost {
 	rec.on("ip -j route show default", gwDefaultRoute)
 	rec.on("ip -j -6 route show default", "[]")
 	rec.on("ip -j route get "+gwClient, gwRouteGet)
+	rec.on("ss -Hlntup", "")
 	rec.on("systemctl daemon-reload", "")
 	rec.on("systemctl is-enabled", "enabled")
 	rec.on("systemctl enable", "")
@@ -277,9 +279,9 @@ func TestAddForwardTakesTheLoadBackWhenVerifyFails(t *testing.T) {
 	}
 }
 
-func TestAdmissionFailureOnTheDockerChainOrIPv6IsNotAReasonToRefuse(t *testing.T) {
+func TestAnAbsentDockerChainAndAnUnusedIPv6FamilyDoNotBlockIPv4(t *testing.T) {
 	h := newGwHost(t)
-	h.fail("iptables -I DOCKER-USER")
+	h.first("iptables -S DOCKER-USER", "No chain/target/match by that name.", errors.New("no chain"))
 	h.fail("ip6tables -I")
 	if _, err := h.AddForward(context.Background(), gwWebForward(), gwClient, "ops", gwProtected); err != nil {
 		t.Fatalf("a host without that chain was refused: %v", err)
@@ -318,7 +320,7 @@ func TestForwardsAreReadOnlyWhereTheFirewallCannotAdmitThem(t *testing.T) {
 	}{
 		{"firewalld running", `{"nftables":[]}`, "firewalld", "running\n", "firewalld"},
 		{"firewalld's table", firewalld, "firewalld", "", "firewalld"},
-		{"a foreign drop-forward table", foreign, "nftables", "", `table "filter" drops forwarded traffic by default in its chain "forward"`},
+		{"a foreign drop-forward table", foreign, "nftables", "", `table "filter" can drop translated traffic in its chain "forward"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -340,7 +342,7 @@ func TestForwardsAreReadOnlyWhereTheFirewallCannotAdmitThem(t *testing.T) {
 			if !errors.As(err, &ro) || !errors.Is(err, ErrReadOnly) {
 				t.Fatalf("AddForward err = %v", err)
 			}
-			_, err = h.AddNAT(context.Background(), NATRequest{Name: "lab", Source: "10.9.0.0/24", Interface: "eth0"}, "ops")
+			_, err = h.AddNAT(context.Background(), NATRequest{Name: "lab", Source: "10.9.0.0/24", Interface: "eth0"}, gwClient, "ops")
 			if !errors.As(err, &ro) {
 				t.Fatalf("AddNAT err = %v", err)
 			}
@@ -441,7 +443,7 @@ func TestForwardingMustBeOnForTheEntryToCarryTraffic(t *testing.T) {
 	}
 	// NAT entries are checked the same way.
 	h.writeSys("net/ipv4/ip_forward", "0")
-	if _, err := h.AddNAT(ctx, NATRequest{Name: "lab", Source: "10.9.0.0/24", Interface: "eth0"}, "ops"); !errors.As(err, &off) || off.Family != "4" {
+	if _, err := h.AddNAT(ctx, NATRequest{Name: "lab", Source: "10.9.0.0/24", Interface: "eth0"}, gwClient, "ops"); !errors.As(err, &off) || off.Family != "4" {
 		t.Fatalf("NAT err = %v", err)
 	}
 	// An entry already working is not refused for an edit that does not enable it.
@@ -573,7 +575,7 @@ func TestUpdateForwardKeepsItsIdentityAndHonoursEnabled(t *testing.T) {
 
 func TestAddNATAppliesAndAdmits(t *testing.T) {
 	h := newGwHost(t)
-	v, err := h.AddNAT(context.Background(), NATRequest{Name: "lab", Source: "10.9.0.77/24", Interface: "eth0", ToAddress: "203.0.113.20"}, "ops")
+	v, err := h.AddNAT(context.Background(), NATRequest{Name: "lab", Source: "10.9.0.77/24", Interface: "eth0", ToAddress: "203.0.113.20"}, gwClient, "ops")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +604,7 @@ func TestNATRefusals(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newGwHost(t)
-			_, err := h.AddNAT(context.Background(), c.req, "ops")
+			_, err := h.AddNAT(context.Background(), c.req, gwClient, "ops")
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("err = %v, want one containing %q", err, c.want)
 			}
@@ -620,7 +622,7 @@ func TestOwnedNATEntriesAreChangedByTheirOwnerOnly(t *testing.T) {
 	upsertOwnedNAT(sp, "wireguard:wg0", "wg0 clients", "10.8.0.0/24", "eth0", "ops")
 	h.seed(t, sp)
 	id := sp.NAT[0].ID
-	if _, err := h.UpdateNAT(ctx, id, NATRequest{Name: "mine", Source: "10.8.0.0/24", Interface: "eth0"}, "ops"); !errors.Is(err, ErrNotManaged) {
+	if _, err := h.UpdateNAT(ctx, id, NATRequest{Name: "mine", Source: "10.8.0.0/24", Interface: "eth0"}, gwClient, "ops"); !errors.Is(err, ErrNotManaged) {
 		t.Errorf("UpdateNAT err = %v", err)
 	}
 	if err := h.DeleteNAT(ctx, id); !errors.Is(err, ErrNotManaged) || !strings.Contains(err.Error(), "wireguard:wg0") {

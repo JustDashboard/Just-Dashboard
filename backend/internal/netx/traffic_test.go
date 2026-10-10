@@ -194,6 +194,8 @@ func TestFlowUnknownOwnerAndPeerCap(t *testing.T) {
 func TestProcessesRunsSSAndAnswersABurstOfPollsOnce(t *testing.T) {
 	rec := record(t)
 	rec.on("ss -tinpH state established", fixture(t, "traffic-ss.txt"))
+	rec.on("ss -uanpH", udpSample)
+	withSNMP(t, snmpSample(100, 50))
 	s := testService(t)
 
 	a, err := s.Processes(context.Background())
@@ -210,8 +212,8 @@ func TestProcessesRunsSSAndAnswersABurstOfPollsOnce(t *testing.T) {
 	if !b.At.Equal(a.At) {
 		t.Fatal("a second poll inside a second moved the baseline")
 	}
-	if n := len(rec.commands()); n != 1 {
-		t.Fatalf("ran ss %d times", n)
+	if n := len(rec.commands()); n != 2 {
+		t.Fatalf("ran ss %d times, want one TCP and one UDP read", n)
 	}
 }
 

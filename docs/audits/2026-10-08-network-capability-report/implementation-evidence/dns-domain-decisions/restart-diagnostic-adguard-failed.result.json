@@ -1,0 +1,110 @@
+{
+  "source_commit": "053f095116ba282ee965e3616843544ec0fe9a9b",
+  "engine": "adguard",
+  "exit_code": 1,
+  "wall_seconds": 55.894,
+  "raw_sha256": "622323e624f0c3b18cfabfce25496a6815c5225a61ca2a6221b3836289390b39",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883": {
+      "start": "452",
+      "comm": "systemd-network",
+      "Name": [
+        "systemd-network"
+      ],
+      "Uid": [
+        "998",
+        "998",
+        "998",
+        "998"
+      ],
+      "Gid": [
+        "998",
+        "998",
+        "998",
+        "998"
+      ]
+    },
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    },
+    "mountinfo_sha256": "4a4f41d8493e0f8ca03b1d682048890fb033d8068bf4bfd59cd76bec871fac85",
+    "namespaces": {
+      "net": "net:[4026531840]",
+      "mnt": "mnt:[4026531841]",
+      "pid": "pid:[4026531836]"
+    }
+  },
+  "docker_socket_after": {
+    "dev": 25,
+    "inode": 8470426,
+    "uid": 0,
+    "gid": 987,
+    "mode": 49584
+  },
+  "owned_docker_remaining": {
+    "io.justdashboard.dns.provision:container": [],
+    "io.justdashboard.dns.provision:network": [],
+    "io.justdashboard.dns.provision:volume": [],
+    "io.justdashboard.dns.decision-fixture:container": [],
+    "io.justdashboard.dns.decision-fixture:network": [],
+    "io.justdashboard.dns.decision-fixture:volume": [],
+    "decision_images": []
+  },
+  "all_image_ids_after": [
+    "sha256:05b6dd87d089cee7165f6d546a0221a6d3714e7796329f681fae4bb62366aefe",
+    "sha256:06b3bb43b649883d06d960dd7a5bbcd584026d8df15fc9f57308a87c9e06a4b2",
+    "sha256:0dd364ba7e10242f07755449e3a3d0e35f9efd987952737b90def6709ab0c5ce",
+    "sha256:1045db38fd2f2e4d9578f9168b7eb4862575469ed0ffc79e03f36bdc772a93b5",
+    "sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb",
+    "sha256:449a60ea21bfe2471d425e25522e9d8b640acb7b5b927345f2bca06e07df6d34",
+    "sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be",
+    "sha256:5bc4da76ec9e15bf8ed83b50bbe1f2c369282924ef27a9aea62300ab629df7d7",
+    "sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+    "sha256:69302931e79cc1062059dd98f17eb422848870092b5a331c28eb343418dff5fd",
+    "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+    "sha256:7b984b477b4da5519602a7da475a908381ae526b77c091aad62f75fc9875ff60",
+    "sha256:8b6c7432f545e9a0cb530677151ab83a587be83e686509fd2c2de9fd305dc293",
+    "sha256:92929135ced2554aaf94706f766a98ad348f211df61b0704e2db7e8498cc00b7",
+    "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+    "sha256:b60c4d0d1c76b6a3a8ceb343f10a5a1c052995e3f1f691b66992b88d032f6332",
+    "sha256:bbd004bc7a05f6c45e4ba340969ad15417399989dac1c38a29d1aa7e3082c18e",
+    "sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685",
+    "sha256:d6ae224005355d0a91c11e8e6c45b245859134a7e944c391396e259c82375b99"
+  ],
+  "owned_tmp_scope": {
+    "entries_remaining": [],
+    "owned_directory_removed": true,
+    "directory_receipt": {
+      "parent": {
+        "dev": 2049,
+        "inode": 4068073,
+        "uid": 1000,
+        "gid": 1000,
+        "mode": 448
+      },
+      "task": {
+        "dev": 2049,
+        "inode": 4335526,
+        "uid": 1000,
+        "gid": 1000,
+        "mode": 448
+      },
+      "name": "n-adg-2edd55ee2176e90c"
+    }
+  },
+  "owned_tmp_entries_remaining": [],
+  "frozen_source_assets_runner_unchanged": true,
+  "host_unchanged": true,
+  "docker_socket_unchanged": true,
+  "all_image_ids_unchanged": true,
+  "errors": [],
+  "complete_bounded_question_receipt": false,
+  "question_count": null,
+  "terminal_pass": false,
+  "fresh_history_phase_receipts": false,
+  "accepted": false
+}

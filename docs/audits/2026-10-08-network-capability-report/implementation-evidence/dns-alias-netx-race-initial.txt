@@ -1,0 +1,159 @@
+=== RUN   TestDNSAliasSafeChainAndDirectCNAME
+=== RUN   TestDNSAliasSafeChainAndDirectCNAME/A
+=== RUN   TestDNSAliasSafeChainAndDirectCNAME/CNAME
+--- PASS: TestDNSAliasSafeChainAndDirectCNAME (0.05s)
+    --- PASS: TestDNSAliasSafeChainAndDirectCNAME/A (0.03s)
+    --- PASS: TestDNSAliasSafeChainAndDirectCNAME/CNAME (0.01s)
+=== RUN   TestDNSAliasChainTrustIncludesEveryAcceptedRecord
+=== RUN   TestDNSAliasChainTrustIncludesEveryAcceptedRecord/cleartext_alias
+=== RUN   TestDNSAliasChainTrustIncludesEveryAcceptedRecord/unsigned_alias
+=== RUN   TestDNSAliasChainTrustIncludesEveryAcceptedRecord/cached_alias
+--- PASS: TestDNSAliasChainTrustIncludesEveryAcceptedRecord (0.07s)
+    --- PASS: TestDNSAliasChainTrustIncludesEveryAcceptedRecord/cleartext_alias (0.03s)
+    --- PASS: TestDNSAliasChainTrustIncludesEveryAcceptedRecord/unsigned_alias (0.02s)
+    --- PASS: TestDNSAliasChainTrustIncludesEveryAcceptedRecord/cached_alias (0.02s)
+=== RUN   TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion
+=== RUN   TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/inactive
+=== RUN   TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/serverless
+=== RUN   TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/unreadable
+=== RUN   TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/owner_replaced
+--- PASS: TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion (0.07s)
+    --- PASS: TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/inactive (0.03s)
+    --- PASS: TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/serverless (0.02s)
+    --- PASS: TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/unreadable (0.01s)
+    --- PASS: TestDNSAliasUnavailablePrivateTargetSendsNoTargetQuestion/owner_replaced (0.01s)
+=== RUN   TestDNSAliasLoopsAndRedirectLimit
+--- PASS: TestDNSAliasLoopsAndRedirectLimit (0.10s)
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/foreign
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/uplink
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/other_server
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/empty_chain
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/empty_policy
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/unowned_suffix
+=== RUN   TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/bad_suffix
+--- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing (0.01s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/foreign (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/uplink (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/other_server (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/empty_chain (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/empty_policy (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/unowned_suffix (0.00s)
+    --- PASS: TestDNSEvidenceForeignResolverAndEmptyPolicySendNothing/bad_suffix (0.00s)
+=== RUN   TestDNSEvidenceDNSSECErrorCannotBeSpoofedByEDE
+--- PASS: TestDNSEvidenceDNSSECErrorCannotBeSpoofedByEDE (0.01s)
+=== RUN   TestEffectiveLookupUsesActualForeignConfiguredChain
+--- PASS: TestEffectiveLookupUsesActualForeignConfiguredChain (0.01s)
+=== RUN   TestDNSEvidenceNativeDisposableResolver
+    dns_evidence_live_test.go:42: native resolver fixture requires disposable namespace privileges
+--- SKIP: TestDNSEvidenceNativeDisposableResolver (0.00s)
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/fresh_validated_encrypted
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/configured_without_encrypted_result
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/cached_authenticated_is_not_validation
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/local_synthetic_is_not_TLS_or_DNSSEC
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/network_cache_mixture_is_not_fresh
+=== RUN   TestDNSEvidenceNativeRouteTrustAndFreshness/unknown_native_output_cannot_prove_trust
+--- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness (0.04s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/fresh_validated_encrypted (0.00s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/configured_without_encrypted_result (0.00s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/cached_authenticated_is_not_validation (0.00s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/local_synthetic_is_not_TLS_or_DNSSEC (0.02s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/network_cache_mixture_is_not_fresh (0.00s)
+    --- PASS: TestDNSEvidenceNativeRouteTrustAndFreshness/unknown_native_output_cannot_prove_trust (0.00s)
+=== RUN   TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing
+=== RUN   TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing/GetNameOwner
+=== RUN   TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing/GetAll
+--- PASS: TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing (0.00s)
+    --- PASS: TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing/GetNameOwner (0.00s)
+    --- PASS: TestDNSEvidenceWrongLinkAndUnreadablePolicySendNothing/GetAll (0.00s)
+=== RUN   TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing
+=== RUN   TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/inactive
+=== RUN   TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/no_servers
+=== RUN   TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/scope_unreadable
+--- PASS: TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing (0.00s)
+    --- PASS: TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/inactive (0.00s)
+    --- PASS: TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/no_servers (0.00s)
+    --- PASS: TestDNSEvidenceUnavailableDeclaredPrivateScopeSendsNothing/scope_unreadable (0.00s)
+=== RUN   TestDNSEvidenceOpportunisticEncryptionDoesNotProveTrust
+--- PASS: TestDNSEvidenceOpportunisticEncryptionDoesNotProveTrust (0.00s)
+=== RUN   TestDNSEvidenceOwnerChangeDiscardsTrust
+--- PASS: TestDNSEvidenceOwnerChangeDiscardsTrust (0.00s)
+=== RUN   TestDNSEvidenceMalformedNativeRecordRefused
+--- PASS: TestDNSEvidenceMalformedNativeRecordRefused (0.00s)
+=== RUN   TestDNSEvidenceRetentionInterruptedAndImmutableScope
+--- PASS: TestDNSEvidenceRetentionInterruptedAndImmutableScope (3.04s)
+=== RUN   TestDNSEvidencePolicyChangeKeepsEncryptionButNotStrictTrust
+--- PASS: TestDNSEvidencePolicyChangeKeepsEncryptionButNotStrictTrust (0.00s)
+=== RUN   TestDNSEvidenceNativeVersionAndOtherOwnersRefuseWithoutQueries
+--- PASS: TestDNSEvidenceNativeVersionAndOtherOwnersRefuseWithoutQueries (0.00s)
+=== RUN   TestDNSEvidenceConcurrentAdmissionAndBoundedRetention
+--- PASS: TestDNSEvidenceConcurrentAdmissionAndBoundedRetention (4.22s)
+=== RUN   TestDNSEvidenceBusEscapesAndGlobalEndpointScopes
+--- PASS: TestDNSEvidenceBusEscapesAndGlobalEndpointScopes (0.01s)
+=== RUN   TestLookupRacesEveryResolver
+--- PASS: TestLookupRacesEveryResolver (0.62s)
+=== RUN   TestLookupRecordTypes
+--- PASS: TestLookupRecordTypes (0.02s)
+=== RUN   TestLookupErrorReadsAnAbsentNameAsAnAnswer
+=== PAUSE TestLookupErrorReadsAnAbsentNameAsAnAnswer
+=== RUN   TestLookupUsesConfiguredPort
+--- PASS: TestLookupUsesConfiguredPort (0.01s)
+=== RUN   TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault
+--- PASS: TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault (0.01s)
+=== RUN   TestLookupRetainsLinkLocalScopeAndDistinctPorts
+--- PASS: TestLookupRetainsLinkLocalScopeAndDistinctPorts (0.00s)
+=== RUN   TestEffectiveLookupDelegatesSplitDNSOnlyToSafeguardedNativeOwner
+--- PASS: TestEffectiveLookupDelegatesSplitDNSOnlyToSafeguardedNativeOwner (0.02s)
+=== RUN   TestEffectiveLookupDoesNotBypassUnreadableNativePolicy
+--- PASS: TestEffectiveLookupDoesNotBypassUnreadableNativePolicy (0.00s)
+=== RUN   TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope
+=== RUN   TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope/inactive
+=== RUN   TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope/serverless
+--- PASS: TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope (0.03s)
+    --- PASS: TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope/inactive (0.03s)
+    --- PASS: TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope/serverless (0.01s)
+=== RUN   TestLookupComparisonRequiresNamedDestinationsAndDisclosure
+--- PASS: TestLookupComparisonRequiresNamedDestinationsAndDisclosure (0.00s)
+=== RUN   TestLookupComparisonContactsOnlyNamedDestination
+--- PASS: TestLookupComparisonContactsOnlyNamedDestination (0.00s)
+=== RUN   TestLookupQueriesTheNamedResolverEvenForLocalhost
+--- PASS: TestLookupQueriesTheNamedResolverEvenForLocalhost (0.00s)
+=== RUN   TestLookupWireRecordTypes
+=== RUN   TestLookupWireRecordTypes/A/example.com
+=== RUN   TestLookupWireRecordTypes/AAAA/example.com
+=== RUN   TestLookupWireRecordTypes/CNAME/example.com
+=== RUN   TestLookupWireRecordTypes/NS/example.com
+=== RUN   TestLookupWireRecordTypes/MX/example.com
+=== RUN   TestLookupWireRecordTypes/TXT/example.com
+=== RUN   TestLookupWireRecordTypes/PTR/127.0.0.1
+=== RUN   TestLookupWireRecordTypes/PTR/::1
+=== RUN   TestLookupWireRecordTypes/SRV/_sip._tcp.example.com
+--- PASS: TestLookupWireRecordTypes (0.02s)
+    --- PASS: TestLookupWireRecordTypes/A/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/AAAA/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/CNAME/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/NS/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/MX/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/TXT/example.com (0.00s)
+    --- PASS: TestLookupWireRecordTypes/PTR/127.0.0.1 (0.00s)
+    --- PASS: TestLookupWireRecordTypes/PTR/::1 (0.00s)
+    --- PASS: TestLookupWireRecordTypes/SRV/_sip._tcp.example.com (0.00s)
+=== RUN   TestLookupRetriesTruncatedUDPOverTCP
+--- PASS: TestLookupRetriesTruncatedUDPOverTCP (0.00s)
+=== RUN   TestLookupRouteAsksOnlyTheKernelInTheSelectedFamily
+--- PASS: TestLookupRouteAsksOnlyTheKernelInTheSelectedFamily (0.02s)
+=== RUN   TestLookupRouteRejectsNamesMixedFamiliesAndMarkMasksBeforeExecution
+--- PASS: TestLookupRouteRejectsNamesMixedFamiliesAndMarkMasksBeforeExecution (0.00s)
+=== RUN   TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput
+=== RUN   TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/[]
+=== RUN   TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/garbage
+=== RUN   TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/[{"dev":"a"},{"dev":"b"}]
+--- PASS: TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput (0.02s)
+    --- PASS: TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/[] (0.01s)
+    --- PASS: TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/garbage (0.01s)
+    --- PASS: TestLookupRouteDoesNotInventAUsablePathFromMalformedOutput/[{"dev":"a"},{"dev":"b"}] (0.00s)
+=== CONT  TestLookupErrorReadsAnAbsentNameAsAnAnswer
+--- PASS: TestLookupErrorReadsAnAbsentNameAsAnAnswer (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	9.532s

@@ -21,6 +21,9 @@ import (
 // cannot be shaped by name here — a name this host's devices do not have.
 func (s *Server) mountNetworkShapingRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/shaping", s.handle(s.handleNetworkShaping))
+	// Per-algorithm figures folded from every non-loopback socket: they name
+	// no peer and no program, so they are a reading like the queue counters.
+	r.Method(http.MethodGet, "/shaping/congestion", s.handle(s.handleShapingCongestion))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/shaping/bbr", s.handle(s.handleShapingBBR))
@@ -74,6 +77,7 @@ func (s *Server) handleShapingClear(w http.ResponseWriter, r *http.Request) erro
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := s.modules.network.ClearShaping(ctx, device); err != nil {
+		auditChange(r, "network.shaping.clear", device, nil, err)
 		return mapNetworkError(err)
 	}
 	httpx.SetAudit(r, "network.shaping.clear", device, nil)
@@ -101,5 +105,16 @@ func (s *Server) handleShapingBBR(w http.ResponseWriter, r *http.Request) error 
 		return mapNetworkError(err)
 	}
 	httpx.JSON(w, http.StatusOK, view.BBR)
+	return nil
+}
+
+func (s *Server) handleShapingCongestion(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	v, err := s.modules.network.Congestion(ctx)
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, v)
 	return nil
 }

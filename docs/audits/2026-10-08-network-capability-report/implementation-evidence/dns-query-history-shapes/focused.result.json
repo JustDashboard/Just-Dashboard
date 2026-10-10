@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "go",
+    "test",
+    "./internal/dnsservice",
+    "-run",
+    "^TestDNSQueryHistory",
+    "-count=1",
+    "-timeout=90s"
+  ],
+  "elapsed_seconds": 3.2038592249155045,
+  "exit_code": 0,
+  "raw_bytes": 73,
+  "raw_sha256": "d09234ed15ea7eb4e45f808dd36d7f26a1625c1fec550b9c936b42a216ffa7eb"
+}

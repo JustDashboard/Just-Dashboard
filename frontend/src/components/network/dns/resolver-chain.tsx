@@ -140,7 +140,7 @@ function identify(up: Upstream, view: DNSView): Identity {
   return { name: <span className="font-mono">{address}</span>, bare: true }
 }
 
-/** DoT's state as a line under an upstream: a closed lock where it is held to, amber where it is not there. */
+/** The configured DoT policy is separate from a fresh native transport measurement. */
 export function EncryptionNote({
   encryption,
   className,
@@ -159,10 +159,10 @@ export function EncryptionNote({
     >
       <Lock aria-hidden className="size-3 shrink-0" />
       {encryption === "required"
-        ? "DoT required"
+        ? "Configured DoT required"
         : encryption === "opportunistic"
-          ? "DoT when offered"
-          : "plain"}
+          ? "Configured opportunistic DoT"
+          : "Configured classic DNS"}
     </span>
   )
 }

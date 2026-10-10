@@ -1,0 +1,34 @@
+{
+  "source": "/home/ubuntu/Just-Dashboard/.network-worktrees/native-v6-final",
+  "head": "d09666fe5a100ce15e78b7d09a53b3e4018197f5",
+  "base": "d3a2c4ea4d4a280973e43608f9ed9d5273fceedb",
+  "status": "clean",
+  "capability": "jd-native-manager-v6",
+  "environment": {
+    "TMPDIR": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/go-tmp",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2"
+  },
+  "checks": {
+    "required": "scripts/test-changed.sh d3a2c4ea",
+    "race": "go test -race -p 2 ./internal/netx -run '^TestNative(Recovery|Confirmation|Confirmed|ForeignStage|DomainRecovery)' -count=1 -timeout=120s"
+  },
+  "files": {
+    "backend/internal/netx/native_manager_domains_test.go": "3b3fd5eeeb00b31b4e453519c31eaf545dec13fdbf6669b0719d8b2ad330dffe",
+    "backend/internal/netx/native_manager_epoch.go": "a6d17161df8150c6242fafd6cd36699f1e6ed13b1478df890268c2244f28c122",
+    "backend/internal/netx/native_manager_recovery.go": "cb74c296df28a805c7da7bfb16cd7bf1ff5811547ee9b7400a2367121f35e9fb",
+    "backend/internal/netx/native_manager_recovery_preflight.go": "bb6423bafecfd7535d882302ee9f832c464db1c24d36bb43718d8ebafce304ca",
+    "backend/internal/netx/native_manager_recovery_preflight_test.go": "93bdcfbe641accae43c497fcc1e383ad1fb6f6b93d0d8c2458f40e74a9da3403",
+    "docs/internal/backend/network-native-managers.md": "967285ce11c5cf45e12b8357ecba8cdefc554f49f59f58398bb5e61c9f6067ac"
+  },
+  "logs": {
+    "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-v6-required-final.log": {
+      "sha256": "1444942b18991befcc721fd59fbfc4fdda2b8f63e94815edc0e132cd1a849036",
+      "output": "Against d3a2c4ea: 6 changed files.\nGo packages: ./internal/netx\nok  \tgithub.com/Wayy01/Just-Dashboard/backend/internal/netx\t1.321s\n"
+    },
+    "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-v6-race-final.log": {
+      "sha256": "674ca6e4928ba0c72709ed5ec4c29cd8d5d67bbb3f2422a5e0d65d3b17611d54",
+      "output": "ok  \tgithub.com/Wayy01/Just-Dashboard/backend/internal/netx\t14.088s\n"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/audit	0.367s
+FAIL
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/audit	0.376s

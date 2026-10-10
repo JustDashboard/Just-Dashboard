@@ -87,7 +87,8 @@ var readAnchors = anchorPaths
 func TestVerifyPathRefusesMovingThisServersOwnWayOut(t *testing.T) {
 	rec := record(t)
 	anchorPaths = readAnchors
-	rec.on("ip -j route get 1.1.1.1 mark 0x80000", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
+	rec.on("wg show all dump", "").
+		on("ip -j route get 1.1.1.1 mark 0x80000", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
 		on("ip -j route get 1.1.1.1", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
 		fail("ip -j -6 route get", "RTNETLINK answers: Network is unreachable").
 		on("ip -j route get 100.110.34.9", `[{"dst":"100.110.34.9","dev":"tailscale0"}]`)
@@ -109,7 +110,8 @@ func TestVerifyPathRefusesMovingThisServersOwnWayOut(t *testing.T) {
 func TestLoopbackClientsStillProtectTheWayOut(t *testing.T) {
 	rec := record(t)
 	anchorPaths = readAnchors
-	rec.on("ip -j route get 1.1.1.1", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
+	rec.on("wg show all dump", "").
+		on("ip -j route get 1.1.1.1", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
 		fail("ip -j -6 route get", "unreachable")
 	before, _ := clientPath(context.Background(), "127.0.0.1")
 	if !before.Local || len(before.anchors) == 0 {

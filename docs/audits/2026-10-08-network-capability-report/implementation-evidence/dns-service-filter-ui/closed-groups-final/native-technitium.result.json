@@ -1,0 +1,24 @@
+{
+  "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+  "engine": "technitium",
+  "exit_code": 0,
+  "wall_seconds": 26.033,
+  "raw_sha256": "f087a153459b70d888bdf88c8ad6086dd70713537c4907b747999a79c4864e18",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true
+}

@@ -1,0 +1,17 @@
+273 |     return reply(
+274 |       { error: { code: "fixture_unknown", message: "Unexpected native fixture mutation." } },
+275 |       400,
+276 |     )
+277 |   })
+278 |   await page.goto("/network/dns")
+                   ^
+error: goto: Protocol error (Page.navigate): Cannot navigate to invalid URL
+Call log:
+[2m  - navigating to "/network/dns", waiting until "load"[22m
+
+  log: [ "  - navigating to \"/network/dns\", waiting until \"load\"" ],
+
+      at mockDNSServicePage (/home/ubuntu/Just-Dashboard-network-dns-services-ui/frontend/tests/browser/network-dns-services-fixture.ts:278:14)
+      at processTicksAndRejections (native:7:39)
+
+Bun v1.3.11 (Linux x64)

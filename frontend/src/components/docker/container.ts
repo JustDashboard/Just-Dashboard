@@ -192,10 +192,13 @@ export type PortRow = {
   key: string
   /** `127.0.0.1:5678`, or the bare port where it is on every interface. */
   published: string
+  hostIp?: string
   hostPort?: number
   containerPort: number
   protocol: string
   scope: PortExposure["scope"]
+  /** Docker publishes each family as its own binding; the path is asked for one. */
+  ipv6?: boolean
   route?: PortRoute
 }
 
@@ -222,10 +225,12 @@ export function portRows(exposure: PortExposure[], routes: PortRoute[] | undefin
           : port.scope === "all" || !ip
             ? String(port.hostPort)
             : `${ip}:${port.hostPort}`,
+      hostIp: port.hostIp,
       hostPort: port.hostPort,
       containerPort: port.containerPort,
       protocol: port.protocol,
       scope: port.scope,
+      ipv6: port.ipv6,
       route: traced.get(id),
     }
   })

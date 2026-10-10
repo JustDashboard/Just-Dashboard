@@ -1,0 +1,146 @@
+{
+  "at": "2026-10-10T01:14:51Z",
+  "bootId": "6d6a7b65-1805-4068-addb-75b071e950bb",
+  "evidence": {
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "1"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "1"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -D FORWARD -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -D INPUT -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -D DOCKER-USER -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "1"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      },
+      {
+        "argv": "/etc/just-dashboard/network/network-recovery --network-sqm-restore /etc/just-dashboard/network",
+        "code": "exited",
+        "ignoreErrors": "no",
+        "path": "/etc/just-dashboard/network/network-recovery",
+        "status": "1"
+      }
+    ],
+    "rules": [
+      "0:\tfrom all lookup local",
+      "10000:\tfrom 10.231.0.0/24 lookup 231",
+      "10001:\tfrom all fwmark 0x231 lookup 231",
+      "10002:\tfrom 10.245.0.0/24 lookup [l3mdev-table]",
+      "32766:\tfrom all lookup main",
+      "32767:\tfrom all lookup default"
+    ]
+  },
+  "failures": [],
+  "phase": "vrf-routing-verify",
+  "result": "pass",
+  "seconds": 0.0
+}

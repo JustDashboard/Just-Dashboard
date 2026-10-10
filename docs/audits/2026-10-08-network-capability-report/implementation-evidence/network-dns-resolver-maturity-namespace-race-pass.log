@@ -1,0 +1,22 @@
+=== RUN   TestDNSEvidenceNativeDisposableResolver
+    dns_evidence_live_test.go:64: === RUN   TestDNSEvidenceNativeDisposableResolver
+        --- PASS: TestDNSEvidenceNativeDisposableResolver (4.75s)
+        PASS
+        
+--- PASS: TestDNSEvidenceNativeDisposableResolver (5.84s)
+=== RUN   TestDNSResolverMaturityNativeDisposable
+    dns_verify_live_test.go:59: === RUN   TestDNSResolverMaturityNativeDisposable
+            dns_verify_live_test.go:573: strict DoT apply verified: 5 checks, restarts=1
+            dns_verify_live_test.go:585: opportunistic DoT fallback reported as a warning
+            dns_verify_live_test.go:604: wrong TLS identity rolled back with the previous drop-in restored
+            dns_verify_live_test.go:621: an overriding later drop-in failed the read-back and was rolled back
+            dns_verify_live_test.go:637: independent TLS check trusted 2 servers
+            dns_verify_live_test.go:654: DNSSEC chain: recomputed DS digests matched; fake root refused as an IANA anchor; private ancestors not asked
+            dns_verify_live_test.go:700: F10: unclaimed private names refused before any public question; foreign private chains need acknowledgement
+            dns_verify_live_test.go:724: local resolution: nas.lan=matches shadowed.lan=includes
+            dns_verify_live_test.go:731: resolver maturity fixture passed: 9 namespace resolver restarts, public questions 35, private 64, plain 8, foreign 1
+        --- PASS: TestDNSResolverMaturityNativeDisposable (28.03s)
+        PASS
+        
+--- PASS: TestDNSResolverMaturityNativeDisposable (29.15s)
+PASS

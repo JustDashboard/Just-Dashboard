@@ -1,0 +1,43 @@
+{
+  "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+  "engine": "pihole",
+  "exit_code": 0,
+  "wall_seconds": 72.962,
+  "raw_sha256": "2bca91d69cb8a2c892ef6fb9968b777d425769b327dcaff315ff108c1aab1781",
+  "skipped": false,
+  "owned_processes_remaining": [],
+  "owned_docker_remaining": {
+    "container": [],
+    "network": [],
+    "volume": []
+  },
+  "owned_tmp_entries_remaining": [],
+  "host_after": {
+    "resolver_sha256": "9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02",
+    "networkd883_start": "452",
+    "nm_paths": {
+      "/etc/NetworkManager": false,
+      "/var/lib/NetworkManager": false
+    }
+  },
+  "host_unchanged": true
+}
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:215: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=0 ruleEvidence=configured fingerprint=cb099727ddc992518d5184a22e590ffd1418cfec5635f61322faa69f28e03300 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:272: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=1 ruleEvidence=configured fingerprint=391968914dfb288307cc84335a589f5720667bd458a21502a24d807b233c3366 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:305: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:310: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:305: Native exact-selection current read passed: override_add planned
+    provision_live_test.go:310: Native exact-selection current read passed: override_add verified
+    provision_live_test.go:305: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:310: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:351: engine=pihole nativeFilterVersion=v6.7.1 sources=0 rules=1 ruleEvidence=configured fingerprint=391968914dfb288307cc84335a589f5720667bd458a21502a24d807b233c3366 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:373: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:378: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:373: Native exact-selection current read passed: override_remove planned
+    provision_live_test.go:378: Native exact-selection current read passed: override_remove verified
+    provision_live_test.go:373: Native exact-selection current read passed: client_groups planned
+    provision_live_test.go:378: Native exact-selection current read passed: client_groups verified
+    provision_live_test.go:416: engine=pihole image=pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be nativeVersion=v6.7.1 UDP/TCP=owned-fixture.invalid owner=ec671989ede17f482dbe2124d0968d70 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (71.92s)
+PASS

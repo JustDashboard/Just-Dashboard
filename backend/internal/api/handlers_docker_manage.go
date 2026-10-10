@@ -486,16 +486,47 @@ func (s *Server) handleVolumeCreate(w http.ResponseWriter, r *http.Request) erro
 // -------------------------------------------------------------- networks ---
 
 func (s *Server) handleNetworkCreate(w http.ResponseWriter, r *http.Request) error {
-	var spec dockerx.NetworkSpec
-	if err := httpx.DecodeJSON(r, &spec); err != nil {
+	var req struct {
+		dockerx.NetworkSpec
+		IPAMReservationIDs []string `json:"ipamReservationIds,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	spec, err := dockerx.NormalizeNetworkSpec(req.NetworkSpec)
+	if err != nil {
+		return httpx.Wrap(http.StatusBadRequest, "invalid_network", err)
+	}
+	if err := s.authoriseNetworkSpec(r, spec); err != nil {
+		return err
+	}
+	if err := s.checkNetworkDriver(r.Context(), spec); err != nil {
+		return err
+	}
+	prefixes := make([]string, 0, len(spec.IPAM))
+	for _, pool := range spec.IPAM {
+		prefixes = append(prefixes, pool.Subnet)
+	}
+	handoff, err := s.beginIPAMOwnerHandoff(r, req.IPAMReservationIDs, "docker_network", spec.Name, prefixes)
+	if err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "docker.network.create", spec.Name, map[string]any{"driver": spec.Driver, "ipamReservations": req.IPAMReservationIDs})
 	net, err := s.modules.docker.CreateNetwork(r.Context(), spec)
+	warning := s.finishIPAMOwnerHandoff(handoff, func() string {
+		if net != nil {
+			return net.ID
+		}
+		return ""
+	}(), err)
 	if err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.create", net.Name, map[string]any{"driver": net.Driver})
-	httpx.JSON(w, http.StatusCreated, net)
+	httpx.SetAudit(r, "docker.network.create", net.Name, map[string]any{"driver": net.Driver, "ipamReservations": req.IPAMReservationIDs, "ipamWarning": warning})
+	httpx.JSON(w, http.StatusCreated, struct {
+		*dockerx.Network
+		IPAMWarning string `json:"ipamWarning,omitempty"`
+	}{net, warning})
 	return nil
 }
 
@@ -511,10 +542,23 @@ func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) er
 	if req.Container == "" {
 		return httpx.BadRequest("a container is required")
 	}
-	if err := s.modules.docker.ConnectNetwork(r.Context(), id, req.Container, req.Aliases); err != nil {
+	req.Aliases = cleanAliases(req.Aliases)
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id, req.Container)
+	if err != nil {
+		return err
+	}
+	conflicts := dockerx.PreviewConnect(deps, req.Container, req.Aliases)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	// The change goes to the container the preview judged, by its full ID.
+	target := deps.Container(req.Container).ID
+	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, target, req.Aliases); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.connect", id, map[string]any{"container": req.Container, "aliases": req.Aliases})
+	httpx.SetAudit(r, "docker.network.connect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "containerId": target, "aliases": req.Aliases, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
@@ -531,22 +575,104 @@ func (s *Server) handleNetworkDisconnect(w http.ResponseWriter, r *http.Request)
 	if req.Container == "" {
 		return httpx.BadRequest("a container is required")
 	}
-	if err := s.modules.docker.DisconnectNetwork(r.Context(), id, req.Container, req.Force); err != nil {
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id, req.Container)
+	if err != nil {
+		return err
+	}
+	// The dashboard's own containers, the shared ingress and a deployment's
+	// database links are refused here as well as in the preview, so no
+	// client can detach them by skipping it.
+	conflicts := dockerx.PreviewDisconnect(deps, req.Container)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	// The container the preview judged, or a stale endpoint whose container
+	// the Engine says is gone — what a forced disconnect exists for.
+	var target string
+	if c := deps.Container(req.Container); c != nil {
+		target = c.ID
+	} else if stale, ok := deps.StaleEndpoint(req.Container); ok {
+		target = stale
+	}
+	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, target, req.Force); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.disconnect", id, map[string]any{"container": req.Container})
+	httpx.SetAudit(r, "docker.network.disconnect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "containerId": target, "force": req.Force, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
 
+// networkPruneSkip is a reviewed network a prune did not remove, and why.
+type networkPruneSkip struct {
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// handleNetworkPrune removes the reviewed networks: the ids the operator
+// confirmed from GET /docker/networks/prune, each rechecked now and removed
+// only while it is still removable. Without ids it removes every network
+// that is removable now. It never runs the Engine's own prune, which also
+// takes networks stopped containers still name.
 func (s *Server) handleNetworkPrune(w http.ResponseWriter, r *http.Request) error {
-	rep, err := s.modules.docker.PruneNetworks(r.Context())
-	if err != nil {
-		return s.dockerErr(err)
+	var req struct {
+		IDs []string `json:"ids"`
 	}
-	httpx.SetAudit(r, "docker.network.prune", "", map[string]any{"deleted": rep.Items})
-	httpx.JSON(w, http.StatusOK, rep)
+	if r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 2*networkDependencyTimeout)
+	defer cancel()
+	candidates, err := s.pruneCandidates(ctx)
+	if err != nil {
+		return err
+	}
+	byID := map[string]dockerx.PruneCandidate{}
+	wanted := req.IDs
+	for _, c := range candidates {
+		byID[c.ID] = c
+		if req.IDs == nil && c.Removable {
+			wanted = append(wanted, c.ID)
+		}
+	}
+	out := struct {
+		dockerx.PruneReport
+		Skipped []networkPruneSkip `json:"skipped"`
+	}{PruneReport: dockerx.PruneReport{Kind: "networks", Items: []string{}}, Skipped: []networkPruneSkip{}}
+	for _, id := range wanted {
+		candidate, ok := byID[id]
+		switch {
+		case !ok:
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Reason: "It is no longer unused, or no longer exists."})
+			continue
+		case !candidate.Removable:
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Name: candidate.Name, Reason: firstConflict(candidate.Conflicts)})
+			continue
+		}
+		if err := s.modules.docker.RemoveNetwork(ctx, id); err != nil {
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Name: candidate.Name, Reason: err.Error()})
+			continue
+		}
+		out.Items = append(out.Items, candidate.Name)
+	}
+	httpx.SetAudit(r, "docker.network.prune", "", map[string]any{"deleted": out.Items, "requested": req.IDs, "skipped": len(out.Skipped)})
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+func firstConflict(conflicts []dockerx.NetworkConflict) string {
+	for _, level := range []string{dockerx.ConflictBlock, dockerx.ConflictWarn} {
+		for _, c := range conflicts {
+			if c.Level == level {
+				return c.Message
+			}
+		}
+	}
+	return "It is not removable now."
 }
 
 // ---------------------------------------------------------------- stacks ---
@@ -1432,7 +1558,8 @@ func firewallViewFor(status *netsec.FirewallStatus, port dockerx.PortExposure) F
 	}
 	needle := strconv.Itoa(port.HostPort)
 	for _, rule := range status.Rules {
-		if !portRuleMatches(rule.Port, needle) {
+		// A rule scoped to one device does not answer for the port at large.
+		if rule.Interface != "" || !portRuleMatches(rule.Port, needle) {
 			continue
 		}
 		if rule.Protocol != "" && port.Protocol != "" &&
@@ -1517,19 +1644,23 @@ func judgeReach(port dockerx.PortExposure, route PortRoute) (reach, reasoning st
 		// The trap. Worth spelling out every time, because the operator has
 		// evidence in front of them that says the opposite.
 		return reachExternal, "Bound to every interface. The firewall has a rule denying this port, but Docker publishes ports with NAT rules that are consulted before " +
-			route.Firewall.Backend + "'s filter chain — so the rule does not apply to it and the port is reachable anyway.", true
+			route.Firewall.Backend + "'s filter chain — so the rule does not apply to it, and nothing on this host stops it unless a DOCKER-USER rule does." + providerUnseen, true
 	case route.Firewall.Verdict == "allowed":
-		return reachExternal, "Bound to every interface and allowed by the firewall: " + route.Firewall.Rule + ".", true
+		return reachExternal, "Bound to every interface and allowed by the firewall: " + route.Firewall.Rule + "." + providerUnseen, true
 	case strings.HasPrefix(strings.ToLower(route.Firewall.DefaultIncoming), "deny") && !route.Firewall.DockerBypass:
 		return reachBlocked, "Bound to every interface. No firewall rule names this port and the default incoming policy is to deny.", true
 	case route.Firewall.DockerBypass:
 		return reachExternal, "Bound to every interface. Docker's own NAT rules are consulted before " +
-			route.Firewall.Backend + "'s, so this port is reachable regardless of the default policy.", true
+			route.Firewall.Backend + "'s, so the default policy does not hold it back." + providerUnseen, true
 	default:
 		return reachExternal, "Bound to every interface, and the firewall's default incoming policy is " +
-			route.Firewall.DefaultIncoming + ".", true
+			route.Firewall.DefaultIncoming + "." + providerUnseen, true
 	}
 }
+
+// providerUnseen qualifies every "reachable from outside" this host can
+// conclude: what stands in front of the host is not visible from it.
+const providerUnseen = " Provider policy in front of this host is not visible here, so reaching it from outside is unproven until an external check measures it."
 
 // Compose includes, substitutions, plugins and driver options are evaluated by
 // Docker. Until that full model has a shared policy, executing or editing it

@@ -1,0 +1,28 @@
+{
+  "name": "race-compile",
+  "argv": [
+    "go",
+    "test",
+    "-c",
+    "-race",
+    "-o",
+    "/home/ubuntu/Just-Dashboard-network-dns-decision-example-artifacts/native-example-race.test",
+    "./internal/dnsservice"
+  ],
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-decision-restart-endpoint/backend",
+  "environment": {
+    "GOTOOLCHAIN": "go1.26.8",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "TMPDIR": "/home/ubuntu/jd-de-t",
+    "JD_DNS_DOMAIN_DECISIONS_LIVE": "0",
+    "JD_DNS_SERVICES_LIVE_ENGINE": "",
+    "CGO_ENABLED": "1",
+    "GOOS": "linux",
+    "GOARCH": "amd64"
+  },
+  "exit_code": 0,
+  "elapsed_seconds": 1.888,
+  "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "native_dispatch": false
+}

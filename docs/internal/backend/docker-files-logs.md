@@ -13,6 +13,110 @@ the latest pair and cannot block collection. The final unsubscribe cancels the s
 snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
 opt into a request-scoped inventory/inspection snapshot; it never survives that request.
 
+### Network creation
+
+`POST /docker/networks/` requires `service.control` and is audited. `NetworkSpec` accepts the legacy
+`subnet`, `gateway` and `ipRange` fields or an additive `ipam` array, never both. Each pool contains a
+canonical IPv4 or IPv6 subnet with optional gateway and allocation range inside it. IPv6 pools require
+`ipv6: true`; up to sixteen pools are accepted and pools in one request must not overlap. The Engine
+receives every pool and remains responsible for driver availability and conflicts with existing
+networks. Names and metadata are validated before calling it. Labels and options have at most 32
+entries, 256-byte keys, 4096-byte values and 16 KiB total per map.
+
+Custom drivers and any driver options require `system.admin`, including options for `bridge`.
+`host`, `none` and `null` are existing system networks and cannot be created here. Manually supplied
+`io.just-dashboard.*` and `com.docker.compose.*` labels are refused so a manual network cannot claim
+deployment or Compose ownership. A supplied pool containing the connection's observed client address
+is refused with `409 would_lock_you_out`. This guard does not prove absence of conflicts with other
+host, VPN or provider routes.
+
+The creation dialog keeps the simple name/internal/subnet path and exposes driver, gateway, allocation
+range, attachable, IPv6 pools, labels and driver options under Advanced settings. Non-administrators
+can create ordinary bridge networks but do not see driver or option controls. It checks explicit pools
+against the last listed Docker networks, retains the draft after an Engine refusal, and disables
+creation after an inventory read failure until a successful refresh. The internal-network setting
+does not claim isolation for containers also attached to another network.
+
+Focused coverage is `network_spec_test.go`, `docker_network_spec_test.go`,
+`network-create-reading.test.js` and `docker-network-create.spec.ts`. Engine-wire tests inspect both
+address families after creation; browser tests cover mobile/desktop payloads, refusals, stale inventory
+and role-specific controls. These fixtures do not constitute native driver or provider acceptance.
+
+`GET /docker/networks/drivers` reads the Engine's driver catalogue when asked
+(`dockerx.NetworkDrivers`: `/info`'s network plugins and `/plugins` with the `networkdriver`
+capability). Each driver is `builtin` or `plugin`, creatable or refused with a reason — `host`/`null`
+are network modes, `overlay` needs this Engine to be a swarm manager, a disabled plugin is refused —
+and built-in drivers carry the option keys Docker documents. Creation checks the same catalogue before
+the Engine is asked (`api.checkNetworkDriver`): a driver this Engine lacks, a refused one, or a
+macvlan/ipvlan `parent` that is not a host device answers `400 driver_unavailable`; any driver but
+`bridge` is refused with `503 drivers_unread` when the catalogue cannot be read. The form suggests the
+creatable drivers, says why one is refused, labels a plugin's options as passed through unchecked, and
+names option keys a built-in driver does not document, which Docker silently ignores. A plugin driver
+is still only as good as the installed plugin; no third-party plugin is installed or accepted here.
+
+### Network ownership, dependencies and guarded changes
+
+Every listed and inspected network carries `owner` (`dockerx.OwnerOfNetwork`, from its labels):
+`system`, `dashboard` (the dashboard's own Compose project, told by the data directory its backend
+mounts — `proxysvc.SelfProject`), `database-link` and `deployment` (managed labels with the
+environment joined to its project's name while it exists), `compose` or `manual`. A failed container
+listing no longer reads as an unused network: the list sets `membersKnown: false` with
+`membersError`, and the detail sets `membersError` and per-member `unread` when a member's inspect
+failed. Members carry their other networks (the containers joining this network to the rest),
+`ingress` for the shared public Caddy (`dockerx.IsIngressContainer`: the provisioned label or name, or an
+adopted Caddy publishing 80 and 443 on every interface) and `dashboard` for the dashboard's own.
+
+Changes are previewed from one fresh reading (`dockerx.NetworkDependencies`: verbose network inspect,
+every container including stopped ones, every network, and an inspect per member and per candidate; a
+failed container or network listing fails the reading, `503 dependencies_unread`, rather than
+reporting no dependents). The pure previews return conflicts at three levels — `block` (refused by the
+mutation as well, `409 network_conflict`), `warn` (a consequence the dialog confirms, recorded as
+`acknowledged` in the audit entry) and `info`:
+
+- `GET /docker/networks/{id}/connect?container=&alias=` (`PreviewConnect`): already attached,
+  host/none/`container:` network modes, a swarm network without `--attachable`, an alias the resolver
+  cannot answer, aliases on the default bridge, every IPv4 pool full (members counted in the pool
+  their address is in) and the dashboard's own network are
+  blocks; a name another member already answers to (Docker returns both), overlapping ranges with the
+  candidate's other networks and attaching to a deployment's or database-link network are warnings.
+- `GET /docker/networks/{id}/disconnect?container=` (`PreviewDisconnect`): the dashboard's own
+  containers, the shared ingress and a database-link network's members are refused; the last network,
+  published ports carried on this network, peers that lose the member's names and a deployment's
+  network are warnings; Compose putting it back is a note. An endpoint whose container the Engine says
+  no longer exists is a stale endpoint, removable with `force`; one whose container was merely unread
+  is refused.
+- `GET /docker/networks/{id}/removal` (`PreviewRemove` plus the dashboard's records): system networks,
+  running members, the dashboard's own stack and a deployment's network whose environment still exists
+  are refused, as is the swarm's routing-mesh network; stopped containers that still name the network
+  (the Engine removes it anyway, and they then fail to start — shown natively below) and shared IPAM
+  reservations still recording it as owner — or reservations that could not be read — are warnings;
+  Compose recreating it and an orphaned managed network are notes. An unreadable deployment record
+  counts as existing.
+- `GET /docker/networks/prune` (`PruneCandidates`): every local network the Engine's own prune would
+  take (swarm networks are their managers'), each `removable` only when nothing blocks or warns. `POST /docker/networks/prune` with `{ids}` removes
+  exactly those reviewed IDs that are still removable now and reports the rest as `skipped`; without
+  ids it removes every removable network. It never runs the Engine's prune. The disk page's cleanup
+  category and the global sweep remove the same removable set (`removableNetworks`), treating every
+  managed network as its deployment's.
+
+The UI draws the owner on each card and in the detail, offers attach on any local network (the old
+non-attachable hint was a swarm-only rule applied to bridges) but not on the dashboard's own, shows no
+detach control for the dashboard's containers or the ingress, and previews every attach (as the draft
+changes, keeping the draft when the preview fails), detach, removal and prune before confirming; a
+refused confirmation reads the preview again and stays disabled until the new reading lands. The
+mutations act on the full ID the reference resolved to, and audit it.
+`docker_network_dependencies_test.go`, `network_dependencies_test.go`, `network_drivers_test.go` and
+`docker-network-maturity.spec.ts` cover these.
+
+The Engine-wire fixture `JD_DOCKER_NETWORK_LIVE=1 go test ./internal/dockerx -run
+'^TestLiveNetworkDependencyPreviewsAgainstTheEngine$' -count=1 -v` creates two uniquely labelled
+internal /28 bridges in free benchmarking space and three owned containers from a cached
+`python:3.11-slim`, runs the previews and the reviewed prune over them, then removes the owned dormant
+network to show the Engine removing a network a stopped container names and that container failing to
+start. Cleanup removes only objects carrying its run's label and verifies none remain.
+
+### Containers and inventory
+
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on
   the historical accident of which fields the daemon could change after creation, and rendering them as a
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
@@ -839,3 +943,18 @@ containers with unread inspections increment runtime `unknown`, rather than `noH
 Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
 and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
 its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.
+
+### Advanced network native acceptance
+
+`JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`
+uses the actual local Engine. The opt-in fixture requires `ip` and a locally cached
+`python:3.11-slim`; it never pulls, starts a public listener or publishes a port. It reads both
+families of host routes and existing Docker pools, then selects nonoverlapping benchmarking/ULA
+pools for a uniquely labeled internal bridge. It verifies exact IPv4/IPv6 subnets, gateways and
+allocation ranges, driver/MTU option, labels, attachable/internal/IPv6 flags, native overlap refusal,
+and one owned full-ID container's both-family addresses and alias through disconnect/reconnect.
+Cleanup rechecks exact names/labels/IDs and never prunes or touches another workload. The fixture
+creates only its own temporary host bridge/routes through Docker; it does not edit existing ones.
+
+This establishes the supported native bridge path. Third-party drivers/options still depend on
+installed Engine plugins and native support; a fixture does not establish provider connectivity.

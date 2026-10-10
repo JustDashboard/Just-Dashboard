@@ -199,24 +199,19 @@ type NetworkSpec struct {
 	IPv6       bool              `json:"ipv6,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
 	Options    map[string]string `json:"options,omitempty"`
+	IPAM       []NetworkIPAM     `json:"ipam,omitempty"`
 }
 
 func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network, error) {
+	spec, err := NormalizeNetworkSpec(spec)
+	if err != nil {
+		return nil, err
+	}
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
 	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return nil, errors.New("a network name is required")
-	}
-	if !validResourceName(name) {
-		return nil, errors.New("a network name may contain letters, digits, and _ . - after the first character")
-	}
-	driver := spec.Driver
-	if driver == "" {
-		driver = "bridge"
-	}
+	name, driver := spec.Name, spec.Driver
 	opts := network.CreateOptions{
 		Driver:     driver,
 		Internal:   spec.Internal,
@@ -225,9 +220,11 @@ func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network,
 		Labels:     spec.Labels,
 		Options:    spec.Options,
 	}
-	if spec.Subnet != "" {
-		cfg := network.IPAMConfig{Subnet: spec.Subnet, Gateway: spec.Gateway, IPRange: spec.IPRange}
-		opts.IPAM = &network.IPAM{Driver: "default", Config: []network.IPAMConfig{cfg}}
+	if len(spec.IPAM) != 0 {
+		opts.IPAM = &network.IPAM{Driver: "default"}
+		for _, pool := range spec.IPAM {
+			opts.IPAM.Config = append(opts.IPAM.Config, network.IPAMConfig{Subnet: pool.Subnet, Gateway: pool.Gateway, IPRange: pool.IPRange})
+		}
 	}
 	res, err := cli.NetworkCreate(ctx, name, opts)
 	if err != nil {
@@ -265,6 +262,9 @@ type NetworkDetail struct {
 	// and will not let you remove, so the UI can say why rather than offering
 	// a button that always fails.
 	System bool `json:"system"`
+	// MembersError is the container listing failing: the members' states,
+	// stacks and other networks are then unknown, not empty.
+	MembersError string `json:"membersError,omitempty"`
 }
 
 type NetworkMember struct {
@@ -279,6 +279,16 @@ type NetworkMember struct {
 	Aliases []string `json:"aliases"`
 	State   string   `json:"state,omitempty"`
 	Stack   string   `json:"stack,omitempty"`
+	// Unread is a member whose own inspect failed, so its aliases are
+	// unknown rather than none.
+	Unread bool `json:"unread,omitempty"`
+	// Networks are the member's other networks: the containers on two
+	// networks are the ones joining them, which is the network's topology.
+	Networks []string `json:"networks"`
+	// Ingress marks the shared public Caddy, and Dashboard (set by the API)
+	// the dashboard's own containers; detaching either is refused.
+	Ingress   bool `json:"ingress,omitempty"`
+	Dashboard bool `json:"dashboard,omitempty"`
 }
 
 func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, error) {
@@ -321,9 +331,17 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 		for _, ct := range list {
 			state[ct.ID] = ct
 		}
+	} else {
+		d.MembersError = listErr.Error()
 	}
+	// A member whose own inspect fails is marked unread: its aliases are not
+	// known, which is not the same as having none.
 	aliases := func(m *NetworkMember) {
-		if member, err := cli.ContainerInspect(ctx, m.ID); err == nil && member.NetworkSettings != nil {
+		member, err := cli.ContainerInspect(ctx, m.ID)
+		switch {
+		case err != nil:
+			m.Unread = true
+		case member.NetworkSettings != nil:
 			if eps := member.NetworkSettings.Networks[d.Name]; eps != nil {
 				m.Aliases = append(m.Aliases, eps.Aliases...)
 				if m.MAC == "" {
@@ -336,11 +354,17 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 		m := NetworkMember{
 			ID: memberID, Name: strings.TrimPrefix(ep.Name, "/"),
 			IPv4: ep.IPv4Address, IPv6: ep.IPv6Address, MAC: ep.MacAddress,
-			Aliases: []string{},
+			Aliases: []string{}, Networks: []string{},
 		}
 		if ct, ok := state[memberID]; ok {
 			m.State = ct.State
 			m.Stack = ct.ComposeStack
+			m.Ingress = IsIngressContainer(ct)
+			for _, other := range ct.Networks {
+				if other != d.Name {
+					m.Networks = append(m.Networks, other)
+				}
+			}
 		}
 		aliases(&m)
 		d.Members = append(d.Members, m)

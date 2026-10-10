@@ -1,0 +1,14 @@
+{
+  "phase": "corrected_wrapper_preparation_only; native release required",
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "original_compile_receipt": "domain-native-compile.json",
+  "original_compile_receipt_sha256": "25afaf64cd2b5b29a6699631355a58f91f8d91346343d750a3e2057abb651fef",
+  "original_runner_sha256": "206507c738b4582ccdc813fa6a9672fc1861b1e71c00928019830fd441ce8421",
+  "corrected_runner_sha256": "190b19d3f9f1c8a1a835b23c810bbff20cbf4b9553f8eaaf09935de796bd58ae",
+  "preparer_sha256": "acacbbe87e2d39621924058ab8b66d282be01178b5afbe2a7185ceda3fa3f259",
+  "binary_sha256": "1874158aaf8b7a852573d214325f1c568919ae386c04e74fc745a73d9669a178",
+  "compiler_reused_without_recompilation": true,
+  "correction": "Replace unauthorized /proc/883/exe dereference with readable exact PID883/start452, comm/name systemd-network and all UID/GID fields998; any read failure or mismatch remains refusal. Keep original compiler/runner/traceback unchanged.",
+  "original_preflight_record": "native-adguard-preflight-original.result.json",
+  "original_preflight_record_sha256": "1bb2b3646dc82cf4880c7445cfbec6ff6aa76990b82213cb70204ae25cf60905"
+}

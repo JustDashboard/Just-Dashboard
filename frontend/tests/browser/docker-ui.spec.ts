@@ -2165,3 +2165,122 @@ test("workspace: Back restores a long container list's scroll and focused row", 
   await expect(item).toBeFocused()
   await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
 })
+
+/**
+ * A published port's verdict is the binding, the proxy and the firewall read
+ * together, with the reasoning on its row; an administrator can open every
+ * layer between the outside and the container — Docker's NAT, DOCKER-USER,
+ * provider policy — from the Ports table, with the ones nothing on the host
+ * can see said as unknown.
+ */
+test("an administrator traces a published port's path from outside, layer by layer", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  await page.route(`**/api/v1/docker/containers/${detail.id}`, (route) => json(route, detail))
+  await page.route(`**/api/v1/docker/containers/${detail.id}/routes`, (route) =>
+    json(route, [
+      {
+        hostIp: "0.0.0.0",
+        hostPort: 443,
+        containerPort: 443,
+        protocol: "tcp",
+        public: true,
+        scope: "all",
+        label: "Every interface",
+        binding: "Bound to every interface on port 443.",
+        firewall: {
+          known: true,
+          backend: "ufw",
+          enabled: true,
+          verdict: "default",
+          defaultIncoming: "deny",
+          dockerBypass: true,
+        },
+        reach: "external",
+        reasoning:
+          "Bound to every interface. Docker's own NAT rules are consulted before ufw's, so the default policy does not hold it back. Provider policy in front of this host is not visible here, so reaching it from outside is unproven until an external check measures it.",
+        inferred: true,
+      },
+    ]),
+  )
+  let asked: URL | undefined
+  await page.route(`**/api/v1/docker/containers/${detail.id}/published/443?**`, (route) => {
+    asked = new URL(route.request().url())
+    return json(route, {
+      request: {
+        sourceKind: "external",
+        containerId: detail.id,
+        family: "inet",
+        protocol: "tcp",
+        port: 443,
+        target: "",
+        measure: false,
+      },
+      scope: {
+        vantage: "published_port",
+        source: "Outside this host",
+        target: "web",
+        address: "172.17.0.2",
+        family: "inet",
+        protocol: "tcp",
+        port: 443,
+        limitations: ["Each layer is a snapshot read in sequence; no packet was sent or traced."],
+      },
+      startedAt: now,
+      endedAt: now,
+      addresses: ["172.17.0.2"],
+      comparison:
+        "Docker NAT: observed. Forwarded-leg firewall prediction: unknown. Provider policy: unknown. External measurement: none retained.",
+      evidence: [
+        {
+          id: "dnat",
+          title: "Docker NAT",
+          basis: "observed",
+          state: "observed",
+          scope: "nat table, DOCKER chain",
+          owner: "Docker",
+          ownerPath: "/docker",
+          checkedAt: now,
+          summary: "Docker's rule translates host port 443 to 172.17.0.2:443.",
+          facts: [],
+          limitations: [],
+        },
+        {
+          id: "provider",
+          title: "Provider policy",
+          basis: "unknown",
+          state: "unknown",
+          scope: "upstream of this host",
+          owner: "Provider",
+          checkedAt: now,
+          summary: "No provider adapter is configured.",
+          facts: [],
+          limitations: [],
+        },
+      ],
+    })
+  })
+  await page.goto(`/docker/containers/${detail.id}`)
+  const ports = page.getByRole("table").filter({ hasText: "Published" })
+  const port = ports.getByRole("row").filter({ hasText: "443/tcp" })
+  await expect(port).toHaveAttribute("title", /reaching it from outside is unproven/)
+  await port.getByRole("button", { name: "Trace the path to port 443/tcp", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "Path to host port 443" })
+  await expect(sheet.getByRole("heading", { name: "Outside this host → web" })).toBeVisible()
+  await expect(sheet.getByText(/any outside address → 172.17.0.2/)).toBeVisible()
+  await expect(sheet.getByRole("heading", { name: "Provider policy", exact: true })).toBeVisible()
+  expect(asked?.searchParams.get("family")).toBe("inet")
+  expect(asked?.searchParams.get("protocol")).toBe("tcp")
+
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      capabilities: ["read", "service.control"],
+      user: { ...user.user, role: "limited" },
+    }),
+  )
+  await page.reload()
+  await expect(port).toHaveAttribute("title", /reaching it from outside is unproven/)
+  await expect(page.getByRole("button", { name: /^Trace the path/ })).toHaveCount(0)
+})

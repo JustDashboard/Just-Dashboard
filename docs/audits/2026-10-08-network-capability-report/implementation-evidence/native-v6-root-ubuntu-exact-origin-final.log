@@ -1,0 +1,14 @@
+=== RUN   TestNativeManagerOwnerLive
+    native_manager_live_test.go:224: native owner acceptance:
+        === RUN   TestNativeManagerOwnerLive
+        === RUN   TestNativeManagerOwnerLive/transport-epoch
+            native_manager_live_test.go:322: Authenticated transport GUID is pinned; mismatched and actual prior-bus epochs refuse before RequestName effects
+        === RUN   TestNativeManagerOwnerLive/netplan-NetworkManager
+            native_manager_live_test.go:582: Native confirmation save failure, process death after durable confirmation, and lost terminal cleanup outcome recovered through fresh helpers
+            native_manager_live_test.go:584: netplan-NetworkManager actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed
+        --- PASS: TestNativeManagerOwnerLive (20.00s)
+            --- PASS: TestNativeManagerOwnerLive/transport-epoch (0.05s)
+            --- PASS: TestNativeManagerOwnerLive/netplan-NetworkManager (19.93s)
+        PASS
+--- PASS: TestNativeManagerOwnerLive (53.53s)
+PASS

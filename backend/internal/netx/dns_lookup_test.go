@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -204,7 +206,7 @@ func TestLookupRacesEveryResolver(t *testing.T) {
 	})
 	lookupTimeout = 600 * time.Millisecond
 
-	res, err := s.Lookup(context.Background(), "Example.com", "a", true)
+	res, err := s.LookupWithOptions(context.Background(), "Example.com", "a", LookupOptions{Mode: "compare", AcknowledgeDisclosure: true, Destinations: []string{"127.0.0.53", "203.0.113.53", "100.64.0.53", "fd7a:115c:a1e0::53", "1.1.1.1", "1.1.1.2", "9.9.9.9", "8.8.8.8", "94.140.14.14", "194.242.2.3"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +260,8 @@ func TestLookupRecordTypes(t *testing.T) {
 	routeDNS(t, map[string]string{"198.51.100.53": srv})
 	lookupTimeout = 500 * time.Millisecond
 
-	targets := s.lookupTargets(context.Background())
-	if targets[0].server != "198.51.100.53" || targets[0].label != "resolv.conf" {
+	targets, _ := s.lookupDestinationInventory(s.readResolved(context.Background(), false))
+	if targets[0].Server != "198.51.100.53" || targets[0].Label != "resolv.conf" {
 		t.Fatalf("without resolved the resolv.conf servers are asked: %+v", targets[0])
 	}
 
@@ -299,16 +301,63 @@ func TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault(t *testing.T) {
 	rec := record(t)
 	rec.on("systemctl is-active systemd-resolved", "inactive\n")
 	pointResolvConf(t, "static")
-	server := startFakeDNS(t, answerA("192.0.2.7"))
+	var asked atomic.Int32
+	server := startFakeDNS(t, func(name string, qtype uint16) dnsBehavior {
+		asked.Add(1)
+		return answerA("192.0.2.7")(name, qtype)
+	})
 	routeDNS(t, map[string]string{"198.51.100.53": server})
-	res, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
-	if err != nil || len(res.Answers) != 2 || res.Answers[0].Server != "198.51.100.53" || len(res.Answers[0].Answers) != 1 {
-		t.Fatalf("private name lookup = %+v, %v", res, err)
+	// The static chain lists a public resolver first: a private name is refused
+	// before a packet leaves, and no preset is asked instead.
+	_, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
+	var refusal *DNSPolicyRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "dns_private_name_public_upstream" || !strings.Contains(refusal.Reason, "198.51.100.53") || asked.Load() != 0 {
+		t.Fatalf("private name lookup = %v (asked %d)", err, asked.Load())
 	}
-	for _, a := range res.Answers {
-		if a.Label != "resolv.conf" {
-			t.Errorf("private name sent outside configured resolvers: %+v", a)
+	// A search domain of the chain is private too.
+	if _, err := testService(t).Lookup(context.Background(), "git.example.internal", "A"); !errors.As(err, &refusal) || asked.Load() != 0 {
+		t.Fatalf("search-domain lookup = %v", err)
+	}
+	// A public name still goes to the configured resolver alone.
+	res, err := testService(t).Lookup(context.Background(), "example.com", "A")
+	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "198.51.100.53" || res.Answers[0].Label != "resolv.conf effective policy" {
+		t.Fatalf("public name lookup = %+v, %v", res, err)
+	}
+}
+
+// A chain of private resolvers may forward a private name on to a public one;
+// that is unseen here, so the name needs an acknowledgement, and then goes to
+// the configured resolver only.
+func TestLookupAsksBeforeSendingPrivateNamesToUnseenForwarding(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive\n")
+	path := pointResolvConf(t, "static")
+	if err := os.WriteFile(path, []byte("search home.example\nnameserver 10.0.0.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var asked atomic.Int32
+	server := startFakeDNS(t, func(name string, qtype uint16) dnsBehavior {
+		asked.Add(1)
+		return answerA("10.0.0.7")(name, qtype)
+	})
+	routeDNS(t, map[string]string{"10.0.0.53": server})
+	s := testService(t)
+	_, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{})
+	var refusal *DNSPolicyRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "dns_private_name_unknown_forwarding" || asked.Load() != 0 {
+		t.Fatalf("unacknowledged = %v (asked %d)", err, asked.Load())
+	}
+	res, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{AcknowledgeForwarding: true})
+	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "10.0.0.53" || asked.Load() != 1 || !strings.Contains(res.Note, "with acknowledgement") {
+		t.Fatalf("acknowledged = %+v, %v", res, err)
+	}
+	for _, rtype := range []string{"PTR"} {
+		if _, err := s.LookupWithOptions(context.Background(), "10.0.0.7", rtype, LookupOptions{}); !errors.As(err, &refusal) {
+			t.Fatalf("private reverse name = %v", err)
 		}
+	}
+	if _, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{Mode: "compare", Destinations: []string{"10.0.0.53"}, AcknowledgeDisclosure: true, AcknowledgeForwarding: true}); err == nil {
+		t.Fatal("comparison accepted a forwarding acknowledgement")
 	}
 }
 
@@ -321,14 +370,130 @@ Link 2 (eth0)
 Link 3 (eth1)
  DNS Servers: fe80::53
 `)
-	targets := testService(t).lookupTargets(context.Background())
+	service := testService(t)
+	targets, _ := service.lookupDestinationInventory(service.readResolved(context.Background(), false))
 	byServer := map[string]string{}
 	for _, target := range targets {
-		byServer[target.server] = target.label
+		byServer[target.Server] = target.Label
 	}
 	for server, label := range map[string]string{"192.0.2.53:5353": "global upstream", "192.0.2.53:1053": "global upstream", "fe80::53%eth0": "eth0", "fe80::53%eth1": "eth1"} {
 		if byServer[server] != label {
 			t.Errorf("%s label = %q, want %q", server, byServer[server], label)
 		}
+	}
+}
+
+func TestEffectiveLookupDelegatesSplitDNSOnlyToSafeguardedNativeOwner(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "active\n").on("resolvectl status --no-pager", fixture(t, "dns-resolvectl-status.txt"))
+	pointResolvConf(t, "stub")
+	previousDial, previousNative := dnsDial, dnsNativeExecutor
+	dnsDial = func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("effective lookup used an alias-chasing wire stub")
+		return nil, nil
+	}
+	questions := []string{}
+	dnsNativeExecutor = dnsAliasExecutor(t, map[string]string{"alias.corp.example": "secret.corp.example"}, nil, &questions)
+	t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
+	result, err := testService(t).Lookup(t.Context(), "alias.corp.example", "A")
+	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Answers[0].Answers[0] != "192.0.2.7" || result.Mode != "effective" || len(questions) != 3 || !strings.Contains(result.Route, "vpn0") {
+		t.Fatalf("effective lookup=%+v,%v questions=%v", result, err, questions)
+	}
+}
+
+func TestEffectiveLookupDoesNotBypassUnreadableNativePolicy(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "active").fail("resolvectl status --no-pager", "scope evidence unavailable")
+	pointResolvConf(t, "stub")
+	previousDial, previousNative := dnsDial, dnsNativeExecutor
+	calls := 0
+	dnsDial = func(context.Context, string, string) (net.Conn, error) {
+		calls++
+		return nil, errors.New("stub disabled")
+	}
+	var queries atomic.Int32
+	base := dnsEvidenceExecutor(t, dnsFlagDNS|dnsFlagNetwork, &queries)
+	dnsNativeExecutor = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "busctl" && len(args) > 7 && args[7] == "GetAll" {
+			return "", errors.New("native policy unavailable")
+		}
+		return base(ctx, name, args...)
+	}
+	t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
+	result, err := testService(t).Lookup(t.Context(), "secret.corp.example", "A")
+	if err == nil || result != nil || !strings.Contains(err.Error(), "policy is unreadable") || calls != 0 || queries.Load() != 0 {
+		t.Fatalf("lookup=%+v,%v wire=%d native=%d", result, err, calls, queries.Load())
+	}
+}
+
+func TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope(t *testing.T) {
+	for _, mode := range []string{"inactive", "serverless"} {
+		t.Run(mode, func(t *testing.T) {
+			rec := record(t)
+			rec.on("systemctl is-active systemd-resolved", "active").on("resolvectl status --no-pager", fixture(t, "dns-resolvectl-status.txt"))
+			pointResolvConf(t, "stub")
+			previousDial, previousNative := dnsDial, dnsNativeExecutor
+			calls := 0
+			dnsDial = func(context.Context, string, string) (net.Conn, error) {
+				calls++
+				return nil, errors.New("query must not be sent")
+			}
+			var queries atomic.Int32
+			base := dnsEvidenceExecutor(t, dnsFlagDNS|dnsFlagNetwork, &queries)
+			dnsNativeExecutor = func(ctx context.Context, name string, args ...string) (string, error) {
+				out, err := base(ctx, name, args...)
+				if name == "busctl" && len(args) > 7 && args[7] == "GetAll" {
+					if strings.HasSuffix(args[5], "/_37") {
+						if mode == "inactive" {
+							out = strings.ReplaceAll(out, `"ScopesMask":{"data":1,"type":"t"}`, `"ScopesMask":{"data":0,"type":"t"}`)
+						} else {
+							out = strings.ReplaceAll(out, `[[2,[10,0,0,53],0,"dns.corp.example"]]`, `[]`)
+						}
+					} else if mode == "serverless" {
+						out = strings.ReplaceAll(out, `,[7,2,[10,0,0,53],0,"dns.corp.example"]`, "")
+					}
+				}
+				return out, err
+			}
+			t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
+			result, err := testService(t).Lookup(t.Context(), "secret.corp.example", "A")
+			if err == nil || result != nil || calls != 0 || queries.Load() != 0 || !strings.Contains(err.Error(), "best-match DNS scope is unavailable") {
+				t.Fatalf("private fallback: %+v %v wire=%d native=%d", result, err, calls, queries.Load())
+			}
+		})
+	}
+}
+
+func TestLookupComparisonRequiresNamedDestinationsAndDisclosure(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive")
+	pointResolvConf(t, "static")
+	for _, opts := range []LookupOptions{
+		{Mode: "compare"},
+		{Mode: "compare", Destinations: []string{"1.1.1.1"}},
+		{Mode: "compare", AcknowledgeDisclosure: true},
+		{Mode: "compare", Destinations: []string{"127.0.0.1:9999"}, AcknowledgeDisclosure: true},
+		{Mode: "effective", Destinations: []string{"1.1.1.1"}, AcknowledgeDisclosure: true},
+		{Mode: "invalid"},
+		{Mode: "compare", Destinations: strings.Fields(strings.Repeat("1.1.1.1 ", maxLookupResolvers+1)), AcknowledgeDisclosure: true},
+	} {
+		if _, err := testService(t).LookupWithOptions(context.Background(), "private.corp.example", "A", opts); err == nil {
+			t.Fatalf("accepted disclosure request %+v", opts)
+		}
+	}
+	if _, err := testService(t).Lookup(context.Background(), "private.corp.example", "A", true); err == nil {
+		t.Fatal("legacy fan-out flag accepted")
+	}
+}
+
+func TestLookupComparisonContactsOnlyNamedDestination(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive")
+	pointResolvConf(t, "static")
+	upstream := startFakeDNS(t, answerA("192.0.2.77"))
+	routeDNS(t, map[string]string{"1.1.1.1": upstream})
+	result, err := testService(t).LookupWithOptions(context.Background(), "nas.home.arpa", "A", LookupOptions{Mode: "compare", Destinations: []string{"1.1.1.1", "1.1.1.1"}, AcknowledgeDisclosure: true})
+	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Answers[0].Server != "1.1.1.1" || !strings.Contains(result.Note, "Private names") {
+		t.Fatalf("named comparison=%+v,%v", result, err)
 	}
 }

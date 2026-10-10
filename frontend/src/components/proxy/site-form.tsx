@@ -634,6 +634,10 @@ function SiteFormBody({
         // the two wins, rather than their change being written over.
         refused.current = true
         setReads((n) => n + 1)
+      } else if (err instanceof ApiError && err.code === "load_refused") {
+        // nginx's master refused the file at the reload — a port another
+        // program holds — and the site was put back; the draft stays here.
+        notify.error("Not applied: nginx could not take it up", err)
       } else {
         notify.error("Not applied", err)
       }

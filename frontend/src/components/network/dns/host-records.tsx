@@ -3,15 +3,23 @@
 import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Plus, Trash } from "@/components/icons"
-import { ApiError, put, refusedIndex } from "@/lib/api"
+import { ApiError, get, post, put, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { HostRecords } from "@/lib/types"
+import type {
+  HostNameResolution,
+  HostRecordIssue,
+  HostRecords,
+  HostRecordsPreview,
+  HostResolutionEvidence,
+} from "@/lib/types"
 import { Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { issueMatters, issuesByRecord } from "@/components/network/dns/resolvers"
 import {
   Table,
   TableBody,
@@ -58,6 +66,13 @@ export function HostRecordsEditor({
   const [edits, setEdits] = useState<{ rows: Row[]; next: number }>()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ row?: number; message: string }>()
+  // The overlaps of the rows as last previewed, keyed to the rows they were
+  // previewed for; an edit clears them, so a stale warning never sits beside
+  // a row that no longer says it.
+  const [preview, setPreview] = useState<{ keys: number[]; value: HostRecordsPreview }>()
+  const [evidence, setEvidence] = useState<HostResolutionEvidence>()
+  const [checking, setChecking] = useState(false)
+  const [evidenceError, setEvidenceError] = useState<string>()
   const rows = edits?.rows ?? saved
   const next = edits?.next ?? saved.length
   // A half-written row is a mistake; an empty one is the one just added.
@@ -68,12 +83,44 @@ export function HostRecordsEditor({
   const update = (nextRows: Row[], nextKey = next) => {
     setEdits({ rows: nextRows, next: nextKey })
     setRefusal(undefined)
+    setPreview(undefined)
   }
   const change = (key: number, patch: Partial<Row>) =>
     update(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
 
   const incomplete = (r: Row) => !r.address.trim() || words(r.names).length === 0
   const firstBad = used.find(incomplete)
+
+  const payload = used.map((r) => ({ address: r.address.trim(), names: words(r.names) }))
+  const refuseAt = (err: unknown) => {
+    const index = refusedIndex(err instanceof ApiError ? err.field : undefined, "records")
+    setRefusal({
+      row: index === undefined ? undefined : used[index]?.key,
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+
+  const checkResolution = async () => {
+    setChecking(true)
+    setEvidenceError(undefined)
+    try {
+      setEvidence(await get<HostResolutionEvidence>("/network/dns/hosts/resolution"))
+    } catch (err) {
+      setEvidenceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  // Previewing names every overlap against the file as it is now; Save
+  // previews first and stops on one that changes which address a program
+  // gets, until the reader saves again having seen it.
+  const previewRecords = async () => {
+    const value = await post<HostRecordsPreview>("/network/dns/hosts/preview", { records: payload })
+    setPreview({ keys: used.map((r) => r.key), value })
+    return value
+  }
+  const reviewed = preview && preview.keys.join(",") === used.map((r) => r.key).join(",")
 
   const save = async () => {
     if (firstBad) {
@@ -86,22 +133,30 @@ export function HostRecordsEditor({
     setBusy(true)
     setRefusal(undefined)
     try {
-      await put("/network/dns/hosts", {
-        records: used.map((r) => ({ address: r.address.trim(), names: words(r.names) })),
-      })
+      if (!reviewed) {
+        const value = await previewRecords()
+        if (value.issues.some(issueMatters)) return
+      }
+      await put("/network/dns/hosts", { records: payload })
       notify.success("Host records saved")
       setEdits(undefined)
+      setPreview(undefined)
       onSaved()
+      if (payload.length > 0) void checkResolution()
     } catch (err) {
-      const index = refusedIndex(err instanceof ApiError ? err.field : undefined, "records")
-      setRefusal({
-        row: index === undefined ? undefined : used[index]?.key,
-        message: err instanceof Error ? err.message : String(err),
-      })
+      refuseAt(err)
     } finally {
       setBusy(false)
     }
   }
+  const byRecord: Map<number, HostRecordIssue[]> = preview
+    ? issuesByRecord(preview.value.issues)
+    : new Map()
+  const rowIssues = (key: number) => {
+    const index = preview?.keys.indexOf(key) ?? -1
+    return index >= 0 ? (byRecord.get(index) ?? []) : []
+  }
+  const blocking = preview?.value.issues.some(issueMatters) ?? false
 
   return (
     <Section
@@ -187,6 +242,18 @@ export function HostRecordsEditor({
                         {refusal.message}
                       </p>
                     )}
+                    {rowIssues(row.key).map((issue, at) => (
+                      <p
+                        key={`${issue.kind}:${issue.name}:${at}`}
+                        className={
+                          issueMatters(issue)
+                            ? "col-span-2 text-hint text-warning sm:col-span-3"
+                            : "col-span-2 text-hint text-muted-foreground sm:col-span-3"
+                        }
+                      >
+                        <span className="font-mono">{issue.name}</span>: {issue.detail}
+                      </p>
+                    ))}
                   </li>
                 )
               })}
@@ -197,16 +264,57 @@ export function HostRecordsEditor({
               {refusal.message}
             </p>
           )}
-          <div className="flex items-center gap-2">
+          {preview && (
+            <div role="status" className="flex min-w-0 flex-col gap-1">
+              <p className="text-body">
+                {preview.value.issues.length === 0
+                  ? "No overlaps with each other or with the rest of the file."
+                  : `${plural(preview.value.issues.length, "overlap")} with the records or the rest of the file.`}
+                {blocking && " Save again to write them as they are."}
+              </p>
+              <p className="numeric text-hint text-muted-foreground">
+                {plural(preview.value.added.length, "record")} added ·{" "}
+                {plural(preview.value.removed.length, "record")} removed
+              </p>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => void save()} disabled={!dirty || locked} pending={busy}>
-              Save
+              {blocking && reviewed ? "Save anyway" : "Save"}
             </Button>
+            {dirty && !locked && (
+              <Button
+                variant="outline"
+                onClick={() => void previewRecords().catch(refuseAt)}
+                disabled={busy || Boolean(firstBad)}
+              >
+                Preview overlaps
+              </Button>
+            )}
             {dirty && (
-              <Button variant="ghost" onClick={() => setEdits(undefined)} disabled={busy}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEdits(undefined)
+                  setPreview(undefined)
+                }}
+                disabled={busy}
+              >
                 Discard
               </Button>
             )}
+            {records.managed.length > 0 && !dirty && (
+              <Button variant="outline" onClick={() => void checkResolution()} pending={checking}>
+                Check local resolution
+              </Button>
+            )}
           </div>
+          {evidenceError && (
+            <p role="alert" className="text-body text-destructive">
+              {evidenceError}
+            </p>
+          )}
+          {evidence && <ResolutionEvidence evidence={evidence} />}
         </div>
 
         {records.other.length > 0 && (
@@ -247,5 +355,58 @@ export function HostRecordsEditor({
         )}
       </div>
     </Section>
+  )
+}
+
+const RESOLUTION: Record<
+  HostNameResolution["state"],
+  { label: string; tone: "running" | "warning" | "notice" }
+> = {
+  matches: { label: "Resolves as written", tone: "running" },
+  includes: { label: "Another address first", tone: "warning" },
+  differs: { label: "Resolves elsewhere", tone: "warning" },
+  unresolved: { label: "Not resolved", tone: "warning" },
+  unknown: { label: "Not checked", tone: "notice" },
+}
+
+/**
+ * What the host's own NSS answers for each managed name, through
+ * nsswitch.conf the way any program on the host would ask: the address it
+ * returns first for each family, against the address written here.
+ */
+function ResolutionEvidence({ evidence }: { evidence: HostResolutionEvidence }) {
+  return (
+    <section aria-label="Local resolution" className="flex min-w-0 flex-col gap-2">
+      <p className="text-hint text-muted-foreground">
+        hosts: <span className="font-mono">{evidence.hosts}</span> · checked{" "}
+        {new Date(evidence.checkedAt).toLocaleTimeString()}
+        {evidence.omitted > 0 && ` · ${plural(evidence.omitted, "name")} past the bound not asked`}
+      </p>
+      <ul className="flex min-w-0 flex-col divide-y divide-hairline">
+        {evidence.names.map((n) => (
+          <li key={n.name} className="flex min-w-0 flex-col gap-1 py-2">
+            <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
+              <p className="min-w-0 font-mono text-body">{n.name}</p>
+              <Status tone={RESOLUTION[n.state].tone} label={RESOLUTION[n.state].label} />
+            </div>
+            <p className="text-hint break-words text-muted-foreground">
+              written <span className="font-mono">{n.configured.join(" ")}</span>
+              {n.ipv4.length + n.ipv6.length > 0 && (
+                <>
+                  {" "}
+                  · answered <span className="font-mono">{[...n.ipv4, ...n.ipv6].join(" ")}</span>
+                </>
+              )}{" "}
+              · {n.detail}
+            </p>
+          </li>
+        ))}
+      </ul>
+      {evidence.limitations.map((line) => (
+        <p key={line} className="text-hint text-muted-foreground">
+          {line}
+        </p>
+      ))}
+    </section>
   )
 }

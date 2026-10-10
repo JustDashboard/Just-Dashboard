@@ -89,6 +89,28 @@ func TestUnitRestoresEverythingAndAdmitsOnlyWhenNeeded(t *testing.T) {
 	if strings.Index(with, "-iptables -D FORWARD") > strings.Index(with, "-iptables -I FORWARD") {
 		t.Error("delete must precede insert")
 	}
+	// A fresh boot has no rule to delete. The deletes are preparation, not
+	// restoration, so their expected failure is not a measured boot result.
+	for _, unit := range []string{without, with} {
+		if strings.Contains(unit, "ExecStart=-iptables -D") || strings.Contains(unit, "ExecStart=-ip6tables -D") || !strings.Contains(unit, "ExecStartPre=-ip6tables -D DOCKER-USER") {
+			t.Errorf("admission deletes must be ExecStartPre lines:\n%s", unit)
+		}
+	}
+}
+
+func TestUnitClearsShapingBeforeItsBatchAndOutsideTheRestoration(t *testing.T) {
+	s := testService(t)
+	sp := gwShapeSpec()
+	unit := s.unitFor(sp)
+	batch := renderShaping(sp)
+	if strings.Contains(batch, " del ") {
+		t.Fatalf("a delete stayed in the batch whose exit is the boot result:\n%s", batch)
+	}
+	for _, want := range []string{"ExecStartPre=-tc qdisc del dev eth0 root", "ExecStartPre=-tc filter del dev eth0 parent ffff: prio 1", "ExecStartPre=-tc filter del dev wg0 parent ffff: prio 1"} {
+		if !strings.Contains(unit, want+"\n") || strings.Index(unit, want) > strings.Index(unit, "ExecStart=-tc -force -batch") {
+			t.Errorf("unit lacks %q before the batch:\n%s", want, unit)
+		}
+	}
 }
 
 func TestCommitNeedsNoNftForAChangeOutsideTheGateway(t *testing.T) {

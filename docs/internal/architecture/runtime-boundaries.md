@@ -6,7 +6,9 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
+`linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
+`dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
+`ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -39,6 +41,31 @@ Startup marks interrupted archive runs failed and reconciles owned restore-check
 scheduling new backups. Interrupted restore checks are cleaned and recorded as failed, never promoted
 to recovery proof. Managed database network reconciliation follows retained environment bindings every
 five seconds and stops before deployment engine shutdown.
+Saved network diagnostics settle predecessor runs as interrupted at startup and never replay their
+probes. A recording failure leaves the service unavailable until a bounded pending write can be
+retained; it does not relaunch the probe. Shutdown cancels and drains active diagnostic jobs through
+their existing process-group cancellation. Saved artifacts and generic job views of those artifacts
+remain administrator-only. See [diagnostic lifecycle](../backend/network-diagnostics.md).
+Private PCAP startup marks unfinished captures interrupted without replay. Shutdown cancels and
+drains their native groups; a separate host `timeout` bounds a capture even after backend death.
+A final recording failure retains bounded pending data and blocks new launches until the same write
+can be retried. Capture changes no host network configuration. See
+[capture lifecycle](../backend/network-captures.md).
+Socket history starts independently of page reads and collects only after persisted admin opt-in.
+Shutdown cancels its bounded native capture and drains it before closing Docker. IPAM reconciles
+interrupted native handoffs to held review state at initialization, without replay or native cleanup.
+Controlled vantage checks persist signed single-use leases and expire lost results without repeating
+traffic; no polling listener or scanner is installed on a source by the dashboard.
+The separate Socket History collector stays off by default. Its explicitly opted-in kernel observer
+holds only owned unpinned cgroup links, drains bounded event batches through a durable SQLite receipt,
+and retains failed detach state for retry. Shutdown reports an unsuccessful final write or detach;
+restart records interruption and never automatically reloads the observer. Ordinary history opt-out
+requires an explicit observer stop first so it cannot bypass the destructive route and its rate budget. See
+[the observer contract](../backend/network-flow-observer.md).
+Native DNS services reconcile interrupted reviewed changes and owned setup/removal during startup
+with a forty-second deadline. They never replay native mutations or bootstrap, and retain verified
+owned engines. Shutdown closes the module's Docker SDK client without stopping those engines. See
+[native DNS service lifecycle](../backend/network-dns-services.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
@@ -156,17 +183,28 @@ Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
 blueprint installs, port and queue leases, removals, drafts, schedules, Git watch cursors, notifications,
 and previews; proxy
-watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
+watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`, holding TLS watches and TCP network probes by `kind`, with each check in `watched_checks`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
 hashed rather than stored); the general `settings` key/value table; mount, container, interface
 (`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
-configurations (`network_vpn_clients`). What the network module makes on the host is kept in
+configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
+packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
+(`network_probe_vantages`, `network_probe_checks`), shared planning pools/reservations
+(`network_ipam_pools`, `network_ipam_reservations`), private native DNS investigation records
+(`network_dns_evidence`), private native DNS service connections, reviewed changes, provisions and
+resource owner identity (`network_dns_services`, `network_dns_service_changes`,
+`network_dns_service_provisions`, `network_dns_service_settings`), socket-hour/coverage records
+(`network_flow_buckets`, `network_flow_cycles`), and gateway counter totals across table generations
+with seven days of per-minute protection samples (`network_gateway_counters`,
+`network_protection_samples`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
-the database being tampered with. An `Entry` records who (user, role, `Actor` = session or token), from
+the database being tampered with. The row is written with the request's values but not its
+cancellation (bounded at five seconds), so a client that disconnects once its mutation applied still
+leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.

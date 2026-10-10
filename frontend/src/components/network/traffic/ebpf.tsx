@@ -4,6 +4,7 @@ import { useState } from "react"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { EBPFView } from "@/lib/types"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
 import { Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -21,8 +22,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallHandoff, InstallFollowUp } from "@/components/network/install"
 import { LinkGlyph } from "@/components/network/marks"
+import { EBPFProgramSheet } from "@/components/network/traffic/ebpf-detail"
+import type { EBPFPlatform } from "@/lib/network-traffic"
 
 const num = (value: number) => value.toLocaleString()
 
@@ -37,11 +40,16 @@ const num = (value: number) => value.toLocaleString()
  *
  * The type counts are filters: a press narrows the table to that type, and the
  * run counts are drawn only where the kernel keeps them (`bpf_stats_enabled`),
- * because a column of zeros would read as programs that never ran.
+ * because a column of zeros would read as programs that never ran. What the
+ * kernel offers eBPF — JIT, unprivileged loading, BTF, the bpf filesystem —
+ * is read from its own files and stated under the figures; a program opens
+ * into its maps, every place it is attached and its cost per run, and the
+ * programs of the dashboard's own kernel observer are marked as such.
  */
 export function EBPFSection() {
   const ebpf = usePoll<EBPFView>((signal) => get("/network/ebpf", undefined, signal), 30_000)
   const [type, setType] = useState<string>()
+  const [opened, setOpened] = useState<number>()
 
   if (!ebpf.data) {
     return (
@@ -54,6 +62,12 @@ export function EBPFSection() {
   if (!view.installed) {
     return (
       <Section title="eBPF">
+        <NetworkReadWarning
+          error={ebpf.error}
+          refresh={ebpf.refresh}
+          lastSuccess={ebpf.lastSuccess}
+          reading="eBPF inventory"
+        />
         <InstallHandoff
           pkg={view.package ?? "bpftool"}
           products={["linux"]}
@@ -67,11 +81,19 @@ export function EBPFSection() {
   const programs = type ? view.programs.filter((p) => p.type === type) : view.programs
   const stats = view.bpfStatsEnabled
   const memlock = view.programs.reduce((n, p) => n + p.memlock, 0)
+  const observer = new Set(view.observerProgramIds ?? [])
 
   return (
     <Section title="eBPF">
+      <NetworkReadWarning
+        error={ebpf.error}
+        refresh={ebpf.refresh}
+        lastSuccess={ebpf.lastSuccess}
+        reading="eBPF inventory"
+      />
+      <InstallFollowUp pkg={view.package ?? "bpftool"} />
       {view.error && <Notice title="bpftool reported a problem">{view.error}</Notice>}
-      <StatGrid columns={3}>
+      <StatGrid columns={4}>
         <StatTile
           label="Programs"
           value={<NumberTicker value={view.total} />}
@@ -91,7 +113,23 @@ export function EBPFSection() {
               : "to no network device"
           }
         />
+        <StatTile
+          label="On cgroups"
+          value={
+            view.cgroupAttachments === undefined ? (
+              "—"
+            ) : (
+              <NumberTicker value={view.cgroupAttachments} />
+            )
+          }
+          hint={
+            view.cgroupAttachments === undefined
+              ? "the cgroup tree could not be read"
+              : "service firewalls, device filters and observers"
+          }
+        />
       </StatGrid>
+      {view.platform && <PlatformFacts platform={view.platform} />}
 
       {view.attachments.length > 0 && (
         <Panel plain>
@@ -164,10 +202,20 @@ export function EBPFSection() {
                   </TableCell>
                   <TableCell className="font-mono whitespace-nowrap">{p.type}</TableCell>
                   <TableCell>
-                    {p.name ? (
-                      <span className="font-mono">{p.name}</span>
-                    ) : (
-                      <span className="text-muted-foreground">unnamed</span>
+                    <button
+                      type="button"
+                      aria-label={`Open program ${p.id}`}
+                      onClick={() => setOpened(p.id)}
+                      className="rounded-sm text-left underline-offset-4 focus-ring hover:underline"
+                    >
+                      {p.name ? (
+                        <span className="font-mono">{p.name}</span>
+                      ) : (
+                        <span className="text-muted-foreground">unnamed</span>
+                      )}
+                    </button>
+                    {observer.has(p.id) && (
+                      <Tag className="ml-2">this dashboard&rsquo;s observer</Tag>
                     )}
                     {p.owners && p.owners.length > 0 && (
                       <span className="ml-2 text-hint text-muted-foreground">
@@ -193,10 +241,40 @@ export function EBPFSection() {
         </PanelBody>
       </Panel>
       <p className="text-hint text-muted-foreground">
-        This is what the kernel has loaded right now, read with bpftool; the dashboard runs no probe
-        of its own.
+        This is what the kernel has loaded right now, read with bpftool. The dashboard loads
+        programs only when its kernel observer is turned on in Socket history, and they are marked
+        here.
         {!stats && " Run counts are off: kernel.bpf_stats_enabled is 0."}
       </p>
+      {opened !== undefined && (
+        <EBPFProgramSheet id={opened} onClose={() => setOpened(undefined)} />
+      )}
     </Section>
+  )
+}
+
+const JIT_WORD: Record<string, string> = { "0": "off", "1": "on", "2": "on, with debug output" }
+const UNPRIVILEGED_WORD: Record<string, string> = {
+  "0": "allowed",
+  "1": "refused until reboot",
+  "2": "refused",
+}
+
+/** What the kernel offers eBPF, from its own files. */
+function PlatformFacts({ platform }: { platform: EBPFPlatform }) {
+  const facts = [
+    platform.kernel && `Kernel ${platform.kernel}`,
+    platform.jit &&
+      `JIT ${JIT_WORD[platform.jit] ?? platform.jit}${platform.jitHarden && platform.jitHarden !== "0" ? ", hardened" : ""}`,
+    platform.unprivilegedDisabled &&
+      `unprivileged loading ${UNPRIVILEGED_WORD[platform.unprivilegedDisabled] ?? platform.unprivilegedDisabled}`,
+    platform.btf ? "BTF type information present" : "no BTF type information",
+    platform.bpffs ? "bpf filesystem mounted" : "bpf filesystem not mounted",
+    platform.statsEnabled ? "run statistics on" : "run statistics off",
+  ].filter(Boolean)
+  return (
+    <p className="text-hint text-muted-foreground" aria-label="eBPF platform">
+      {facts.join(" · ")}
+    </p>
   )
 }

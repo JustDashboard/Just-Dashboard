@@ -96,14 +96,86 @@ the [route table](../backend/databases-proxy-platform.md#routes).
 - **Network.** The gateway and protection PUTs (`/network/gateway/forwards/{id}`, `/gateway/nat/{id}`,
   `/protection/limits/{id}`, `/protection/blocklists/{id}`) are `system.admin`, and ask for
   `destructive` and spend `destrLim` by hand when the body disables the entry; `POST
-  /network/protection/settings` does the same when a value weakens a kernel protection. Setting a
+  /network/protection/settings` does the same when a value weakens a kernel protection, and `PUT
+  /network/protection/trusted` when it sets an expiry on a kept address. Exceptions (both directions)
+  and session revocation are inside `s.destructive`; previews, the target check and the connection-
+  table pressure read are `system.admin` and change nothing on the host. Setting a
   device down and turning forwarding off are their own paths (`/down`, `/off`) inside `s.destructive`,
   so the two directions of one switch never share a route ([network module](../backend/network.md#routes)).
+- **Native network profiles.** Capability/profile reads and writes require an administrator session.
+  The native PUT accepts a typed generation/intent rather than filenames and always requires pending
+  confirmation. Editing and terminal cleanup retries use `s.destructive` and audit the selected device
+  or change ID. Cleanup is restricted to the current account's confirmed/recovered native journal and
+  never turns a confirmed decision into rollback ([native profiles](../backend/network-native-managers.md)).
 - **Container specs.** Container creation and recreation use `api.authoriseSpec`: privileged mode, added
   capabilities/devices, host/shared network namespaces and bind mounts require `system.admin`. Referenced
   network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a host
   bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and pass
   the configured file-root check, including for administrators.
+- **Docker network specs.** Creation requires `service.control`; a custom driver or any driver options
+  additionally require `system.admin`. Manual creation refuses Compose/dashboard ownership labels and
+  explicit address pools that contain the connection's observed client address before Engine I/O.
+  Additive IPv4/IPv6 IPAM pools retain the legacy single-pool API; validation and bounded metadata are
+  described in [Docker network creation](../backend/docker-files-logs.md#network-creation). A driver
+  other than `bridge` is checked against the Engine's catalogue before Engine I/O, and refused when the
+  catalogue cannot be read.
+- **Docker network membership and removal.** Connect and disconnect stay `service.control`, removal and
+  prune `s.destructive`, but each handler reads the network's dependents afresh and refuses what its
+  preview blocks (`dockerx.PreviewConnect`, `PreviewDisconnect`, `PreviewRemove`, `PruneCandidates`),
+  failing closed when the dependents cannot be read: the dashboard's own containers, the shared ingress
+  and a deployment's database-link members are never detached, no container joins the dashboard's own
+  network, and a live deployment's network is removed only through its removal plan. Prune removes only
+  the reviewed IDs still removable, never through the Engine's own prune. See
+  [guarded changes](../backend/docker-files-logs.md#network-ownership-dependencies-and-guarded-changes).
+- **Saved network diagnostics.** Launch, read, export, compare and cancel require `system.admin`.
+  The generic job list/get/stream/cancel routes apply that same gate to `network.diagnostic.*` jobs,
+  so artifact access cannot bypass the feature route. Deletion and retention changes additionally
+  use `s.destructive`; all mutations are audited. The connection investigator likewise requires
+  `system.admin` and accepts a closed source/target tuple rather than a PID, executable or argv.
+  Retained investigations use that same adapter and privilege boundary; comparison requires the
+  same requested source, family, protocol, port, address, mark and measurement choice.
+- **Private packet captures.** Every `/network/captures` route and generic `network.capture.*`
+  job view/cancel requires `system.admin`; deletion additionally uses `s.destructive`. Closed
+  typed filters produce fixed native argv without client paths or shell expressions. Mutations
+  are audited, and successful private PCAP/support downloads use `httpx.AuditRead`. Original bytes
+  remain sensitive; only the separate support metadata is redacted. See
+  [capture lifecycle](../backend/network-captures.md).
+- **Native DNS services.** Every `/network/dns/services` connection, native inventory, retained review
+  and owned setup route requires `system.admin` and returns private, no-store responses. Credentials
+  and custom trust material remain sealed/request-only; retained history omits native query entries.
+  Connection deletion, reviewed native apply, owned setup apply and owned resource removal use
+  `s.destructive`. All mutations record redacted audit metadata; a nonverified HTTP 200 outcome must
+  remain a retained review state ([native DNS services](../backend/network-dns-services.md)).
+- **Controlled probe identities.** Optional `/probe-agent/{enroll,poll,result}` routes run behind
+  the global allowlist and a dedicated limiter before human authentication. One-use enrollment
+  proofs or durable sequence-bound machine signatures grant only the closed probe protocol;
+  cookies/API tokens cannot replace them, and they grant no dashboard capabilities. Human
+  `/network/external` management/evidence requires `system.admin`; enrollment/revocation also
+  require a session and revocation is destructive. Secrets/raw proofs are excluded from audit.
+- **Private native DNS evidence.** Every `/network/dns/evidence` route requires `system.admin`,
+  including retained questions, answers and exports. Launch and deletion are audited, deletion uses
+  `s.destructive`, and reload/history/export never issue a DNS query. Unsupported or unavailable
+  private policy refuses before fallback. See [resolver evidence](../backend/network-dns-evidence.md).
+- **Address plans and socket history.** `/network/ipam` and `/network/flows` require `system.admin`;
+  release/retirement and history/policy erasure use `s.destructive`. A plan grants no native
+  ownership. Socket collection needs explicit persisted opt-in; querying/exporting never collect.
+  Failed native handoffs hold planning allocations for review without repeating native creation.
+- **Selected drift repair and SQM.** Drift reads retain `read`. The generation-bound selected
+  repair endpoint is admin/destructive/audited with mandatory pending reconnection and pre-effect
+  independent recovery. It can repair only reviewed owned files/canonical required admission;
+  other native repair remains advice. Explicit SQM set/clear also requires mandatory pending
+  reconnection, with a closed private typed undo. Selected drift recovery rejects that vocabulary.
+- **The access boundary.** A fail2ban ban, a CrowdSec decision and an SSH settings change are judged
+  by `api.boundaryGate` against the dashboard's access boundary (Caddy's listener, the pre-auth
+  allowlist, the tailnet, SSH for a tunnel, tailnet-only previews) after the request is validated
+  and before anything is applied: an impact that `cuts` this session's own way in answers
+  `409 would_lock_you_out`; one that `affects` the boundary for somebody else answers
+  `409 boundary_acknowledgement_required` until the body carries `acknowledgeBoundary: true`, which
+  the forms send only after showing the same sentences from `GET /security/boundary/check`. The
+  check is a GET so judging a proposal is never audited as a change. The existing own-address
+  guards are unchanged and still apply. A pending SSH apply (`X-JD-Network-Apply: pending` on
+  `POST /ssh/config`) is refused to anything but an administrator's interactive session and enrols
+  the apply in the network recovery journal before the first write.
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

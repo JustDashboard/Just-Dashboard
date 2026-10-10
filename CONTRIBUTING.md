@@ -71,6 +71,8 @@ to the contribution terms above, including the additional licence grant to the p
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
   the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
+  Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
+  it to use the existing Playwright worker setting.
 - Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
   locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
@@ -79,6 +81,88 @@ to the contribution terms above, including the additional licence grant to the p
   `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
   passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
   host's own interfaces, firewall or tailscaled.
+- Persistent native profile changes also follow the bounded
+  [native-owner acceptance](docs/internal/backend/network-native-managers.md#local-acceptance).
+  The fixture requires verified native userland and uses private net/mount/PID namespaces, private
+  `/etc`, `/run` and `/var/lib`, and explicit private NetworkManager state paths. It builds the actual
+  standalone recovery executable with a workspace-local `TMPDIR`. Native-owner activation does not
+  substitute for the separate systemd timer, DHCP/SLAAC, boot or structural bond/VRF requirements.
+  Include a canonical unchanged-intent transaction: equal bytes with a distinct candidate inode must
+  restore the captured authored inode during fresh-helper recovery. Confirmation and terminal retry
+  must retain the exact candidate inode. Keep original failed runs separately attributed.
+  The [automatic addressing/deadline fixture](docs/internal/backend/evidence/native-manager-automatic-2026-10-09.md)
+  has explicit `JD_NATIVE_AUTO_CASE=networkd` or `NetworkManager` selections for its verified direct
+  owner slices. Its default all-owner opt-in also runs the still-open Netplan admission cases; those
+  known refusals remain failed acceptance rather than successful skips.
+  `JD_NATIVE_AUTO_CASE=netplan JD_NATIVE_NETPLAN_AUTO_POLICY=explicit` selects the separately verified
+  authored Netplan/networkd DHCPv4/SLAAC policy with DHCP MTU disabled and explicit DHCP/RA domains.
+  Follow its [v8 source/helper proof](docs/internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md);
+  this selection does not replace the default-policy, DHCPv6 or structural acceptance requirements.
+- The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
+  Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
+  to compile the narrow test binary and run it as root. It creates a network-none fixture with no
+  published ports, verifies private DNS/source/route/TCP and restart identity, then removes it.
+- Kernel flow observer changes also run the targeted `internal/netflows` race suite and the opted-in
+  disposable cgroup/network-namespace fixtures. Build a race binary and invoke it with
+  `JD_NETFLOWS_OBSERVER_LIVE=1` as root in the host cgroup namespace; see the exact command and evidence
+  limits in [the observer contract](docs/internal/backend/network-flow-observer.md). These fixtures
+  never attach a production cgroup, replace a foreign program or migrate an unrelated process.
+  Docker attribution acceptance also needs a reachable Docker socket and the already cached
+  `python:3.11-slim` image; the fixture never pulls an image and removes its bounded test containers.
+- Independent network recovery also has a real systemd timer fixture. On a host with a reachable
+  systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
+  the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for
+  disposable namespaces, then removes those exact fixtures. It does not install persistent host
+  units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
+  reboot acceptance.
+- Native resolver evidence changes also run from `backend/`:
+  the private race test binary as root using the commands in
+  [native DNS investigations](docs/internal/backend/network-dns-evidence.md#controlled-validation).
+  This requires root or passwordless sudo and installed resolved/busctl/dbus-daemon/ip. It uses only
+  owned network/mount namespaces, private bus/configuration and a controlled signed TLS DNS fixture;
+  it never changes the host resolver. See [native DNS investigations](docs/internal/backend/network-dns-evidence.md).
+- Native DNS service changes run the selected private API, sealing, HTTP/TLS and owned-resource races,
+  then each actual pinned engine serially with `JD_DNS_SERVICES_LIVE_ENGINE`. See
+  [native DNS service acceptance](docs/internal/backend/network-dns-services.md#acceptance-status)
+  for the selected test binary, required already-cached images and exact owned cleanup scope.
+  These fixtures publish explicit high loopback ports and never redirect the host resolver.
+  Filter-inventory changes also verify native source/custom-rule metadata and restart persistence;
+  subscription loading and effective client filtering remain unmeasured. Retain failed and
+  corrected source/binary/raw records separately.
+  Filter UI changes run `network-dns-filters.spec.ts` against the matching production build; width
+  assertions must check the settled sheet against the viewport before capturing it.
+  Reviewed custom-domain filters also prove native allow/deny configuration with AdGuard suffix
+  versus Pi-hole exact semantics, selected-current reads, explicit group membership, duplicate/replay
+  refusal, restart persistence and unselected rule/comment/group/source preservation after removal.
+  Record/client UI changes also run the selected DNS service browser spec against a fresh production
+  build. Its mocks must supply `/changes/{id}/current` for the exact retained selection; ordinary
+  connection inventory cannot stand in for selected record/client freshness. Browser mocks and
+  actual engine acceptance remain separately attributed.
+- Controlled probe-agent changes also run from `backend/`:
+  `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
+  This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor
+  account. It measures real signed DNS/TCP/TLS in both families and refuses out-of-scope/untrusted
+  outcomes. It proves a separate controlled namespace, not a real external host or region.
+- Opt-in socket collector changes also run from `backend/`:
+  build the private test binary and run its selected fixtures as root using the commands in
+  [native socket history](docs/internal/backend/network-flow-accounting.md#measured-acceptance-and-its-limits).
+  The fixtures own
+  their disposable namespace and exact Docker containers with no published ports; native command
+  deadlines remain fixed, and a deadline failure is recorded as unavailable evidence. See
+  [native socket history](docs/internal/backend/network-flow-accounting.md) for tools and scope.
+- Advanced Docker network changes also run from `backend/`:
+  `JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`.
+  The fixture needs the local Docker socket, `ip` and cached `python:3.11-slim`; it never pulls an
+  image or publishes a port. It chooses pools outside observed host routes/Docker allocations,
+  creates an internal uniquely labeled dual-stack bridge and one exact owned container, verifies
+  native fields/alias/allocation/overlap refusal, then removes only its verified IDs.
+- Private PCAP changes also run from `backend/`:
+  `JD_NETCAPTURE_LIVE=1 go test -race ./internal/netcapture -run Live -count=1 -v`. The fixture
+  needs root or passwordless sudo plus host `ip`, `tcpdump`, `timeout` and Python. It creates and
+  removes only a uniquely named disposable namespace, checks known IPv4/IPv6 loopback packets,
+  bounds, cancellation and independent timeout after killing its own applying process. It never
+  captures production interfaces or starts public listeners. See
+  [capture verification](docs/internal/backend/network-captures.md#verification).
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

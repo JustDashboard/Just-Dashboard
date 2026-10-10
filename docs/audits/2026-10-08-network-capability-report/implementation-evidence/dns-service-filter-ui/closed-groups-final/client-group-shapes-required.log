@@ -1,0 +1,4 @@
+Against fe0dc97b: 6 changed files.
+Go packages: ./internal/api ./internal/dnsservice
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.365s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	17.158s

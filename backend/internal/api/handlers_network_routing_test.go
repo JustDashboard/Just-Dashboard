@@ -8,9 +8,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
+	"github.com/go-chi/chi/v5"
 )
+
+func TestKernelRouteLookupIsReadableAndRejectsProbeTargetsBeforeHostExecution(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited, auth.RoleAdmin} {
+		s, router := gatewayRouter(t, role, true)
+		router.Route("/routing-fixture", func(r chi.Router) { s.mountNetworkRoutingRoutes(r) })
+		for _, query := range []string{"", "target=private.example", "target=192.0.2.1&source=other.example", "target=192.0.2.1&source=2001:db8::1", "target=192.0.2.1&mark=1%2F255"} {
+			response := gwDo(router, http.MethodGet, "/routing-fixture/routing/lookup?"+query, "")
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("lookup as %s with %s = %d: %s", role, query, response.Code, response.Body)
+			}
+		}
+		if role != auth.RoleAdmin {
+			response := gwDo(router, http.MethodPost, "/routing-fixture/routing/routes", `{}`)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("read-only kernel explanation enabled route mutation: %d %s", response.Code, response.Body)
+			}
+		}
+	}
+}
 
 func TestNetworkForwardingDockerDependenciesCountEachFamily(t *testing.T) {
 	for _, test := range []struct {
@@ -110,5 +131,46 @@ func TestNetworkInventoryWithoutDockerIsKnownAbsent(t *testing.T) {
 	needs := dockerForwardingNeeds(inv)
 	if inv.DockerNetworksUnknown || needs.DockerNetworksUnknown || needs.DockerNetworks != 0 || needs.DockerIPv6Networks != 0 {
 		t.Fatalf("a host without Docker is not known absent: inventory %+v, needs %+v", inv, needs)
+	}
+}
+
+func TestRoutingHistoryPreviewsAndBGPRoutesRefuseMalformedRequestsBeforeTheHost(t *testing.T) {
+	s, router := gatewayRouter(t, auth.RoleAdmin, true)
+	router.Route("/routing-fixture", func(r chi.Router) { s.mountNetworkRoutingRoutes(r) })
+	cases := []struct {
+		method, path, body string
+		status             int
+		code               string
+	}{
+		{http.MethodGet, "/routing-fixture/routing/history?family=ipx", "", 400, "bad_request"},
+		{http.MethodGet, "/routing-fixture/routing/history?object=chain", "", 400, "bad_request"},
+		{http.MethodGet, "/routing-fixture/routing/history?target=private.example", "", 400, "bad_request"},
+		{http.MethodGet, "/routing-fixture/routing/history", "", 503, "history_unavailable"},
+		{http.MethodPost, "/routing-fixture/routing/routes/preview", `{"destination":""}`, 400, "bad_request"},
+		{http.MethodPost, "/routing-fixture/routing/routes/preview", `{"destination":"10.0.0.0/8","nexthops":[{"gateway":"10.0.0.1"}]}`, 400, "bad_request"},
+		{http.MethodPost, "/routing-fixture/routing/routes/abc/plan", `{"destination":"10.0.0.0/8","device":"d0"}`, 400, "bad_request"},
+		{http.MethodPost, "/routing-fixture/routing/rules/preview", `{"table":100}`, 409, "would_lock_you_out"},
+		{http.MethodPost, "/routing-fixture/routing/rules/preview", `{"from":"10.0.0.0/8","action":"goto","goto":5300}`, 409, "would_lock_you_out"},
+		{http.MethodGet, "/routing-fixture/bgp/routes?family=l2vpnEvpn", "", 400, "bad_request"},
+	}
+	for _, c := range cases {
+		response := gwDo(router, c.method, c.path, c.body)
+		if response.Code != c.status || !strings.Contains(response.Body.String(), c.code) {
+			t.Errorf("%s %s = %d %s, want %d %s", c.method, c.path, response.Code, response.Body, c.status, c.code)
+		}
+	}
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
+		s, router := gatewayRouter(t, role, true)
+		router.Route("/routing-fixture", func(r chi.Router) { s.mountNetworkRoutingRoutes(r) })
+		for _, c := range []struct{ method, path string }{
+			{http.MethodPost, "/routing-fixture/routing/routes/preview"},
+			{http.MethodPost, "/routing-fixture/routing/routes/1/plan"},
+			{http.MethodPost, "/routing-fixture/routing/rules/preview"},
+			{http.MethodPut, "/routing-fixture/routing/routes/1"},
+		} {
+			if response := gwDo(router, c.method, c.path, `{"destination":"10.0.0.0/8","device":"d0"}`); response.Code != http.StatusForbidden {
+				t.Errorf("%s may call %s %s: %d", role, c.method, c.path, response.Code)
+			}
+		}
 	}
 }

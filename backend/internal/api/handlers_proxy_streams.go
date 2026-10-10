@@ -31,6 +31,7 @@ func (s *Server) mountStreamRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/traffic", s.handle(s.handleStreamTrafficSummary))
 	r.Method(http.MethodGet, "/{name}/traffic", s.handle(s.handleStreamTraffic))
 	r.Method(http.MethodGet, "/{name}/sessions", s.handle(s.handleStreamSessions))
+	r.Method(http.MethodGet, "/{name}/path", s.handle(s.handleStreamPath))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleStreamPreview))
@@ -193,6 +194,26 @@ func (s *Server) handleStreamSessions(w http.ResponseWriter, r *http.Request) er
 		return httpx.Err(http.StatusInternalServerError, "sessions_unreadable", err.Error()).Retry()
 	}
 	httpx.JSON(w, http.StatusOK, sessions)
+	return nil
+}
+
+// handleStreamPath is one stream as the network page joins it: its forward,
+// state, the client sessions and backend connections nginx holds now and its
+// last hour by backend. It names addresses as the sessions do.
+func (s *Server) handleStreamPath(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	path, err := s.modules.proxy.StreamPath(ctx, httpx.URLParam(r, "name"), time.Now())
+	if errors.Is(err, proxysvc.ErrStreamName) {
+		return httpx.BadRequest("%s", err.Error())
+	}
+	if errors.Is(err, proxysvc.ErrStreamNotFound) {
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	}
+	if err != nil {
+		return httpx.Err(http.StatusInternalServerError, "stream_unreadable", err.Error()).Retry()
+	}
+	httpx.JSON(w, http.StatusOK, path)
 	return nil
 }
 

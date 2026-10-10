@@ -1,0 +1,39 @@
+source 86bd86a4 (VPN, diagnostics, topology, gateway and routing packages merged), 2026-10-09T19:22:23Z
+host before: netns=0 wg_links=0 nft_tables=d0e3b1cee4c9 ip_rules=1646c3d2cb97
+=== RUN   TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel
+--- PASS: TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel (4.92s)
+=== RUN   TestLiveBridgeVLANRecoveryAfterProcessDeath
+--- PASS: TestLiveBridgeVLANRecoveryAfterProcessDeath (0.34s)
+=== RUN   TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables
+--- PASS: TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables (5.66s)
+=== RUN   TestLiveUFWChangesAreRestoredByTheJournal
+--- PASS: TestLiveUFWChangesAreRestoredByTheJournal (9.79s)
+=== RUN   TestLiveModesGoldenLoadsAndDriftReadsItAsOwned
+--- PASS: TestLiveModesGoldenLoadsAndDriftReadsItAsOwned (0.37s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.87s)
+=== RUN   TestLiveMutationsAgainstARealKernel
+=== RUN   TestLiveMutationsAgainstARealKernel/refusals
+--- PASS: TestLiveMutationsAgainstARealKernel (22.31s)
+=== RUN   TestLiveRoutingMaturity
+--- PASS: TestLiveRoutingMaturity (6.25s)
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_false
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment/IPv6_transport_true
+--- PASS: TestLiveWireGuardDualStackSplitFullAndContainment (51.63s)
+=== RUN   TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks
+    wgkillswitch_live_test.go:138: IPv4 exit translated 2 client connections
+    wgkillswitch_live_test.go:138: IPv6 exit translated 2 client connections
+--- PASS: TestLiveWireGuardKillSwitchHoldsWhenTheTunnelBreaks (9.95s)
+=== RUN   TestLiveWireGuardSiteVerificationTransportGuardAndRestore
+    wgsite_live_test.go:94: verified: [{Name:handshake Status:pass Detail:handshake 0s ago} {Name:route 192.168.88.0/24 Status:pass Detail:routed into jdst} {Name:transport Status:pass Detail:172.32.0.2:51820 leaves through transport} {Name:tunnel address Status:pass Detail:10.80.0.2 answered 10.80.0.1 through the tunnel} {Name:target 192.168.88.10 Status:pass Detail:192.168.88.10 answered 10.80.0.1 through the tunnel}]
+    wgsite_live_test.go:175: history: site_verified restored removed site_verified site_verified peer_added created
+--- PASS: TestLiveWireGuardSiteVerificationTransportGuardAndRestore (17.21s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	129.414s
+netx exit=0
+=== RUN   TestLiveUFWParsesGuardsAndPlansAgainstTheRealTool
+--- PASS: TestLiveUFWParsesGuardsAndPlansAgainstTheRealTool (7.52s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	7.528s
+host after: netns=0 wg_links=0 nft_tables=d0e3b1cee4c9 ip_rules=1646c3d2cb97

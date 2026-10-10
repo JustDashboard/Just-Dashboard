@@ -10,6 +10,7 @@ import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
+import { flowNeighbours, nodeFlows } from "@/components/network/topology-reading"
 
 type Tone = "default" | "warning" | "danger"
 
@@ -42,9 +43,11 @@ type Node = {
  * is (`pulseDuration`), running the way most of the bytes go — into the
  * server for what arrives, out of it for what leaves. It is still while the
  * device is idle, dashed where it is down, amber where the internet reaches a
- * server no firewall filters. Pointing at a node steps every other wire back,
- * as on the runtime map. Where nothing is set up yet a dashed ring stands in
- * the place it would go, with the way to set it up.
+ * server no firewall filters. Pointing at a node steps back every wire except
+ * its own and those of the nodes it is trading flows with — the effective
+ * paths connection tracking holds, so pointing at the internet lights the
+ * Docker networks reaching it. Where nothing is set up yet a dashed ring
+ * stands in the place it would go, with the way to set it up.
  *
  * On the page's own ground over the dot grid. Three lanes from `lg`; below it
  * the lanes stack, the wires are not drawn, and each node says its traffic in
@@ -63,6 +66,8 @@ export function Topology({
   const [focus, setFocus] = useState<string | null>(null)
 
   const nodes = useMemo(() => buildNodes(overview, links), [overview, links])
+  const neighbours = useMemo(() => flowNeighbours(overview.flows.edges), [overview.flows])
+  const lit = (id: string) => focus === null || focus === id || !!neighbours.get(focus)?.has(id)
   const ids = nodes.map((n) => n.id).join("\n")
   const refs = useMemo(() => {
     const map = new Map<string, RefObject<HTMLDivElement | null>>()
@@ -92,7 +97,6 @@ export function Topology({
           const rx = node.devices.reduce((n, d) => n + d.rxRate, 0)
           const tx = node.devices.reduce((n, d) => n + d.txRate, 0)
           const moving = !node.dashed && node.devices.some(carrying)
-          const lit = focus === null || focus === node.id
           // Into the server for what arrives on an outside device, out of it
           // for what a bridge carries to its containers (a bridge's transmit
           // is the host sending into it).
@@ -112,7 +116,7 @@ export function Topology({
               tone={node.tone ?? "default"}
               duration={pulseDuration(rx + tx)}
               delay={(index % 5) * 0.3}
-              className={cn("transition-opacity max-lg:hidden", !lit && "opacity-15")}
+              className={cn("transition-opacity max-lg:hidden", !lit(node.id) && "opacity-15")}
             />
           )
         })}
@@ -125,7 +129,7 @@ export function Topology({
                 node={node}
                 nodeRef={refs.get(node.id)}
                 align="end"
-                dim={focus !== null && focus !== node.id}
+                dim={!lit(node.id)}
                 {...watch(node.id)}
               />
             ))}
@@ -174,7 +178,7 @@ export function Topology({
                 node={node}
                 nodeRef={refs.get(node.id)}
                 align="start"
-                dim={focus !== null && focus !== node.id}
+                dim={!lit(node.id)}
                 {...watch(node.id)}
               />
             ))}
@@ -226,7 +230,12 @@ function NodeItem({
     node.mark
   )
   return (
-    <li {...handlers} className={cn("min-w-0 transition-opacity", dim && "opacity-40")}>
+    <li
+      {...handlers}
+      data-node={node.id}
+      data-dim={dim ? "" : undefined}
+      className={cn("min-w-0 transition-opacity", dim && "opacity-40")}
+    >
       <WireNode
         nodeRef={nodeRef}
         align={align}
@@ -249,6 +258,17 @@ function Throughput({ devices }: { devices: NetworkLink[] }) {
       <span className="text-[var(--chart-5)]">↓ {rate(rx)}</span>
       <span className="mx-1.5 text-muted-foreground/50">·</span>
       <span className="text-[var(--chart-2)]">↑ {rate(tx)}</span>
+    </span>
+  )
+}
+
+/** A node's tracked flows, under its traffic, where it has any. */
+function FlowCount({ overview, id }: { overview: NetworkOverview; id: string }) {
+  const n = nodeFlows(overview.flows.edges, id)
+  if (n === 0) return null
+  return (
+    <span className="numeric block text-micro text-muted-foreground">
+      {n} tracked flow{n === 1 ? "" : "s"}
     </span>
   )
 }
@@ -283,6 +303,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
           )}
         </span>
         <Throughput devices={uplinks} />
+        <FlowCount overview={overview} id="internet" />
       </>
     ),
     devices: uplinks,
@@ -328,6 +349,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
             )}
           </span>
           {!down && <Throughput devices={[l]} />}
+          <FlowCount overview={overview} id={`link:${l.name}`} />
         </>
       ),
       devices: [l],
@@ -370,6 +392,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
             <ProductGlyphs ids={[...new Set(products)]} max={4} />
           </span>
           {bridge && <Throughput devices={[bridge]} />}
+          <FlowCount overview={overview} id={`docker:${network.id}`} />
         </>
       ),
       devices: bridge ? [bridge] : [],
@@ -408,11 +431,12 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
             {!l.adminUp ? "down" : (address ?? "no address")}
           </span>
           {l.adminUp && <Throughput devices={[l]} />}
+          <FlowCount overview={overview} id={`link:${l.name}`} />
         </>
       ),
       devices: [l],
       dashed: !l.adminUp,
-      href: "/network/interfaces",
+      href: `/network/interfaces?device=${encodeURIComponent(l.name)}`,
     })
   }
   if (!links.some((l) => l.managed && l.role === "bridge")) {

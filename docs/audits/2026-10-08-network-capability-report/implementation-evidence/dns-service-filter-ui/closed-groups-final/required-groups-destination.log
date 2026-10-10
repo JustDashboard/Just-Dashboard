@@ -1,0 +1,4 @@
+Against 379a43fb: 3 changed files.
+Go packages: ./internal/dnsservice
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	0.626s
+Elapsed: 18.09 seconds; Exit: 0

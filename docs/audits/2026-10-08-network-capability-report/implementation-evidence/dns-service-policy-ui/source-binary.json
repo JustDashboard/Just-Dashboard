@@ -1,0 +1,32 @@
+{
+  "head": "2ebb5e02a1d6ed806dc0d0a28dfc144b8bde5780",
+  "sourceFileCount": 22,
+  "source": {
+    "backend/internal/dnsservice/adapters.go": "3c6221b5c775f69c4a27008c7883914df0cdaa409f99af12bc28d5ec9ebf213a",
+    "backend/internal/dnsservice/current.go": "78808ef15537856f41af9e7bcc82536a2f77309d1d5eadaa1351a62a0f5c4c12",
+    "backend/internal/dnsservice/current_test.go": "5398706664f13ee49faee52f58286b997e02fdfe9d81aeba33368e6bea4c5305",
+    "backend/internal/dnsservice/history.go": "45d3c360cfcfa8f6542d979dc05f79f2ba4fd87e07e1b764a7f740506a10f092",
+    "backend/internal/dnsservice/history_test.go": "5fe745d3f42c209eb34aeeeaeed474a5ac3e190d52bb9d4d0c54d41b87792bc2",
+    "backend/internal/dnsservice/http.go": "5d63505edc8e414c91f84b4e83a3a761aefd8f2f086e08b6acc0a7d7e3738bc5",
+    "backend/internal/dnsservice/http_contract_test.go": "8f76524edc30e218e9807106ca09ab7f16fe1860602474a45e18d2fa3cdfd933",
+    "backend/internal/dnsservice/model.go": "6c9163e544c2652c40d373ddbcbf0942ab1df1821e3746b065fb101fc3749cdf",
+    "backend/internal/dnsservice/native_groups.go": "e94ed30778c81a59b3560fcad32936ccb0c71166316c430e2c11a24d7197670d",
+    "backend/internal/dnsservice/policy.go": "5725846d99d5f79d75c63da601c72c7a59b3cf51db9793cca3f619c1447d8d32",
+    "backend/internal/dnsservice/policy_test.go": "b7b024326113f85a93a7c820115371002efdbade520827e2035eead852ad6290",
+    "backend/internal/dnsservice/provision.go": "672bbfdd7d1637f763583183cff1f6c204f9208d66aa0987a9469c993b62f3e0",
+    "backend/internal/dnsservice/provision_docker.go": "fb79fb847754c034a59fea84f274c21b3a278f25ee1198221427b5e26ce16e9c",
+    "backend/internal/dnsservice/provision_docker_test.go": "38ecaf81f05f77b409d4601a603b6660353b852cd862c43fb5565034622f2546",
+    "backend/internal/dnsservice/provision_live_test.go": "ea5d843aec393bff33994264c8e3a13fc70543435a46645c5683ba37ea1991e3",
+    "backend/internal/dnsservice/provision_model.go": "ff1091b57e1807c0ffdf5782c761eb273f0d4c1472ba9c7de181cfddf4d461f0",
+    "backend/internal/dnsservice/provision_seed.go": "156e3123faa97a08e756b0626c4559b296519f836186d836c2af97e9bf7394c8",
+    "backend/internal/dnsservice/provision_test.go": "01ed7573857a72d435a3c310e1efca6257b8f47d32e7664ff7cce7f12b62c79f",
+    "backend/internal/dnsservice/service.go": "33a5792f248d6be24c0c036d742c9a754ffe78255da9b542a6d13e04a7ece2f8",
+    "backend/internal/dnsservice/service_test.go": "28b4af6bd31d70796b0dd47e7166ee99a5e56819b5bad27abba01799b7b4580c",
+    "backend/go.mod": "5f680b84b898ab166ace9fad284ad09ecb73c921ef9b949d2a4a3db82bea76e4",
+    "backend/go.sum": "fac9be6bd85b383d4215b58ae314514070caf7276fcae4caee77b84deaa755fc"
+  },
+  "binary": "/home/ubuntu/jd-network-validation-tmp/dns-policy-assembled-native/dns-service-policy.test",
+  "binarySha256": "0fee207c0d7689b9acde9048abb45961d1116862a273537c59e3aef7aa7ec86b",
+  "selectionReadFixtureCommit": "cfad4f55",
+  "frontendBuildSource": "588332e3"
+}

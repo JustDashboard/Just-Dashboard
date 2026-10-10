@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ForwardingRequiredError is a forward or NAT entry that was refused because the
@@ -99,10 +101,14 @@ func gatewayEmpty(sp *Spec) bool {
 // describes. Best effort, because it runs on the way out of a failure.
 func (s *Service) restoreGateway(ctx context.Context, sp *Spec) {
 	if gatewayEmpty(sp) {
-		_, _ = run(ctx, "nft", "delete", "table", "inet", gatewayTable) // absent table is the state being restored to
+		_, err := run(ctx, "nft", "delete", "table", "inet", gatewayTable)
+		if err != nil && !isGone(err) {
+			recordRecoveryError(ctx, err)
+		}
 		return
 	}
 	if err := s.loadGateway(ctx, sp); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Error("restoring the gateway ruleset after a failed change", "err", err)
 	}
 }
@@ -122,7 +128,33 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 	if !insert && !needsAdmission(prior) {
 		return nil
 	}
+	affected := admissionFamilies(prior)
+	for family := range admissionFamilies(target) {
+		affected[family] = true
+	}
 	for _, cmd := range admissionCommands(insert) {
+		family := "inet"
+		if cmd[0] == "ip6tables" {
+			family = "inet6"
+		}
+		if !affected[family] {
+			continue
+		}
+		if cmd[1] == "-I" {
+			if !admissionFamilies(target)[family] {
+				continue
+			}
+			ch := inspectAdmissionChain(ctx, cmd[0], cmd[2], family, true)
+			if ch.Status == "unsupported" {
+				if ch.Needed {
+					return fmt.Errorf("admission is required in %s/%s but unavailable: %s", family, cmd[2], ch.Reason)
+				}
+				continue
+			}
+			if ch.Status == "unreadable" {
+				return fmt.Errorf("reading admission chain %s/%s: %s", family, cmd[2], ch.Reason)
+			}
+		}
 		if cmd[1] == "-D" {
 			// One -D removes one copy of the rule. Duplicates arise — an
 			// earlier run that died between the delete and the insert, a
@@ -131,8 +163,18 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 			// Delete until the kernel says there is none left, a few times
 			// at most. The failure that ends it is the common case.
 			for i := 0; i < admissionDeleteCap; i++ {
-				if _, err := run(ctx, cmd[0], cmd[1:]...); err != nil {
-					break
+				if out, err := run(ctx, cmd[0], cmd[1:]...); err != nil {
+					if recoveryExpectedAbsence(cmd[0], out, err) {
+						break
+					}
+					var unavailable *UnavailableError
+					if errors.As(err, &unavailable) {
+						state := inspectAdmissionChain(ctx, cmd[0], cmd[2], family, true)
+						if state.Status == "unsupported" && !state.Needed {
+							break
+						}
+					}
+					return fmt.Errorf("removing owned admission from %s/%s: %w", family, cmd[2], err)
 				}
 			}
 			continue
@@ -141,16 +183,9 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 		if err == nil {
 			continue
 		}
-		var missing *UnavailableError
-		switch {
-		case errors.As(err, &missing):
-			// No iptables on this host: nothing it drops, nothing to admit.
-		case cmd[0] == "ip6tables", cmd[2] == "DOCKER-USER":
-			// IPv6 filtering may not exist, and the Docker chain exists only
-			// where Docker runs; neither is a reason to refuse the change.
-		default:
-			return fmt.Errorf("admitting the translated connections through %s: %w", cmd[2], err)
-		}
+		// Optional absence was checked before insertion. A present chain
+		// that fails to accept its rule is a partial apply, even on IPv6.
+		return fmt.Errorf("admitting the translated connections through %s: %w", cmd[2], err)
 	}
 	return nil
 }
@@ -163,25 +198,35 @@ func (s *Service) gatewayStep(old, next *Spec) step {
 	return s.gatewayStepWithRules(old, next, "")
 }
 
-func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
+func (s *Service) gatewayStepWithRules(old, next *Spec, previous string, candidate ...string) step {
 	restore := func(ctx context.Context) {
 		if previous == "" || gatewayEmpty(old) {
 			s.restoreGateway(ctx, old)
 			return
 		}
 		if err := s.loadGatewayRules(ctx, previous); err != nil {
+			recordRecoveryError(ctx, err)
 			s.log.Error("restoring the gateway ruleset after a failed change", "err", err)
 		}
 	}
 	return step{
 		apply: func(ctx context.Context) error {
-			if err := s.loadGateway(ctx, next); err != nil {
+			// The replacement starts every counter at zero; what the old
+			// table counted is read into the totals first.
+			if !gatewayEmpty(old) {
+				s.telemetry.observeCounters(ctx)
+			}
+			load := func() error { return s.loadGateway(ctx, next) }
+			if len(candidate) > 0 {
+				load = func() error { return s.loadGatewayRules(ctx, candidate[0]) }
+			}
+			if err := load(); err != nil {
 				return err
 			}
 			if err := s.syncAdmission(ctx, next, old); err != nil {
 				rollback(ctx, func(recovery context.Context) {
 					restore(recovery)
-					_ = s.syncAdmission(recovery, old, next) // returning to the state before; the error being reported is the first
+					recordRecoveryError(recovery, s.syncAdmission(recovery, old, next))
 				})
 				return err
 			}
@@ -189,11 +234,14 @@ func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
 		},
 		undo: func(ctx context.Context) {
 			restore(ctx)
-			_ = s.syncAdmission(ctx, old, next) // as above: best effort on the way out
+			recordRecoveryError(ctx, s.syncAdmission(ctx, old, next))
 		},
 		verify: func(ctx context.Context) error {
 			if _, err := run(ctx, "nft", "list", "set", "inet", gatewayTable, "trusted4"); err != nil {
 				return fmt.Errorf("the gateway table is not loaded after applying it: %w", err)
+			}
+			if a := s.admissionState(ctx, next); a.Needed && !a.Present {
+				return fmt.Errorf("translated connections were not admitted in every required chain: %s", admissionFailure(a))
 			}
 			return nil
 		},
@@ -216,6 +264,33 @@ func (s *Service) mutateGateway(ctx context.Context, edit func(old, next *Spec) 
 // rules before an edit can replace a feed file, so restoring the old spec
 // cannot accidentally reload the failed candidate's networks.
 func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, next *Spec) (bool, error), undoEdit func()) (err error) {
+	return s.mutateGatewayCandidate(ctx, edit, undoEdit, nil)
+}
+
+type gatewayCacheChange struct {
+	before recoverySnapshot
+	nets   []netip.Prefix
+}
+
+func (s *Service) mutateGatewayWithCache(ctx context.Context, edit func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error)) error {
+	var changes []gatewayCacheChange
+	return s.mutateGatewayCandidate(ctx, func(old, next *Spec) (bool, error) {
+		return edit(old, next, func(id int, nets []netip.Prefix) error {
+			path := blocklistFile(filepath.Join(s.paths.Dir, "lists"), id)
+			if err := validateRecoveryBlocklistPath(s.paths.Dir, path); err != nil {
+				return err
+			}
+			previous, err := saveNetworkFile(path)
+			if err != nil {
+				return fmt.Errorf("reading the blocklist cache before replacement: %w", err)
+			}
+			changes = append(changes, gatewayCacheChange{before: recoverySnapshot{Path: path, Data: previous.data, Mode: previous.perm, Exists: previous.exists}, nets: nets})
+			return nil
+		})
+	}, nil, &changes)
+}
+
+func (s *Service) mutateGatewayCandidate(ctx context.Context, edit func(old, next *Spec) (bool, error), undoEdit func(), cacheChanges *[]gatewayCacheChange) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer func() {
@@ -230,9 +305,16 @@ func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, 
 	if err != nil {
 		return err
 	}
-	previous, err := renderGateway(old, s.trustedFor(old))
-	if err != nil {
-		return err
+	previous, renderErr := renderGateway(old, s.trustedFor(old))
+	if renderErr != nil {
+		// Cache loss must not prevent disabling, removing or refreshing the
+		// broken list. The last committed render retains its previous data
+		// and is the rollback source until the candidate is validated.
+		b, readErr := os.ReadFile(filepath.Join(s.paths.Dir, gatewayFile))
+		if readErr != nil {
+			return fmt.Errorf("reading the last applied gateway policy after cache failure: %v (%w)", readErr, renderErr)
+		}
+		previous = string(b)
 	}
 	next := old.clone()
 	translating, err := edit(old, next)
@@ -240,7 +322,7 @@ func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, 
 		return err
 	}
 	if translating {
-		if _, err := s.requireWritable(ctx); err != nil {
+		if _, err := s.requireWritable(ctx, next); err != nil {
 			return err
 		}
 		if err := checkNewForwarding(old, next); err != nil {
@@ -250,7 +332,52 @@ func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, 
 	if err := s.resolveAutoNAT(ctx, next); err != nil {
 		return err
 	}
-	return s.commit(ctx, next, s.gatewayStepWithRules(old, next, previous))
+	if cacheChanges == nil || len(*cacheChanges) == 0 {
+		return s.commit(ctx, next, s.gatewayStepWithRules(old, next, previous))
+	}
+	candidates := map[int][]netip.Prefix{}
+	for _, change := range *cacheChanges {
+		id, parseErr := strconv.Atoi(strings.TrimSuffix(filepath.Base(change.before.Path), ".txt"))
+		if parseErr != nil {
+			return parseErr
+		}
+		candidates[id] = change.nets
+	}
+	rules, err := renderGatewayCandidate(next, s.trustedFor(next), candidates)
+	if err != nil {
+		return err
+	}
+	st := s.gatewayStepWithRules(old, next, previous, rules)
+	st.gatewayRules = &rules
+	for _, change := range *cacheChanges {
+		st.recoveryFiles = append(st.recoveryFiles, change.before)
+	}
+	apply, undo := st.apply, st.undo
+	var wrote []recoverySnapshot
+	restoreCaches := func(ctx context.Context) {
+		for i := len(wrote) - 1; i >= 0; i-- {
+			f := wrote[i]
+			recordRecoveryError(ctx, (savedNetworkFile{data: f.Data, perm: f.Mode, exists: f.Exists}).restore(f.Path))
+		}
+	}
+	st.apply = func(ctx context.Context) error {
+		for _, change := range *cacheChanges {
+			// Rename may have succeeded even when the writer reports a later
+			// fsync error. Every attempted replacement needs its snapshot.
+			wrote = append(wrote, change.before)
+			if err := writeNetworkFile(change.before.Path, blocklistCacheBytes(change.nets), 0o644); err != nil {
+				rollback(ctx, restoreCaches)
+				return fmt.Errorf("saving the fetched list: %w", err)
+			}
+		}
+		if err := apply(ctx); err != nil {
+			rollback(ctx, restoreCaches)
+			return err
+		}
+		return nil
+	}
+	st.undo = func(ctx context.Context) { undo(ctx); restoreCaches(ctx) }
+	return s.commit(ctx, next, st)
 }
 
 // checkNewForwarding refuses an entry that starts carrying traffic through
@@ -343,6 +470,13 @@ func (s *Service) resolveAutoNAT(ctx context.Context, sp *Spec) error {
 // routedHere reports whether a target is this host's own address or on a
 // network of a device that is not the uplink.
 func routedHere(addrs []ipAddr, uplinks map[string]bool, target netip.Addr) bool {
+	here, _ := autoNATReason(addrs, uplinks, target)
+	return here
+}
+
+// autoNATReason is routedHere with the sentence that explains it.
+func autoNATReason(addrs []ipAddr, uplinks map[string]bool, target netip.Addr) (bool, string) {
+	onUplink := ""
 	for _, a := range addrs {
 		if a.IfName == "lo" {
 			continue
@@ -353,17 +487,23 @@ func routedHere(addrs []ipAddr, uplinks map[string]bool, target netip.Addr) bool
 				continue
 			}
 			if local == target {
-				return true
+				return true, fmt.Sprintf("%s is this server's own address on %s, so replies come back through it.", target, a.IfName)
 			}
-			if uplinks[a.IfName] {
+			network := netip.PrefixFrom(local, info.PrefixLen).Masked()
+			if !network.Contains(target) {
 				continue
 			}
-			if netip.PrefixFrom(local, info.PrefixLen).Masked().Contains(target) {
-				return true
+			if uplinks[a.IfName] {
+				onUplink = a.IfName
+				continue
 			}
+			return true, fmt.Sprintf("%s is on %s (%s), a network this server routes, so the visitor's address can be kept.", target, network, a.IfName)
 		}
 	}
-	return false
+	if onUplink != "" {
+		return false, fmt.Sprintf("%s shares the uplink's network on %s; its replies would bypass this server unless they are masqueraded.", target, onUplink)
+	}
+	return false, fmt.Sprintf("%s is not on a network this server routes; masquerading makes its replies come back through this server.", target)
 }
 
 // ifaceAddresses reads a device's addresses, and so also whether it exists.
@@ -471,6 +611,7 @@ func (s *Service) saveForward(ctx context.Context, id int, req ForwardRequest, c
 				return false, err
 			}
 		}
+		f.ChangedAt = gatewayNow().UTC()
 		if idx < 0 {
 			f.ID, f.Made = next.takeID(), gwStamp(actor)
 			next.Forwards = append(next.Forwards, f)
@@ -596,20 +737,32 @@ type NATRequest struct {
 	Source    string `json:"source"`
 	Interface string `json:"interface"`
 	ToAddress string `json:"toAddress"`
-	Enabled   *bool  `json:"enabled"`
+	// Mode is masquerade or snat (both stored empty), one-to-one or nptv6.
+	Mode         string   `json:"mode"`
+	Translated   string   `json:"translated"`
+	Destinations []string `json:"destinations"`
+	Enabled      *bool    `json:"enabled"`
 }
 
 // AddNAT creates a NAT entry for a network.
-func (s *Service) AddNAT(ctx context.Context, req NATRequest, actor string) (NATView, error) {
-	return s.saveNAT(ctx, 0, req, actor)
+func (s *Service) AddNAT(ctx context.Context, req NATRequest, client, actor string) (NATView, error) {
+	return s.saveNAT(ctx, 0, req, client, actor)
 }
 
 // UpdateNAT replaces a NAT entry's settings, and enables or disables it.
-func (s *Service) UpdateNAT(ctx context.Context, id int, req NATRequest, actor string) (NATView, error) {
-	return s.saveNAT(ctx, id, req, actor)
+func (s *Service) UpdateNAT(ctx context.Context, id int, req NATRequest, client, actor string) (NATView, error) {
+	return s.saveNAT(ctx, id, req, client, actor)
 }
 
-func (s *Service) saveNAT(ctx context.Context, id int, req NATRequest, actor string) (NATView, error) {
+// natFromRequest is the entry a request describes, before normalization.
+func natFromRequest(req NATRequest) NATSpec {
+	return NATSpec{
+		Name: req.Name, Source: req.Source, Interface: req.Interface, ToAddress: req.ToAddress,
+		Mode: strings.TrimSpace(req.Mode), Translated: req.Translated, Destinations: req.Destinations, Enabled: true,
+	}
+}
+
+func (s *Service) saveNAT(ctx context.Context, id int, req NATRequest, client, actor string) (NATView, error) {
 	var saved NATSpec
 	err := s.mutateGateway(ctx, func(old, next *Spec) (bool, error) {
 		idx := -1
@@ -621,7 +774,7 @@ func (s *Service) saveNAT(ctx context.Context, id int, req NATRequest, actor str
 		if id != 0 && idx < 0 {
 			return false, fmt.Errorf("NAT entry %d: %w", id, ErrNotFound)
 		}
-		n := NATSpec{Name: req.Name, Source: req.Source, Interface: req.Interface, ToAddress: req.ToAddress, Enabled: true}
+		n := natFromRequest(req)
 		if idx >= 0 {
 			if owner := next.NAT[idx].Owner; owner != "" {
 				return false, fmt.Errorf("%w: it belongs to %s, which keeps it in step with itself; change it there", ErrNotManaged, owner)
@@ -635,23 +788,12 @@ func (s *Service) saveNAT(ctx context.Context, id int, req NATRequest, actor str
 		if err != nil {
 			return false, err
 		}
-		addrs, err := ifaceAddresses(ctx, n.Interface)
-		if err != nil {
+		if err := s.checkNATHost(ctx, n, client); err != nil {
 			return false, err
 		}
-		if n.ToAddress != "" {
-			to, _ := ParseAddr(n.ToAddress)
-			found := false
-			for _, a := range addrs {
-				found = found || a == to
-			}
-			if !found {
-				return false, fmt.Errorf("%s is not an address of %s, so it cannot be the address traffic leaves from", to, n.Interface)
-			}
-		}
 		for _, other := range next.NAT {
-			if other.ID != n.ID && other.Source == n.Source && other.Interface == n.Interface {
-				return false, fmt.Errorf("%w: %q already translates %s out of %s", ErrExists, other.Name, n.Source, n.Interface)
+			if other.ID != n.ID && natsCollide(other, n) {
+				return false, fmt.Errorf("%w: %q already translates %s out of %s", ErrExists, other.Name, other.Source, other.Interface)
 			}
 		}
 		if idx < 0 {
@@ -667,6 +809,90 @@ func (s *Service) saveNAT(ctx context.Context, id int, req NATRequest, actor str
 		return NATView{}, err
 	}
 	return natView(saved, nil), nil
+}
+
+// checkNATHost asks the host what a NAT entry depends on: the device exists,
+// a fixed or mapped single address is one of its own, and a mapped public
+// side does not take the address the requester's own connection arrives on.
+func (s *Service) checkNATHost(ctx context.Context, n NATSpec, client string) error {
+	addrs, err := ifaceAddresses(ctx, n.Interface)
+	if err != nil {
+		return err
+	}
+	owns := func(a netip.Addr) bool {
+		for _, have := range addrs {
+			if have == a {
+				return true
+			}
+		}
+		return false
+	}
+	if n.ToAddress != "" {
+		to, _ := ParseAddr(n.ToAddress)
+		if !owns(to) {
+			return fmt.Errorf("%s is not an address of %s, so it cannot be the address traffic leaves from", to, n.Interface)
+		}
+	}
+	if !natMapped(n) || !n.Enabled {
+		return nil
+	}
+	to, _ := ParsePrefix(n.Translated)
+	if to.IsSingleIP() && !owns(to.Addr()) {
+		return fmt.Errorf("%s is not an address of %s; a one-to-one address must be on the device it maps through", to.Addr(), n.Interface)
+	}
+	if addr, err := ParseAddr(client); err == nil && !addr.IsLoopback() {
+		path, err := clientPath(ctx, client)
+		if err != nil {
+			return err
+		}
+		if src, err := ParseAddr(path.Source); err == nil && to.Contains(src) {
+			return guarded("%s is the address your own connection to this server uses, and mapping %s would send every connection to it, yours included, to %s. Map an address you do not reach the dashboard through.", src, to, n.Source)
+		}
+	}
+	return nil
+}
+
+// natsCollide reports two enabled entries that would translate the same
+// traffic: overlapping sources out of one device, where only the first rule
+// would ever apply, or two mappings claiming overlapping public sides.
+func natsCollide(a, b NATSpec) bool {
+	if !a.Enabled || !b.Enabled {
+		return false
+	}
+	pa, ea := ParsePrefix(a.Source)
+	pb, eb := ParsePrefix(b.Source)
+	if ea != nil || eb != nil {
+		return false
+	}
+	if a.Interface == b.Interface && pa.Masked().Overlaps(pb.Masked()) && destinationsOverlap(a.Destinations, b.Destinations) {
+		return true
+	}
+	if natMapped(a) && natMapped(b) {
+		ta, e1 := ParsePrefix(a.Translated)
+		tb, e2 := ParsePrefix(b.Translated)
+		return e1 == nil && e2 == nil && ta.Masked().Overlaps(tb.Masked())
+	}
+	return false
+}
+
+// destinationsOverlap is true when two destination lists can match the same
+// packet; an empty list matches everything.
+func destinationsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, x := range a {
+		px, err := ParsePrefix(x)
+		if err != nil {
+			continue
+		}
+		for _, y := range b {
+			if py, err := ParsePrefix(y); err == nil && px.Masked().Overlaps(py.Masked()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DeleteNAT removes a NAT entry the operator made. An entry a VPN made for
@@ -722,16 +948,18 @@ func removeOwnedNAT(next *Spec, owner string) {
 
 // LimitRequest is the body of a limit's create and update.
 type LimitRequest struct {
-	Name           string `json:"name"`
-	Protocol       string `json:"protocol"`
-	Ports          string `json:"ports"`
-	Rate           int    `json:"rate"`
-	Per            string `json:"per"`
-	Burst          int    `json:"burst"`
-	PerSource      bool   `json:"perSource"`
-	MaxConnections int    `json:"maxConnections"`
-	Action         string `json:"action"`
-	Enabled        *bool  `json:"enabled"`
+	Name              string `json:"name"`
+	Protocol          string `json:"protocol"`
+	Ports             string `json:"ports"`
+	Rate              int    `json:"rate"`
+	Per               string `json:"per"`
+	Burst             int    `json:"burst"`
+	PerSource         bool   `json:"perSource"`
+	MaxConnections    int    `json:"maxConnections"`
+	GlobalConnections int    `json:"globalConnections"`
+	Profile           string `json:"profile"`
+	Action            string `json:"action"`
+	Enabled           *bool  `json:"enabled"`
 }
 
 // AddLimit creates a rate or connection limit on a port.
@@ -759,6 +987,7 @@ func (s *Service) saveLimit(ctx context.Context, id int, req LimitRequest, clien
 		l := LimitSpec{
 			Name: req.Name, Protocol: req.Protocol, Ports: req.Ports, Rate: req.Rate, Per: req.Per,
 			Burst: req.Burst, PerSource: req.PerSource, MaxConnections: req.MaxConnections,
+			GlobalConnections: req.GlobalConnections, Profile: strings.TrimSpace(req.Profile),
 			Action: req.Action, Enabled: true,
 		}
 		if l.Action == "" {
@@ -776,7 +1005,7 @@ func (s *Service) saveLimit(ctx context.Context, id int, req LimitRequest, clien
 		}
 		// Before anything is added that drops: the reader's own address is
 		// kept out of its reach (path.go).
-		s.trustClient(next, client)
+		s.trustClientBy(next, client, actor, "")
 		if idx < 0 {
 			l.ID, l.Made = next.takeID(), gwStamp(actor)
 			next.Limits = append(next.Limits, l)
@@ -883,8 +1112,19 @@ type GatewayForwarding struct {
 // AdmissionState is whether the iptables rule that admits translated
 // connections is in place, against whether anything needs it.
 type AdmissionState struct {
-	Needed  bool `json:"needed"`
-	Present bool `json:"present"`
+	Needed    bool                  `json:"needed"`
+	Present   bool                  `json:"present"`
+	CheckedAt time.Time             `json:"checkedAt"`
+	Chains    []AdmissionChainState `json:"chains"`
+}
+
+type AdmissionChainState struct {
+	Family string `json:"family"`
+	Tool   string `json:"tool"`
+	Chain  string `json:"chain"`
+	Needed bool   `json:"needed"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ForwardView is a port forward as the Gateway page shows it.
@@ -899,14 +1139,24 @@ type ForwardView struct {
 	Sources    []string `json:"sources"`
 	// SourceNat is the choice made (auto, always or never); Masquerade is
 	// what it came to for this target.
-	SourceNat  string `json:"sourceNat"`
-	Masquerade bool   `json:"masquerade"`
-	Enabled    bool   `json:"enabled"`
+	SourceNat  string     `json:"sourceNat"`
+	Masquerade bool       `json:"masquerade"`
+	Enabled    bool       `json:"enabled"`
+	ChangedAt  *time.Time `json:"changedAt"`
 	Made
 	// Packets and Bytes are what the forward has carried since the table
-	// was loaded.
-	Packets uint64 `json:"packets"`
-	Bytes   uint64 `json:"bytes"`
+	// was loaded; Total carries across table replacements.
+	Packets   uint64          `json:"packets"`
+	Bytes     uint64          `json:"bytes"`
+	Total     CounterTotal    `json:"total"`
+	Readiness *EntryReadiness `json:"readiness,omitempty"`
+	// Decision is auto source translation re-checked against the host now.
+	Decision *NATDecision `json:"decision,omitempty"`
+	// Check is the last target check from this server.
+	Check *ForwardCheck `json:"check,omitempty"`
+	// External is the latest measurement of the public port by an enrolled
+	// external source, attached for administrators.
+	External *ExternalEvidence `json:"external,omitempty"`
 }
 
 func forwardView(f ForwardSpec, counters map[string]RuleCounter) ForwardView {
@@ -918,6 +1168,10 @@ func forwardView(f ForwardSpec, counters map[string]RuleCounter) ForwardView {
 	}
 	if v.Sources == nil {
 		v.Sources = []string{}
+	}
+	if !f.ChangedAt.IsZero() {
+		t := f.ChangedAt
+		v.ChangedAt = &t
 	}
 	c := counters["forward:"+strconv.Itoa(f.ID)]
 	v.Packets, v.Bytes = c.Packets, c.Bytes
@@ -931,6 +1185,11 @@ type NATView struct {
 	Source    string `json:"source"`
 	Interface string `json:"interface"`
 	ToAddress string `json:"toAddress"`
+	// Mode is masquerade, snat, one-to-one or nptv6; Translated is a
+	// mapping's public side.
+	Mode         string   `json:"mode"`
+	Translated   string   `json:"translated"`
+	Destinations []string `json:"destinations"`
 	// Owner is what keeps the entry, when that is not a person: removing it
 	// is done there.
 	Owner   string `json:"owner"`
@@ -938,13 +1197,33 @@ type NATView struct {
 	Made
 	Packets uint64 `json:"packets"`
 	Bytes   uint64 `json:"bytes"`
+	// InPackets and InBytes are a mapping's inbound half since load.
+	InPackets uint64          `json:"inPackets"`
+	InBytes   uint64          `json:"inBytes"`
+	Total     CounterTotal    `json:"total"`
+	InTotal   CounterTotal    `json:"inTotal"`
+	Readiness *EntryReadiness `json:"readiness,omitempty"`
 }
 
 func natView(n NATSpec, counters map[string]RuleCounter) NATView {
 	c := counters["nat:"+strconv.Itoa(n.ID)]
+	in := counters["nat-in:"+strconv.Itoa(n.ID)]
+	mode := n.Mode
+	if mode == "" {
+		mode = "masquerade"
+		if n.ToAddress != "" {
+			mode = "snat"
+		}
+	}
+	dests := n.Destinations
+	if dests == nil {
+		dests = []string{}
+	}
 	return NATView{
 		ID: n.ID, Name: n.Name, Source: n.Source, Interface: n.Interface, ToAddress: n.ToAddress,
+		Mode: mode, Translated: n.Translated, Destinations: dests,
 		Owner: n.Owner, Enabled: n.Enabled, Made: n.Made, Packets: c.Packets, Bytes: c.Bytes,
+		InPackets: in.Packets, InBytes: in.Bytes,
 	}
 }
 
@@ -959,38 +1238,221 @@ type GatewayView struct {
 	Admission  AdmissionState    `json:"admission"`
 	Forwards   []ForwardView     `json:"forwards"`
 	NAT        []NATView         `json:"nat"`
+	// Counters labels the live figures and the totals.
+	Counters CounterEvidence `json:"counters"`
+	// Flows are each enabled entry's modeled verdicts at the checked layers.
+	Flows []EntryFlow `json:"flows"`
+
+	hostAddrs []hostAddr
 }
 
-// Gateway reads the port forwards and NAT entries with their live counters.
+// Gateway reads the port forwards and NAT entries with their live counters,
+// totals, readiness and the per-flow verdicts of the host's other chains.
 func (s *Service) Gateway(ctx context.Context) (*GatewayView, error) {
 	sp, err := s.loadSpec()
 	if err != nil {
 		return nil, err
 	}
-	counters, loaded := gatewayCounters(ctx)
+	live := readLiveCounters(ctx)
+	capability := s.GatewayCapability(ctx)
+	admission := s.admissionState(ctx, sp)
+	addrs := hostAddresses(ctx)
 	v := &GatewayView{
-		Capability: s.GatewayCapability(ctx),
-		Loaded:     loaded,
+		Capability: capability,
+		Loaded:     live.Loaded,
 		Forwarding: GatewayForwarding{IPv4: gatewayForwardingOn("4"), IPv6: gatewayForwardingOn("6")},
-		Admission:  s.admissionState(ctx, sp),
+		Admission:  admission,
 		Forwards:   make([]ForwardView, 0, len(sp.Forwards)),
 		NAT:        make([]NATView, 0, len(sp.NAT)),
+		Counters:   s.telemetry.evidence(live),
+		Flows:      evaluateGatewayFlows(capability.listing, modelGatewayFlows(sp, addrs)),
+		hostAddrs:  addrs,
 	}
+	if v.Flows == nil {
+		v.Flows = []EntryFlow{}
+	}
+	var keys []string
 	for _, f := range sp.Forwards {
-		v.Forwards = append(v.Forwards, forwardView(f, counters))
+		keys = append(keys, "forward:"+strconv.Itoa(f.ID))
 	}
 	for _, n := range sp.NAT {
-		v.NAT = append(v.NAT, natView(n, counters))
+		keys = append(keys, "nat:"+strconv.Itoa(n.ID), "nat-in:"+strconv.Itoa(n.ID))
+	}
+	totals := s.telemetry.totals(ctx, live, keys)
+	decisions := autoNATDecisions(ctx, sp.Forwards)
+	for _, f := range sp.Forwards {
+		fv := forwardView(f, live.Counters)
+		fv.Total = totals["forward:"+strconv.Itoa(f.ID)]
+		target, _ := ParseAddr(f.Target)
+		r := readinessOf(f.Enabled, live, forwardRuleComments(f), familyOf(target), admission)
+		fv.Readiness = &r
+		if d, ok := decisions[f.ID]; ok {
+			fv.Decision = &d
+		}
+		fv.Check = s.lastForwardCheck(f)
+		v.Forwards = append(v.Forwards, fv)
+	}
+	for _, n := range sp.NAT {
+		nv := natView(n, live.Counters)
+		nv.Total, nv.InTotal = totals["nat:"+strconv.Itoa(n.ID)], totals["nat-in:"+strconv.Itoa(n.ID)]
+		family := "inet"
+		if p, err := ParsePrefix(n.Source); err == nil {
+			family = familyOf(p.Addr())
+		}
+		r := readinessOf(n.Enabled, live, natRuleComments(n), family, admission)
+		nv.Readiness = &r
+		v.NAT = append(v.NAT, nv)
 	}
 	return v, nil
 }
 
-// admissionState checks the one rule in FORWARD; the others are put in and
-// taken out together with it.
+// Each filtering family has independent chains. A reload can remove any
+// single owned rule, so aggregate health must never infer the others from it.
 func (s *Service) admissionState(ctx context.Context, sp *Spec) AdmissionState {
-	a := AdmissionState{Needed: needsAdmission(sp)}
-	if _, err := run(ctx, "iptables", append([]string{"-C", "FORWARD"}, admissionRule()...)...); err == nil {
-		a.Present = true
+	a := AdmissionState{Needed: needsAdmission(sp), CheckedAt: time.Now().UTC(), Chains: []AdmissionChainState{}}
+	families := admissionFamilies(sp)
+	a.Present = a.Needed
+	required := false
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		family := "inet"
+		if tool == "ip6tables" {
+			family = "inet6"
+		}
+		if !families[family] {
+			continue
+		}
+		for _, chain := range admissionChains {
+			ch := inspectAdmissionChain(ctx, tool, chain, family, true)
+			a.Chains = append(a.Chains, ch)
+			required = required || ch.Needed
+			if ch.Needed && ch.Status != "present" {
+				a.Present = false
+			}
+		}
+	}
+	a.Needed = a.Needed && required
+	if !a.Needed {
+		a.Present = false
 	}
 	return a
+}
+
+func admissionFamilies(sp *Spec) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range sp.Forwards {
+		if a, err := ParseAddr(f.Target); f.Enabled && err == nil {
+			out[familyOf(a)] = true
+		}
+	}
+	for _, n := range sp.NAT {
+		if p, err := ParsePrefix(n.Source); n.Enabled && err == nil {
+			out[familyOf(p.Addr())] = true
+		}
+	}
+	return out
+}
+
+func inspectAdmissionChain(ctx context.Context, tool, chain, family string, needed bool) AdmissionChainState {
+	v := AdmissionChainState{Family: family, Tool: tool, Chain: chain, Needed: needed}
+	out, err := run(ctx, tool, "-S", chain)
+	if err != nil {
+		var missing *UnavailableError
+		switch {
+		case errors.As(err, &missing), strings.Contains(out+err.Error(), "No chain/target/match"), strings.Contains(out+err.Error(), "does not exist"), strings.Contains(out+err.Error(), "Table does not exist"):
+			v.Status, v.Reason = "unsupported", "This tool or filtering chain is absent; no admission rule can be installed here."
+			if chain == "DOCKER-USER" {
+				v.Needed = false
+			} else {
+				// An absent tool is optional only after checking that no
+				// compatible filtering chain still requires its admission.
+				listing, readErr := run(ctx, "nft", "-t", "-j", "list", "ruleset")
+				var rules nftListing
+				if readErr != nil || json.Unmarshal([]byte(listing), &rules) != nil || rules.Nftables == nil {
+					v.Status, v.Reason = "unreadable", "Cannot establish whether the unavailable admission tool leaves a filtering chain unadmitted."
+				} else {
+					v.Needed = false
+					nftFamily := "ip"
+					if family == "inet6" {
+						nftFamily = "ip6"
+					}
+					for _, o := range rules.Nftables {
+						if o.Chain != nil && o.Chain.Family == nftFamily && o.Chain.Table == "filter" && o.Chain.Name == chain {
+							v.Needed = true
+							break
+						}
+					}
+				}
+			}
+		default:
+			v.Status, v.Reason = "unreadable", err.Error()
+		}
+		return v
+	}
+	chainRules := out
+	out, err = run(ctx, tool, append([]string{"-C", chain}, admissionRule()...)...)
+	if err == nil {
+		for _, line := range strings.Split(chainRules, "\n") {
+			if !strings.HasPrefix(line, "-A "+chain+" ") {
+				continue
+			}
+			if strings.ReplaceAll(line, "\"", "") != strings.Join(append([]string{"-A", chain}, admissionRule()...), " ") {
+				v.Status, v.Reason = "absent", "The owned admission rule exists but is not first in the chain; earlier rules may block it."
+				return v
+			}
+			break
+		}
+		v.Status = "present"
+		return v
+	}
+	if strings.Contains(out+err.Error(), "Bad rule") || strings.Contains(out+err.Error(), "matching rule") {
+		v.Status, v.Reason = "absent", "The dashboard's translation admission rule is missing from this chain."
+	} else {
+		v.Status, v.Reason = "unreadable", err.Error()
+	}
+	return v
+}
+
+func admissionFailure(a AdmissionState) string {
+	var failed []string
+	for _, ch := range a.Chains {
+		if ch.Needed && ch.Status != "present" {
+			failed = append(failed, ch.Family+"/"+ch.Chain+": "+ch.Status)
+		}
+	}
+	return strings.Join(failed, ", ")
+}
+
+// RepairGatewayAdmission changes only rules owned by their fixed mark and
+// comment. It never edits a foreign chain's rules, policy or ownership.
+func (s *Service) RepairGatewayAdmission(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		return err
+	}
+	defer unlockChange(lock)
+	if prior, err := readChange(s.paths.Dir); err == nil {
+		if !changeTerminal(prior.Phase) {
+			return &ReadOnlyError{Reason: "An earlier network change needs confirmation or recovery before admission can be repaired."}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	sp, err := s.loadSpec()
+	if err != nil {
+		return err
+	}
+	if needsAdmission(sp) {
+		if _, err := s.requireWritable(ctx, sp); err != nil {
+			return err
+		}
+	}
+	if err := s.syncAdmission(ctx, sp, sp); err != nil {
+		return err
+	}
+	if a := s.admissionState(ctx, sp); a.Needed && !a.Present {
+		return fmt.Errorf("admission repair is incomplete: %s", admissionFailure(a))
+	}
+	return nil
 }

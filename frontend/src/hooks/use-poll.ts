@@ -7,6 +7,7 @@ export type PollState<T> = {
   data: T | undefined
   error: Error | undefined
   loading: boolean
+  lastSuccess?: number
   refresh: () => void
 }
 
@@ -47,6 +48,7 @@ export function usePoll<T>(
     resource: object
     data?: T
     error?: Error
+    lastSuccess?: number
   }>()
   const [tick, setTick] = useState(0)
   // The fetcher is closed over by the interval, so it is kept in a ref that
@@ -77,7 +79,7 @@ export function usePoll<T>(
       try {
         const next = await fetcherRef.current(controller.signal)
         if (cancelled) return
-        setResult({ resource, data: next })
+        setResult({ resource, data: next, lastSuccess: Date.now() })
       } catch (err) {
         if (cancelled || controller.signal.aborted) return
         if (err instanceof DOMException && err.name === "AbortError") return
@@ -85,6 +87,7 @@ export function usePoll<T>(
           resource,
           data: previous?.resource === resource ? previous.data : undefined,
           error: err instanceof Error ? err : new Error(String(err)),
+          lastSuccess: previous?.resource === resource ? previous.lastSuccess : undefined,
         }))
       } finally {
         schedule()
@@ -102,7 +105,13 @@ export function usePoll<T>(
   // A disabled poll is not loading: nothing is in flight, and reporting
   // otherwise would leave a caller showing a skeleton forever.
   const current = result?.resource === resource ? result : undefined
-  return { data: current?.data, error: current?.error, loading: enabled && !current, refresh }
+  return {
+    data: current?.data,
+    error: current?.error,
+    lastSuccess: current?.lastSuccess,
+    loading: enabled && !current,
+    refresh,
+  }
 }
 
 export function isAuthError(error: Error | undefined) {

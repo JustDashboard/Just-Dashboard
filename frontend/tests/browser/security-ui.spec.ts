@@ -456,10 +456,99 @@ async function mockSecurity(
         return json(route, options.firewall ?? firewall)
       case "/firewall/apps":
         return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
+      case "/firewall/history":
+        return json(route, { events: [], limits: [] })
+      case "/firewall/access":
+        return json(route, { backend: "ufw", checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: "ufw", findings: [], checks: [] })
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/security/boundary":
+        return json(route, {
+          checkedAt: new Date().toISOString(),
+          allowlist: ["127.0.0.1/32", "100.64.0.0/10"],
+          client: "100.110.34.9",
+          caddyPort: 8443,
+          sshPorts: ["22"],
+          tailnetIp: "100.110.34.31",
+          previewMin: 21000,
+          previewMax: 21999,
+          checks: [
+            {
+              id: "ingress",
+              state: "held",
+              title: "Caddy is the only routable listener",
+              detail: "Caddy holds port 8443 on 100.110.34.31:8443, 127.0.0.1:8443.",
+            },
+            {
+              id: "allowlist",
+              state: "held",
+              title: "The allowlist admits this session before sign-in",
+              detail: "100.110.34.9 is inside the allowlist that runs before authentication.",
+            },
+            {
+              id: "tailnet",
+              state: "held",
+              title: "The tailnet path is up",
+              detail: "tailscale0 is up with 100.110.34.31.",
+            },
+            {
+              id: "ssh",
+              state: "held",
+              title: "SSH answers for a tunnel",
+              detail: "Port 22 is listening.",
+            },
+            {
+              id: "previews",
+              state: "broken",
+              title: "Previews stay tailnet-only",
+              detail:
+                "Preview ports outside the boundary: 21001 is funnelled or serves something other than a loopback port.",
+            },
+          ],
+        })
+      case "/fail2ban/sshd/policy":
+        return json(route, {
+          name: "sshd",
+          rule: "5 failures within 10 minutes earn a 10-minute ban",
+          values: [
+            { key: "bantime", running: "600" },
+            { key: "findtime", running: "600" },
+            { key: "maxretry", running: "5" },
+          ],
+          watches: { kind: "files", files: ["/var/log/auth.log"] },
+          actions: [
+            {
+              name: "iptables-multiport",
+              kind: "firewall",
+              enforces: true,
+              allPorts: false,
+              ports: ["ssh"],
+              words: "drops a banned address on ssh in the firewall",
+            },
+          ],
+          coverage: { service: "sshd", listening: ["22"], covered: ["22"], uncovered: [] },
+          ignoreSelf: true,
+          ignoreIp: ["127.0.0.0/8"],
+          findings: [],
+        })
+      case "/security/blocks":
+        return json(route, {
+          entries: [],
+          distinct: 0,
+          duplicated: 0,
+          covered: 0,
+          communityOnly: 0,
+          truncated: false,
+          engines: [
+            { engine: "fail2ban", read: true, count: 0 },
+            { engine: "crowdsec", read: false, count: 0, note: "not read" },
+            { engine: "firewall", read: true, count: 0 },
+          ],
+        })
       case "/fail2ban/sshd/config":
         return json(route, {
           name: "sshd",
@@ -1278,8 +1367,10 @@ test("limited readers see no SSH, diagnostic, firewall or failed-login mutations
   await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
   await page.goto("/network/tools")
   await expect(
-    page.getByText("Diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need the admin capability", { exact: true }),
   ).toBeVisible()
+  await expect(page.getByText("calculated in this browser", { exact: true })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveCount(0)
 })
 
 for (const [path, endpoint, reply, message] of [
@@ -1403,6 +1494,18 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
   expect(mutations).toEqual([])
 })
 
+test("the overview reads the access boundary and names the part that broke", async ({ page }) => {
+  await mockSecurity(page)
+  await page.goto("/security")
+  const boundary = page.locator("[data-slot=panel]").filter({ hasText: "Access boundary" })
+  await expect(boundary).toContainText("4 of 5 held")
+  await expect(boundary).toContainText("Caddy is the only routable listener")
+  await expect(boundary.getByRole("listitem").filter({ hasText: "Previews stay" })).toContainText(
+    "broken",
+  )
+  await expect(boundary).toContainText("21001 is funnelled")
+})
+
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
@@ -1445,4 +1548,49 @@ test("workspace: security filters are shareable and Back restores the previous q
   await query.press("Escape")
   await expect(query).toHaveValue("")
   await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
+})
+
+/**
+ * The verdict says what its checks could not see: provider policy always,
+ * since no provider adapter exists, and an nftables table no adapter models.
+ * Neither is a finding, and a clean list beside them does not say "passed".
+ */
+test("the posture names the layers its checks could not see", async ({ page }) => {
+  await mockSecurity(page, [], {
+    overrides: {
+      "/security/posture": {
+        ...posture,
+        status: "ok",
+        skipped: [],
+        findings: [],
+        unknowns: [
+          {
+            id: "unknown.provider",
+            layer: "provider",
+            title: "Provider policy is not visible",
+            detail:
+              "No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen. This host has no public address on any interface, so traffic from the internet reaches it only through a provider's translation.",
+          },
+          {
+            id: "unknown.nftables",
+            layer: "nftables",
+            title: "Foreign nftables decisions are not modeled",
+            detail:
+              "1 chain outside the firewall adapter can drop or redirect inbound traffic with rules this check does not evaluate: inet crowdsec crowdsec-chain (input hook, policy accept).",
+            subjects: ["inet crowdsec crowdsec-chain (input hook, policy accept)"],
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security")
+  const unseen = page.getByRole("region", { name: "Not seen by these checks" })
+  await expect(unseen.getByText("Provider policy is not visible", { exact: true })).toBeVisible()
+  await expect(unseen.getByText(/reaches it only through a provider's translation/)).toBeVisible()
+  await expect(
+    unseen.getByText("Foreign nftables decisions are not modeled", { exact: true }),
+  ).toBeVisible()
+  await expect(unseen.getByText(/inet crowdsec crowdsec-chain/)).toBeVisible()
+  await expect(page.getByText("No findings in the layers these checks can see")).toBeVisible()
+  await expect(page.getByText("All security checks passed")).toHaveCount(0)
 })

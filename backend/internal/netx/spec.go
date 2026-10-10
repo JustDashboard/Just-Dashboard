@@ -38,8 +38,47 @@ type Spec struct {
 	// loopback and the allowlist: the operator's own, added the first time
 	// they make a protection entry and kept until they remove it.
 	Trusted []string `json:"trusted"`
+	// TrustedNotes say who kept a Trusted address, why, and until when. An
+	// address kept before notes existed has none.
+	TrustedNotes []TrustedNote `json:"trustedNotes,omitempty"`
+	// Exceptions let a network past the drops for a scope and a reason,
+	// optionally until a time the kernel itself enforces.
+	Exceptions []ExceptionSpec `json:"exceptions,omitempty"`
 	// Sysctls are the kernel settings set here, by key.
 	Sysctls map[string]string `json:"sysctls"`
+	// Firewall is the owned nftables table, present once it has been used
+	// (firewall_owned.go).
+	Firewall *FirewallSpec `json:"firewall,omitempty"`
+	// EgressGroups are monitored egress groups (egress.go): their member
+	// tables, rules and the decided member restored at boot.
+	EgressGroups []EgressGroupSpec `json:"egressGroups,omitempty"`
+}
+
+// TrustedNote is the record behind one kept trusted address.
+type TrustedNote struct {
+	Address string `json:"address"`
+	Reason  string `json:"reason,omitempty"`
+	// ExpiresAt, when set, ends the trust: the rendered rule stops matching
+	// at that instant (`meta time`), whether or not the dashboard runs.
+	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+	// ConfirmedAt and ConfirmedBy are the last time an operator said the
+	// address is still needed.
+	ConfirmedAt time.Time `json:"confirmedAt,omitzero"`
+	ConfirmedBy string    `json:"confirmedBy,omitempty"`
+	Made
+}
+
+// ExceptionSpec lets a network past the gateway's drops.
+type ExceptionSpec struct {
+	ID int `json:"id"`
+	// Address is a network or an address, stored masked.
+	Address string `json:"address"`
+	// Scope is "all" (every blocklist and limit) or "blocklist:<id>".
+	Scope  string `json:"scope"`
+	Reason string `json:"reason"`
+	// ExpiresAt, when set, is enforced by the kernel's clock in the rule.
+	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+	Made
 }
 
 const specVersion = 1
@@ -76,12 +115,33 @@ type LinkSpec struct {
 	PeerNamespace string `json:"peerNamespace,omitempty"`
 	MTU           int    `json:"mtu,omitempty"`
 	STP           bool   `json:"stp,omitempty"`
+	// VLANFiltering makes a bridge forward by VLAN: each port carries only
+	// the VLANs it is a member of, tagged or untagged.
+	VLANFiltering bool `json:"vlanFiltering,omitempty"`
+	// MulticastSnooping, where set, overrides the kernel's default (on).
+	MulticastSnooping *bool `json:"multicastSnooping,omitempty"`
 	// Master is the bridge this device was made a port of.
 	Master string `json:"master,omitempty"`
+	// VLANs are this device's memberships on the VLAN-filtering bridge it is
+	// a port of (or, on such a bridge itself, the bridge's own). Empty keeps
+	// the kernel's default: VLAN 1, untagged and the port's native VLAN.
+	VLANs []PortVLAN `json:"vlans,omitempty"`
+	// Remotes are a unicast VXLAN's further flood destinations beside
+	// Remote: head-end replication to every other end of the segment.
+	Remotes []string `json:"remotes,omitempty"`
 	// Addresses are CIDRs, the host bits kept.
 	Addresses []string `json:"addresses,omitempty"`
 	Up        bool     `json:"up"`
 	Made
+}
+
+// PortVLAN is one VLAN a bridge port carries. PVID makes it the VLAN an
+// untagged frame arriving on the port belongs to; Untagged sends the VLAN's
+// frames out of the port without a tag.
+type PortVLAN struct {
+	VID      int  `json:"vid"`
+	PVID     bool `json:"pvid,omitempty"`
+	Untagged bool `json:"untagged,omitempty"`
 }
 
 // AddressSpec is an address added to a device the dashboard did not create.
@@ -105,8 +165,19 @@ type RouteSpec struct {
 	Table   int    `json:"table"`
 	Metric  int    `json:"metric,omitempty"`
 	Source  string `json:"source,omitempty"`
-	Comment string `json:"comment,omitempty"`
+	// Nexthops are an equal-cost multipath route's legs; such a route has
+	// no single Gateway or Device.
+	Nexthops []NexthopSpec `json:"nexthops,omitempty"`
+	Comment  string        `json:"comment,omitempty"`
 	Made
+}
+
+// NexthopSpec is one leg of a managed multipath route. Weight is the
+// kernel's relative share, 1 to 256, and zero is written as the default 1.
+type NexthopSpec struct {
+	Gateway string `json:"gateway,omitempty"`
+	Device  string `json:"device,omitempty"`
+	Weight  int    `json:"weight,omitempty"`
 }
 
 // RuleSpec is a policy rule the dashboard added. Its priority is always in
@@ -120,9 +191,18 @@ type RuleSpec struct {
 	IIF      string `json:"iif,omitempty"`
 	OIF      string `json:"oif,omitempty"`
 	FWMark   string `json:"fwmark,omitempty"`
-	// Action is lookup (Table), blackhole, unreachable or prohibit.
+	// UIDRange selects locally generated traffic by socket owner, "1000-1999".
+	UIDRange string `json:"uidRange,omitempty"`
+	// TOS selects a DS field value, written as ip prints it ("0x10").
+	TOS string `json:"tos,omitempty"`
+	// L3MDev looks traffic up in the table of the VRF device it uses
+	// instead of a numbered table.
+	L3MDev bool `json:"l3mdev,omitempty"`
+	// Action is lookup (Table, or the VRF's with L3MDev), goto (Goto),
+	// blackhole, unreachable or prohibit.
 	Action  string `json:"action"`
 	Table   int    `json:"table,omitempty"`
+	Goto    int    `json:"goto,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	Made
 }
@@ -151,6 +231,12 @@ type ShapeSpec struct {
 	// kilobits a second; zero is no limit.
 	EgressKbit  int `json:"egressKbit,omitempty"`
 	IngressKbit int `json:"ingressKbit,omitempty"`
+	// SQM is explicit opt-in. Its identities are generated by the server;
+	// an older entry without it keeps the ingress policer.
+	SQM *SQMSpec `json:"sqm,omitempty"`
+	// Upload is CAKE's egress profile under an upload limit; absent keeps
+	// the bare bandwidth an older entry was made with.
+	Upload *UploadProfile `json:"upload,omitempty"`
 	Made
 }
 
@@ -176,6 +262,9 @@ type ForwardSpec struct {
 	// Sources narrows who may use it; empty is anyone.
 	Sources []string `json:"sources,omitempty"`
 	Enabled bool     `json:"enabled"`
+	// ChangedAt is when an operator last saved it; evidence measured
+	// earlier describes a forward that no longer exists in that form.
+	ChangedAt time.Time `json:"changedAt,omitzero"`
 	Made
 }
 
@@ -191,6 +280,16 @@ type NATSpec struct {
 	// ToAddress, when set, is a fixed source address (SNAT) instead of
 	// whatever the interface holds (masquerade).
 	ToAddress string `json:"toAddress,omitempty"`
+	// Mode is empty for the two forms above, or one-to-one (Source and
+	// Translated are the same width and map in both directions) or nptv6
+	// (an IPv6 network mapped to another of the same length, both ways).
+	Mode string `json:"mode,omitempty"`
+	// Translated is the public address or network of a one-to-one or
+	// nptv6 entry.
+	Translated string `json:"translated,omitempty"`
+	// Destinations narrow a masquerade or SNAT entry to traffic for these
+	// networks; empty is everything leaving through Interface.
+	Destinations []string `json:"destinations,omitempty"`
 	// Owner names what made it when that was not a person directly: a
 	// WireGuard exit ("wireguard:wg0"). Removing the owner removes the entry.
 	Owner   string `json:"owner,omitempty"`
@@ -214,6 +313,11 @@ type LimitSpec struct {
 	PerSource bool `json:"perSource"`
 	// MaxConnections refuses a source holding more than this many at once.
 	MaxConnections int `json:"maxConnections,omitempty"`
+	// GlobalConnections refuses a new connection once this many are open
+	// to the port from every source together.
+	GlobalConnections int `json:"globalConnections,omitempty"`
+	// Profile names the service profile the limit started from.
+	Profile string `json:"profile,omitempty"`
 	// Action is drop or reject.
 	Action  string `json:"action"`
 	Enabled bool   `json:"enabled"`
@@ -236,7 +340,54 @@ type BlocklistSpec struct {
 	Refreshed time.Time `json:"refreshed,omitempty"`
 	Count     int       `json:"count"`
 	Error     string    `json:"error,omitempty"`
+	// Refresh is how often a fetched list is fetched again: one of
+	// blocklistRefreshChoices, the daily default when empty.
+	Refresh string `json:"refresh,omitempty"`
+	// LastAttempt and Failures describe the fetches since the last success;
+	// the scheduler backs off by them.
+	LastAttempt time.Time `json:"lastAttempt,omitzero"`
+	Failures    int       `json:"failures,omitempty"`
+	// SignatureURL and PublicKey make a custom feed's refresh verify a
+	// detached Ed25519 signature over the exact body before it is used.
+	SignatureURL string `json:"signatureUrl,omitempty"`
+	PublicKey    string `json:"publicKey,omitempty"`
+	// Sources is where the last successful fetch came from, one per URL.
+	Sources []BlocklistSource `json:"sources,omitempty"`
+	// LastDiff is what the last successful fetch changed.
+	LastDiff *BlocklistDiff `json:"lastDiff,omitempty"`
 	Made
+}
+
+// BlocklistSource is the provenance of one URL a fetched list read.
+type BlocklistSource struct {
+	URL string `json:"url"`
+	// Country and Family are a country zone's; empty for a feed.
+	Country string `json:"country,omitempty"`
+	Family  string `json:"family,omitempty"`
+	// Status is ok, absent (a country without that family's zone) or
+	// unchanged (the feed answered 304 to its validators).
+	Status       string    `json:"status"`
+	FetchedAt    time.Time `json:"fetchedAt"`
+	Bytes        int       `json:"bytes"`
+	SHA256       string    `json:"sha256,omitempty"`
+	Networks     int       `json:"networks"`
+	Skipped      int       `json:"skipped"`
+	ETag         string    `json:"etag,omitempty"`
+	LastModified string    `json:"lastModified,omitempty"`
+	// Signed is a verified detached Ed25519 signature over this body.
+	Signed bool `json:"signed,omitempty"`
+}
+
+// BlocklistDiff is how a refresh changed a list, with a bounded sample.
+type BlocklistDiff struct {
+	At            time.Time `json:"at"`
+	Added         int       `json:"added"`
+	Removed       int       `json:"removed"`
+	AddedSample   []string  `json:"addedSample,omitempty"`
+	RemovedSample []string  `json:"removedSample,omitempty"`
+	// Baseline is false when the previous cache could not be read, so the
+	// numbers compare against nothing.
+	Baseline bool `json:"baseline"`
 }
 
 // emptySpec is what a host the dashboard has never changed reads as.
@@ -327,5 +478,15 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// The rename must reach stable storage too: fsync of only the file can
+	// leave a durable journal referring to a directory entry lost at reboot.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

@@ -2,16 +2,62 @@
 
 Network pages retain useful readings when a poll fails and mark them with
 `components/network/read-warning.tsx`; a failed initial read stays an error or loading state.
+The workload traffic, bandwidth link inventory, eBPF and Firewall warnings include the last successful
+read time and a Refresh action. Each read owns its freshness independently: a working live sampler does
+not make a failed link inventory current. Docker attachment candidates retain failed-refresh context,
+disable attachment while unreadable, and offer retry instead of claiming the candidate list is empty.
+The overview's latest network-change record reports runtime, persistence, boot restoration and
+independent host recovery separately. A saved change means the host apply/save finished; the UI
+explicitly states that this status does not confirm browser reconnect or application reachability.
+Unavailable recovery, unverified boot restoration and recovery errors remain visible. Runtime-only
+changes say they are applied and explicitly state that they are not saved for boot.
+Device creation offers VXLAN unicast or multicast destinations; multicast requires a sending card
+and matching local/destination address families. Its notice leaves multicast-underlay readiness and
+peer reachability unverified. GRE and GRETAP, in both families, expose decimal uint32 tunnel keys
+and outer TTL/hop limits, with blank or zero retaining the kernel defaults. A key is an identifier;
+GRE remains unencrypted, and creating a link does not test endpoint reachability.
+The live throughput ring (`use-live-traffic.ts`) carries its own last-success time and retry, so
+the Overview, Interfaces and the live Traffic window show a dated "live throughput" warning while
+the retained ring stays drawn; the Overview's Throughput head also counts the newest reading's age
+on the browser clock and turns stale past three sampler intervals. A later namespaces poll failure
+keeps the list with its own dated warning; a single namespace whose devices could not be read says
+so in place, and the namespace sheet, device detail, bridge and readiness reads each keep their last
+answer with a dated warning. Parts of those reads that did not arrive (`Reading` state unavailable,
+not_applicable or failed) are worded as such, never as empty lists.
 Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
 the administrator capability, with destructive controls also following the destructive capability;
 backend route checks remain authoritative. VPN peer reads are disabled for a reader without the
 administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
 after a successful write. Their bridge selector reaches the existing guarded membership route, and
 the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+Administrator sheets for unmanaged devices read the existing
+[native persistent profile](../backend/network-native-managers.md). A response
+must name the requested device before it can create or refresh a draft. The editor keeps configured,
+runtime and boot evidence separate, and exposes only the supported IPv4/IPv6 address, DNS/domain
+and route intent. New routes inherit the observed VRF table, with table 254 for ordinary profiles;
+bond membership and mode remain with the existing owner. Failed reads and rejected writes retain
+the typed fields. A changed generation blocks apply until the operator reviews the latest owner
+and explicitly rebases the generation; rebasing preserves every draft field. An owner/profile change
+cannot be rebased into a different native profile.
+The leaf contract in `lib/network-native-profile.ts` validates every rendered metadata/evidence field,
+family method and preference, bounded string collection and route entry before a poll replaces its
+last successful data. Malformed items become a failed retained read and block apply. An already-open
+confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
+its old callback cannot send an obsolete client review. Backend identity fences remain authoritative.
+Native profile writes always request temporary apply and reconnection confirmation, even when the
+ordinary managed-network preference is off. A confirmed or recovered network decision with pending
+or failed native cleanup remains a warning, including outside Network. Further journaled changes
+remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
+until cleanup succeeds. Read accounts do not request administrator-only native profiles.
 The route form exposes an optional preferred source and shows returned sources in the existing
-table. Policy rules include an outgoing-interface selector and validated note. Resolver fallback
-servers and cache modes are editable through the existing confirmed apply; managed values are
-preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
+table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
+IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family. Its
+highlighted policy rule is explicitly an inference. The target lookup asks the kernel through the
+read-only `/network/routing/lookup` endpoint with optional source and packet mark, without sending
+traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
+retry reads current preferences so an accepted offer with a lost response is not duplicated.
+Resolver fallback servers and cache modes are editable through the existing confirmed apply;
+managed values are preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
 custom ports, interface scopes and TLS names.
 
 Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
@@ -21,12 +67,96 @@ port draft, including whitespace, before submitting.
 Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
 surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
 packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
-subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. DNS comparison sends a name
-only to configured resolvers by default; the reader explicitly opts into public presets through
-`includePublic`. Resolver changes may carry a private `verificationName` for a network that cannot
-resolve public names. This verification input is a check for that apply, not saved resolver state.
-The managed WireGuard full-tunnel label states its IPv4 egress and the blocking of IPv6 to prevent
-leaks until dual-stack egress is configured.
+subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. It is available with read access;
+privileged server diagnostics are not mounted for readers and retain their backend admin gate.
+Saved runs retain bounded named artifacts with explicit queued/running/completed/failed/cancelled/
+interrupted lifecycle, dated scope, typed outcomes, compatible comparison and administrator-only
+export. They use polled status without a socket-only live halo and can watch the existing job stream.
+The connection investigator retains its previous report and tuple after a failed retry, labeling
+each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
+failed refresh and expire a selected repair review when compared identities or evidence change.
+Selected executable file/admission repairs require exact review tokens and pending reconnection;
+wider native objects remain advice.
+Packet captures retain dated native observations after poll failures. Their immutable scope uses
+one interface/family and literal filter fields; rejected launches retain the entire bounded draft.
+Original PCAP and redacted support have separate downloads. A cancel remains pending until native
+cleanup, and interrupted captures never replay. Admin-only rendering issues no private capture
+requests for read accounts. Incident references compare timestamps without assuming the same flow.
+DNS lookup defaults to the configured host resolver chain. Supported resolved delegation uses the
+native split-policy and explicit alias checks; static/foreign paths report private-policy and recursive
+alias behavior as unknown. The pre-query hint states this support boundary. Direct comparison requires selected,
+named destinations and acknowledgment that private names leave their usual policy scope; the old
+`includePublic` flag does not authorize fan-out. Resolver changes may carry a private
+`verificationName` for a network that cannot resolve public names. This verification input is a check
+for that apply, not saved resolver state.
+Native policy investigations retain answering-link, encryption, TLS trust and DNSSEC provenance
+separately from configured switches and classic direct comparisons. Effective resolved lookup uses
+the same safe native adapter; its optional typed `hops` retain each question, alias edge and complete
+policy fingerprint. Failed launches/history reads retain
+dated evidence and the query draft. Reload never reruns a private question or grants direct-query
+disclosure consent.
+Native DNS service sheets are private administrator surfaces and issue no service reads for reader
+accounts. `lib/network-dns-services.ts` validates connection, inventory and retained-review envelopes;
+an incomplete response is a read error. Credentials, tokens, CA material and bootstrap passwords stay
+request-only and are cleared after submission; only bounded review IDs are stored in account-scoped
+session storage to hold an uncertain apply across navigation/reload. Retained history never starts or
+replays a native action. Open confirmations check current capabilities, read freshness, generation,
+policy fingerprint and immutable reviewed intent again before sending. Owned removal checks the exact
+current owner/image/resource identities separately. HTTP 200 with a nonverified state remains a
+retained outcome requiring review. A late planned read cannot overwrite a terminal native response.
+Record/client forms retain typed drafts through field/native refusals, with linked focused error
+summaries and associated inline errors. Authoritative records require a fresh explicit zone reading;
+unsupported RR types stay read-only. Existing Pi-hole clients use native group IDs, with an explicit
+empty membership list. Successful refreshes preserve edited group choices and refuse staging if a
+selected client or group has disappeared. Retained reviews wait for their full baseline before
+polling `/changes/{id}/current`; ordinary connection inventory cannot supply selected-policy
+freshness. The current read retains raw record/client fingerprints, while open confirmations also
+compare the complete immutable request and selected metadata. Explicit null and empty client
+comments have distinct labels and remain unchanged in native readback.
+Unreadable native client memberships or group identities keep their own unknown evidence;
+their section headers withhold counts rather than presenting an unknown inventory as zero policy.
+Filter metadata uses the separate bounded `lib/network-dns-filters.ts` decoder and `/filters` read.
+It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
+entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain
+the previous same-owner data and observation time; a fresh partial reading shows unknown sections
+without treating them as empty. Connection replacement clears all retained filter rows, and a stale
+owner read suspends its filter poll. These reads do not stage or apply a filter change.
+Reviewed custom-domain forms use the closed `network-dns-service-policy` validator and retained
+service DTO reader. Engine-specific suffix/exact matching is explicit; raw rule syntax is not a
+draft field. Pi-hole add drafts preserve empty memberships and native zero, require configured
+native groups and refuse disappeared group IDs after refresh. A configured missing ID has an
+explicit removal control; unknown inventory retains selections and holds review. Refused reviews
+retain draft values. Selected-filter evidence distinguishes absence, ambiguous or other-target
+policy, native false/empty/null and unreported fields; owner and exact-match counts remain visible.
+Ordinary inventory cannot replace `/changes/{id}/current`; changed selected metadata or fingerprints
+hold apply even if a top-level digest is reused. Open confirmations also compare the complete
+immutable selected-filter baseline. Native readback shows configured policy rather than measured
+filter priority or client decisions.
+WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
+and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
+containment; successful setup says configured when native runtime is not up. Its Advanced fold
+checks an MTU and hand-typed resolver addresses before submitting. Peer edits send only changed
+fields, keep the draft and show the refusal when rejected, and confirm a site withdrawal before
+the request; budgets parse binary units as `bytes` prints them. The record's trend, endpoint and
+lifecycle reads poll per peer and window and keep their last data with a retry after a failure.
+SQM retains its entire bounded profile after rejected writes and requires pending reconnection
+even when the global preference is off. Failed native shaping polls block edits until fresh reads.
+IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
+review; planning release never deletes a native resource. Incomplete planning envelopes or malformed
+rows are failed reads: a selected owner draft survives an unreadable refresh and its handoff is blocked
+until fresh inventory is available. Creation links initialize once per seed identity after a valid
+row is available; consumed/detached seeds cannot overwrite retained edits or gate an unselected
+draft. A new seed identity and delayed admin authentication can still initialize a plan. External
+pickers accept only current option identities so synthetic empty
+form events cannot erase dependent scope. External check reload/filter/comparison never launch
+probes and retain source/family/time distinctions. Socket history keeps native decimal-string TCP
+counter deltas separate from opt-in kernel TCP/UDP transport-payload subtotals, including when both
+channels describe the same socket. Missing lengths, owners, UTC certainty and delivery/budget/storage
+gaps remain explicit. Observer activation and stop use reviewed destructive controls, gated by fresh
+admin reads and history recording; page reads, ordinary opt-in and restart never attach it. Retained
+attachments after a failed stop offer retry without claiming off. The observer must be stopped
+explicitly before ordinary history opt-out; history erasure also stops it. Historical program/link IDs
+are dated evidence, not proof of current attachment ownership.
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
@@ -43,8 +173,9 @@ leaks until dual-stack egress is configured.
   `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
   the same file and opened on the wrong remembered filter.
 - `usePoll` schedules the next request only after the previous one settles and pauses scheduled
-  requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
-  immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
+  requests on hidden tabs. Each successful response records `lastSuccess`; failed refreshes retain
+  that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
+  changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
   Live Processes treats its search and filters as resource identity, and ranking/row-count
   changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
@@ -244,3 +375,8 @@ leaks until dual-stack egress is configured.
   `color-scheme`, and clears the stored light/dark preference from anyone upgrading. `hooks/use-theme.tsx`,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
+
+Saved connection investigations share the `netdiag` lifecycle and exact-source comparison. The
+`kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
+is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
+not a connected/live state. The shared naming dialog snapshots its discriminated request kind.

@@ -30,10 +30,18 @@ var vpnRoutes = []struct {
 	{http.MethodPost, "/api/v1/network/vpn/wireguard/{iface}/exit", proxyAdmin},
 	{http.MethodPost, "/api/v1/network/vpn/wireguard/{iface}/peers", proxyAdmin},
 	{http.MethodGet, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}/config", proxyAdmin},
+	{http.MethodGet, "/api/v1/network/vpn/archive", proxyAdmin},
+	{http.MethodPost, "/api/v1/network/vpn/archive/{file}/restore", proxyAdmin},
+	{http.MethodGet, "/api/v1/network/vpn/wireguard/{iface}/history", proxyAdmin},
+	{http.MethodGet, "/api/v1/network/vpn/wireguard/{iface}/endpoint", proxyAdmin},
+	{http.MethodPatch, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}", proxyAdmin},
+	{http.MethodPut, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}/quota", proxyAdmin},
+	{http.MethodPost, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}/verify", proxyAdmin},
 	{http.MethodPost, "/api/v1/network/vpn/wireguard/{iface}/down", proxyDestructive},
 	{http.MethodDelete, "/api/v1/network/vpn/wireguard/{iface}", proxyDestructive},
 	{http.MethodDelete, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}", proxyDestructive},
 	{http.MethodDelete, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}/config", proxyDestructive},
+	{http.MethodDelete, "/api/v1/network/vpn/wireguard/{iface}/peers/{id}/quota", proxyDestructive},
 }
 
 func TestVPNRoutesAreAdminOnlyAndRemovalsAreDestructive(t *testing.T) {
@@ -271,6 +279,7 @@ func TestWireGuardRoutesRefuseBadInterfaceNamesAndPeerIds(t *testing.T) {
 
 func TestWireGuardPeerConfigRoute(t *testing.T) {
 	c, s := newClient(t)
+	dir := vpnRecordNetwork(t, s)
 	const config = "[Interface]\nPrivateKey = AAAA\nAddress = 10.8.0.2/32\n"
 	sealed, err := s.Sealer.Seal(config)
 	if err != nil {
@@ -287,6 +296,9 @@ func TestWireGuardPeerConfigRoute(t *testing.T) {
 	}
 	kept := insert("pk-kept", sealed)
 	forgotten := insert("pk-forgotten", "")
+	// A stored configuration is shown only for the peer of that id in the
+	// tunnel's own file.
+	vpnWriteTunnel(t, dir, "wgtest", vpnPeerBlock(kept, "Phone", "device", "pk-kept", "10.8.0.2/32", "")+vpnPeerBlock(forgotten, "Tablet", "device", "pk-forgotten", "10.8.0.3/32", ""))
 	path := func(id int64, suffix string) string {
 		return "/api/v1/network/vpn/wireguard/wgtest/peers/" + strconv.FormatInt(id, 10) + suffix
 	}
@@ -380,6 +392,17 @@ func TestExitNodeOffAndTailscaleWithdrawalSpendTheDestructiveBudget(t *testing.T
 		if n := postUntilLimited(c, ts, body, 40); n == 0 || n > 15 {
 			t.Errorf("%s was limited after %d calls, want it to spend the destructive budget", name, n)
 		}
+	}
+}
+
+func TestWireGuardIPv6ExitWithdrawalSpendsTheDestructiveBudget(t *testing.T) {
+	c, _ := newClient(t)
+	const endpoint = "/api/v1/network/vpn/wireguard/wgnone/exit"
+	if n := postUntilLimited(c, endpoint, `{"on":true,"ipv6":true}`, 40); n != 0 {
+		t.Errorf("IPv6 exit enable consumed destructive budget after %d calls", n)
+	}
+	if n := postUntilLimited(c, endpoint, `{"on":true,"ipv6":false}`, 40); n == 0 || n > 15 {
+		t.Errorf("IPv6 withdrawal did not consume destructive budget: %d", n)
 	}
 }
 

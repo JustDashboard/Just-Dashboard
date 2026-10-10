@@ -1,0 +1,576 @@
+$ node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build
+monaco: /home/ubuntu/Just-Dashboard-net-traffic/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-net-traffic/frontend/public/monaco/vs
+▲ Next.js 16.3.5 (Turbopack)
+✓ Running next.config.ts took 42ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 24.4s
+  Running TypeScript ...
+  Finished TypeScript in 75s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/73) ...
+  Generating static pages using 7 workers (18/73) 
+  Generating static pages using 7 workers (36/73) 
+  Generating static pages using 7 workers (54/73) 
+✓ Generating static pages using 7 workers (73/73) in 875ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ƒ /account/keys
+├ ƒ /account/security
+├ ƒ /account/sessions
+├ ƒ /account/users
+├ ○ /apple-icon.png
+├ ƒ /audit
+├ ƒ /backups
+├ ƒ /backups/[job]
+├ ƒ /boards
+├ ƒ /boards/[id]
+├ ƒ /dashboard
+├ ƒ /dashboard/configuration
+├ ƒ /databases
+├ ƒ /databases/[id]
+├ ƒ /databases/[id]/[...missing]
+├ ƒ /databases/[id]/access
+├ ƒ /databases/[id]/advisor
+├ ƒ /databases/[id]/backups
+├ ƒ /databases/[id]/data
+├ ƒ /databases/[id]/diagram
+├ ƒ /databases/[id]/generate
+├ ƒ /databases/[id]/logs
+├ ƒ /databases/[id]/performance
+├ ƒ /databases/[id]/query
+├ ƒ /databases/[id]/schema
+├ ƒ /databases/[id]/search
+├ ƒ /databases/[id]/settings
+├ ƒ /databases/map
+├ ƒ /databases/new
+├ ƒ /deploy
+├ ƒ /deploy/[id]
+├ ƒ /deploy/[id]/console
+├ ƒ /deploy/[id]/deployments
+├ ƒ /deploy/[id]/game-settings
+├ ƒ /deploy/[id]/logs
+├ ƒ /deploy/[id]/players
+├ ƒ /deploy/[id]/runs/[run]
+├ ƒ /deploy/[id]/runtime
+├ ƒ /deploy/[id]/settings
+├ ƒ /deploy/[id]/settings/automation
+├ ƒ /deploy/[id]/settings/build
+├ ƒ /deploy/[id]/settings/danger
+├ ƒ /deploy/[id]/settings/databases
+├ ƒ /deploy/[id]/settings/domains
+├ ƒ /deploy/[id]/settings/general
+├ ƒ /deploy/[id]/settings/runtime
+├ ƒ /deploy/[id]/settings/storage
+├ ƒ /deploy/[id]/settings/variables
+├ ƒ /deploy/credentials
+├ ƒ /deploy/new
+├ ƒ /deploy/notifications
+├ ƒ /docker
+├ ƒ /docker/containers
+├ ƒ /docker/containers/[id]
+├ ƒ /docker/events
+├ ƒ /docker/images
+├ ƒ /docker/networks
+├ ƒ /docker/stacks
+├ ƒ /docker/stacks/[name]
+├ ƒ /docker/volumes
+├ ƒ /files
+├ ƒ /files/editor
+├ ƒ /git
+├ ○ /icon.svg
+├ ƒ /login
+├ ƒ /logs
+├ ƒ /metrics
+├ ƒ /network
+├ ƒ /network/captures
+├ ƒ /network/connections
+├ ƒ /network/dns
+├ ƒ /network/drift
+├ ƒ /network/external
+├ ƒ /network/firewall
+├ ƒ /network/flows
+├ ƒ /network/gateway
+├ ƒ /network/interfaces
+├ ƒ /network/investigate
+├ ƒ /network/ipam
+├ ƒ /network/protection
+├ ƒ /network/routing
+├ ƒ /network/runs
+├ ƒ /network/tools
+├ ƒ /network/traffic
+├ ƒ /network/vpn
+├ ƒ /packages
+├ ƒ /processes
+├ ƒ /processes/pm2
+├ ƒ /processes/scheduled
+├ ƒ /processes/services
+├ ƒ /proxy
+├ ƒ /proxy/certificates
+├ ƒ /proxy/config
+├ ƒ /proxy/ports
+├ ƒ /proxy/sites
+├ ƒ /proxy/sites/[name]
+├ ƒ /proxy/streams
+├ ƒ /proxy/tls
+├ ƒ /proxy/traffic
+├ ƒ /security
+├ ƒ /security/intrusion
+├ ƒ /security/logins
+├ ƒ /security/ssh
+├ ƒ /system-users
+└ ƒ /terminal
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+Running 14 tests using 1 worker
+
+  ✘   1 [chromium] › tests/browser/network-traffic-maturity.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip (13.8s)
+  ✓   2 [chromium] › tests/browser/network-traffic-maturity.spec.ts:38:5 › a stopped sampler reads as stale, not as a quiet link (6.6s)
+  ✘   3 [chromium] › tests/browser/network-traffic-maturity.spec.ts:47:5 › a typed range reads that window with its percentiles and the incidents in it (31.1s)
+  ✘   4 [chromium] › tests/browser/network-traffic-maturity.spec.ts:83:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared (282ms)
+  ✘   5 [chromium] › tests/browser/network-traffic-maturity.spec.ts:119:5 › programs say what a read could not see and list UDP peers without byte counters (326ms)
+  ✘   6 [chromium] › tests/browser/network-traffic-maturity.spec.ts:138:5 › every container can be listed and one opens into its chart, service and peers (312ms)
+  ✘   7 [chromium] › tests/browser/network-traffic-maturity.spec.ts:165:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree (325ms)
+  ✘   8 [chromium] › tests/browser/network-traffic-maturity.spec.ts:184:5 › an upload profile goes with CAKE and the delay CAKE measured is shown (271ms)
+  ✘   9 [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch (281ms)
+  ✘  10 [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked (273ms)
+  ✘  11 [chromium] › tests/browser/network-traffic-maturity.spec.ts:259:5 › an install is followed by configured, active and verified phases, not by a claim (294ms)
+  ✘  12 [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses (276ms)
+  ✘  13 [chromium] › tests/browser/network-traffic-maturity.spec.ts:362:5 › a block asks why and until when, opens an incident, and is listed with its end (303ms)
+  ✘  14 [chromium] › tests/browser/network-traffic-maturity.spec.ts:431:5 › a past hour is read from the socket history in the live table's shape (303ms)
+
+
+  1) [chromium] › tests/browser/network-traffic-maturity.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByLabel('Live context')
+    Expected substring: "2.7%"
+    Received string:    "Newest reading3s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent3.3%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByLabel('Live context')
+        5 × locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+          - unexpected value "Newest reading5s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent2.9%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+        - locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+        - unexpected value "Newest reading1s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent3.2%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+        - locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+        - unexpected value "Newest reading3s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent3.2%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+        - locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+        - unexpected value "Newest reading1s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent3.3%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+        - locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+        - unexpected value "Newest reading3s oldsampled every 2sPackets on ens33.9k/s3.0k/s in · 962/s outTCP resent3.3%of segments in the last minute · 2 resetsTCP round trip23 msmedian of 37 sockets · p90 118 ms · read just now"
+
+
+      28 |   await expect(context).toContainText("TCP resent")
+      29 |   // Over the last 30 steps: 11 of 5 and 19 of 40 resent per 1000 sent.
+    > 30 |   await expect(context).toContainText("2.7%")
+         |                         ^
+      31 |   await expect(context).toContainText("23 ms")
+      32 |   await expect(context).toContainText("median of 37 sockets · p90 118 ms")
+      33 |   await expect(page.getByLabel("ens3 packets")).toContainText("packets in")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:30:25
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-t-de65d-s-TCP-resent-and-round-trip-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-t-de65d-s-TCP-resent-and-round-trip-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-t-de65d-s-TCP-resent-and-round-trip-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-t-de65d-s-TCP-resent-and-round-trip-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests/browser/network-traffic-maturity.spec.ts:47:5 › a typed range reads that window with its percentiles and the incidents in it 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.fill: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('form', { name: 'Recorded range' }).getByLabel('From')
+
+
+      75 |   // A reversed range is refused before anything is read.
+      76 |   await page.getByRole("radio", { name: "Range" }).click()
+    > 77 |   await form.getByLabel("From").fill("2026-10-01T10:00")
+         |                                 ^
+      78 |   await form.getByLabel("To").fill("2026-10-01T09:00")
+      79 |   await expect(form.getByText("The range ends before it starts.")).toBeVisible()
+      80 |   await expect(form.getByRole("button", { name: "Show range" })).toBeDisabled()
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:77:33
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-ef952-les-and-the-incidents-in-it-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-ef952-les-and-the-incidents-in-it-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-ef952-les-and-the-incidents-in-it-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-ef952-les-and-the-incidents-in-it-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [chromium] › tests/browser/network-traffic-maturity.spec.ts:83:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      86 |   const mutations: Mutation[] = []
+      87 |   await open(page, mutations)
+    > 88 |   await page.goto("/network/traffic")
+         |              ^
+      89 |   const budgets = page.getByLabel("Transfer budgets")
+      90 |   await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month")
+      91 |   await expect(budgets).toContainText("40.0 GB estimated from older rows")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:88:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-c102a-erts-and-is-set-and-cleared-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-c102a-erts-and-is-set-and-cleared-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-c102a-erts-and-is-set-and-cleared-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-c102a-erts-and-is-set-and-cleared-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [chromium] › tests/browser/network-traffic-maturity.spec.ts:119:5 › programs say what a read could not see and list UDP peers without byte counters 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      121 | }) => {
+      122 |   await open(page, [])
+    > 123 |   await page.goto("/network/traffic")
+          |              ^
+      124 |   const limits = page.getByLabel("What the program read could not see")
+      125 |   await expect(limits).toContainText("14 TCP connections opened and closed between two reads")
+      126 |   await expect(limits).toContainText("3 sockets closed since the last read")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:123:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-p-ab0ac-peers-without-byte-counters-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-p-ab0ac-peers-without-byte-counters-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-p-ab0ac-peers-without-byte-counters-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-p-ab0ac-peers-without-byte-counters-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [chromium] › tests/browser/network-traffic-maturity.spec.ts:138:5 › every container can be listed and one opens into its chart, service and peers 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      144 |   })
+      145 |   await open(page, [])
+    > 146 |   await page.goto("/network/traffic")
+          |              ^
+      147 |   const band = page.getByLabel("Traffic by container", { exact: true })
+      148 |   await expect(band.getByRole("button", { name: "Open registry's traffic" })).toHaveCount(0)
+      149 |   await band.getByRole("button", { name: "Show all 7" }).click()
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:146:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-e-f38e6-its-chart-service-and-peers-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-e-f38e6-its-chart-service-and-peers-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-e-f38e6-its-chart-service-and-peers-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-e-f38e6-its-chart-service-and-peers-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [chromium] › tests/browser/network-traffic-maturity.spec.ts:165:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      167 | }) => {
+      168 |   await open(page, [])
+    > 169 |   await page.goto("/network/traffic")
+          |              ^
+      170 |   const queues = page.getByRole("table").filter({ hasText: "tailscale0" })
+      171 |   await expect(queues).toContainText("captures this fq_codel's parameters and puts them back")
+      172 |   await expect(queues).toContainText("replaces the kernel's default queue")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:169:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-s-c9349--and-refuses-a-foreign-tree-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-s-c9349--and-refuses-a-foreign-tree-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-s-c9349--and-refuses-a-foreign-tree-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-s-c9349--and-refuses-a-foreign-tree-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  7) [chromium] › tests/browser/network-traffic-maturity.spec.ts:184:5 › an upload profile goes with CAKE and the delay CAKE measured is shown 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      185 |   const mutations: Mutation[] = []
+      186 |   await open(page, mutations)
+    > 187 |   await page.goto("/network/traffic")
+          |              ^
+      188 |   await expect(
+      189 |     page.getByText("Upload CAKE delay 1.4 ms average in best effort · 41 ms peak"),
+      190 |   ).toBeVisible()
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:187:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-f3f61-elay-CAKE-measured-is-shown-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-f3f61-elay-CAKE-measured-is-shown-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-f3f61-elay-CAKE-measured-is-shown-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-f3f61-elay-CAKE-measured-is-shown-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  8) [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      225 | }) => {
+      226 |   await open(page, [])
+    > 227 |   await page.goto("/network/traffic")
+          |              ^
+      228 |   const panel = page.getByLabel("Congestion control on live sockets")
+      229 |   const now = panel.getByLabel("Now")
+      230 |   await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:227:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  9) [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      239 | }) => {
+      240 |   await open(page, [])
+    > 241 |   await page.goto("/network/traffic")
+          |              ^
+      242 |   await expect(page.getByLabel("eBPF platform")).toContainText(
+      243 |     "Kernel 6.14.0-37-generic · JIT on · unprivileged loading refused · BTF type information present · bpf filesystem mounted · run statistics off",
+      244 |   )
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:241:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) [chromium] › tests/browser/network-traffic-maturity.spec.ts:259:5 › an install is followed by configured, active and verified phases, not by a claim 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/traffic
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/traffic", waiting until "load"
+
+
+      312 |     )
+      313 |   })
+    > 314 |   await page.goto("/network/traffic")
+          |              ^
+      315 |   await page.getByRole("button", { name: "Install bpftool" }).click()
+      316 |   const phases = page.getByRole("list", { name: "After installing bpftool" }).first()
+      317 |   await expect(phases).toContainText("Installed: done")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:314:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-1789c-ified-phases-not-by-a-claim-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-1789c-ified-phases-not-by-a-claim-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-1789c-ified-phases-not-by-a-claim-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-1789c-ified-phases-not-by-a-claim-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  11) [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/connections
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/connections", waiting until "load"
+
+
+      324 | test("a peer opens into its tuples, ages, closes and the layers it crosses", async ({ page }) => {
+      325 |   await open(page, [])
+    > 326 |   await page.goto("/network/connections")
+          |              ^
+      327 |   await loaded(page)
+      328 |   const row = page.getByRole("row").filter({ hasText: "198.51.100.23" })
+      329 |   await expect(row).toContainText(
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:326:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12) [chromium] › tests/browser/network-traffic-maturity.spec.ts:362:5 › a block asks why and until when, opens an incident, and is listed with its end 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/connections
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/connections", waiting until "load"
+
+
+      376 |     return json(route, { id: "fedcba9876543210fedcba9876543210", name: "Blocked" }, 202)
+      377 |   })
+    > 378 |   await page.goto("/network/connections")
+          |              ^
+      379 |   await loaded(page)
+      380 |   const listed = page.getByLabel("Blocks from this page")
+      381 |   await expect(listed).toContainText("credential stuffing on /login")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:378:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-28b40--and-is-listed-with-its-end-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-28b40--and-is-listed-with-its-end-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-28b40--and-is-listed-with-its-end-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-28b40--and-is-listed-with-its-end-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  13) [chromium] › tests/browser/network-traffic-maturity.spec.ts:431:5 › a past hour is read from the socket history in the live table's shape 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:43211/network/connections
+    Call log:
+      - navigating to "http://127.0.0.1:43211/network/connections", waiting until "load"
+
+
+      435 |   })
+      436 |   await open(page, [])
+    > 437 |   await page.goto("/network/connections")
+          |              ^
+      438 |   await loaded(page)
+      439 |   await page.getByRole("radio", { name: "A past hour" }).click()
+      440 |   const recorded = page.getByLabel("Recorded connections")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:437:14
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-ce769-y-in-the-live-table-s-shape-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-ce769-y-in-the-live-table-s-shape-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-ce769-y-in-the-live-table-s-shape-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-ce769-y-in-the-live-table-s-shape-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  13 failed
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:47:5 › a typed range reads that window with its percentiles and the incidents in it 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:83:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:119:5 › programs say what a read could not see and list UDP peers without byte counters 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:138:5 › every container can be listed and one opens into its chart, service and peers 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:165:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:184:5 › an upload profile goes with CAKE and the delay CAKE measured is shown 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:259:5 › an install is followed by configured, active and verified phases, not by a claim 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:362:5 › a block asks why and until when, opens an incident, and is listed with its end 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:431:5 › a past hour is read from the socket history in the live table's shape 
+  1 passed (1.1m)

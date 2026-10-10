@@ -1,0 +1,53 @@
+2026-10-10T01:15:59Z removed overlay, seed and ephemeral key; logs kept in /home/ubuntu/Just-Dashboard-net-vm-artifacts/logs
+/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/vm-prerequisites/ubuntu-24.04-minimal-cloudimg-amd64.img: OK
+image: /home/ubuntu/Just-Dashboard-net-vm-artifacts/vm/overlay.qcow2
+file format: qcow2
+virtual size: 8 GiB (8589934592 bytes)
+disk size: 196 KiB
+cluster_size: 65536
+backing file: /home/ubuntu/Just-Dashboard-network-native-managers-artifacts/vm-prerequisites/ubuntu-24.04-minimal-cloudimg-amd64.img
+backing file format: qcow2
+Format specific information:
+    compat: 1.1
+    compression type: zlib
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+    extended l2: false
+Child node '/file':
+    filename: /home/ubuntu/Just-Dashboard-net-vm-artifacts/vm/overlay.qcow2
+    protocol type: file
+    file length: 192 KiB (197120 bytes)
+    disk size: 196 KiB
+2026-10-10T01:16:00Z prepared overlay, seed and ephemeral key
+2026-10-10T01:16:00Z QEMU started as PID 496008
+2026-10-10T01:17:17Z rebooting guest (boot b2040693-337e-476f-b6c2-f03507cdc960)
+2026-10-10T01:17:39Z guest rebooted (boot b2040693-337e-476f-b6c2-f03507cdc960 -> a9214001-a3e6-410d-a476-c00a03e8f2d8)
+2026-10-10T01:18:00Z rebooting guest (boot a9214001-a3e6-410d-a476-c00a03e8f2d8)
+2026-10-10T01:18:21Z guest rebooted (boot a9214001-a3e6-410d-a476-c00a03e8f2d8 -> 47775ab0-e4ff-47e3-82e9-693ad6ad4f0d)
+2026-10-10T01:23:16Z rebooting guest (boot 47775ab0-e4ff-47e3-82e9-693ad6ad4f0d)
+2026-10-10T01:23:39Z guest rebooted (boot 47775ab0-e4ff-47e3-82e9-693ad6ad4f0d -> 814a930d-6347-4b6e-8d1c-d085bbbfe5f1)
+2026-10-10T01:23:44Z rebooting guest (boot 814a930d-6347-4b6e-8d1c-d085bbbfe5f1)
+2026-10-10T01:24:04Z guest rebooted (boot 814a930d-6347-4b6e-8d1c-d085bbbfe5f1 -> c6f11c8c-21ad-45a6-a63c-2f0e1e56ab4e)
+2026-10-10T01:24:09Z rebooting guest (boot c6f11c8c-21ad-45a6-a63c-2f0e1e56ab4e)
+2026-10-10T01:24:30Z guest rebooted (boot c6f11c8c-21ad-45a6-a63c-2f0e1e56ab4e -> 339fec2c-236b-4273-9a32-a9c259007286)
+2026-10-10T01:24:36Z rebooting guest (boot 339fec2c-236b-4273-9a32-a9c259007286)
+2026-10-10T01:25:00Z guest rebooted (boot 339fec2c-236b-4273-9a32-a9c259007286 -> 616fb1b6-8cfa-49bf-9e1a-b1259f4aefbf)
+2026-10-10T01:25:05Z rebooting guest (boot 616fb1b6-8cfa-49bf-9e1a-b1259f4aefbf)
+2026-10-10T01:25:28Z guest rebooted (boot 616fb1b6-8cfa-49bf-9e1a-b1259f4aefbf -> 720a6047-e221-452a-a0da-c9b34647d1f4)
+2026-10-10T01:25:36Z rebooting guest (boot 720a6047-e221-452a-a0da-c9b34647d1f4)
+2026-10-10T01:25:59Z guest rebooted (boot 720a6047-e221-452a-a0da-c9b34647d1f4 -> 5c9eed23-5a7f-44e4-ade8-a02a1644d3a2)
+2026-10-10T01:26:40Z rebooting guest (boot 5c9eed23-5a7f-44e4-ade8-a02a1644d3a2)
+2026-10-10T01:27:04Z guest rebooted (boot 5c9eed23-5a7f-44e4-ade8-a02a1644d3a2 -> 5108d8c1-24b7-46da-b7f4-f72947023058)
+2026-10-10T01:32:14Z rebooting guest (boot 5108d8c1-24b7-46da-b7f4-f72947023058)
+2026-10-10T01:32:36Z guest rebooted (boot 5108d8c1-24b7-46da-b7f4-f72947023058 -> d7c8f806-87f0-4cdc-abee-8aa968dc24f6)
+2026-10-10T01:32:45Z rebooting guest (boot d7c8f806-87f0-4cdc-abee-8aa968dc24f6)
+2026-10-10T01:33:09Z guest rebooted (boot d7c8f806-87f0-4cdc-abee-8aa968dc24f6 -> 4c322dff-fede-4f1c-993a-0bbc749170b3)
+2026-10-10T01:33:19Z rebooting guest (boot 4c322dff-fede-4f1c-993a-0bbc749170b3)
+2026-10-10T01:33:42Z guest rebooted (boot 4c322dff-fede-4f1c-993a-0bbc749170b3 -> 4ca9e11f-94fc-418d-abe3-bc1bfbb5398b)
+2026-10-10T01:33:48Z rebooting guest (boot 4ca9e11f-94fc-418d-abe3-bc1bfbb5398b)
+2026-10-10T01:34:10Z guest rebooted (boot 4ca9e11f-94fc-418d-abe3-bc1bfbb5398b -> b2fdb865-ccb9-4026-890d-e897743e1154)
+2026-10-10T01:34:23Z rebooting guest (boot b2fdb865-ccb9-4026-890d-e897743e1154)
+2026-10-10T01:34:46Z guest rebooted (boot b2fdb865-ccb9-4026-890d-e897743e1154 -> 8bc157f9-22c0-4876-85db-8942ed240c74)
+2026-10-10T01:37:38Z QEMU 496008 stopped
+2026-10-10T01:37:38Z removed overlay, seed and ephemeral key; logs kept in /home/ubuntu/Just-Dashboard-net-vm-artifacts/logs

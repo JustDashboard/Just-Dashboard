@@ -1,0 +1,17 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:215: engine=technitium nativeFilterVersion=15.6 sources=0 rules=0 ruleEvidence=unsupported fingerprint=0efeeead7dacb713facb7fb51301d61ca0f971358fb7d789c9ce2b614d79eb44 subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:274: engine=technitium nativeFilterVersion=15.6 sources=0 rules=0 ruleEvidence=unsupported fingerprint=8760daa6cec7f8345fb458433d5d762b766b8ace41e7f465869e087f98355a1a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:321: Native exact-selection current read passed: record_add planned
+    provision_live_test.go:326: Native exact-selection current read passed: record_add verified
+    provision_live_test.go:321: Native exact-selection current read passed: record_add planned
+    provision_live_test.go:326: Native exact-selection current read passed: record_add verified
+    provision_live_test.go:341: engine=technitium nativeFilterVersion=15.6 sources=0 rules=0 ruleEvidence=unsupported fingerprint=8760daa6cec7f8345fb458433d5d762b766b8ace41e7f465869e087f98355a1a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:381: engine=technitium nativeFilterVersion=15.6 sources=0 rules=0 ruleEvidence=unsupported fingerprint=8760daa6cec7f8345fb458433d5d762b766b8ace41e7f465869e087f98355a1a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:405: Native exact-selection current read passed: record_remove planned
+    provision_live_test.go:410: Native exact-selection current read passed: record_remove verified
+    provision_live_test.go:405: Native exact-selection current read passed: record_remove planned
+    provision_live_test.go:410: Native exact-selection current read passed: record_remove verified
+    provision_live_test.go:412: engine=technitium nativeFilterVersion=15.6 sources=0 rules=0 ruleEvidence=unsupported fingerprint=8760daa6cec7f8345fb458433d5d762b766b8ace41e7f465869e087f98355a1a subscriptions=not_fetched decisions=unmeasured
+    provision_live_test.go:452: engine=technitium image=technitium/dns-server@sha256:1045db38fd2f2e4d9578f9168b7eb4862575469ed0ffc79e03f36bdc772a93b5 nativeVersion=15.6 UDP/TCP=owned-fixture.invalid owner=8394effdd05e46bdaad0ead49655c006 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (29.30s)
+PASS
