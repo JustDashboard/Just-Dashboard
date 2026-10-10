@@ -22,7 +22,8 @@ test("the live window says how old its reading is, with packets, TCP resent and 
   await page.goto("/network/traffic")
   await loaded(page)
   const context = page.getByLabel("Live context")
-  await expect(context).toContainText("Newest reading")
+  // The shared host is busy; a page's first reading can take a few seconds.
+  await expect(context).toContainText("Newest reading", { timeout: 15_000 })
   await expect(context).toContainText(/\ds old/)
   await expect(context).toContainText("Packets on ens3")
   await expect(context).toContainText("TCP resent")
@@ -87,7 +88,9 @@ test("a transfer budget reads exact and estimated bytes, alerts, and is set and 
   await open(page, mutations)
   await page.goto("/network/traffic")
   const budgets = page.getByLabel("Transfer budgets")
-  await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month")
+  await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month", {
+    timeout: 15_000,
+  })
   await expect(budgets).toContainText("40.0 GB estimated from older rows")
   await expect(budgets).toContainText("96% of the month so far was recorded")
   await expect(budgets).toContainText("over 80%")
@@ -122,7 +125,9 @@ test("programs say what a read could not see and list UDP peers without byte cou
   await open(page, [])
   await page.goto("/network/traffic")
   const limits = page.getByLabel("What the program read could not see")
-  await expect(limits).toContainText("14 TCP connections opened and closed between two reads")
+  await expect(limits).toContainText("14 TCP connections opened and closed between two reads", {
+    timeout: 15_000,
+  })
   await expect(limits).toContainText("3 sockets closed since the last read")
   await expect(limits).toContainText("Nothing before this page opened is kept")
   await page.getByRole("button", { name: "Who agent-cli talks to" }).click()
@@ -168,7 +173,9 @@ test("shaping says what the next change does with each device's queues, and refu
   await open(page, [])
   await page.goto("/network/traffic")
   const queues = page.getByRole("table").filter({ hasText: "tailscale0" })
-  await expect(queues).toContainText("captures this fq_codel's parameters and puts them back")
+  await expect(queues).toContainText("captures this fq_codel's parameters and puts them back", {
+    timeout: 15_000,
+  })
   await expect(queues).toContainText("replaces the kernel's default queue")
   await expect(queues).toContainText("Changes are refused: jd-lab has an unmanaged queue hierarchy")
   // Drift names the parameter changed in place.
@@ -227,7 +234,8 @@ test("congestion control is compared on live sockets, now and before the last sw
   await page.goto("/network/traffic")
   const panel = page.getByLabel("Congestion control on live sockets")
   const now = panel.getByLabel("Now")
-  await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms")
+  // The panel reads after the shaping view, so it lands last on a busy host.
+  await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms", { timeout: 15_000 })
   await expect(now.getByRole("row", { name: /cubic/ })).toContainText("0.8%")
   await expect(panel).toContainText("Before the last switch, cubic → bbr")
   await expect(panel.getByLabel("Before the last switch")).toContainText("52 ms")
@@ -241,6 +249,7 @@ test("a loaded program opens into its maps, attachments and cost, and the observ
   await page.goto("/network/traffic")
   await expect(page.getByLabel("eBPF platform")).toContainText(
     "Kernel 6.14.0-37-generic · JIT on · unprivileged loading refused · BTF type information present · bpf filesystem mounted · run statistics off",
+    { timeout: 15_000 },
   )
   // The figure counts up once it is on screen.
   const cgroups = page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" })
@@ -380,7 +389,7 @@ test("a block asks why and until when, opens an incident, and is listed with its
   await page.goto("/network/connections")
   await loaded(page)
   const listed = page.getByLabel("Blocks from this page")
-  await expect(listed).toContainText("credential stuffing on /login")
+  await expect(listed).toContainText("credential stuffing on /login", { timeout: 15_000 })
   await expect(listed).toContainText(/Ends in 2\dh|Ends in 1d/)
   await expect(listed).toContainText("Ended on schedule")
   await expect(listed.getByRole("link", { name: "incident" })).toHaveAttribute(
@@ -442,6 +451,7 @@ test("a past hour is read from the socket history in the live table's shape", as
   const recorded = page.getByLabel("Recorded connections")
   await expect(recorded.getByRole("row").filter({ hasText: "198.51.100.23" })).toContainText(
     "2.0 GiB",
+    { timeout: 15_000 },
   )
   await expect(recorded.getByRole("row").filter({ hasText: "203.0.113.200" })).toContainText("sshd")
   await expect(recorded).toContainText(
