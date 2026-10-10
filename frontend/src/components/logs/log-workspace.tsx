@@ -537,7 +537,11 @@ export function LogWorkspace(props: WorkspaceProps) {
           )}
 
           <LogConsole
-            stateKey={`${sourceId}.${mode}.${JSON.stringify({ filter: applied, range: props.range, since: props.since, until: props.until, boot: props.boot, lens: forced })}`}
+            // The place is the question's as asked, not as the live tail
+            // trails it: keyed on the debounced filter, a run's question
+            // opened on an empty filter for 400ms, and a record opened in
+            // that window was filed where Back and Forward never look.
+            stateKey={`${sourceId}.${mode}.${JSON.stringify({ filter, range: props.range, since: props.since, until: props.until, boot: props.boot, lens: forced })}`}
             lines={lines}
             filter={applied}
             leading={<LevelChips filter={filter} onFilterChange={onFilterChange} counts={counts} />}
