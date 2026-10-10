@@ -365,3 +365,32 @@ func TestDriftDetectsMissingRecoveryHelperWithoutExecutingReplacements(t *testin
 		t.Fatalf("foreign executable accepted: %+v", o)
 	}
 }
+
+// The installed helper is the packaged backend, about 80 MB when stripped. A
+// guest reboot acceptance found it read against the render limit, so the
+// helper always looked unreadable and every selected repair was blocked as if
+// it were absent. Sparse files stand in for executables of that size.
+func TestDriftHashesAnExecutableSizedRecoveryHelper(t *testing.T) {
+	s := testService(t)
+	path := filepath.Join(s.paths.Dir, recoveryBinary)
+	if err := writeFileAtomic(path, []byte("\x7fELF"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 80<<20); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := s.driftRecoveryHelper()
+	if o.Status != "unknown" || !o.Owned || o.Observed["sha256"] != digestBytes(data) || o.Observed["mode"] != "0700" {
+		t.Fatalf("executable-sized helper misread: %+v", o)
+	}
+	if err := os.Truncate(path, maxRecoveryHelperBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if o := s.driftRecoveryHelper(); o.Status != "unreadable" {
+		t.Fatalf("helper past its inspection bound accepted: %+v", o)
+	}
+}

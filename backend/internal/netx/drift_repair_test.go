@@ -494,3 +494,19 @@ func TestDriftAdmissionIncompleteAndDisagreeingReadingsCannotAuthorizeRepair(t *
 		})
 	}
 }
+
+func TestDriftRepairReadinessHashesAnExecutableSizedHelper(t *testing.T) {
+	h := driftRepairHost(t, emptySpec())
+	if reason := h.driftRecoveryReady(context.Background()); reason != "" {
+		t.Fatalf("installed helper refused: %s", reason)
+	}
+	// Past the render limit the helper must still be read and compared with
+	// the running backend, not reported as missing.
+	helper := filepath.Join(h.paths.Dir, recoveryBinary)
+	if err := os.Truncate(helper, maxRecoveryJournalBytes+1<<20); err != nil {
+		t.Fatal(err)
+	}
+	if reason := h.driftRecoveryReady(context.Background()); reason != "The independent recovery helper's current backend ownership cannot be established." {
+		t.Fatalf("executable-sized helper misread: %s", reason)
+	}
+}

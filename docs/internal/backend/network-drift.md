@@ -26,7 +26,11 @@ When independent recovery is configured, inspection also checks its owned boot
 unit render and the required executable's presence, digest and mode. A missing
 helper is a known boot dependency failure. It never executes an unfamiliar
 replacement to test it; an executable's build identity and ability to run remain
-unknown without separate installation/self-check evidence.
+unknown without separate installation/self-check evidence. The helper is the
+packaged backend executable (about 80 MB stripped), so it is hashed as a stream
+through the same no-follow identity checks under its own 256 MiB bound rather
+than read into memory under the render limit; the selected-repair preflight
+compares it with the running executable the same way.
 
 Each observation has an identity, domain, resource, coverage, reason, ownership
 and repair eligibility. `matching` requires observed facts within the stated
