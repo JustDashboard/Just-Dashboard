@@ -42,12 +42,16 @@ const (
 	staleAfter = 2 * time.Minute
 )
 
-const trafficNote = "TCP only; UDP has no per-socket byte counters"
+const trafficNote = "Rates are TCP's per-socket counters; UDP sockets are counted and named without bytes, which the kernel does not keep per socket"
 
 // PeerTraffic is a remote end a program talks to.
 type PeerTraffic struct {
-	Address     string `json:"address"`
-	Port        int    `json:"port"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	// Protocol is tcp or udp. A UDP peer has no byte counters: BytesKnown is
+	// false and its zeros are not measurements.
+	Protocol    string `json:"protocol"`
+	BytesKnown  bool   `json:"bytesKnown"`
 	Connections int    `json:"connections"`
 	// RxBytes and TxBytes are what the live connections to it have carried.
 	RxBytes uint64 `json:"rxBytes"`
@@ -67,6 +71,17 @@ type ProgramTraffic struct {
 	RxTotal uint64        `json:"rxTotal"`
 	TxTotal uint64        `json:"txTotal"`
 	Peers   []PeerTraffic `json:"peers"`
+	// UDPConnected are UDP sockets with a peer (QUIC clients, resolvers that
+	// connect); UDPUnconnected are listeners and servers, HTTP/3 among them,
+	// whose peers ss cannot name. Neither has byte counters.
+	UDPConnected   int `json:"udpConnected"`
+	UDPUnconnected int `json:"udpUnconnected"`
+	// MedianRTTMs is the median of TCP's smoothed round-trip estimate over
+	// the program's sockets; Retransmitted and SegmentsOut are what its live
+	// sockets have resent and sent since they opened.
+	MedianRTTMs   *float64 `json:"medianRttMs,omitempty"`
+	Retransmitted uint64   `json:"retransmitted"`
+	SegmentsOut   uint64   `json:"segmentsOut"`
 }
 
 // ProcessTraffic is every program's TCP traffic.
@@ -80,6 +95,70 @@ type ProcessTraffic struct {
 	// Truncated is whether the host had more sockets than were read.
 	Truncated bool   `json:"truncated"`
 	Note      string `json:"note"`
+	// MissedOpens is how many TCP connections the kernel opened since the
+	// previous read that this read did not see established — born and gone
+	// between two reads, their bytes counted nowhere here. Absent while
+	// warming, on a truncated read or where the kernel's counters could not
+	// be read: unknown, not zero.
+	MissedOpens *uint64 `json:"missedOpens,omitempty"`
+	// Closed is how many sockets of the previous read are gone; what they
+	// carried after it is not in any rate.
+	Closed   int    `json:"closed"`
+	UDPError string `json:"udpError,omitempty"`
+	// History says whether the separate socket history is recording, which
+	// is where traffic before this page opened can be read. The api fills it.
+	History *RecordedHistory `json:"history,omitempty"`
+}
+
+// RecordedHistory is the standing of the opt-in socket history beside the
+// live program reads.
+type RecordedHistory struct {
+	Recording      bool       `json:"recording"`
+	KernelObserver bool       `json:"kernelObserver"`
+	Since          *time.Time `json:"since,omitempty"`
+	RetentionDays  int        `json:"retentionDays"`
+}
+
+// udpSocket is one line of `ss -uanpH`: UDP has a state column (ESTAB for a
+// connected socket, UNCONN otherwise) and no counters.
+type udpSocket struct {
+	state, local, peer string
+	peerAddr           string
+	peerPort           int
+	name               string
+	pids               []int
+}
+
+// parseUDP reads `ss -uanpH`, stopping at socketCap.
+func parseUDP(out string) (socks []udpSocket, truncated bool) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(socks) >= socketCap {
+			return socks, true
+		}
+		f := ssSpace.Split(line, 6)
+		if len(f) < 5 {
+			continue
+		}
+		u := udpSocket{state: f[0], local: f[3], peer: f[4]}
+		if u.state == "ESTAB" {
+			u.peerAddr, u.peerPort = splitHostPort(f[4])
+		}
+		if len(f) == 6 {
+			for _, m := range usersRe.FindAllStringSubmatch(f[5], -1) {
+				pid, _ := strconv.Atoi(m[2])
+				if u.name == "" {
+					u.name = m[1]
+				}
+				u.pids = append(u.pids, pid)
+			}
+		}
+		socks = append(socks, u)
+	}
+	return socks, false
 }
 
 // flowSocket is one established TCP socket.
@@ -91,6 +170,19 @@ type flowSocket struct {
 	peerAddr    string
 	peerPort    int
 	hasName     bool
+	// What ss -i prints about the connection itself: TCP's smoothed
+	// round-trip estimate, segments sent and resent, the congestion control
+	// the socket runs and the rate it last delivered at. Absent fields stay
+	// zero with their has-flag false, never a measured zero.
+	rttMs, minRTTMs float64
+	hasRTT          bool
+	retransOut      uint64
+	retransTotal    uint64
+	segsOut         uint64
+	bytesRetrans    uint64
+	congestion      string
+	deliveryBps     float64
+	hasDelivery     bool
 }
 
 type flowKey struct{ local, peer string }
@@ -101,6 +193,10 @@ type flowSampler struct {
 	prev map[flowKey]flowSocket
 	at   time.Time
 	last *ProcessTraffic
+	// opens is the kernel's count of TCP connections begun at the previous
+	// read, and prevTruncated whether that read stopped at the cap.
+	opens         *uint64
+	prevTruncated bool
 }
 
 func newFlowSampler() *flowSampler { return &flowSampler{} }
@@ -157,11 +253,22 @@ func parseSS(out string) (socks []flowSocket, truncated bool) {
 		}
 		var sent, acked uint64
 		var haveSent bool
-		for _, tok := range strings.Fields(line) {
+		tokens := strings.Fields(line)
+		named := false
+		for i, tok := range tokens {
 			k, v, ok := strings.Cut(tok, ":")
 			if !ok {
+				switch {
+				case tok == "delivery_rate" && i+1 < len(tokens):
+					cur.deliveryBps, cur.hasDelivery = parseBps(tokens[i+1])
+				case !named && ssCongestion(tok):
+					// The algorithm is the first bare word after the
+					// option flags and before the first key:value.
+					cur.congestion = tok
+				}
 				continue
 			}
+			named = true
 			switch k {
 			case "bytes_sent":
 				sent, haveSent = parseUint(v), true
@@ -169,6 +276,21 @@ func parseSS(out string) (socks []flowSocket, truncated bool) {
 				acked = parseUint(v)
 			case "bytes_received":
 				cur.rx = parseUint(v)
+			case "bytes_retrans":
+				cur.bytesRetrans = parseUint(v)
+			case "segs_out":
+				cur.segsOut = parseUint(v)
+			case "rtt":
+				avg, _, _ := strings.Cut(v, "/")
+				if ms, err := strconv.ParseFloat(avg, 64); err == nil {
+					cur.rttMs, cur.hasRTT = ms, true
+				}
+			case "minrtt":
+				cur.minRTTMs, _ = strconv.ParseFloat(v, 64)
+			case "retrans":
+				// retrans:outstanding/total
+				out, total, _ := strings.Cut(v, "/")
+				cur.retransOut, cur.retransTotal = parseUint(out), parseUint(total)
 			}
 		}
 		// bytes_sent counts what was handed to the network; bytes_acked what
@@ -187,6 +309,43 @@ func parseSS(out string) (socks []flowSocket, truncated bool) {
 func parseUint(s string) uint64 {
 	n, _ := strconv.ParseUint(s, 10, 64)
 	return n
+}
+
+// ssFlags are the option words ss prints before the congestion algorithm.
+var ssFlags = map[string]bool{"ts": true, "sack": true, "ecn": true, "ecnseen": true, "fastopen": true}
+
+// ssCongestion is whether a bare word on the counters line names the
+// socket's congestion control: lower-case letters and digits, not a flag.
+func ssCongestion(tok string) bool {
+	if ssFlags[tok] || tok == "" {
+		return false
+	}
+	for _, r := range tok {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return tok[0] >= 'a' && tok[0] <= 'z'
+}
+
+// parseBps reads ss's "14551555552bps" (or with a K/M/G prefix on older
+// releases) as bits a second.
+func parseBps(s string) (float64, bool) {
+	s = strings.TrimSuffix(s, "bps")
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(s, "K"):
+		mult, s = 1e3, strings.TrimSuffix(s, "K")
+	case strings.HasSuffix(s, "M"):
+		mult, s = 1e6, strings.TrimSuffix(s, "M")
+	case strings.HasSuffix(s, "G"):
+		mult, s = 1e9, strings.TrimSuffix(s, "G")
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v < 0 {
+		return 0, false
+	}
+	return v * mult, true
 }
 
 // splitHostPort splits ss's address:port, where the host of an IPv6 address
@@ -225,12 +384,121 @@ func (f *flowSampler) read(ctx context.Context) (*ProcessTraffic, error) {
 		return nil, fmt.Errorf("reading the TCP sockets: %w", err)
 	}
 	socks, truncated := parseSS(out)
-	res := f.observe(now, socks)
-	res.Truncated = truncated
+	var opens *uint64
+	if c, err := readTCPCounters(); err == nil {
+		n := c.activeOpens + c.passiveOpens
+		opens = &n
+	}
+	var udp []udpSocket
+	udpOut, udpErr := run(ctx, "ss", "-uanpH")
+	if udpErr == nil {
+		var udpTruncated bool
+		udp, udpTruncated = parseUDP(udpOut)
+		truncated = truncated || udpTruncated
+	}
+	res := f.observeAll(now, socks, udp, opens, truncated)
+	if udpErr != nil {
+		res.UDPError = fmt.Sprintf("reading the UDP sockets: %v", udpErr)
+	}
 	f.last = res
 	cp := *res
 	return &cp, nil
 }
+
+// observeAll is observe with the UDP sockets and the kernel's open count
+// beside the TCP ones.
+func (f *flowSampler) observeAll(now time.Time, socks []flowSocket, udp []udpSocket, opens *uint64, truncated bool) *ProcessTraffic {
+	prev, prevOpens, prevTruncated := f.prev, f.opens, f.prevTruncated
+	res := f.observe(now, socks)
+	res.Truncated = truncated
+	if !res.Warming {
+		seen := uint64(0)
+		for _, sk := range socks {
+			if _, ok := prev[flowKey{sk.local, sk.peer}]; !ok {
+				seen++
+			}
+		}
+		for key := range prev {
+			if _, ok := f.prev[key]; !ok {
+				res.Closed++
+			}
+		}
+		if opens != nil && prevOpens != nil && *opens >= *prevOpens && !truncated && !prevTruncated {
+			missed := uint64(0)
+			if began := *opens - *prevOpens; began > seen {
+				missed = began - seen
+			}
+			res.MissedOpens = &missed
+		}
+	}
+	f.opens, f.prevTruncated = opens, truncated
+	addUDP(res, udp)
+	return res
+}
+
+// addUDP counts each program's UDP sockets and lists its connected peers
+// beside the TCP ones, marked as having no byte counters.
+func addUDP(res *ProcessTraffic, udp []udpSocket) {
+	if len(udp) == 0 {
+		return
+	}
+	index := map[string]int{}
+	for i, p := range res.Programs {
+		index[p.Name] = i
+	}
+	type peerKey struct {
+		program, addr string
+		port          int
+	}
+	peers := map[peerKey]int{}
+	for _, u := range udp {
+		name := u.name
+		if name == "" {
+			name = "unknown"
+		}
+		i, ok := index[name]
+		if !ok {
+			res.Programs = append(res.Programs, ProgramTraffic{Name: name, PIDs: []int{}, Peers: []PeerTraffic{}})
+			i = len(res.Programs) - 1
+			index[name] = i
+		}
+		p := &res.Programs[i]
+		for _, pid := range u.pids {
+			if !containsInt(p.PIDs, pid) {
+				p.PIDs = append(p.PIDs, pid)
+			}
+		}
+		sort.Ints(p.PIDs)
+		if u.state != "ESTAB" || u.peerAddr == "" {
+			p.UDPUnconnected++
+			continue
+		}
+		p.UDPConnected++
+		peers[peerKey{name, u.peerAddr, u.peerPort}]++
+	}
+	for key, n := range peers {
+		p := &res.Programs[index[key.program]]
+		if len(p.Peers) >= peersShown+udpPeersShown {
+			continue
+		}
+		p.Peers = append(p.Peers, PeerTraffic{Address: key.addr, Port: key.port, Protocol: "udp", Connections: n})
+	}
+	for i := range res.Programs {
+		sort.SliceStable(res.Programs[i].Peers, func(a, b int) bool {
+			pa, pb := res.Programs[i].Peers[a], res.Programs[i].Peers[b]
+			if pa.Protocol != pb.Protocol {
+				return pa.Protocol == "tcp"
+			}
+			if pa.Protocol == "udp" && pa.Connections != pb.Connections {
+				return pa.Connections > pb.Connections
+			}
+			return false
+		})
+	}
+}
+
+// udpPeersShown is how many UDP peers a program lists beside its TCP ones.
+const udpPeersShown = 3
 
 // observe differences socks against the previous read and aggregates by
 // program. Split from read so the arithmetic is tested without a clock or a
@@ -244,6 +512,7 @@ func (f *flowSampler) observe(now time.Time, socks []flowSocket) *ProcessTraffic
 		p     *ProgramTraffic
 		pids  map[int]bool
 		peers map[string]*PeerTraffic
+		rtts  []float64
 	}
 	progs := map[string]*agg{}
 	next := make(map[flowKey]flowSocket, len(socks))
@@ -266,10 +535,15 @@ func (f *flowSampler) observe(now time.Time, socks []flowSocket) *ProcessTraffic
 		for _, pid := range sk.pids {
 			a.pids[pid] = true
 		}
+		if sk.hasRTT {
+			a.rtts = append(a.rtts, sk.rttMs)
+		}
+		a.p.Retransmitted += sk.retransTotal
+		a.p.SegmentsOut += sk.segsOut
 		pk := sk.peerAddr + ":" + strconv.Itoa(sk.peerPort)
 		peer := a.peers[pk]
 		if peer == nil {
-			peer = &PeerTraffic{Address: sk.peerAddr, Port: sk.peerPort}
+			peer = &PeerTraffic{Address: sk.peerAddr, Port: sk.peerPort, Protocol: "tcp", BytesKnown: true}
 			a.peers[pk] = peer
 		}
 		peer.Connections++
@@ -312,6 +586,11 @@ func (f *flowSampler) observe(now time.Time, socks []flowSocket) *ProcessTraffic
 			a.p.PIDs = append(a.p.PIDs, pid)
 		}
 		sort.Ints(a.p.PIDs)
+		if len(a.rtts) > 0 {
+			sort.Float64s(a.rtts)
+			median := round3(quantile(a.rtts, 0.5))
+			a.p.MedianRTTMs = &median
+		}
 		for _, peer := range a.peers {
 			a.p.Peers = append(a.p.Peers, *peer)
 		}
@@ -391,6 +670,30 @@ func (s *Service) Containers(ctx context.Context, window time.Duration) (*Contai
 }
 
 func (s *Service) containers(ctx context.Context, window time.Duration, now time.Time) (*ContainerTraffic, error) {
+	return s.containerFlows(ctx, window, now, "", seriesPoints)
+}
+
+// detailPoints is how many steps one container's own chart has: twice the
+// sparkline's, since it is drawn across a panel rather than in a row.
+const detailPoints = 120
+
+// ContainerDetail is one container's recorded traffic over a window, at a
+// finer grain than the list's sparkline. A container with no samples in the
+// window is ErrNotFound.
+func (s *Service) ContainerDetail(ctx context.Context, name string, window time.Duration) (*ContainerFlow, error) {
+	res, err := s.containerFlows(ctx, window, time.Now(), name, detailPoints)
+	if err != nil {
+		return nil, err
+	}
+	for i := range res.Containers {
+		if res.Containers[i].Name == name {
+			return &res.Containers[i], nil
+		}
+	}
+	return nil, fmt.Errorf("traffic of %s: %w", name, ErrNotFound)
+}
+
+func (s *Service) containerFlows(ctx context.Context, window time.Duration, now time.Time, only string, points int64) (*ContainerTraffic, error) {
 	if window <= 0 {
 		window = time.Hour
 	}
@@ -414,7 +717,7 @@ func (s *Service) containers(ctx context.Context, window time.Duration, now time
 	from := now.Add(-window).Unix()
 	// Both ends of the window are included; leave room for a partial bucket
 	// at each end instead of sometimes returning a sixty-first point.
-	step := (int64(window.Seconds()) + seriesPoints - 2) / (seriesPoints - 1)
+	step := (int64(window.Seconds()) + points - 2) / (points - 1)
 	if step < 1 {
 		step = 1
 	}
@@ -430,13 +733,13 @@ func (s *Service) containers(ctx context.Context, window time.Duration, now time
 		  SELECT name, ts, net_rx, net_tx,
 		         LAG(net_rx) OVER w AS prx, LAG(net_tx) OVER w AS ptx
 		    FROM metric_container_samples
-		   WHERE ts >= ? AND ts <= ?
+		   WHERE ts >= ? AND ts <= ? AND (? = '' OR name = ?)
 		     AND COALESCE(network_available, net_rx > 0 OR net_tx > 0)
 		  WINDOW w AS (PARTITION BY name ORDER BY ts))
 		SELECT name, MIN(ts), MAX(ts),
 		       SUM(CASE WHEN prx IS NULL THEN 0 WHEN net_rx >= prx THEN net_rx - prx ELSE net_rx END),
 		       SUM(CASE WHEN ptx IS NULL THEN 0 WHEN net_tx >= ptx THEN net_tx - ptx ELSE net_tx END)
-		  FROM d GROUP BY name, ts / %d ORDER BY name, ts / %d`, step, step), from, now.Unix())
+		  FROM d GROUP BY name, ts / %d ORDER BY name, ts / %d`, step, step), from, now.Unix(), only, only)
 	if err != nil {
 		return nil, fmt.Errorf("reading container samples: %w", err)
 	}
@@ -482,8 +785,9 @@ func (s *Service) containers(ctx context.Context, window time.Duration, now time
 		  SELECT name, ts, net_rx, net_tx,
 		         ROW_NUMBER() OVER (PARTITION BY name ORDER BY ts DESC) AS n
 		    FROM metric_container_samples
-		   WHERE ts >= ? AND ts <= ? AND COALESCE(network_available, net_rx > 0 OR net_tx > 0))
-		 WHERE n <= 2 ORDER BY name, ts`, from, now.Unix())
+		   WHERE ts >= ? AND ts <= ? AND (? = '' OR name = ?)
+		     AND COALESCE(network_available, net_rx > 0 OR net_tx > 0))
+		 WHERE n <= 2 ORDER BY name, ts`, from, now.Unix(), only, only)
 	if err != nil {
 		return nil, fmt.Errorf("reading container samples: %w", err)
 	}

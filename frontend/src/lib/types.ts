@@ -1,3 +1,18 @@
+import type {
+  AppliedQueue,
+  CakeTin,
+  ConnectionQuality,
+  EBPFPlatform,
+  Offload,
+  Percentiles,
+  QdiscNode,
+  RecordedHistory,
+  ShapeOwnership,
+  TCPLatency,
+  TCPPoint,
+  UploadProfile,
+} from "@/lib/network-traffic"
+
 export type Capability =
   "read" | "service.control" | "file.write" | "terminal" | "destructive" | "system.admin"
 
@@ -6491,6 +6506,11 @@ export type Peer = {
   processes: string[]
   private: boolean
   service?: string
+  /** What folding by address keeps of each socket: transports, far-end ports, states. */
+  protocols?: string[]
+  remotePorts?: number[]
+  morePorts?: number
+  states?: Record<string, number>
 }
 
 export type Connections = {
@@ -6498,6 +6518,7 @@ export type Connections = {
   total: number
   listening: number
   loopback: number
+  quality?: ConnectionQuality
 }
 
 export type NetInterface = {
@@ -6994,12 +7015,26 @@ export type NetworkNamespaceDetail = {
   listenersRead: NetworkReading
 }
 
-/** One two-second reading of a device. */
-export type NetworkLivePoint = { t: number; rx: number; tx: number }
+/** One two-second reading of a device: bytes and packets a second, faults the step added. */
+export type NetworkLivePoint = {
+  t: number
+  rx: number
+  tx: number
+  rxp?: number
+  txp?: number
+  err?: number
+  drop?: number
+}
 
 export type NetworkLive = {
   now: number
   series: Record<string, NetworkLivePoint[]>
+  /** When the newest reading was taken, unix seconds; 0 before the first. */
+  sampledAt?: number
+  stepSeconds?: number
+  tcp?: TCPPoint[]
+  tcpError?: string
+  latency?: TCPLatency
 }
 
 export type NetworkHistoryPoint = {
@@ -7018,6 +7053,8 @@ export type NetworkHistory = {
   stepSeconds: number
   interfaces: Record<string, NetworkHistoryPoint[]>
   recording: boolean
+  percentiles?: Record<string, Percentiles>
+  retainedFrom?: number
 }
 
 /** How the kernel answers one address: this browser's, on every Network page. */
@@ -8165,6 +8202,11 @@ export type ProcessTraffic = {
   warming: boolean
   truncated: boolean
   note: string
+  /** TCP connections opened since the last read that no read saw; absent is unknown. */
+  missedOpens?: number
+  closed?: number
+  udpError?: string
+  history?: RecordedHistory
   programs: {
     name: string
     pids: number[]
@@ -8173,9 +8215,16 @@ export type ProcessTraffic = {
     txRate: number
     rxTotal: number
     txTotal: number
+    udpConnected?: number
+    udpUnconnected?: number
+    medianRttMs?: number
+    retransmitted?: number
+    segmentsOut?: number
     peers: {
       address: string
       port: number
+      protocol?: "tcp" | "udp"
+      bytesKnown?: boolean
       connections: number
       rxBytes: number
       txBytes: number
@@ -8228,6 +8277,10 @@ export type EBPFView = {
     mode?: string
   }[]
   error?: string
+  platform?: EBPFPlatform
+  cgroupAttachments?: number
+  /** The programs this dashboard's own kernel observer holds while attached. */
+  observerProgramIds?: number[]
 }
 
 export type CrowdSecView = {
@@ -8820,6 +8873,8 @@ export type QdiscStat = {
   overlimits: number
   requeues: number
   backlog: number
+  /** CAKE's classes with the queueing delay it measured in each. */
+  tins?: CakeTin[]
 }
 
 export type ShapeDevice = {
@@ -8843,6 +8898,12 @@ export type ShapeDevice = {
     helper: NonNullable<ShapeDevice["verification"]>
     boot: NonNullable<ShapeDevice["verification"]>
   }
+  upload?: UploadProfile
+  tree?: QdiscNode[]
+  ownership?: ShapeOwnership
+  effective?: Record<string, string>
+  applied?: AppliedQueue
+  offload?: Offload
 }
 
 export type SQMProfile = {

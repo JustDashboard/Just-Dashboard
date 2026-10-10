@@ -179,6 +179,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// The attention list is judged on a schedule too, so its history holds
 	// what happened while nobody had the Overview open.
 	s.startNetworkIncidents(ctx)
+	// A block made from the connection table with an end is lifted when it
+	// ends, whether or not anybody has the page open.
+	go s.expireBlocks(ctx)
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)

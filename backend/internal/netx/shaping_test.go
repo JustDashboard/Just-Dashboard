@@ -447,6 +447,7 @@ func TestBBR(t *testing.T) {
 	ctx := context.Background()
 	t.Run("on", func(t *testing.T) {
 		h := newShapeHost(t)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.rec.on("sysctl -w", "")
 		h.rec.on("sysctl -n net.ipv4.tcp_congestion_control", "bbr")
 		h.rec.on("sysctl -n net.core.default_qdisc", "fq")
@@ -479,6 +480,7 @@ func TestBBR(t *testing.T) {
 		sp := emptySpec()
 		sp.Sysctls = map[string]string{"net.ipv4.tcp_congestion_control": "bbr", "net.core.default_qdisc": "fq", "net.ipv4.tcp_syncookies": "1"}
 		h.seed(t, sp)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.rec.on("sysctl -w", "")
 		h.rec.on("sysctl -n net.ipv4.tcp_congestion_control", "cubic")
 		h.rec.on("sysctl -n net.core.default_qdisc", "fq_codel")
@@ -495,6 +497,7 @@ func TestBBR(t *testing.T) {
 	})
 	t.Run("a refused write puts the first one back", func(t *testing.T) {
 		h := newShapeHost(t)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.first("sysctl -w net.core.default_qdisc", "sysctl: permission denied", errors.New("permission denied"))
 		h.rec.on("sysctl -w", "")
 		if err := h.SetBBR(ctx, true, "ops"); err == nil {
@@ -667,7 +670,7 @@ func TestFirstShapingFailureRestoresSupportedForeignQueueParameters(t *testing.T
 	if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{Qdisc: "cake", EgressKbit: 50000}, gwClient, "ops"); err == nil {
 		t.Fatal("expected failure")
 	}
-	want := "tc qdisc replace dev eth0 root handle 5: fq_codel limit 1000 flows 1024 quantum 1514 target 4999us interval 99999us memory_limit 33554432 drop_batch 64 noecn"
+	want := "tc qdisc replace dev eth0 root handle 5: fq_codel limit 1000 flows 1024 quantum 1514 target 5000us interval 100000us memory_limit 33554432 drop_batch 64 noecn"
 	if !h.rec.ran(want) {
 		t.Fatalf("original queue parameters not restored: %v", h.tcCommands())
 	}

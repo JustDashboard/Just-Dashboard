@@ -219,7 +219,20 @@ page knows the reader's address. The pages that moved keep their behaviour:
 - **Connections** (`/network/connections`): opens on four live readings, each carrying every read
   since the page opened as its trend, and a picture of who is connected (`connections-map.tsx`: the
   callers by network, this server, the programs they reached), then the peers as before — address and
-  network in one column, process and ports in another, a socket count and a comparative meter.
+  network in one column, process and ports in another, a socket count and a comparative meter — with
+  each peer's transports, far-end ports and socket states kept under its ports, and a footer saying
+  what the read could not see (time since the last read, closes noticed, unconnected UDP). An
+  administrator opens an address (`connections/peer-sheet.tsx`, `GET /connections/{address}`) into
+  its live tuples with how long each has been seen, TCP bytes and RTT, the tuples seen closing in the
+  last fifteen minutes, and the layers it crosses: the firewall rules naming it or its network (rules
+  for any source are counted, not listed) and its block, the kernel route that answers it, and the
+  socket history's last day, with the tools, investigator, captures and history as next steps. "A past
+  hour" reads the socket history for a chosen UTC hour in the same shape (`connections/recorded.tsx`).
+  "Block at the firewall" opens a dialog asking why, for how long (an hour to thirty days, or until
+  lifted) and which incident — an existing saved run, or a new one that starts by recording who owns
+  the address (`connections/block-dialog.tsx`); the blocks made here are listed under the table with
+  their end, their incident and whether the rule is still in the firewall, and an administrator with
+  the destructive capability lifts one after confirmation (`connections/blocks-panel.tsx`).
 - **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
   workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
   result pane's head). The searchable chooser selects one labelled form and result area. Other probes

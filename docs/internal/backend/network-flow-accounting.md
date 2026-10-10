@@ -162,3 +162,9 @@ No real reboot or power-loss acceptance is claimed for this observation baseline
 snapshot fixtures do not establish kernel observer acceptance, UDP byte measurement, complete
 short-lived coverage, event-drop proof or billing accounting. See the separate observer acceptance
 and its declared fixture limits.
+
+Other pages read the history without collecting: `Service.Standing` answers whether it records, since
+when, its retention and the observer's attached program ids (the Traffic page's program note and eBPF
+marks), and the Connections page, a container's traffic sheet and a peer's sheet read rows through the
+same admin `GET /flows/` with `address`, `containerId` or a past UTC hour, folded by remote address in
+the browser. They inherit every limit above.

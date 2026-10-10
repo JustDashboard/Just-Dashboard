@@ -12,7 +12,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Field } from "@/components/form"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
@@ -95,6 +95,7 @@ export function CrowdSecPanel() {
 
   return (
     <>
+      <InstallFollowUp pkg="crowdsec" />
       <HostIdentity
         mark="crowdsec"
         title="CrowdSec"

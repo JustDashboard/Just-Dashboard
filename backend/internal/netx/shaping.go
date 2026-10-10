@@ -47,9 +47,11 @@ func shapeLines(sh ShapeSpec) []string {
 	var out []string
 	switch {
 	case sh.EgressKbit > 0 && sh.Qdisc == "cake":
-		out = append(out,
-			fmt.Sprintf("qdisc del dev %s root", d),
-			fmt.Sprintf("qdisc replace dev %s root cake bandwidth %dkbit", d, sh.EgressKbit))
+		cake := fmt.Sprintf("qdisc replace dev %s root cake bandwidth %dkbit", d, sh.EgressKbit)
+		if sh.Upload != nil {
+			cake += " " + strings.Join(uploadCakeArgs(*sh.Upload), " ")
+		}
+		out = append(out, fmt.Sprintf("qdisc del dev %s root", d), cake)
 	case sh.EgressKbit > 0:
 		leaf := sh.Qdisc
 		if leaf == "" {
@@ -110,6 +112,16 @@ func normShape(sh ShapeSpec) (ShapeSpec, error) {
 		copy := *sh.SQM
 		copy.SQMProfile = profile
 		sh.SQM = &copy
+	}
+	if sh.Upload != nil {
+		if sh.Qdisc != "cake" || sh.EgressKbit == 0 {
+			return sh, errors.New("an upload profile needs CAKE and an upload limit")
+		}
+		profile, err := normUploadProfile(*sh.Upload)
+		if err != nil {
+			return sh, err
+		}
+		sh.Upload = &profile
 	}
 	if sh.Qdisc == "" && sh.EgressKbit == 0 && sh.IngressKbit == 0 {
 		return sh, errors.New("set a queue discipline, a speed limit, or both")
@@ -216,9 +228,10 @@ type ShapeRequest struct {
 	Qdisc string `json:"qdisc"`
 	// EgressKbit and IngressKbit are the upload and download limits in
 	// kilobits a second; zero is no limit.
-	EgressKbit  int         `json:"egressKbit"`
-	IngressKbit int         `json:"ingressKbit"`
-	SQM         *SQMProfile `json:"sqm,omitempty"`
+	EgressKbit  int            `json:"egressKbit"`
+	IngressKbit int            `json:"ingressKbit"`
+	SQM         *SQMProfile    `json:"sqm,omitempty"`
+	Upload      *UploadProfile `json:"upload,omitempty"`
 }
 
 // linkKind reads a device's kernel kind, and so also whether it exists.
@@ -246,12 +259,12 @@ func linkKind(ctx context.Context, device string) (string, error) {
 }
 
 // SetShaping gives a device a queue discipline and speed limits.
-func (s *Service) SetShaping(ctx context.Context, device string, req ShapeRequest, client, actor string) error {
+func (s *Service) SetShaping(ctx context.Context, device string, req ShapeRequest, client, actor string) (err error) {
 	var sqm *SQMSpec
 	if req.SQM != nil {
 		sqm = &SQMSpec{SQMProfile: *req.SQM}
 	}
-	sh, err := normShape(ShapeSpec{Device: device, Qdisc: req.Qdisc, EgressKbit: req.EgressKbit, IngressKbit: req.IngressKbit, SQM: sqm})
+	sh, err := normShape(ShapeSpec{Device: device, Qdisc: req.Qdisc, EgressKbit: req.EgressKbit, IngressKbit: req.IngressKbit, SQM: sqm, Upload: req.Upload})
 	if err != nil {
 		return err
 	}
@@ -364,6 +377,11 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 			return nil
 		}
 	}
+	defer func() {
+		if err == nil {
+			s.recordApplied(context.WithoutCancel(ctx), sh)
+		}
+	}()
 	return s.commit(ctx, next, step{
 		recovery: recovery,
 		apply: func(ctx context.Context) (applyErr error) {
@@ -416,10 +434,15 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 }
 
 // ClearShaping removes a device's shaping.
-func (s *Service) ClearShaping(ctx context.Context, device string) error {
+func (s *Service) ClearShaping(ctx context.Context, device string) (err error) {
 	if err := ValidIfName(device); err != nil {
 		return err
 	}
+	defer func() {
+		if err == nil {
+			s.forgetApplied(context.WithoutCancel(ctx), device)
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.loadSpec()
@@ -526,6 +549,7 @@ type tcQdisc struct {
 	Overlimits uint64                     `json:"overlimits"`
 	Requeues   uint64                     `json:"requeues"`
 	Backlog    uint64                     `json:"backlog"`
+	Tins       []cakeTinJSON              `json:"tins"`
 }
 
 func parseQdiscs(out string) ([]tcQdisc, error) {
@@ -603,64 +627,8 @@ func shapingBaseline(ctx context.Context, sh ShapeSpec, prev *ShapeSpec) ([]stri
 	if !sh.hasRoot() || (prev != nil && prev.hasRoot()) {
 		return nil, nil
 	}
-	var root *tcQdisc
-	for i := range qs {
-		q := &qs[i]
-		if q.Root {
-			if root != nil {
-				return nil, fmt.Errorf("%s has multiple root queues", sh.Device)
-			}
-			root = q
-		} else if q.Kind != "ingress" && q.Kind != "clsact" {
-			return nil, fmt.Errorf("%s has an unmanaged queue hierarchy; its owner must remove it before shaping", sh.Device)
-		}
-	}
-	if root == nil || root.Kind == "noqueue" {
-		return nil, nil
-	}
-	refuse := func() ([]string, error) {
-		return nil, fmt.Errorf("%s has an unmanaged %s queue whose recovery is unsupported; change it through its owner before shaping", sh.Device, root.Kind)
-	}
-	if root.Kind != "fq_codel" || !regexp.MustCompile(`^[0-9a-fA-F]+:$`).MatchString(root.Handle) {
-		return refuse()
-	}
-	out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "root")
-	if err != nil {
-		return nil, fmt.Errorf("reading existing queue filters: %w", err)
-	}
-	if !rootFiltersClear(out) {
-		return refuse()
-	}
-	if len(root.Options) == 0 {
-		return refuse()
-	}
-	line := fmt.Sprintf("qdisc replace dev %s root handle %s fq_codel", sh.Device, root.Handle)
-	for _, key := range []string{"limit", "flows", "quantum", "target", "interval", "memory_limit", "drop_batch"} {
-		raw, exists := root.Options[key]
-		if !exists {
-			return refuse()
-		}
-		var value uint64
-		if json.Unmarshal(raw, &value) != nil || value == 0 {
-			return refuse()
-		}
-		suffix := ""
-		if key == "target" || key == "interval" {
-			suffix = "us"
-		}
-		line += fmt.Sprintf(" %s %d%s", key, value, suffix)
-	}
-	var ecn bool
-	ecnRaw, hasECN := root.Options["ecn"]
-	if (hasECN && json.Unmarshal(ecnRaw, &ecn) != nil) || (len(root.Options) != 7 && !hasECN) || (len(root.Options) != 8 && hasECN) {
-		return refuse()
-	}
-	if ecn {
-		line += " ecn"
-	} else {
-		line += " noecn"
-	}
-	return []string{line}, nil
+	baseline, _, err := unmanagedRoot(sh.Device, qs, rootFiltersOf(ctx, sh.Device), currentDefaultQdisc())
+	return baseline, err
 }
 
 // tc's root listing also includes ingress/clsact filters on some releases.
@@ -747,6 +715,11 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 			var bandwidth uint64
 			if json.Unmarshal(root.Options["bandwidth"], &bandwidth) != nil || bandwidth != shapeBytes(sh.EgressKbit) {
 				return shapingDrift("%s CAKE bandwidth does not match %d kbit/s", sh.Device, sh.EgressKbit)
+			}
+			if sh.Upload != nil {
+				if err := checkUploadCake(sh.Device, root.Options, sh.EgressKbit, *sh.Upload); err != nil {
+					return err
+				}
 			}
 		} else {
 			var def string
@@ -844,11 +817,13 @@ type QdiscStat struct {
 	Overlimits uint64 `json:"overlimits"`
 	Requeues   uint64 `json:"requeues"`
 	Backlog    uint64 `json:"backlog"`
+	// Tins are CAKE's classes with the queueing delay it measured in each.
+	Tins []CakeTin `json:"tins,omitempty"`
 }
 
 func qdiscStat(q tcQdisc) *QdiscStat {
 	return &QdiscStat{Kind: q.Kind, Bytes: q.Bytes, Packets: q.Packets, Drops: q.Drops,
-		Overlimits: q.Overlimits, Requeues: q.Requeues, Backlog: q.Backlog}
+		Overlimits: q.Overlimits, Requeues: q.Requeues, Backlog: q.Backlog, Tins: cakeTins(q)}
 }
 
 // ShapeDevice is one device's queue as the Traffic page shows it.
@@ -874,6 +849,20 @@ type ShapeDevice struct {
 	Guard        string             `json:"guard"`
 	Verification *ShapeVerification `json:"verification,omitempty"`
 	SQM          *SQMView           `json:"sqm,omitempty"`
+	Upload       *UploadProfile     `json:"upload,omitempty"`
+	// Tree is every queue on the device as the kernel lists it, and
+	// Ownership what the next change does with them: managed, kernel,
+	// preserved or refused, with why.
+	Tree      []QdiscNode    `json:"tree"`
+	Ownership ShapeOwnership `json:"ownership"`
+	// Effective is the parameters of the queue that carries them (the leaf
+	// under an HTB shaper, otherwise the root), read back now; Applied is
+	// that queue as it was right after the dashboard applied the entry.
+	Effective map[string]string `json:"effective,omitempty"`
+	Applied   *AppliedQueue     `json:"applied,omitempty"`
+	// Offload is the card's receive and segmentation offloads, read for a
+	// device with download SQM, where they change what the IFB queue sees.
+	Offload *Offload `json:"offload,omitempty"`
 }
 
 // BBRState is the kernel's congestion control and default queue.
@@ -959,14 +948,32 @@ func (s *Service) Shaping(ctx context.Context, client string) (*ShapingView, err
 				d.Leaf = qdiscStat(q)
 			}
 		}
+		d.Tree = queueTree(byDev[l.IfName])
 		if sh, ok := spec[l.IfName]; ok {
 			d.Managed, d.Qdisc, d.EgressKbit, d.IngressKbit = true, sh.Qdisc, sh.EgressKbit, sh.IngressKbit
+			d.Upload = sh.Upload
+			d.Ownership = ShapeOwnership{Verdict: "managed", Reason: "Made here: the dashboard verifies it against the saved limits and removes only what it made."}
 			verifyCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			d.Verification = readShapeVerification(verifyCtx, sh)
+			if q := parameterQueue(sh, byDev[l.IfName]); q != nil {
+				d.Effective = effectiveOptions(*q)
+			}
+			d.Verification, d.Applied = s.verifyShapeEntry(verifyCtx, sh, byDev[l.IfName])
 			if sh.SQM != nil {
 				d.SQM = s.sqmView(verifyCtx, sh, byDev[sh.SQM.IFB])
+				d.Offload = readOffload(verifyCtx, sh.Device)
 			}
 			cancel()
+		} else if d.Shapeable {
+			ownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			d.Ownership = ownershipOf(ownCtx, l.IfName, byDev[l.IfName])
+			cancel()
+			for _, q := range byDev[l.IfName] {
+				if q.Root {
+					d.Effective = effectiveOptions(q)
+				}
+			}
+		} else {
+			d.Ownership = ShapeOwnership{Verdict: "refused", Reason: d.Guard}
 		}
 		v.Devices = append(v.Devices, d)
 	}
@@ -1020,6 +1027,11 @@ func (s *Service) SetBBR(ctx context.Context, on bool, actor string) error {
 	}
 	keys := []string{bbrCongestionKey, bbrQdiscKey}
 
+	// The comparison as it stands before the switch is the "before" a later
+	// read is set against; it is taken first because the switch changes
+	// what every new socket runs.
+	before := s.readCongestion(ctx, true)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.loadSpec()
@@ -1036,9 +1048,15 @@ func (s *Service) SetBBR(ctx context.Context, on bool, actor string) error {
 			delete(next.Sysctls, k)
 		}
 	}
-	return s.commit(ctx, next, step{
+	if err := s.commit(ctx, next, step{
 		apply:  func(ctx context.Context) error { return writeSysctls(ctx, keys, want, prev) },
 		undo:   func(ctx context.Context) { restoreSysctls(ctx, keys, prev) },
 		verify: func(ctx context.Context) error { return verifySysctls(ctx, keys, want) },
-	})
+	}); err != nil {
+		return err
+	}
+	if prev[bbrCongestionKey] != want[bbrCongestionKey] {
+		s.keepCongestion(context.WithoutCancel(ctx), before, prev[bbrCongestionKey], want[bbrCongestionKey], actor)
+	}
+	return nil
 }

@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { TunnelPicture } from "@/components/network/vpn/tunnel-picture"
 import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
@@ -205,6 +205,7 @@ function NetworkVPNContent() {
         }
       >
         {wireguard.error && <Notice title="WireGuard could not be read">{wireguard.error}</Notice>}
+        {wireguard.installed && <InstallFollowUp pkg="wireguard-tools" />}
         {!wireguard.installed ? (
           <InstallHandoff
             pkg="wireguard-tools"

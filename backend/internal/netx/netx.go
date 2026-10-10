@@ -117,6 +117,8 @@ type Service struct {
 	// page; they are measurements, not configuration.
 	checksMu            sync.Mutex
 	forwardChecks       map[int]ForwardCheck
+	latency             latencySampler
+	congestion          congestionReader
 	independentRecovery bool
 	recoveryInstalled   bool
 	// incidentMu serialises the Overview's concurrent readers folding their

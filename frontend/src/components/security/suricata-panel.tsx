@@ -9,7 +9,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Address } from "@/components/security/marks"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -112,6 +112,7 @@ export function SuricataPanel() {
 
   return (
     <>
+      <InstallFollowUp pkg="suricata" />
       <HostIdentity
         fallback={Bug}
         title={

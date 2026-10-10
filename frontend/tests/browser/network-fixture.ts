@@ -1465,6 +1465,30 @@ export const namespaces = [
   },
 ]
 
+/** The live sockets grouped by congestion control, with no switch kept yet. */
+export const congestion = {
+  now: {
+    at: new Date().toISOString(),
+    default: "cubic",
+    groups: [
+      {
+        algorithm: "cubic",
+        sockets: 42,
+        medianRttMs: 38,
+        p90RttMs: 91,
+        retransmitShare: 0.004,
+        medianDeliveryMbit: 18.5,
+        segmentsOut: 1_200_000,
+        bytesSent: 1_400_000_000,
+      },
+    ],
+    loopback: 61,
+    truncated: false,
+  },
+  snapshots: [],
+  note: "Each group is whatever this host's sockets were doing at the read: different peers, paths and workloads, not a controlled test. A socket keeps the algorithm it opened with.",
+}
+
 export function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -1595,6 +1619,8 @@ export async function mockNetwork(
         })
       case "/network/routing":
         return json(route, routing)
+      case "/network/shaping/congestion":
+        return json(route, congestion)
       case "/network/bgp":
         return json(route, bgp)
       case "/network/namespaces":

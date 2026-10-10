@@ -142,3 +142,9 @@ ratio describes one measured workload and host; it is not a universal overhead c
 Primary contracts: [Linux BPF UAPI](https://github.com/torvalds/linux/blob/v6.14/include/uapi/linux/bpf.h),
 [ring-buffer ownership and layout](https://docs.kernel.org/bpf/ringbuf.html),
 [Go runtime pinning](https://pkg.go.dev/runtime#Pinner).
+
+While attached, the observer's program ids are exposed through `netflows.Standing` (never by reading
+rows or attaching anything), and the Traffic page's read-only eBPF inventory marks those programs as
+the dashboard's own; a program's detail (`GET /network/ebpf/{id}`) shows its maps, cgroup links and,
+only where `kernel.bpf_stats_enabled` is already on, its average cost per run. The dashboard does not
+enable run statistics, so production overhead remains unmeasured unless the operator does.

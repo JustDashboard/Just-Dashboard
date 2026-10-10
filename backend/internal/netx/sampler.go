@@ -42,6 +42,16 @@ type LivePoint struct {
 	TS int64   `json:"t"`
 	Rx float64 `json:"rx"`
 	Tx float64 `json:"tx"`
+	// RxPackets and TxPackets are packets a second. A byte rate alone cannot
+	// tell a flood of small packets from one bulk transfer, and a device that
+	// drops under the first is a different problem from one that saturates.
+	RxPackets float64 `json:"rxp"`
+	TxPackets float64 `json:"txp"`
+	// Errors and Drops are what the step added, both directions together, so
+	// a fault is drawn at the two seconds it happened rather than as a
+	// counter that has grown since boot.
+	Errors uint64 `json:"err,omitempty"`
+	Drops  uint64 `json:"drop,omitempty"`
 }
 
 // devCounters is one line of /proc/net/dev.
@@ -61,10 +71,23 @@ type Sampler struct {
 	last  map[string]devCounters
 	at    time.Time
 	rings map[string][]LivePoint
+	// tcp is the host's TCP counters beside the devices' (traffic_context.go):
+	// the step the retransmissions and resets are counted over is the step the
+	// rates are.
+	tcpLast  *tcpCounters
+	tcpAt    time.Time
+	tcpRing  []TCPPoint
+	tcpError string
 	// pending accumulates the live points since the last recorded row, per
 	// device, so the row's peak is the busiest two seconds in its interval.
 	pending map[string][]LivePoint
 	drops   map[string]devCounters
+	// tallies are the exact counter growth since the last recorded row, per
+	// device, which a quota is measured against: a mean rate times an
+	// interval loses whatever fell between two-second steps.
+	tallies map[string]*byteTally
+	// ranked caches percentile reads per window (traffic_history.go).
+	ranked map[percentileKey]map[string]Percentiles
 
 	stop     chan struct{}
 	done     chan struct{}
@@ -87,6 +110,7 @@ func newSampler(db *sql.DB, log *slog.Logger, every, retention time.Duration) *S
 		db: db, log: log, every: every, retention: retention,
 		last: map[string]devCounters{}, rings: map[string][]LivePoint{},
 		pending: map[string][]LivePoint{}, drops: map[string]devCounters{},
+		tallies: map[string]*byteTally{},
 	}
 }
 
@@ -149,6 +173,8 @@ func (s *Sampler) tick(now time.Time) {
 	cur := parseProcNetDev(f)
 	f.Close()
 	s.observe(now, cur)
+	tcp, err := readTCPCounters()
+	s.observeTCP(now, tcp, err)
 }
 
 // observe is tick's arithmetic, separate so tests feed it counters.
@@ -163,9 +189,13 @@ func (s *Sampler) observe(now time.Time, cur map[string]devCounters) {
 				continue
 			}
 			p := LivePoint{
-				TS: now.Unix(),
-				Rx: rate(prev.rxBytes, c.rxBytes, elapsed),
-				Tx: rate(prev.txBytes, c.txBytes, elapsed),
+				TS:        now.Unix(),
+				Rx:        rate(prev.rxBytes, c.rxBytes, elapsed),
+				Tx:        rate(prev.txBytes, c.txBytes, elapsed),
+				RxPackets: rate(prev.rxPackets, c.rxPackets, elapsed),
+				TxPackets: rate(prev.txPackets, c.txPackets, elapsed),
+				Errors:    delta(prev.rxErrs, c.rxErrs) + delta(prev.txErrs, c.txErrs),
+				Drops:     delta(prev.rxDrop, c.rxDrop) + delta(prev.txDrop, c.txDrop),
 			}
 			ring := append(s.rings[name], p)
 			if len(ring) > liveKeep {
@@ -174,6 +204,12 @@ func (s *Sampler) observe(now time.Time, cur map[string]devCounters) {
 			s.rings[name] = ring
 			if s.db != nil && s.retention > 0 {
 				s.pending[name] = append(s.pending[name], p)
+				t := s.tallies[name]
+				if t == nil {
+					t = &byteTally{}
+					s.tallies[name] = t
+				}
+				t.add(prev, c, elapsed)
 			}
 		}
 	}
@@ -183,9 +219,36 @@ func (s *Sampler) observe(now time.Time, cur map[string]devCounters) {
 		if _, ok := cur[name]; !ok {
 			delete(s.rings, name)
 			delete(s.pending, name)
+			delete(s.tallies, name)
 		}
 	}
 	s.last, s.at = cur, now
+}
+
+// byteTally is one device's exact counter growth over the steps since the
+// last recorded row, and how many seconds those steps covered.
+type byteTally struct {
+	rxBytes, txBytes, rxPackets, txPackets uint64
+	seconds                                float64
+}
+
+// add counts one step. A counter that went backwards was reset with its
+// device inside the step, so its new value is what it carried since; unlike a
+// rate, which would draw that as a burst, a byte count only loses accuracy by
+// leaving it out.
+func (t *byteTally) add(prev, cur devCounters, seconds float64) {
+	t.rxBytes += grown(prev.rxBytes, cur.rxBytes)
+	t.txBytes += grown(prev.txBytes, cur.txBytes)
+	t.rxPackets += grown(prev.rxPackets, cur.rxPackets)
+	t.txPackets += grown(prev.txPackets, cur.txPackets)
+	t.seconds += seconds
+}
+
+func grown(prev, cur uint64) uint64 {
+	if cur < prev {
+		return cur
+	}
+	return cur - prev
 }
 
 // rate is a counter's change per second. A counter that went backwards was
@@ -234,6 +297,8 @@ func (s *Sampler) record(ctx context.Context, now time.Time) {
 	s.mu.Lock()
 	pending := s.pending
 	s.pending = map[string][]LivePoint{}
+	tallies := s.tallies
+	s.tallies = map[string]*byteTally{}
 	last := s.last
 	prevDrops := s.drops
 	s.drops = last
@@ -245,8 +310,9 @@ func (s *Sampler) record(ctx context.Context, now time.Time) {
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO metric_interface_samples
-		(ts, iface, rx_rate, tx_rate, rx_peak, tx_peak, rx_errors, tx_errors, rx_dropped, tx_dropped)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(ts, iface, rx_rate, tx_rate, rx_peak, tx_peak, rx_errors, tx_errors, rx_dropped, tx_dropped,
+		 rx_bytes, tx_bytes, rx_packets, tx_packets, span)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return
 	}
@@ -274,10 +340,15 @@ func (s *Sampler) record(ctx context.Context, now time.Time) {
 		if !seen {
 			prev = cur
 		}
+		t := tallies[name]
+		if t == nil {
+			t = &byteTally{}
+		}
 		if _, err := stmt.ExecContext(ctx, ts, name,
 			math.Round(rx/n*10)/10, math.Round(tx/n*10)/10, rxPeak, txPeak,
 			delta(prev.rxErrs, cur.rxErrs), delta(prev.txErrs, cur.txErrs),
-			delta(prev.rxDrop, cur.rxDrop), delta(prev.txDrop, cur.txDrop)); err != nil {
+			delta(prev.rxDrop, cur.rxDrop), delta(prev.txDrop, cur.txDrop),
+			t.rxBytes, t.txBytes, t.rxPackets, t.txPackets, int64(math.Round(t.seconds))); err != nil {
 			s.log.Debug("recording interface sample", "iface", name, "err", err)
 			return
 		}
@@ -328,12 +399,22 @@ type History struct {
 	// Recording is false where the metrics retention is zero, so nothing is
 	// kept and the page says so instead of drawing an empty chart.
 	Recording bool `json:"recording"`
+	// Percentiles are each device's interval means ranked over the window;
+	// only an explicit range read carries them (traffic_history.go).
+	Percentiles map[string]Percentiles `json:"percentiles,omitempty"`
+	// RetainedFrom is the oldest instant the retention still keeps, so a
+	// range reaching before it says why its start is empty.
+	RetainedFrom int64 `json:"retainedFrom,omitempty"`
 }
 
 // History reads the recorded window. iface narrows it to one device.
 func (s *Sampler) History(ctx context.Context, window time.Duration, maxPoints int, iface string) (*History, error) {
 	to := time.Now()
-	from := to.Add(-window)
+	return s.history(ctx, to.Add(-window), to, maxPoints, iface)
+}
+
+func (s *Sampler) history(ctx context.Context, from, to time.Time, maxPoints int, iface string) (*History, error) {
+	window := to.Sub(from)
 	if maxPoints < 2 {
 		maxPoints = 2
 	}

@@ -185,6 +185,9 @@ type Service struct {
 	profilesMu sync.Mutex
 	profiles   map[string][]string
 	profilesAt time.Time
+	// conns remembers the connection table between reads (connections.go),
+	// which is how a tuple gets an age and a close is noticed at all.
+	conns connTracker
 }
 
 func New() *Service { return &Service{} }

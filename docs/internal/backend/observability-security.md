@@ -384,12 +384,28 @@ ufw's grammar has shapes that are accepted and mean something else, checked agai
 - `AddRule` has `insert` because ufw stops at the first match — a deny added after a broad allow does
   nothing at all, which looks exactly like a deny that works. **A source-only deny or reject with no
   position goes in front on its own** (`blocksASource`, `frontPosition`): that is what "block this
-  address" from the Connections, Intrusion and Logins pages writes, and appended after `allow 22` it
+  address" from the Connections, Intrusion and Logins pages writes (the Connections page's as a
+  recorded block, below), and appended after `allow 22` it
   never saw the SSH traffic it was written to refuse. The positions are ufw's, checked with
   `--dry-run` against a real dual-stack host: an IPv4 block at 1, an IPv6 block at one past the last
   IPv4 rule (ufw numbers the v6 rules after the v4 ones and refuses an insert outside the family's own
   range), and an empty family appended to, because ufw refuses `insert 1` into nothing. An explicit
   `position` is kept.
+- **A block from the Connections page has a reason and an end** (`netsec/blocks.go`,
+  `network_address_blocks`). `POST /firewall/blocks` (admin, audited) validates one remote address
+  (no loopback, unspecified or multicast), a one-line reason, a length of five minutes to ninety days
+  or none, and an optional saved diagnostic run as its incident (checked to exist), then writes the
+  same source-only deny through `AddRule` with the caller's address — so the lockout guard refuses
+  the operator's own address — commented `jd-block <id>`. The rule goes in before the record; a
+  record that cannot be written takes its rule back. An address already blocked, or already denied by
+  a plain rule somebody wrote, is refused rather than shadowed. A loop started with the server lifts
+  ended blocks every minute, removing exactly the block's rule — found by its comment, or on a
+  firewall that keeps no comments by its exact shape, which creation refused to duplicate — reading
+  the list again before each delete; a failed removal leaves the block active with its error and is
+  retried, and each outcome is a `system` audit entry (`firewall.block.expire`). Lifting only ever
+  opens the firewall, so the loop can cut nobody off. `GET /firewall/blocks` (the rules' standing)
+  lists them with whether the firewall still lists each rule; `DELETE /firewall/blocks/{id}` (admin,
+  destructive) lifts one now. The Intrusion and Logins pages keep the plain permanent deny.
 - **A ban is a deny rule wearing another name**: `netsec.Ban` refuses the caller's own address, the same
   guard the firewall route has, and the jail sheet now reaches it. `IgnoreIP` writes through to the
   jail.d drop-in — `addignoreip` changes only the running server.

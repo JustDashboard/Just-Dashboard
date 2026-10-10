@@ -262,16 +262,47 @@ Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the a
 
 ## Traffic
 
-Files: `sampler.go`, `traffic.go`, `ebpf.go`.
+Files: `sampler.go`, `traffic.go`, `traffic_context.go`, `traffic_history.go`, `ebpf.go`.
 
 The sampler reads `/proc/net/dev` every two seconds into a fifteen-minute ring per device (the live
 figures and wires) and records a row per device every metrics interval into `metric_interface_samples`
 (the interval's mean, its busiest two seconds, and its errors and drops), pruned by the metrics
 retention. Disabled retention does not accumulate pending samples; stopping the sampler is idempotent.
+Each live step also carries packets a second and the errors and drops it added, and the same tick
+reads the host's `Tcp:` counters from `/proc/net/snmp` into a TCP ring (segments sent and resent,
+connections opened, failed and reset, established). `GET /traffic/live` answers both rings since a
+moment with `sampledAt` and `stepSeconds`, so a page can call a reading stale rather than draw its last
+answer as a quiet link; with `latency=1` it adds TCP's own smoothed RTT (median/p90/max) over every
+non-loopback established socket, read with `ss -tinH` at most every ten seconds whoever polls. These are
+kernel measurements of real traffic, never a probe.
+
+A recorded row also keeps its interval's exact counter growth (`rx_bytes`, `tx_bytes`, `rx_packets`,
+`tx_packets`) and the seconds its steps covered (`span`); a counter reset inside a step counts its new
+value. Rows recorded before these columns read them as NULL — unknown, never zero. `GET
+/traffic/history` takes a named `window` or an explicit `from`/`to` (unix seconds or RFC3339, at most 31
+days, `to` clamped to now) and adds each device's p50/p95/p99 of the raw interval means (the basis is
+the recording interval, never the chart buckets; ranked per five-minute window grain and cached) and
+`retainedFrom`. Transfer budgets (`network_interface_quotas`, day/week/month in UTC, both/rx/tx) are
+measured from the exact columns, with older rows' mean-rate estimate reported apart, the share of the
+period the recorder covered, and whether the retention is shorter than the period; like a WireGuard
+peer's budget they only alert. `GET /traffic/annotations` (admin) is the window's network and firewall
+audit entries and saved diagnostic runs, in the shape charts mark.
+
 Docker's veths are not recorded; each container's traffic is in `metric_container_samples`,
-which `/network/traffic/containers` differences per sample in SQL. Per-program traffic differences
-`ss -tinpH`'s per-socket byte counters between reads (TCP only). eBPF is an inventory from `bpftool`
-(programs, XDP and tc attachments). The separate administrator Socket History recorder can explicitly
+which `/network/traffic/containers` differences per sample in SQL; `/traffic/containers/{name}` is one
+container at twice the grain with what Docker says it is now (id, image, compose project/service,
+networks). Its peers come from the socket history's exact container id, read by the page under the
+history's own admin route. Per-program traffic differences `ss -tinpH`'s per-socket byte counters
+between reads and joins `ss -uanpH`: connected UDP peers are listed with `bytesKnown: false`, and
+unconnected UDP sockets (listeners, HTTP/3) are counted. Each read says what it could not see — TCP
+connections the kernel opened (`ActiveOpens + PassiveOpens`) that no read saw established, sockets
+closed since the previous read — and carries each program's median RTT and resent/sent segments. The
+answer names whether the socket history records (`netflows.Standing`, which never collects). eBPF is an
+inventory from `bpftool` (programs, XDP and tc attachments, a count of cgroup attachments) with the
+platform read from the kernel's own files (release, JIT, unprivileged loading, BTF, bpffs, run
+statistics); `GET /ebpf/{id}` is one program's maps, device/cgroup/link attachments and average cost per
+run where statistics are on, and marks the dashboard's own observer programs. Nothing here detaches or
+loads anything. The separate administrator Socket History recorder can explicitly
 attach the fixed bounded cgroup observer for TCP/UDP and short socket header evidence; see
 [observer ownership, byte subtotals and quality](network-flow-observer.md). Reading traffic or history
 does not attach it, and restart requires a new explicit opt-in.
@@ -414,7 +445,7 @@ maximum is read from `/proc`; its history, breakdown and pressure indications ar
 
 ## Shaping
 
-Files: `shaping.go`.
+Files: `shaping.go`, `shaping_inspect.go`, `shaping_congestion.go`.
 
 Per device a root discipline (fq_codel, cake, fq) and upload and download limits (CAKE bandwidth or
 HTB with fq/fq_codel egress, ingress policing), and BBR as a switch (`tcp_congestion_control=bbr`, `default_qdisc=fq`).
@@ -424,14 +455,37 @@ never touched, and a download limit on a device that has one is refused.
 Apply verification reads the exact HTB class/default/leaf and rate/ceil, CAKE bandwidth, and ingress
 matchall/drop policer rate/burst. Detailed policer output supplements iproute2 JSON where its fields
 are absent, with a small allowance for kernel clock quantization. First replacement refuses foreign
-hierarchies/filters unless a supported classless fq_codel baseline can be captured and restored.
+hierarchies/filters unless the root is the kernel's own default — `noqueue`, a single queue of the
+current `net.core.default_qdisc` with the kernel's `0:` handle, or a multiqueue `mq` whose per-ring
+children are all the current default — which a cleared change gives back by deletion, or a supported
+classless fq_codel baseline that is captured and restored (`unmanagedRoot`). The Traffic view reports
+the same verdict per device before any change (`ownership`: managed, kernel, preserved or refused,
+with the reason), the device's queue tree and the effective parameters of the queue that carries them.
+After a successful apply the parameter queue (the leaf under HTB, otherwise the root) is read back
+into `network_shaping_applied`, bound to the exact entry; the page's verification compares it, so a
+queue changed in place with `tc qdisc change` reads as drift naming each parameter, while drift
+inspection keeps the plain saved-entry comparison its repair restores.
 Managed-device reads report `verification` as verified, observed drift or unreadable/unknown; saved
 limits remain desired values when external commands change the kernel. This verifies configured
-objects, not bandwidth or latency under load. Existing download limits remain policing; the
+objects, not bandwidth or latency under load. An upload limit on CAKE can carry an explicit egress
+profile (`upload`: besteffort/diffserv3/diffserv4 classes, dual-srchost/triple-isolate/flows fairness,
+NAT lookup, DSCP wash, ACK filter, overhead, MPU, ATM/PTM framing, RTT), rendered into the same boot
+batch and verified option by option; an older entry keeps its bare bandwidth. CAKE's per-class
+statistics (`tins`: average/peak/base queueing delay, drops, ECN marks, flows) are reported for the
+upload root and the SQM IFB alike — the delay this host held packets, not the path beyond it; the
+owned namespace fixture `TestLiveUploadProfileMeasuresQueueDelayUnderDeclaredLoad` measures the loaded
+round trip with and without the profile behind a declared deep-buffer link. Existing download limits remain policing; the
 explicit [download SQM](network-sqm.md) profile redirects ingress to a provenance-bound IFB/CAKE
 queue, preserves native clsact egress and always requires independent pending recovery plus
 positive reconnection confirmation. Its nonignored packaged boot restore runs after ordinary
 resources. Measured fixture latency is separate from a general production performance claim.
+
+`GET /shaping/congestion` groups the established non-loopback TCP sockets by the congestion control
+each runs (a socket keeps the algorithm it opened with, so after a switch the host runs both): sockets,
+median/p90 RTT, resent share, median delivery rate and bytes sent, read with `ss -tinH` at most every ten
+seconds. `SetBBR` takes the comparison just before an actual switch and keeps it in
+`network_congestion_snapshots` (newest twenty) as the "before". Each group is whatever its sockets were
+carrying — a comparison of this host's own workload, not a controlled experiment.
 
 ## VPN
 
@@ -682,30 +736,34 @@ upstream router/provider restriction. All probes remain admin-only and audited.
 
 ## Routes
 
-All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*` and
-`/traffic/processes`, which name who connects and are `system.admin`. Every mutation is `system.admin`;
+All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*`,
+`/traffic/processes` and `/traffic/annotations` (who connects; who changed what and the saved
+incidents), which are `system.admin`. The per-algorithm congestion groups, the latency distribution
+and the hand-off phases name no peer and stay `read`. Every mutation is `system.admin`;
 removals, setting a device down, turning forwarding off, enabling, disabling, removing or switching
-an egress group or turning its automation on, disabling a forward, NAT entry, limit or blocklist, weakening a kernel protection, setting a trusted address to expire, making or removing an
+an egress group or turning its automation on, disabling a forward, NAT entry, limit or blocklist,
+weakening a kernel protection, setting a trusted address to expire, making or removing an
 exception, ending sessions, turning a WireGuard exit off, withdrawing a site's network or changing
-where it is dialled, clearing a peer's usage budget, withdrawing what this server offers the tailnet
-and changing the resolver are inside `s.destructive` (by path, or by content in the handler for the
-PUTs, PATCHes and posts). No route takes a typed phrase.
+where it is dialled, clearing a peer's usage budget, withdrawing what this server offers the
+tailnet, clearing a device's transfer budget and changing the resolver are inside `s.destructive`
+(by path, or by content in the handler for the PUTs, PATCHes and posts). No route takes a typed
+phrase.
 
 | Area | Routes |
 | --- | --- |
-| Overview | `GET /`, `GET /capabilities`, `GET /overview` (identity, flows, observations, incidents), `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
+| Overview | `GET /`, `GET /capabilities`, `GET /overview` (identity, flows, observations, incidents), `GET /links`, `GET /traffic/live` (`?since=`, `&latency=1`), `GET /traffic/history` (`window=` or `from=`/`to=`), `GET /handoffs/{package}` (wireguard-tools, bpftool, crowdsec, suricata) |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`, `PUT /links/{name}/vlans`, `PUT /links/{name}/remotes` (destructive by content when removing); reads `GET /links/{name}/detail`, `/bridge`, `/readiness`, `/master/preview?master=`; `GET`/`POST /namespaces`, `GET /namespaces/{name}?kind=`, `GET /namespaces/{name}/lookup?kind=&target=`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `GET /routing/history?family=&object=&target=`, `POST /routing/routes/preview`, `POST /routing/routes/{id}/plan`, `POST /routing/rules/preview` (admin, change nothing), `POST /routing/routes`, `PUT /routing/routes/{id}` (destructive), `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp`, `GET /bgp/routes?family=&prefix=` |
 | Egress groups | `GET /egress`, `GET /egress/{id}/events`, `/simulations`, `GET /egress/simulations/{sim}`; `POST /egress`, `PUT /egress/{id}`, `POST /egress/{id}/simulate`, `/automation/off` (admin); `DELETE /egress/{id}`, `POST /egress/{id}/enable`, `/disable`, `/switch`, `/automation/on` (destructive). See [egress groups](network-egress.md). |
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}`, `POST /gateway/preview`, `POST /gateway/verify` (admin; change nothing on the host) |
 | Protection | `GET /protection`, `GET /protection/pressure` (admin), `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/preview` (admin), `POST /protection/settings`, `DELETE /protection/settings/{key}`, `PUT /protection/trusted` (destructive with an expiry), `DELETE /protection/trusted?address=`, `POST /protection/exceptions`, `DELETE /protection/exceptions/{id}` (both destructive), `POST /protection/sessions/preview` (admin), `POST /protection/sessions/revoke` (destructive) |
-| Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
+| Shaping | `GET /shaping`, `GET /shaping/congestion`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET /vpn/wireguard/{iface}/history`, `/endpoint`, `PATCH`/`DELETE /vpn/wireguard/{iface}/peers/{id}`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config` (`?variant=linux-killswitch`), `PUT`/`DELETE /vpn/wireguard/{iface}/peers/{id}/quota`, `POST /vpn/wireguard/{iface}/peers/{id}/verify`, `GET /vpn/archive`, `POST /vpn/archive/{file}/restore`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` and `POST /dns/tls-check` (read), `GET /dns/hosts/resolution` (read), `POST /dns/verification-plan`, `POST /dns/hosts/preview` and `POST /dns/dnssec-chain` (admin, unaudited reads) |
 | Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
 | Native DNS services | `/dns/services/` connections, `/handoffs` detected-server joins, `/{id}/dhcp` read-only DHCP, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review, `/changes/{id}/current` exact current selection and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
-| Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
+| Traffic | `GET /traffic/processes` (admin), `GET /traffic/containers`, `GET /traffic/containers/{name}`, `GET /traffic/quotas`, `PUT /traffic/quotas/{iface}` (admin), `DELETE /traffic/quotas/{iface}` (admin, destructive), `GET /traffic/annotations` (admin), `GET /ebpf`, `GET /ebpf/{id}` |
 | Diagnostics | `POST /probe` (26 tools) |
 
 `GET /network` (the old interface summary) and `POST /network/probe` moved into the same `Route`, since a

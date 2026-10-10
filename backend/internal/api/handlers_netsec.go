@@ -21,6 +21,7 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleFirewallStatus))
 		r.Method(http.MethodGet, "/apps", s.handle(s.handleFirewallApps))
 		r.Method(http.MethodGet, "/access", s.handle(s.handleFirewallAccess))
+		s.mountFirewallBlockRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			// The rule history names who changed what, as the audit log does.
