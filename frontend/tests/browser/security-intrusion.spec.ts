@@ -156,7 +156,12 @@ test("a bouncer pulling into a flushed kernel table is not called protection", a
   await expect(
     section.getByText("The bouncer is pulling and nothing is dropped", { exact: true }),
   ).toBeVisible()
-  await expect(section.getByText("no CrowdSec set exists in nftables or ipset")).toBeVisible()
+  // The cause, named beside the bouncer it is about, as well as under the kernel sets.
+  await expect(
+    section
+      .getByRole("listitem")
+      .filter({ hasText: "no CrowdSec set exists in nftables or ipset" }),
+  ).toContainText("firewall-bouncer-nftables")
   await expect(section.getByText("not dropping", { exact: true }).first()).toBeVisible()
   await expect(section.getByText(/enforced by/)).toHaveCount(0)
   await expect(section.getByLabel("Kernel sets")).toContainText("No CrowdSec set exists")
