@@ -1,11 +1,38 @@
-import { ShieldCheck } from "@/components/icons"
+import { Box, CornerUpRight, FileText, FolderOpen, ShieldCheck } from "@/components/icons"
 import type { SiteUpstreamHealth, VHost } from "@/lib/types"
-import { ProductGlyph } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { certPathProduct } from "@/components/proxy/marks"
+import { certPathProduct, siteProduct } from "@/components/proxy/marks"
+import type { BackendKind } from "@/components/proxy/route-map"
 import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
 import { isDown } from "@/components/proxy/site-filters"
+
+const BACKEND_GLYPH = { app: Box, files: FolderOpen, redirect: CornerUpRight, config: FileText }
+
+/**
+ * A route as what its visitors reach, with the engine serving it in the
+ * tile's corner — the session list's browser-over-system shape. Every route
+ * on the overview was the engine's own mark, so nine sites in front of
+ * Grafana, n8n and Gitea were nine nginx logos; the application is what the
+ * reader looks for, and the engine is the same on every row.
+ */
+export function RouteMark({
+  vhost,
+  backend,
+}: {
+  vhost: Pick<VHost, "kind">
+  backend: { kind: BackendKind; product?: string }
+}) {
+  return (
+    <span className="relative flex shrink-0">
+      <ProductLogo id={backend.product} fallback={BACKEND_GLYPH[backend.kind]} />
+      <span className="absolute -right-1 -bottom-1 flex size-4.5 items-center justify-center rounded-md border border-hairline bg-background">
+        <ProductGlyph id={siteProduct(vhost)} className="size-3" />
+      </span>
+    </span>
+  )
+}
 
 /**
  * A site's two states, as the overview's list and the Sites cards both draw

@@ -76,8 +76,10 @@ export function HostIdentity({
           the width the aside leaves — measured at its content, a long line
           of facts pushed the aside under the line instead of wrapping the
           facts, and a run's verbs at the line's end were the first aside
-          wide enough to make that happen on a laptop. */}
-      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex sm:flex-1">
+          wide enough to make that happen on a laptop. It keeps 18rem of its
+          own, though: with none, a wide aside on a tablet left the facts a
+          word wide, one fact to a line, where the aside should go under. */}
+      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-3 sm:flex sm:flex-[1_1_18rem]">
         {logo ?? (
           <ProductLogo
             id={mark}

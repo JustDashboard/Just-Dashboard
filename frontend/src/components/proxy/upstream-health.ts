@@ -49,6 +49,11 @@ const RANK: Record<UpstreamState, number> = {
   up: 0,
 }
 
+/** How bad a state is, for picking the worse of two: a refusal outranks a timeout. */
+export function upstreamRank(state: UpstreamState): number {
+  return RANK[state]
+}
+
 /** The targets of one site file, worst first. */
 export function upstreamsOf(report: UpstreamReport | undefined, path: string): UpstreamTarget[] {
   return (report?.targets ?? [])

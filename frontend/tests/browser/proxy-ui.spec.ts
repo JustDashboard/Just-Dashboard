@@ -43,23 +43,93 @@ test("the reverse proxy is named once, in the identity line", async ({ page }) =
   await expect(identity.getByRole("button", { name: "Reload" })).toBeVisible()
 })
 
-test("the overview's sites are cards drawn as the engine serving them", async ({ page }) => {
+test("the overview's sites are cards drawn as what they reach, the engine in the corner", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy")
 
   const sites = page.getByRole("list", { name: "Sites" })
   const cards = sites.locator("[data-slot='choice-row']")
   await expect(cards).toHaveCount(3)
-  await expect(
-    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/nginx.svg']"),
-  ).toHaveCount(1)
-  await expect(
-    cards.filter({ hasText: "just-dashboard-shop" }).locator("img[src='/logos/caddy.svg']"),
-  ).toHaveCount(1)
+  // app.example.com forwards to 127.0.0.1:3000, where node listens: the
+  // card is Node's, with nginx's mark in the tile's corner.
+  const app = cards.filter({ hasText: "app.example.com" })
+  await expect(app.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
+  await expect(app.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
+  await expect(app).toContainText("nginx site → node")
+  // Nothing listens behind the shop's address, so no product is guessed.
+  const shop = cards.filter({ hasText: "just-dashboard-shop" })
+  await expect(shop.locator("img[src='/logos/caddy.svg']")).toHaveCount(1)
+  await expect(shop.locator("img")).toHaveCount(1)
   // A site whose certificate is certbot's says so with Let's Encrypt's mark.
-  await expect(
-    cards.filter({ hasText: "app.example.com" }).locator("img[src='/logos/lets-encrypt.svg']"),
-  ).toHaveCount(1)
+  await expect(app.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
+})
+
+test("the overview draws each domain wired through nginx to what answers it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const target = (site: string, address: string, state: string, extra = {}) => ({
+    site,
+    kind: "http",
+    directive: "proxy_pass",
+    address,
+    file: `/etc/nginx/sites-available/${site}`,
+    line: 12,
+    state,
+    ...extra,
+  })
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: now,
+      targets: [
+        target("app.example.com", "127.0.0.1:3000", "up", { ms: 2, owner: "node" }),
+        target("legacy.example.com", "127.0.0.1:8080", "refused"),
+      ],
+    }),
+  )
+  const hour = (site: string, requests: number, errorRate: number) => ({
+    site,
+    file: `/etc/nginx/sites-available/${site}`,
+    status: "available",
+    requests,
+    errorRate,
+    bytes: requests * 2_000,
+    complete: true,
+  })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: now,
+      sites: [hour("app.example.com", 1_200, 0.002), hour("legacy.example.com", 80, 0.9)],
+    }),
+  )
+  await page.goto("/proxy")
+
+  // The verdict at the engine line's end is about its routes.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("1 route down")).toBeVisible()
+
+  const picture = page.locator("[data-slot='route-picture']")
+  const domains = picture.getByRole("list", { name: "Domains" })
+  // The route that is down leads, then the busiest.
+  await expect(domains.getByRole("listitem").first()).toContainText("legacy.example.com")
+  await expect(domains.getByRole("link", { name: "app.example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/app.example.com",
+  )
+  await expect(domains).toContainText("1.2k req/h")
+  // A domain in plain HTTP says so.
+  await expect(domains.getByRole("listitem").first()).toContainText("plain HTTP")
+  const apps = picture.getByRole("list", { name: "Applications" })
+  await expect(apps.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
+  await expect(apps.getByText("up 2 ms")).toBeVisible()
+  await expect(apps.getByText("refused")).toBeVisible()
+  await expect(picture.getByText(":443 nginx")).toBeVisible()
+
+  // The hour's traffic is shared out by site, and a site opens its traffic.
+  const traffic = page.getByRole("region", { name: "Traffic", exact: true })
+  await expect(traffic.getByText("1.3k req in the hour")).toBeVisible()
+  await traffic.getByRole("button", { name: "Open app.example.com's traffic" }).click()
+  await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
 })
 
 test("the overview's attention list is folded from conditions worth acting on", async ({
