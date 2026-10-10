@@ -2491,6 +2491,42 @@ Each page that reads a tool this host may not have opens on its install where it
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
 Packages page's install job streaming under the button).
 
+**Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
+four grey figures (known differences, incomplete readings, matching observations, owned repair
+proposals) over six panels of mono paths that each said one state word, a route named by the number
+the saved configuration gave it, and nothing on the page that moved. Where each figure went, and
+what took their place (`components/network/drift/`):
+
+- **The identity line.** `HostIdentity` with the dashboard's own mark, when the host was inspected
+  (ticking), how many comparisons, the saved spec's digest and the journal's phase; at its end the
+  verdict (`driftVerdict`): a failed read before a configuration that changed under the inspection
+  before any difference, the differences counted in red while another owner holds one, its dot
+  breathing only while an inspection is in flight. A press narrows the table to them. The other
+  three figures are the table's chips, and the proposals the plan's own review button.
+- **A picture of where the saved configuration goes** (`drift-picture.tsx`), the backups map's
+  shape: `spec.json` wired to the rendered files, the kernel objects, the boot unit and the
+  blocklists, each drawn as the product that reads it — netfilter's flame for the nftables files and
+  admission chains, systemd's brackets for the units, Linux for the kernel's devices, routes and
+  settings, WireGuard for a tunnel, Spamhaus and FireHOL for their lists (four marks arrived for it,
+  each the project's own artwork, `public/logos/NOTICE`). A wire takes the worst state in its domain
+  (red, amber, green, plain, dashed for nothing to compare), every comparison is a block in its
+  state's colour beside the domain, the wires pulse while an inspection is in flight and once as
+  each lands, and pressing a domain narrows the table to it.
+- **Since this page opened** (`drift-rhythm.tsx`): each inspection a beat on fifteen minutes that end
+  at this second, split into its states and sliding left as the clock runs, the countdown to the
+  next one under it, and each comparison whose state moved between two of them, newest first. It is
+  the page's memory and nothing else; a host that has not drifted says how many inspections it has
+  stood through. The three configuration identities sit under it.
+- **One framed table of every comparison**, worst first, each as its product, named the way a
+  reader knows it (a route by its destination, an address by its prefix and device), its kind in
+  its lane hue, and its evidence read in place — expected beside observed, a digest as seven
+  characters, amber where they disagree. A row whose state changes rises.
+- **The boot unit's activation as its run** (`drift-boot.tsx`): each `ExecStart` as the tool it is
+  over a rule in the colour of its exit, the finish said as how long ago where systemd's zone can be
+  read without guessing. **Each blocklist** is its publisher with its cache, render and kernel set
+  as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
+  pick, lit (§16), and the review shows each change as a diff of its before and after.
+
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,
 id, compose stack) over a filled tab list, and an Overview of three columns of grey fields, a run
