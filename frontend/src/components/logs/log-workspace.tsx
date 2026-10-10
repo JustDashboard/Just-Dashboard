@@ -148,7 +148,11 @@ type WorkspaceProps = {
   name?: React.ReactNode
   /** The source's facts, beside its name: its kind, path, size, state. */
   facts?: React.ReactNode
-  /** Commands for the source, at the end of the workbench strip. */
+  /**
+   * Commands for the source, after the views' tabs at the strip's end, as
+   * glyphs: a boxed button between the name and the tabs split the strip in
+   * two and read as one more tab.
+   */
   actions?: React.ReactNode
   className?: string
 }
@@ -378,7 +382,6 @@ export function LogWorkspace(props: WorkspaceProps) {
         ) : (
           props.leading && <div className="flex shrink-0 items-center pr-1">{props.leading}</div>
         )}
-        {props.actions && <div className="flex shrink-0 items-center gap-2">{props.actions}</div>}
         <nav
           aria-label="Log mode"
           className={cn(
@@ -419,6 +422,9 @@ export function LogWorkspace(props: WorkspaceProps) {
             </button>
           ))}
         </nav>
+        {props.actions && (
+          <div className="flex shrink-0 items-center gap-1 pl-1">{props.actions}</div>
+        )}
       </div>
 
       {filtered && (

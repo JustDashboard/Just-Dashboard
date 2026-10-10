@@ -741,14 +741,14 @@ Frontend `components/logs/`: the page is a workbench like the terminal — one f
 does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
 `HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
 rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
-line (`RecordIdentity`) — and under it the lens's readings as tiles (`LensReadings`) where five fit
-across and the console keeps its height, a window at least 1280 by 800; on a smaller one they are the
-counts on the lens row's chips instead. The workspace is one pane, and its chrome is at most three
+line (`RecordIdentity`). No readings stand over the frame: the lens's readings are the counts on the
+lens row's chips at every width, so the console keeps the height. The workspace is one pane, and its chrome is at most three
 rows above the lines: a strip of the views as `tabClasses` buttons with `aria-pressed` — **Live**,
 **History**, **Insights**, then the page's own views — which on the logs page (`name={null}`) is the
 rail toggle and the views from its leading edge, and on a service page names the source with its facts
-beside the name (`SourceFacts`, giving way by the strip's own width rather than the window's) and the
-page's actions, Export among them, before the views; `filter-bar.tsx` with the one
+beside the name (`SourceFacts`, giving way by the strip's own width rather than the window's), the
+views, and after them the page's actions as glyphs at the strip's end — Export as an `IconAction`,
+never an outlined box between the facts and the tabs; `filter-bar.tsx` with the one
 filter, the window and the journal unit inline and the exclusion, context, archives, boot and a
 **Read as** select (Auto, naming the detected lens; each lens; None) behind "More"; and `lens-bar.tsx`
 only when the lens has something to offer or a predicate is on. The histogram sits over History's lines,
