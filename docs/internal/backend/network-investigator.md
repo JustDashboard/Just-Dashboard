@@ -134,7 +134,8 @@ interface address; and retained external measurements that can be about this bin
 family, and for a binding on one address only that address (a loopback binding takes none) — labelled
 by whether the measured address is on this host. The comparison line keeps those bases apart.
 
-The container page's reachability rows and the ports sheet of a Docker-published socket open it.
+The container page's Ports table (**Trace the path**, an administrator's) and the ports sheet of a
+Docker-published socket open it.
 `published_test.go`, `docker_chains_test.go` and `docker_published_path_test.go` cover the layers and
 the capability; the browser cases are in `docker-ui.spec.ts` and `proxy-ports-reachability.spec.ts`.
 The opt-in read-only host check compiles as the contributor and runs as root, so iptables can be

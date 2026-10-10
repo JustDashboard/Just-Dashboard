@@ -7,6 +7,10 @@ import { admin, json, mockNetwork, type Mutation } from "./network-fixture"
  * — read before it happens and refused where the backend refuses — and what
  * this Engine can create a network with. Every preview here is the backend's
  * shape; the page decides nothing the preview did not say.
+ *
+ * It is the redesigned Networks page that is read: the networks table and its
+ * verbs, a network's sheet with its members as a table, and the dialogs they
+ * open (`docker-networks.spec.ts` covers the page's own readings).
  */
 
 const now = new Date().toISOString()
@@ -124,6 +128,14 @@ const preview = (over: Record<string, unknown>) => ({
   ...over,
 })
 
+/** A network's name in the table (wide) or the list (narrow): the button that opens its sheet. */
+const networkButton = (page: Page, name: string) =>
+  page
+    .getByRole("table")
+    .first()
+    .or(page.getByRole("list", { name: "Networks" }))
+    .getByRole("button", { name, exact: true })
+
 async function setup(page: Page, mutations: Mutation[] = [], list: unknown[] = networks) {
   await mockNetwork(page, mutations, {
     overrides: {
@@ -139,15 +151,18 @@ async function setup(page: Page, mutations: Mutation[] = [], list: unknown[] = n
 test("networks name their owners, and unread membership never reads as unused", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   await page.goto("/docker/networks")
-  const list = page.getByRole("list", { name: "Networks" })
-  await expect(list.getByText("This dashboard", { exact: true })).toBeVisible()
-  await expect(list.getByText("Compose · shop", { exact: true })).toBeVisible()
-  await expect(list.getByText("Database link · shop · production", { exact: true })).toBeVisible()
-  await expect(list.getByText("Deployment · blog · production", { exact: true })).toBeVisible()
-  await expect(list.getByText("Created by hand", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prune", exact: true })).toBeVisible()
+  const table = page.getByRole("table").first()
+  await expect(table.getByText("made by this dashboard", { exact: true })).toBeVisible()
+  await expect(table.getByText("compose · shop", { exact: true })).toBeVisible()
+  await expect(table.getByText("database link · shop · production", { exact: true })).toBeVisible()
+  await expect(table.getByText("deployment · blog · production", { exact: true })).toBeVisible()
+  await expect(table.getByText("standalone", { exact: true })).toBeVisible()
+  // The deployment's networks are the dashboard's work, so they share its chip.
+  await expect(page.getByRole("button", { name: /^Just Dashboard\s*3$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Remove unused", exact: true })).toBeVisible()
 
   // The container listing failed: the networks are listed, their members are not.
   await setup(
@@ -157,27 +172,51 @@ test("networks name their owners, and unread membership never reads as unused", 
   )
   await page.reload()
   await expect(page.getByText("Which containers use each network could not be read")).toBeVisible()
-  await expect(list.getByText("members unread").first()).toBeVisible()
-  await expect(list.getByText("0 containers")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Prune", exact: true })).toHaveCount(0)
-  await expect(list.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+  await expect(table.getByText("members unread").first()).toBeVisible()
+  await expect(table.getByText("0 containers")).toHaveCount(0)
+  await expect(table.getByText("nothing attached")).toHaveCount(0)
+  // Not "unused", not "every network in use": the line says it does not know.
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity.getByText("Who is on them is unread")).toBeVisible()
+  await expect(identity.getByText(/unused|Every network in use/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Unused/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Remove unused", exact: true })).toHaveCount(0)
+  // Remove is drawn, disabled, with the reason as its name.
+  await expect(table.getByRole("button", { name: /^Remove / })).toHaveCount(0)
+  await expect(
+    table.getByRole("button", { name: /could not be read — cannot judge a removal/ }),
+  ).toHaveCount(5)
+  await expect(
+    table.getByRole("button", { name: /could not be read — cannot judge a removal/ }).first(),
+  ).toBeDisabled()
 })
 
-test("a network's detail names its owner, both families and the networks its members join", async ({
+test("a network's sheet names its owner, both families and the networks its members join", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  const table = page.getByRole("table").first()
+  // The dashboard's own network takes no other container, said on the verb too.
+  await expect(
+    table.getByRole("button", {
+      name: "The dashboard's own private network takes no other containers",
+    }),
+  ).toBeDisabled()
+  await table.getByRole("button", { name: "lab", exact: true }).click()
   const panel = page.getByRole("dialog", { name: "lab" })
-  await expect(panel.getByText("Compose · shop", { exact: true })).toBeVisible()
+  await expect(panel.getByText("compose · shop", { exact: true })).toBeVisible()
   await expect(
     panel.getByText("Compose recreates it the next time its project comes up."),
   ).toBeVisible()
   // Attaching depends on the scope, not on --attachable: a local bridge takes members.
   await expect(panel.getByText("yes, while running", { exact: true })).toBeVisible()
-  await expect(panel.getByText("10.4.0.3/24 · fd00:4::3/64 · also on bridge")).toBeVisible()
-  await expect(panel.getByText("Shared ingress", { exact: true })).toBeVisible()
+  const api = panel.getByRole("row").filter({ hasText: "10.4.0.3" })
+  await expect(api.getByText("fd00:4::3", { exact: true })).toBeVisible()
+  await expect(api.getByText("also on bridge")).toBeVisible()
+  const ingress = panel.getByRole("row").filter({ hasText: "10.4.0.4" })
+  await expect(ingress.getByText("Shared ingress", { exact: true })).toBeVisible()
   await expect(panel.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(1)
   await expect(
     panel.getByRole("button", { name: "Detach just-dashboard-ingress", exact: true }),
@@ -185,7 +224,7 @@ test("a network's detail names its owner, both families and the networks its mem
   await expect(panel.getByRole("button", { name: /^The shared public Caddy/ })).toHaveCount(1)
   await page.keyboard.press("Escape")
 
-  await page.getByRole("button", { name: "just-dashboard_internal", exact: true }).click()
+  await table.getByRole("button", { name: "just-dashboard_internal", exact: true }).click()
   const own = page.getByRole("dialog", { name: "just-dashboard_internal" })
   await expect(
     own.getByText("The dashboard's own private network takes no other containers."),
@@ -194,12 +233,14 @@ test("a network's detail names its owner, both families and the networks its mem
   // The member's own mark, beside the owner line that says the same of the network.
   await expect(own.locator('[data-slot="tag"]', { hasText: "This dashboard" })).toBeVisible()
   await expect(own.getByRole("button", { name: "Detach jd-frontend", exact: true })).toHaveCount(0)
+  await expect(own.getByRole("button", { name: /^Part of the dashboard itself/ })).toHaveCount(1)
 })
 
 test("attaching previews shared names and refusals, and keeps the draft when the preview fails", async ({
   page,
 }) => {
   const mutations: Mutation[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page, mutations)
   let answer: "warn" | "block" | "fail" = "warn"
   await page.route("**/api/v1/docker/networks/n-lab/connect?**", (route) => {
@@ -238,7 +279,7 @@ test("attaching previews shared names and refusals, and keeps the draft when the
     )
   })
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  await networkButton(page, "lab").click()
   await page.getByRole("button", { name: "Attach a container", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Attach a container" })
   await dialog.getByRole("combobox").click()
@@ -278,6 +319,7 @@ test("detaching names who loses the member, and a refused detach cannot be confi
   page,
 }) => {
   const mutations: Mutation[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page, mutations)
   let blocked = false
   await page.route("**/api/v1/docker/networks/n-lab/disconnect?**", (route) =>
@@ -315,7 +357,7 @@ test("detaching names who loses the member, and a refused detach cannot be confi
     ),
   )
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  await networkButton(page, "lab").click()
   await page.getByRole("button", { name: "Detach api", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Detach api" })
   await expect(dialog.getByText(/worker reaches api on lab as api, app/)).toBeVisible()
@@ -339,6 +381,7 @@ test("a removal says what still names the network, and a live deployment's netwo
   page,
 }) => {
   const mutations: Mutation[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page, mutations)
   await page.route("**/api/v1/docker/networks/n-spare/removal", (route) =>
     json(
@@ -383,13 +426,12 @@ test("a removal says what still names the network, and a live deployment's netwo
     ),
   )
   await page.goto("/docker/networks")
-  const list = page.getByRole("list", { name: "Networks" })
-  const spare = list.getByRole("listitem").filter({ hasText: "spare" })
-  await spare.getByRole("button", { name: "Remove", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Delete spare" })
+  const table = page.getByRole("table").first()
+  await table.getByRole("button", { name: "Remove spare", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Remove spare" })
   await expect(dialog.getByText(/batch still names this network/)).toBeVisible()
   await expect(dialog.getByText(/IPAM reservation 10.9.0.0\/24/)).toBeVisible()
-  await dialog.getByRole("button", { name: "Delete", exact: true }).click()
+  await dialog.getByRole("button", { name: "Remove", exact: true }).click()
   await expect(dialog).not.toBeVisible()
   expect(mutations).toContainEqual({
     method: "DELETE",
@@ -397,16 +439,16 @@ test("a removal says what still names the network, and a live deployment's netwo
     body: null,
   })
 
-  const managed = list.getByRole("listitem").filter({ hasText: "jd-e9-net" })
-  await managed.getByRole("button", { name: "Remove", exact: true }).click()
-  const refused = page.getByRole("dialog", { name: "Delete jd-e9-net" })
+  await table.getByRole("button", { name: "Remove jd-e9-net", exact: true }).click()
+  const refused = page.getByRole("dialog", { name: "Remove jd-e9-net" })
   await expect(refused.getByText(/deployment blog · production, which still exists/)).toBeVisible()
-  await expect(refused.getByRole("button", { name: "Delete", exact: true })).toBeDisabled()
+  await expect(refused.getByRole("button", { name: "Remove", exact: true })).toBeDisabled()
 })
 
 test("the reviewed prune removes only what nothing names and says why the rest is kept", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
   let pruned: unknown
   await page.route("**/api/v1/docker/networks/prune", (route) => {
@@ -455,7 +497,7 @@ test("the reviewed prune removes only what nothing names and says why the rest i
     })
   })
   await page.goto("/docker/networks")
-  await page.getByRole("button", { name: "Prune", exact: true }).click()
+  await page.getByRole("button", { name: "Remove unused", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Remove unused networks" })
   const removed = dialog.getByRole("list", { name: "Networks removed" })
   const kept = dialog.getByRole("list", { name: "Networks kept" })
@@ -578,7 +620,7 @@ for (const width of [390, 1440]) {
       ),
     )
     await page.goto("/docker/networks")
-    await page.getByRole("button", { name: "lab", exact: true }).click()
+    await networkButton(page, "lab").click()
     await page.getByRole("button", { name: "Detach api", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "Detach api" })
     await expect(dialog.getByText(/reporting-service reach api/)).toBeVisible()
@@ -592,6 +634,7 @@ for (const width of [390, 1440]) {
 }
 
 test("readers see owners and previews' results but are offered no change", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await mockNetwork(page, [], {
     session: { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } },
     overrides: {
@@ -601,11 +644,14 @@ test("readers see owners and previews' results but are offered no change", async
     },
   })
   await page.goto("/docker/networks")
-  await expect(page.getByText("Compose · shop", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prune", exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "lab", exact: true }).click()
+  await expect(page.getByText("compose · shop", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Remove unused", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0)
+  await networkButton(page, "lab").click()
   const panel = page.getByRole("dialog", { name: "lab" })
-  await expect(panel.getByText("10.4.0.3/24 · fd00:4::3/64 · also on bridge")).toBeVisible()
+  const api = panel.getByRole("row").filter({ hasText: "10.4.0.3" })
+  await expect(api.getByText("fd00:4::3", { exact: true })).toBeVisible()
+  await expect(api.getByText("also on bridge")).toBeVisible()
   await expect(panel.getByRole("button", { name: "Detach api", exact: true })).toHaveCount(0)
   await expect(panel.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(
     0,

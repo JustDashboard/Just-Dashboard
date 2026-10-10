@@ -2168,9 +2168,10 @@ test("workspace: Back restores a long container list's scroll and focused row", 
 
 /**
  * A published port's verdict is the binding, the proxy and the firewall read
- * together; an administrator can open every layer between the outside and
- * the container — Docker's NAT, DOCKER-USER, provider policy — with the ones
- * nothing on the host can see said as unknown.
+ * together, with the reasoning on its row; an administrator can open every
+ * layer between the outside and the container — Docker's NAT, DOCKER-USER,
+ * provider policy — from the Ports table, with the ones nothing on the host
+ * can see said as unknown.
  */
 test("an administrator traces a published port's path from outside, layer by layer", async ({
   page,
@@ -2261,8 +2262,10 @@ test("an administrator traces a published port's path from outside, layer by lay
     })
   })
   await page.goto(`/docker/containers/${detail.id}`)
-  await expect(page.getByText(/reaching it from outside is unproven/)).toBeVisible()
-  await page.getByRole("button", { name: "Trace the path", exact: true }).click()
+  const ports = page.getByRole("table").filter({ hasText: "Published" })
+  const port = ports.getByRole("row").filter({ hasText: "443/tcp" })
+  await expect(port).toHaveAttribute("title", /reaching it from outside is unproven/)
+  await port.getByRole("button", { name: "Trace the path to port 443/tcp", exact: true }).click()
   const sheet = page.getByRole("dialog", { name: "Path to host port 443" })
   await expect(sheet.getByRole("heading", { name: "Outside this host → web" })).toBeVisible()
   await expect(sheet.getByText(/any outside address → 172.17.0.2/)).toBeVisible()
@@ -2278,6 +2281,6 @@ test("an administrator traces a published port's path from outside, layer by lay
     }),
   )
   await page.reload()
-  await expect(page.getByText(/reaching it from outside is unproven/)).toBeVisible()
-  await expect(page.getByRole("button", { name: "Trace the path", exact: true })).toHaveCount(0)
+  await expect(port).toHaveAttribute("title", /reaching it from outside is unproven/)
+  await expect(page.getByRole("button", { name: /^Trace the path/ })).toHaveCount(0)
 })

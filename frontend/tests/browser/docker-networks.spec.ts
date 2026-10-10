@@ -153,24 +153,36 @@ test("a network's sheet is a live readout with its members as a table", async ({
   await expect(db.getByText("db", { exact: true })).toBeVisible()
   await expect(db.getByText("database", { exact: true })).toBeVisible()
 
+  // What detaching disturbs is read first; the button is the dialog's.
   await db.getByRole("button", { name: "Detach shop-db-1" }).click()
+  await page
+    .getByRole("dialog", { name: "Detach shop-db-1" })
+    .getByRole("button", { name: "Detach", exact: true })
+    .click()
   await expect
     .poll(() => mocks.writes.map((w) => w.path))
     .toContain(`/docker/networks/${id("shop_backend")}/disconnect`)
 })
 
-test("Remove unused prunes the networks nothing is attached to", async ({ page }) => {
+test("Remove unused prunes the networks nothing is attached to, after reading the prune", async ({
+  page,
+}) => {
   const mocks = await mockNetworks(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/docker/networks")
 
   await page.getByRole("button", { name: "Remove unused" }).click()
-  const dialog = page.getByRole("alertdialog").or(page.getByRole("dialog"))
-  await expect(dialog.getByText("old-staging, wiki_default")).toBeVisible()
-  await dialog.getByRole("button", { name: "Remove", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Remove unused networks" })
+  const removed = dialog.getByRole("list", { name: "Networks removed" })
+  await expect(removed.getByText("old-staging", { exact: true })).toBeVisible()
+  await expect(removed.getByText("wiki_default", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "Remove 2", exact: true }).click()
   await expect
     .poll(() => mocks.writes.map((w) => `${w.method} ${w.path}`))
     .toContain("POST /docker/networks/prune")
+  expect(mocks.writes.find((w) => w.path === "/docker/networks/prune")?.body).toEqual({
+    ids: [id("old-staging"), id("wiki_default")],
+  })
 })
 
 test("on a phone both lists read down the row and nothing scrolls sideways", async ({ page }) => {

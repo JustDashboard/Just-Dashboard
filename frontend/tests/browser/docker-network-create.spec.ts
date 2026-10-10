@@ -19,6 +19,9 @@ async function setup(page: Page, options: { role?: "admin" | "limited" | "read" 
   if (role !== "read") {
     await page.getByRole("button", { name: "Create network", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
+  } else {
+    // The page has read the (empty) list before a missing action means anything.
+    await expect(page.getByText("No networks", { exact: true })).toBeVisible()
   }
 }
 
