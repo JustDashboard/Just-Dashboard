@@ -165,7 +165,17 @@ test("reviewed configuration replacement preserves credentials and needs explici
       return json(route, { id: "replacement-id", name: "web", warnings: [], started: true })
     }
     if (path.endsWith("/failure"))
-      return json(route, { cause: "none", evidence: [], suggestions: [] })
+      return json(route, {
+        containerId: "web-id",
+        name: "web",
+        checkedAt: new Date().toISOString(),
+        state: "running",
+        headline: "web is running",
+        confidence: "observed",
+        evidence: [],
+        restarts: { count: 0, recent: 0, looping: false },
+        suggestions: [],
+      })
     if (path.endsWith("/web-id"))
       return json(route, {
         id: "web-id",
