@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,10 +14,10 @@ import (
 )
 
 // The host's nginx binary on a private prefix serving two sites: one over
-// TLS with HTTP/2, a QUIC listen advertised by Alt-Svc, a response cache and
-// browser caching of CSS; one with a request limit of one a minute and a
-// burst of one. The measurement finds each control doing what it says, by
-// what nginx answered.
+// TLS with HTTP/2, a QUIC listen advertised by Alt-Svc where the build has
+// HTTP/3, a response cache and browser caching of CSS; one with a request
+// limit of one a minute and a burst of one. The measurement finds each
+// control doing what it says, by what nginx answered.
 func TestLiveSiteControlsAreMeasured(t *testing.T) {
 	root := liveNginx(t)
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,16 +34,25 @@ func TestLiveSiteControlsAreMeasured(t *testing.T) {
 		}
 	}
 	tlsPort, plainPort := freePort(t), freePort(t)
+	// The site is written for the nginx at hand. A quic listen needs a build
+	// with http_v3_module, which nginx has had only since 1.25, and Ubuntu
+	// 24.04's 1.24 refuses one outright, along with the http2 directive.
+	// Without QUIC, HTTP/3 must read as unset; every other control is measured.
+	build, _ := exec.Command("nginx", "-V").CombinedOutput()
+	quic := parseStreamNginxBuild(string(build)).modules["http_v3_module"] != ""
+	listen := fmt.Sprintf("listen 127.0.0.1:%d ssl http2;\n", tlsPort)
+	if liveNginxHasHTTP2Directive(t) {
+		listen = fmt.Sprintf("listen 127.0.0.1:%d ssl;\n    http2 on;\n", tlsPort)
+	}
+	if quic {
+		listen += fmt.Sprintf("    listen 127.0.0.1:%[1]d quic;\n    add_header Alt-Svc 'h3=\":%[1]d\"; ma=60' always;\n", tlsPort)
+	}
 	live := fmt.Sprintf(`proxy_cache_path %[1]s/cache levels=1:2 keys_zone=jd_live_cache:1m max_size=10m inactive=1h use_temp_path=off;
 map $sent_http_content_type $jd_live_asset_expires { default off; text/css 30d; }
 server {
-    listen 127.0.0.1:%[2]d ssl;
-    listen 127.0.0.1:%[2]d quic;
-    http2 on;
-    server_name live.test;
+    %[2]s    server_name live.test;
     ssl_certificate %[1]s/cert.pem;
     ssl_certificate_key %[1]s/key.pem;
-    add_header Alt-Svc 'h3=":%[2]d"; ma=60' always;
     add_header X-Cache-Status $upstream_cache_status always;
     expires $jd_live_asset_expires;
     proxy_cache jd_live_cache;
@@ -50,7 +60,7 @@ server {
     proxy_buffering on;
     location / { proxy_pass %[3]s; }
 }
-`, root, tlsPort, app.URL)
+`, root, listen, app.URL)
 	limit := fmt.Sprintf(`limit_req_zone $binary_remote_addr zone=jd_limit_req:1m rate=1r/m;
 server {
     listen 127.0.0.1:%[1]d;
@@ -95,7 +105,13 @@ server {
 		t.Fatal(err)
 	}
 	got := states(verified)
-	for _, id := range []string{"http2", "http3", "proxy-cache", "static-cache"} {
+	measured := []string{"http2", "proxy-cache", "static-cache"}
+	if quic {
+		measured = append(measured, "http3")
+	} else if got["http3"].State != ControlNotConfigured {
+		t.Errorf("http3 without a quic listen = %+v", got["http3"])
+	}
+	for _, id := range measured {
 		if got[id].State != ControlVerified {
 			t.Errorf("%s = %+v", id, got[id])
 		}

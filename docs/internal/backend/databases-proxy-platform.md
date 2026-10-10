@@ -2481,7 +2481,9 @@ containers/volumes/networks.
   `TestControlHelpers`, `TestProxyLayerCarriesTheSitesServicePolicy`, and `TestLiveSiteControlsAreMeasured`,
   where the host's nginx binary on a private prefix serves a TLS site with HTTP/2, a QUIC listen
   advertised by Alt-Svc, a response cache and CSS caching, and a site limited to one request a minute
-  with a burst of one, and every control is verified from nginx's answers.
+  with a burst of one, and every control is verified from nginx's answers. The site is written for the
+  installed build: HTTP/2 goes in the listen where nginx predates `http2 on;` (1.25.1), and a build
+  without `http_v3_module` gets no QUIC listen, so HTTP/3 must read as not configured there.
 
   **Visitor address** (`site_realip.go`, form "Visitor address"). `SiteSpec.RealIP{Source, Trusted,
   Header, CloudflareOnly}`: `cloudflare` renders `include <nginxDir>/jd-realip/cloudflare.conf;` +

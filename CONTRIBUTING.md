@@ -199,7 +199,9 @@ to the contribution terms above, including the additional licence grant to the p
   by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
   the caches of its base branch and never those of another task branch.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
-  directive; the other nginx tests still run.
+  directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its
+  site for the build it finds — HTTP/2 in the listen before 1.25.1, a QUIC listen only with
+  `http_v3_module` — so it runs on the runners' nginx 1.24 too.
 - The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
   they run there like the other jobs, each job on a fresh daemon, and only when one of the six
   deployment packages (those of the race gate) or `go.mod` changed: `live (fixtures)` runs the
