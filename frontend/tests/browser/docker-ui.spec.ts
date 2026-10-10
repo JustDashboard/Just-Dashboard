@@ -577,8 +577,12 @@ test("a stack that was never deployed says so", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/stacks")
 
-  await expect(page.getByText("Not deployed · 3 services defined").first()).toBeVisible()
-  await expect(page.getByText("Running · 2/2 services").first()).toBeVisible()
+  const never = page.locator('[data-stack-row="never-deployed"]')
+  await expect(never).toContainText("Not deployed")
+  await expect(never).toContainText("3 services defined")
+  const running = page.locator('[data-stack-row="running-app"]')
+  await expect(running).toContainText("Running")
+  await expect(running).toContainText("2 of 2 services up")
   await expect(page.getByText("0/0")).toHaveCount(0)
 })
 
