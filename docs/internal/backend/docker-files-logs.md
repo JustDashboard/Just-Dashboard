@@ -76,6 +76,8 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   it reads the buffered past, so an event recorded between the two is sent rather than lost — one
   recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
   service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+  `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
+  nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
   `/logs/*` routes (see [Logs](#logs)). `GET /docker/containers/{id}/logs`, its `/logs/stream` and
   `GET /docker/stacks/{name}/logs/stream` are gone: a second reader of the same lines with no lens and no
@@ -134,7 +136,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   from a shell.
 - **Efficiency rules that are load-bearing**: `ListContainers` carries `Mounts` (the Engine summary
   already has them); membership joins for volumes, networks and images, and image-reference discovery
-  use the summary without fetching unused inspection fields. The history recorder reads the enriched
+  use the summary without fetching unused inspection fields. The network listing carries each member's
+  address from the same summary — `Network.Endpoints` (container id and name, IPv4 and IPv6 with their
+  prefix, MAC) and `Network.Gateway` — kept off the containers socket (`Container.Endpoints` is
+  `json:"-"`); the summary has no aliases, so the names a member answers to beyond its own are
+  `NetworkDetail`'s, which inspects. A network's inspect lists endpoints, and a stopped container holds
+  none, so `NetworkDetail` adds every container the summary places on the network that the inspect
+  left out — without an address, with its state and aliases — and counts it: Docker removes a network
+  whose members are all stopped, and they then fail to start. The history recorder reads the enriched
   listing because it persists explicit memory budgets, including a limit equal to host RAM, which the
   stats response alone cannot distinguish from an unlimited container. The shared live table sampler
   reuses the inventory it already collected and samples those IDs without another listing.

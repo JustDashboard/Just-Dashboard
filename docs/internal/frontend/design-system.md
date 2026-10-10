@@ -60,11 +60,11 @@ taking a frame:
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
   metrics page, every block on the Docker pages but the overview's container table (the
-  overview's band, attention, compose projects, cleanup and disk; the containers, networks,
-  stacks and events lists with their toolbars; the Images page's band of what Docker holds on
-  disk and what the registries say, over its framed table; the Volumes page's band of who holds
-  the data and where each volume stands, over its framed table; the attention and storage
-  blocks on a container's page), the
+  overview's band, attention, compose projects, cleanup and disk; the containers, stacks and
+  events lists with their toolbars; the Networks page's band; the Images page's band of what
+  Docker holds on disk and what the registries say, over its framed table; the Volumes page's
+  band of who holds the data and where each volume stands, over its framed table; the attention
+  and storage blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
@@ -1042,6 +1042,12 @@ at the operator's request, on the Processes, Packages and Services tables' prece
 opens a sheet but is read down its columns — which image is largest, oldest, unused or behind — is
 a table of readings with a destination on its name, and it keeps its frame (§2).
 
+The networks list left the cards on 2026-10-08, at the operator's request, by the argument the
+containers made: eleven networks are compared down their columns — which is busy, which has nothing
+on it, which subnet each holds — far more often than one is opened, and the cards were eleven grey
+copies of one line. It is a table of fixed columns from `xl` whose name is the button and whose row
+takes Enter, without the lit edge, drawn down the row below `xl` (`components/docker/network-table.tsx`).
+
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
 measures where there is room and under it where there is not, chosen once with a media query — and
@@ -1257,7 +1263,8 @@ dolphin and Valkey is not Redis, on a fleet card, a home's identity tile, the st
 rail's head and every engine picker, which are one `EngineCard` (`choice-card.tsx`) rather than three
 shapes that had already drifted. A flavour with no artwork of its own draws the database glyph on
 the same tile and never borrows its driver's logo with its own name beside it.
-Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
+A network has no product of its own. Its row carries its lane colour down its leading edge and its
+members' products (`ProductLogos`), and its sheet draws its bridge as Docker's mark.
 
 **What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
 the thing it protects — a saved database as its engine, the proxy's configuration as nginx or Caddy,
@@ -2029,6 +2036,24 @@ The passes, in order. Each one is a diff you can review on its own.
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
 
+   Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
+   still page of the section: a column of grey cards, each a name, a subnet and a count, with the
+   members one press away and nothing on it that moved. The page had no tiles to give up; its three
+   chips (all, user-created, Docker system) became owner chips that count and narrow by who made a
+   network — a compose project, this dashboard, standalone or Docker — with Unused in amber beside
+   them. It opens on Docker's identity line, the overview's, whose verdict is the address pool nearly
+   or wholly spent, else the unused networks (a press narrows the table to them), else every network
+   in use. Under it `components/docker/network-band.tsx` answers what the cards never did: which
+   networks carry the traffic, read off their bridges every two seconds and drawn as spans of one bar
+   in each network's colour; how much of the address pool Docker carves networks from is taken, as
+   blocks in the colour of the network holding each — the pool every `compose up` takes a subnet from
+   runs out at thirty-one with the built-in pools; and who joined or left which network, from
+   Docker's events. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
+   same on its row's edge, its span, its blocks and its chips in the containers table, which lists
+   every container with each network it is on, its address there and the names it answers to, so
+   "can the API reach the database" is whether two rows share a colour. The sheet became a live
+   readout: four readings over the bridge's two minutes, the bridge wired to each member in the
+   wiring vocabulary with a pulse while that member moves bytes, the members as a table, the settings.
    Docker's Stacks page took the same exit in 0.7.1 at the operator's request, because it was the
    still page of the section: a title over six cards, each a stack's name with its services as a line
    of 6px dots under it, so "is the database up" was a dot, an Alertmanager killed for memory read as
