@@ -196,11 +196,15 @@ leaks until dual-stack egress is configured.
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
-  when things happened. Container charts offer only recorded ranges; the container Usage tab also has
-  a separate `container-live-usage.tsx` reading section on its existing stats WebSocket. Its rate helper
-  differences Docker timestamps and per-interface counters, rejects resets and gaps, and establishes a
-  new baseline after reconnects. Pausing freezes labelled readings; a disconnected or ten-second-stale
-  feed clears current figures without hiding recorded history. `hooks/use-metrics.ts` and
+  when things happened. A container's Usage tab is a project Runtime's `RuntimeUsage`: its Live range
+  is the stats socket's last five minutes bucketed apart from the recorded ranges, never joined to
+  them, and its breakdowns read the newest frame of that same socket (`useContainerFrame`). The rate
+  helper differences Docker timestamps and per-interface counters, rejects resets and gaps, and
+  establishes a new baseline after reconnects; a ten-second-stale feed says so without hiding
+  recorded history, and a stopped container opens no socket at all. The Overview tab's four readings
+  (`docker/container-readings.tsx`) open the same socket only while that tab is showing, so the two
+  never run together, and draw the recorded hour as each tile's trend beside the live figure rather
+  than splicing the frames into that line. `hooks/use-metrics.ts` and
   `hooks/use-metrics-history.ts` are the React surface over those two.
 - `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run

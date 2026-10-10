@@ -26,6 +26,8 @@ export const searchContainer = {
   mounts: [],
   env: [],
   networkDetails: [],
+  capAdd: [],
+  entrypoint: [],
   restartCount: 0,
   exitCode: 0,
 }

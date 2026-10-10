@@ -2472,6 +2472,49 @@ Each page that reads a tool this host may not have opens on its install where it
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
 Packages page's install job streaming under the button).
 
+**A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
+because it was the page with no life: a strip of four grey label-and-value pairs (container, image,
+id, compose stack) over a filled tab list, and an Overview of three columns of grey fields, a run
+of port tags and a second list of the same ports, with nothing on it that moved. Each of the four
+went into the identity line (`docker/container-identity.tsx`, through `HostIdentity`): the
+container is its product's mark with its state in the tile's corner and its name as the title; the
+image is a fact with its tag in ink, the project a link in its lane hue (`hueFor(stack, LANES)`, the
+containers table's), the uptime ticks, the restart policy is said as what it does ("restarted
+unless stopped"), and the id copies. The verdict at the line's end (`docker/container.ts`) is the
+one Docker's state cannot give: a container failing its health check is not "Running", and a crash
+loop is not "Restarting", the word a deliberate restart gets — the failure diagnosis tells the two
+apart. The views are the underlined strip (`tabClasses`) with Environment and Storage counting
+what they hold. The Overview reads in the order a reader asks: why it is not working (the failure
+notice, its evidence a column of facts, and nothing at all for a healthy container — the line
+already says it); what it is using (`container-readings.tsx`: the Overview's four readings, each a
+`LiveFigure` gliding to Docker's frame every second with its last hour as a `TileTrend` keyed by its
+series colour, memory as a `Meter` against a limit where it has one); what is wrong with it; a
+picture of how it is reached and what it keeps (`container-picture.tsx`, the runtime map's three
+lanes over `wire-grid`: each published port as where it is reached from and each network as the
+name it is reached by, the container as its product, each volume, folder and tmpfs it mounts — the
+line amber where a port answers around the firewall, red where Docker's socket is mounted, dashed
+where a thing does not outlive it, pulsing while it moves traffic); the containers it runs beside
+as a live framed table (`container-company.tsx`, its project or failing that its own networks, off
+the containers socket, this container the selected row); then what just happened to it
+(`container-recent.tsx`, Docker's events with a loop folded to one row) beside how it runs (the
+command coloured by `ShellWords`), and its ports and networks as framed tables. The Environment tab
+is a framed table with a filter that does not search a hidden value. The page draws every verb the
+container has — it used to draw only the inline three, so pausing or removing it meant the list.
+
+Each of its other views then took the pass of the page it stands in for, so a reader who has learned
+that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): every chart
+headed by its reading now, with the container's own crashes and folded restart loops as its markers,
+then the Metrics page's breakdowns of the same frame — memory as one allocation bar, quota, share,
+throttling and tasks as tiles, the limits beside the change that sets them, interfaces as a framed
+table with an in/out bar per row. Storage is the file manager's workbench, a rail of mounts drawn as
+their kinds beside the listing in one frame. Logs is the logs page's own pane. Inspect is the run
+page's Details shape, a rail of the document's sections beside the picked one in the `CODE` hues.
+Configuration is Health's, each finding a lit card on its level's wash that prepares its own change
+and the editor's head naming the edited fields in `--git-modified`. Shell is the deploy Console's,
+its strip saying the account and the directory and its first commands typing themselves in. The
+Environment tab colours each name's namespace in its lane hue and each value in its kind's code hue,
+its kinds chips that count and narrow, as the deployment Variables page's do.
+
 **A stack's own page took the Services page's shape on 2026-10-08**, at the operator's request,
 because it had no life: a `MetricStrip` of three facts over a filled tab list and a column of grey
 cards that each said a state word, so a worker in a restart loop read "restarting" beside a

@@ -211,7 +211,8 @@ the [CLI calculations](https://github.com/docker/cli/blob/master/cli/command/con
 `stats_test.go`, `metrics/container_usage_test.go`, the store migration test and
 `frontend/src/lib/container-usage.test.js` pin conversion, availability and rate boundaries. Browser
 coverage lives in `docker-ui.spec.ts`, including pause/reconnect, stale data, disabled retention,
-host networking, stopped containers and desktop/phone layouts.
+host networking, stopped containers and desktop/phone layouts; `container-page.spec.ts` covers the
+Overview's readings off the same stream.
 For read-only acceptance against a running container, run from `backend/`:
 `JD_DOCKER_STATS_CONTAINER=<id> go test ./internal/dockerx -run '^TestLiveContainerUsageStream$' -count=1 -v`.
 The test opens the existing stats stream, reconciles totals and memory, and checks cancellation;
