@@ -310,6 +310,9 @@ Stage individual lines or chunks, resolve conflicts, compare branches, inspect b
 recover commits, and edit local history with a recovery branch. Worktrees, submodules, Git LFS and
 patch import/export open in the same workspace. Review GitHub pull requests and Actions job logs,
 or connect a GitLab/Gitea token for requests on those providers.
+Pull establishes missing upstream tracking when the same branch has one unambiguous remote match or
+a configured remote preference. If it needs a choice, use **Branches → Set upstream**. Pull remains
+fast-forward-only and refuses to overwrite local work.
 
 ### Deployments
 

@@ -79,6 +79,13 @@ No CI workflows, release changes, commits or pushes are part of this request.
   literal search and ref filtering; the Git page's graph loads them as one windowed scroll. Comparison file lists and diffs use frozen base/head SHAs. Message-only amend is
   supported without staging a file.
 
+Pull also handles a local branch without upstream tracking: it checks for the same branch on the
+configured branch remote, or `checkout.defaultRemote` when the branch has no remote preference.
+Otherwise it requires a unique matching remote, and lets Git establish tracking during the fetch.
+An existing upstream is never replaced, even when it is gone. Missing or ambiguous remote branches
+require **Branches → Set upstream**, while unpublished branches can use Push. Remote lookup and fetch
+errors remain failures; local edits and divergent commits retain Git's fast-forward-only protection.
+
 ## Submodules, LFS and patches
 
 The existing More menu opens each tool in the preview. Submodules list the expected/checked-out commits,
@@ -137,6 +144,8 @@ Run backend build/vet and tests for `internal/gitx`, `internal/ghx`, `internal/f
 Race-check the three Git/provider packages. Real repository tests cover selected lines/chunks, Unicode
 and newline handling, stale edits, conflict continue/abort, worktrees, rescue/blame/signatures, rebase,
 submodules and patch containment. A loopback Git daemon verifies branch/shallow/sparse cloning.
+`ops_pull_test.go` uses temporary repositories to cover missing/unfetched tracking, remote selection,
+ambiguity, existing/gone upstreams, detached HEAD, lookup failures and preservation of local work.
 `TestLFSLifecycleUsesRepositoryConfig` needs `git-lfs` on PATH and uses only a temporary repository.
 GitHub tests replace the CLI runner; GitLab/Gitea tests use local HTTP fixtures to prove payloads,
 credential isolation, encryption, head checks and redirect refusal. They do not post live reviews.

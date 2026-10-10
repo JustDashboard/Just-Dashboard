@@ -74,12 +74,19 @@ option-shaped values behind an explicit `--`. A stash is addressed by integer in
 form is built server-side, because the braces are exactly what the ref validator refuses. Remote URLs
 accept `https://`, `http://`, `ssh://`, `git://` and the scp-like `user@host:path` and nothing that could be
 a local path or an option; a clone's directory name is one path segment that is neither hidden nor
-option-shaped. Pull is fast-forward-only; push never forces and establishes a missing upstream on the
-branch's own remote; checkout never forces, and a remote branch is checked out as a new local branch
-that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure. The workspace
-uses `/operation/start`, which requires a clean checkout and retains conflicts for the visual resolver,
-`/operation/continue` and ordinarily confirmed `/operation/abort`. Branch deletion defaults to Git's
-merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
+option-shaped. Pull is fast-forward-only and preserves a configured upstream, including one that is
+gone or has not been fetched. Without a merge ref, it checks the remotes for the current branch's exact
+name and establishes tracking with `pull --ff-only --set-upstream`. A configured branch remote takes
+precedence over `checkout.defaultRemote`; otherwise exactly one remote must have that branch. Remote
+lookups use `ls-remote`, so stale or missing fetched refs cannot choose an upstream. Missing or ambiguous
+matches direct the operator to **Branches → Set upstream**; an unpublished branch can be pushed first.
+Lookup failures stop the pull. The whole operation keeps its three-minute deadline, and Git still
+refuses divergent history or overwriting local edits. Push never forces and establishes a missing
+upstream on the branch's own remote; checkout never forces, and a remote branch is checked out as a new
+local branch that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure.
+The workspace uses `/operation/start`, which requires a clean checkout and retains conflicts for the
+visual resolver, `/operation/continue` and ordinarily confirmed `/operation/abort`. Branch deletion
+defaults to Git's merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
 deletes an untracked one (`clean -fd`); a hard reset may also clean untracked files; an identity is
 written into the repository's own config; a clone lands only in a new directory under a root, as the
 root's owner, and `init` starts an existing directory on `main`.

@@ -48,7 +48,77 @@ func (s *Service) Fetch(ctx context.Context, path string, prune bool) (*Result, 
 // working tree the operator cannot easily fix from a web page. Refusing is a
 // clear failure they can resolve deliberately; a half-finished merge is not.
 func (s *Service) Pull(ctx context.Context, path string) (*Result, error) {
-	return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only")
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	branch, err := s.CurrentBranch(ctx, path)
+	if err != nil {
+		return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only")
+	}
+	// Read the configured merge ref rather than resolving @{upstream}: a
+	// deleted or unfetched upstream must not be replaced by a different one.
+	merge, err := s.run(ctx, path, "config", "--get-all", "branch."+branch+".merge")
+	if err == nil && strings.TrimSpace(merge) != "" {
+		return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only")
+	}
+	remote, err := s.pullRemote(ctx, path, branch)
+	if err != nil {
+		return &Result{Command: "git pull --ff-only", Output: err.Error()}, err
+	}
+	return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only", "--set-upstream", "--", remote, "refs/heads/"+branch)
+}
+
+// A locally created branch may already exist on a remote without tracking it.
+// Inspect the remote itself so a stale or missing fetched ref cannot decide
+// where Pull goes. Multiple matches need the operator's existing Git choice.
+func (s *Service) pullRemote(ctx context.Context, path, branch string) (string, error) {
+	out, err := s.run(ctx, path, "remote")
+	if err != nil {
+		return "", err
+	}
+	remotes := strings.Fields(out)
+	preferred := ""
+	for _, key := range []string{"branch." + branch + ".remote", "checkout.defaultRemote"} {
+		if out, err := s.run(ctx, path, "config", "--get", key); err == nil && strings.TrimSpace(out) != "" {
+			preferred = strings.TrimSpace(out)
+			break
+		}
+	}
+	if preferred != "" {
+		found := false
+		for _, remote := range remotes {
+			found = found || remote == preferred
+		}
+		if !found {
+			return "", fmt.Errorf("Remote %q is not available for branch %q. Choose Set upstream in Branches before pulling.", preferred, branch)
+		}
+		remotes = []string{preferred}
+	}
+	ref := "refs/heads/" + branch
+	var matches []string
+	for _, remote := range remotes {
+		if err := ValidateRef(remote); err != nil {
+			return "", err
+		}
+		out, err := s.runAllowing(ctx, path, 2, "ls-remote", "--exit-code", "--heads", "--", remote, ref)
+		if err != nil {
+			return "", err
+		}
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[1] == ref {
+				matches = append(matches, remote)
+				break
+			}
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("Branch %q has no upstream and no matching branch on its remotes. Push to publish it, or choose Set upstream in Branches.", branch)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("Branch %q exists on multiple remotes (%s). Choose Set upstream in Branches before pulling.", branch, strings.Join(matches, ", "))
+	}
 }
 
 // Push sends the current branch to its upstream. No force, ever: this runs
