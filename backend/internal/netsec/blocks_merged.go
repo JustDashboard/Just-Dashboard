@@ -78,7 +78,7 @@ func MergeBlocks(f2b *Fail2banStatus, decisions []CrowdSecDecision, crowdsecRead
 	}
 	entries := map[netip.Prefix]*held{}
 	add := func(value string, src BlockSource) bool {
-		p, ok := blockPrefix(value)
+		p, ok := refusedPrefix(value)
 		if !ok {
 			return false
 		}
@@ -213,8 +213,8 @@ func redundancy(e BlockedEntry) int {
 	return n
 }
 
-// blockPrefix reads an address or a network as the prefix it blocks.
-func blockPrefix(value string) (netip.Prefix, bool) {
+// refusedPrefix reads an address or a network as the prefix it blocks.
+func refusedPrefix(value string) (netip.Prefix, bool) {
 	value = strings.TrimSpace(value)
 	if strings.Contains(value, "/") {
 		p, err := netip.ParsePrefix(value)

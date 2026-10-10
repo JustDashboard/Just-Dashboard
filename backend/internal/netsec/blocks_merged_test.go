@@ -85,13 +85,13 @@ func TestBlockPrefixCanonicalisesMappedAndHostForms(t *testing.T) {
 		"::ffff:192.0.2.0/120": "192.0.2.0/24",
 		"2001:db8::1":          "2001:db8::1",
 	} {
-		p, ok := blockPrefix(in)
+		p, ok := refusedPrefix(in)
 		if !ok || blockValue(p) != want {
 			t.Errorf("%s=%v,%v want %s", in, blockValue(p), ok, want)
 		}
 	}
 	for _, bad := range []string{"Anywhere", "", "203.0.113.9/40"} {
-		if _, ok := blockPrefix(bad); ok {
+		if _, ok := refusedPrefix(bad); ok {
 			t.Errorf("accepted %q", bad)
 		}
 	}

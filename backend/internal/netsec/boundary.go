@@ -329,7 +329,7 @@ func BoundaryImpacts(b AccessBoundary, p BoundaryProposal) []BoundaryImpact {
 // ("" for every port) against the allowlist, this session and the tunnel.
 func refusedSourceImpacts(b AccessBoundary, target, port, what string) []BoundaryImpact {
 	var out []BoundaryImpact
-	refused, ok := blockPrefix(target)
+	refused, ok := refusedPrefix(target)
 	everywhere := refusesEverywhere(target)
 	if !ok && !everywhere {
 		return out
