@@ -311,55 +311,6 @@ export type MetricEvent = {
   durationSeconds?: number
 }
 
-/** The parts of the host the verdict covers, in the order the strip draws them. */
-export type HealthArea =
-  "cpu" | "memory" | "storage" | "network" | "services" | "containers" | "hardware"
-
-/** A thing a finding names and a fix acts on: a failed unit, a container, a mount. */
-export type HealthSubject = {
-  kind: "unit" | "container" | "mount" | "interface"
-  id: string
-  name: string
-  detail?: string
-  since?: string
-}
-
-/** One thing worth telling the operator, with the reasoning attached. */
-export type HealthFinding = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  title: string
-  /** What was measured. */
-  detail: string
-  /** What to do about it — an opinion, kept separate from the fact. */
-  advice?: string
-  metric?: string
-  value: number
-  threshold: number
-  since?: string
-  area?: HealthArea
-  /** The measured facts behind the verdict, already worded by the server. */
-  evidence?: { label: string; value: string }[]
-  subjects?: HealthSubject[]
-}
-
-/** One area's verdict, so a clean area reads as checked rather than as absent. */
-export type HealthAreaVerdict = {
-  id: HealthArea
-  status: Health["status"] | "unknown"
-  summary: string
-}
-
-export type Health = {
-  silences?: string[]
-  status: "ok" | "critical" | "warning" | "notice"
-  findings: HealthFinding[]
-  checkedAt: string
-  /** False when nothing is recording, which makes the verdict a shallower one. */
-  recorded: boolean
-  areas?: HealthAreaVerdict[]
-}
-
 export type MetricsHistory = {
   from: string
   to: string
@@ -893,6 +844,24 @@ export type DockerEventFeed = {
   listening: boolean
   since: string
   buffered: number
+}
+
+/**
+ * The part of `docker info` the overview's identity line reads. The route
+ * passes the daemon's own document through, so the names are its casing and
+ * every field it adds in a later release is simply not read here.
+ */
+export type DockerInfo = {
+  Name?: string
+  ServerVersion?: string
+  OperatingSystem?: string
+  Architecture?: string
+  /** The storage driver: overlay2, btrfs, zfs. */
+  Driver?: string
+  CgroupVersion?: string
+  NCPU?: number
+  MemTotal?: number
+  Images?: number
 }
 
 /** Whether the tag a container runs still points where it did when pulled. */

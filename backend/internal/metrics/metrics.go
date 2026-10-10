@@ -299,10 +299,6 @@ type Recorder struct {
 	// Whether the last container sample failed, so a host without Docker says
 	// so once instead of every interval for as long as it runs.
 	dockerQuiet bool
-
-	// links holds each interface's counters between health checks, so loss
-	// is judged on what happened since the last check rather than since boot.
-	links linkWatch
 }
 
 // New builds a recorder. An interval or retention outside the supported band

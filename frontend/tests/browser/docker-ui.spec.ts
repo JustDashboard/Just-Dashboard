@@ -517,23 +517,26 @@ async function mockDocker(page: Page) {
 
 /**
  * The contradiction this whole model exists to remove: runtime health and
- * attention are separate tiles, and neither claims to be the other.
+ * attention are separate verdicts, and neither claims to be the other. They
+ * were two of four tiles until the overview took §15's exit; they are the two
+ * verdicts at the end of its identity line now.
  */
 test("the overview separates runtime health from attention", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
 
-  await expect(page.getByText("Runtime health")).toBeVisible()
-  await expect(page.getByText("2 / 2 running")).toBeVisible()
-  await expect(page.getByText("2 running, 1 without a health check")).toBeVisible()
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("2 of 2 containers running")).toBeVisible()
+  await expect(identity.getByText("Nothing failing")).toBeVisible()
 
   // And, at the same time, that something needs attention.
-  await expect(page.getByText("Attention", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("2 issues").first()).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toBeVisible()
 
-  // The word that used to sit above a page of warnings must not appear.
+  // The word that used to sit above a page of warnings must not appear, and
+  // nor do the tiles.
   await expect(page.getByText("All good")).toHaveCount(0)
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
   await page.screenshot({
     path: "test-results/docker-docs.png",
     fullPage: true,

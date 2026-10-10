@@ -27,7 +27,6 @@ strategy, and feature ownership behind those rules.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
   client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.
-- [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.
 - [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
   posture, login history, sshd, firewall/fail2ban, and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
@@ -73,6 +72,9 @@ strategy, and feature ownership behind those rules.
   confirmations, and self-update state.
 
 ## Contributor reference
+
+- [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
+  — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
 
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.

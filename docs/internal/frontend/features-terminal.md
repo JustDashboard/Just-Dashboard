@@ -55,6 +55,14 @@
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
+- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
+  table read the containers socket, so the overview's figures move with every frame where the four
+  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
+  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
+  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
+  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
+  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
+  row below the fold read 0.0% until it was.
 - `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
   volumes, stated whether or not any are affected. The preview's services are a flat list, not
