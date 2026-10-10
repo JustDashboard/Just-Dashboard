@@ -127,6 +127,14 @@ type Service struct {
 	// forwardingSample is the last forwarded-datagram reading per family,
 	// which the next read turns into a rate (forwarding.go).
 	forwardingSample forwardingSamples
+	// egress measures and switches egress groups (egress_monitor.go).
+	egress *egressMonitor
+	// egressNetns is the namespace file member probes and connection
+	// tracking run in; empty is this process's own, the host's. Tests point
+	// it at a throwaway namespace, as egressNetnsRoot is where simulation
+	// namespaces are opened from (the host's /run/netns otherwise).
+	egressNetns     string
+	egressNetnsRoot string
 }
 
 // Paths are where the module reads and writes on the host. Tests point them
@@ -200,6 +208,7 @@ func New(opts Options) *Service {
 	s.wg = newWGRecord(opts.DB, opts.Log, opts.Retention)
 	s.flows = newFlowSampler()
 	s.telemetry = newGatewayTelemetry(opts.DB, opts.Log)
+	s.egress = newEgressMonitor(s, newEgressStore(opts.DB))
 	return s
 }
 
@@ -217,13 +226,16 @@ func (s *Service) Start(ctx context.Context) {
 	s.sampler.Start(ctx)
 	s.wg.start(ctx)
 	s.telemetry.start(ctx)
+	s.egress.start(ctx)
 }
 
-// Stop ends the samplers and the gateway counter recorder.
+// Stop ends the samplers, the gateway counter recorder and the egress
+// monitor.
 func (s *Service) Stop() {
 	s.sampler.Stop()
 	s.wg.stopLoop()
 	s.telemetry.halt()
+	s.egress.halt()
 }
 
 // Sampler is the interface counter recorder, for the traffic routes.

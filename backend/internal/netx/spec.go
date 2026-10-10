@@ -49,6 +49,9 @@ type Spec struct {
 	// Firewall is the owned nftables table, present once it has been used
 	// (firewall_owned.go).
 	Firewall *FirewallSpec `json:"firewall,omitempty"`
+	// EgressGroups are monitored egress groups (egress.go): their member
+	// tables, rules and the decided member restored at boot.
+	EgressGroups []EgressGroupSpec `json:"egressGroups,omitempty"`
 }
 
 // TrustedNote is the record behind one kept trusted address.

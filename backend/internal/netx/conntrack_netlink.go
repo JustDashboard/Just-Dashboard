@@ -83,6 +83,7 @@ type ctEntry struct {
 	DPort      uint16
 	ReplySrc   netip.Addr
 	ReplySPort uint16
+	ReplyDst   netip.Addr // a source-translated flow's translated address
 	TCPState   uint8
 	HasTCP     bool
 	Status     uint32
@@ -271,10 +272,9 @@ func decodeCTEntry(payload []byte) (ctEntry, bool) {
 			e.origTuple = append([]byte(nil), v...)
 			decodeTuple(v, &e.Src, &e.Dst, &e.SPort, &e.DPort, &e.Proto)
 		case ctaTupleReply:
-			var dst netip.Addr
 			var dport uint16
 			var proto uint8
-			decodeTuple(v, &e.ReplySrc, &dst, &e.ReplySPort, &dport, &proto)
+			decodeTuple(v, &e.ReplySrc, &e.ReplyDst, &e.ReplySPort, &dport, &proto)
 		case ctaStatus:
 			if len(v) >= 4 {
 				e.Status = binary.BigEndian.Uint32(v)

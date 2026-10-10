@@ -19,6 +19,9 @@ test("pending applies enroll only managed netx mutations", () => {
     "/network/protection/exceptions",
     "/network/protection/exceptions/4",
     "/network/drift/repairs",
+    "/network/egress",
+    "/network/egress/3/enable",
+    "/network/egress/3/switch",
   ]) {
     expect(supportsPendingNetworkMutation(path, "POST")).toBe(true)
     expect(supportsPendingNetworkMutation(path, "GET")).toBe(false)
@@ -38,6 +41,8 @@ test("pending applies enroll only managed netx mutations", () => {
     "/network/protection/preview",
     "/network/protection/sessions/revoke",
     "/network/protection/sessions/preview",
+    "/network/egress/3/simulate",
+    "/network/egress/3/automation/on",
   ]) {
     expect(supportsPendingNetworkMutation(path, "POST")).toBe(false)
   }

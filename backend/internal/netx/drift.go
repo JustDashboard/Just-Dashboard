@@ -300,6 +300,7 @@ func (s *Service) drift(ctx context.Context, locked bool) DriftReport {
 		if s.independentRecovery {
 			files[filepath.Join(filepath.Dir(s.paths.Unit), "just-dashboard-network-recovery.service")] = []byte(renderRecoveryUnit(s.paths))
 		}
+		s.addEgressRender(files, sp)
 		paths := make([]string, 0, len(files))
 		for path := range files {
 			paths = append(paths, path)

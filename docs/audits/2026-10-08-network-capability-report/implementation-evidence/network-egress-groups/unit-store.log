@@ -1,0 +1,11 @@
+=== RUN   TestNetworkEgressSchemaOnlyAddsTablesAndIndexes
+--- PASS: TestNetworkEgressSchemaOnlyAddsTablesAndIndexes (0.00s)
+=== RUN   TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls
+=== RUN   TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls/fresh
+=== RUN   TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls/0.6.6
+--- PASS: TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls (0.67s)
+    --- PASS: TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls/fresh (0.28s)
+    --- PASS: TestNetworkEgressSchemaReachesFreshAndUpgradedInstalls/0.6.6 (0.34s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	0.713s
+# exit 0

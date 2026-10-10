@@ -1,19 +1,23 @@
 # Recovering network changes
 
 `Service.commit` protects managed links, addresses, routes, rules, namespaces, forwarding, gateway,
-protection, shaping and owned firewall-table changes with `/etc/just-dashboard/network/change.json`.
-Managed bridge-port VLAN memberships and VXLAN flood ends are part of the spec; their undo is typed
-`bridge vlan`/`bridge fdb` commands derived from the previous spec, and the boot unit restores them
-with conditional failure-tolerant `bridge` lines. Native-owned link state, MTU and bridge membership
-changes use the same journal but remain runtime-only. ufw and firewalld changes are enrolled through
-`ProtectFirewallChange`: a check pass runs first under the lock, so a refused request opens no
-journal; then the journal names the tool (`firewall`), snapshots only that tool's own files and
-records a closed set of commands that put its switch back (`ufw --force enable|disable`, `ufw
-reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd --reload`; the unit command
-only when its prior state read as plainly enabled or disabled); a journal naming any other file or
-command is refused before recovery starts. DNS and WireGuard configuration and Tailscale preferences
-have separate owners and are not covered by this journal. Their existing synchronous rollback does not
-imply independent recovery.
+protection, shaping, owned firewall-table and egress group changes with
+`/etc/just-dashboard/network/change.json`. Managed bridge-port VLAN memberships and VXLAN flood ends
+are part of the spec; their undo is typed `bridge vlan`/`bridge fdb` commands derived from the
+previous spec, and the boot unit restores them with conditional failure-tolerant `bridge` lines.
+Native-owned link state, MTU and bridge membership changes use the same journal but remain
+runtime-only. An [egress group](network-egress.md) change — creation, edit, enable, disable, removal
+and every switch, the monitor's included — journals typed `ip route replace`/`rule add`/`rule del`
+commands that take each changed group's slot back to its previous decision, and reloads (or
+removes) the previous `egress.nft` pinning from the restored file. ufw and firewalld changes are
+enrolled through `ProtectFirewallChange`: a check pass runs first under the lock, so a refused
+request opens no journal; then the journal names the tool (`firewall`), snapshots only that tool's
+own files and records a closed set of commands that put its switch back (`ufw --force
+enable|disable`, `ufw reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd
+--reload`; the unit command only when its prior state read as plainly enabled or disabled); a
+journal naming any other file or command is refused before recovery starts. DNS and WireGuard
+configuration and Tailscale preferences have separate owners and are not covered by this journal.
+Their existing synchronous rollback does not imply independent recovery.
 
 [Selected persistent native profiles](network-native-managers.md) also use this journal with a
 closed native owner/checkpoint recovery payload. Their addressing, DNS/domain and explicit-route
@@ -79,8 +83,8 @@ dependencies over a running host.
 ## Reconnect and confirm
 
 An interactive administrator can request `X-JD-Network-Apply: pending` on covered link, routing,
-forwarding, shaping, forward/NAT and protection mutations, including exceptions and trusted-address
-notes. Previews, the forward target check, the pressure read and session revocation are not journaled
+forwarding, shaping, forward/NAT, protection and egress group mutations, including exceptions and
+trusted-address notes. Previews, the forward target check, the pressure read and session revocation are not journaled
 and do not accept it; revocation deletes connection-tracking entries, which no recovery can restore. The browser enables this after reading
 independent-recovery availability; its preference appears in Network, while pending/recovery notices
 remain visible throughout the dashboard. The response body stays compatible and the

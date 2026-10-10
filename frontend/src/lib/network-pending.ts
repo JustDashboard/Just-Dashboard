@@ -16,6 +16,10 @@ export function supportsPendingNetworkMutation(path: string, method: string): bo
     clean.startsWith("/firewall/rules/")
   )
     return true
+  // Egress group changes are journaled; a simulation and the automation
+  // switch change no route.
+  if (clean === "/network/egress" || clean.startsWith("/network/egress/"))
+    return !clean.endsWith("/simulate") && !clean.includes("/automation/")
   return [
     "/network/links",
     "/network/native/profiles",

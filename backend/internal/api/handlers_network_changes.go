@@ -29,6 +29,14 @@ func supportsPendingNetworkApply(path string) bool {
 	if strings.HasPrefix(path, "/firewall/rules/") {
 		return true
 	}
+	// Egress group changes go through the journal; a simulation and the
+	// automation switch change no route and are not enrolled.
+	if strings.HasPrefix(path, "/network/egress/") && !strings.HasSuffix(path, "/simulate") && !strings.Contains(path, "/automation/") {
+		return true
+	}
+	if path == "/network/egress" {
+		return true
+	}
 	for _, prefix := range []string{"/network/links", "/network/native/profiles", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted", "/network/protection/exceptions"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
@@ -66,7 +74,7 @@ func (s *Server) pendingNetworkApply(next http.Handler) http.Handler {
 			return
 		}
 		if mode != "pending" || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete) || !supportsPendingNetworkApply(strings.TrimPrefix(r.URL.Path, "/api/v1")) {
-			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for native profile edits, selected drift repairs, host firewall changes, and managed link, routing, shaping, gateway and kernel-setting mutations."))
+			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for native profile edits, selected drift repairs, host firewall changes, and managed link, routing, egress, shaping, gateway and kernel-setting mutations."))
 			return
 		}
 		p := httpx.MustPrincipal(r)

@@ -395,6 +395,7 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 		filepath.Join(j.Paths.Dir, linksFile): true, filepath.Join(j.Paths.Dir, rules6File): true,
 		filepath.Join(j.Paths.Dir, shapingFile): true, filepath.Join(j.Paths.Dir, gatewayFile): true,
 		filepath.Join(j.Paths.Dir, firewallFile): true,
+		filepath.Join(j.Paths.Dir, egressFile):   true,
 		filepath.Join(j.Paths.Dir, "spec.json"):  true, j.Paths.Sysctl: true, j.Paths.Unit: true,
 	}
 	if j.SelectedDriftRepair {
