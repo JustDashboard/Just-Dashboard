@@ -1368,9 +1368,10 @@ for ufw, sshd or an unknown interface. Source choices in the firewall dialog use
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
-register and begin with four `StatTile` readings, two per row on phones; on Sites, what the reader
-has to act on first — a failed read, nginx not running, changes on disk nginx has not loaded, with
-Test config and Reload nginx — stands above them as a `Notice`. On the overview the engine
+register. Sites opens on its identity line and the site band (§15, *The proxy's Sites page*); what
+the reader has to act on first — a failed read, nginx not running, changes on disk nginx has not
+loaded, with Test config and Reload nginx — stands under the line as a `Notice`. The other pages
+begin with four `StatTile` readings, two per row on phones. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
 expiry in a narrower column. On an nginx host Live traffic sits between the engine line and the routes: two readings
 (requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
@@ -2214,6 +2215,36 @@ The passes, in order. Each one is a diff you can review on its own.
    the last day read from their own query so a filter narrows the trail without narrowing them:
    the changes with their hours as a trend, the failures, the people as their faces and the
    sign-ins with the refused ones.
+
+   The proxy's Sites page took the exit in 0.7.1, at the operator's request, because it had no
+   life: four grey counts — sites, on TLS, plain HTTP, disabled — over a grid of cards that each
+   drew the same nginx mark, so a Grafana and a blog read alike. Each figure went where it is said
+   better. Sites is the identity line's *12 sites* and the All chip; On TLS the line's fact and the
+   Certificates block's head; Plain HTTP a chip, a cause in the verdict and a press under the
+   Certificates block that narrows to it; Disabled a fact in the line — with the sites nginx still
+   serves until it reloads said beside it in amber — and a chip. The line is `HostIdentity`: the
+   host's sites drawn as the applications they front, the commonest first, then the host's name,
+   the engines with their versions, how many sites serve (none of a stopped engine's, none nginx
+   has not loaded), how many are on TLS and the hour's requests; at its right end the verdict —
+   how many sites need attention, said by the worst thing about each (a broken link or an
+   application refusing connections red, plain HTTP, a parked site or a change not live amber), a
+   press of which narrows the cards to exactly them through a *Needs attention* chip — beside
+   Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
+   tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
+   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, each
+   enabled TLS site on an axis from "ends now" to ninety days, a dot in its hue, the last fortnight
+   washed amber; and **Applications**, what the sites stand in front of drawn as itself, each with
+   the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
+   sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
+   else its unit — never the port alone, so an upstream nothing on the list names keeps the
+   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else", and
+   it runs down its card's left edge. The card leads with the application tucked over its engine
+   (`ProductLogos`), names it in its second line and at the route's far end beside the address, and
+   draws a static site's directory as *Files* and a redirect's target as *Redirects to* where both
+   read "Served by configuration"; its hour is a short bar against the busiest site's. A site
+   whose application refuses connections joins Needs attention, since its visitors get a 502.
+   Chips that name something wrong carry its tone in their word, and a site new since the last
+   read rises (`useArrivals`).
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project
