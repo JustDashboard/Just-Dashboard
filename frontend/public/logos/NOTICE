@@ -187,3 +187,14 @@ mullvad.svg its navy #192e45 to #8ea7c4, unbound.svg its #2d2e83 to #8e9bfb and
 openvpn.svg its #1a3967 to #82a6dc — each the same hue at the L 0.72 rung, so
 the mark reads on a dark ground. quad9.svg is Simple Icons' path (CC0) filled
 with the brand's #DC205E.
+
+The drift page draws where the saved network configuration is written, and
+none of the three collections has those marks, so each is the project's own
+artwork from its own site. systemd.svg is the systemd logomark from
+https://brand.systemd.io (designed by Tobias Bernard, CC BY-SA 4.0) with its
+white ground removed and its #201a26 brackets drawn white, as the project's own
+dark variant draws them. netfilter.webp is the flame disc cut from
+https://www.netfilter.org/images/netfilter-logo3.png, resized to 96px WebP.
+spamhaus.svg is the mark from the Spamhaus Project's site logo
+(https://www.spamhaus.org), its wordmark removed. firehol.webp is FireHOL's
+web-shield-128.png from https://firehol.org, resized to 96px WebP.
