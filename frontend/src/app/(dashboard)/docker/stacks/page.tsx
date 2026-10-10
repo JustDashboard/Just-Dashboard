@@ -1,31 +1,14 @@
 "use client"
 
-import { useState } from "react"
-import { FolderPlus } from "@/components/icons"
-import { useAuth } from "@/hooks/use-auth"
-import { Page, PageContext } from "@/components/page"
+import { Suspense } from "react"
 import { StacksTab } from "@/components/docker/stacks-tab"
-import { Button } from "@/components/ui/button"
 
+// A `?stack=` link from before stacks had pages lives in the query string,
+// which the App Router only hands out inside a Suspense boundary.
 export default function DockerStacksPage() {
-  const { can } = useAuth()
-  const [creating, setCreating] = useState(false)
   return (
-    <Page>
-      <PageContext eyebrow="Docker" title="Stacks" />
-      <StacksTab
-        creating={creating}
-        onCreatingChange={setCreating}
-        actions={
-          can("system.admin") &&
-          can("file.write") && (
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <FolderPlus className="size-4" />
-              Create stack
-            </Button>
-          )
-        }
-      />
-    </Page>
+    <Suspense>
+      <StacksTab />
+    </Suspense>
   )
 }

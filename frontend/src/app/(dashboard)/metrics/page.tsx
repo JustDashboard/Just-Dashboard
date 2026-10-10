@@ -8,7 +8,6 @@ import type { MetricEvent, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import {
-  useHealth,
   useMetricEvents,
   useMetricsHistory,
   useStorageHistory,
@@ -39,7 +38,6 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { RangePicker, windowSpanNote } from "@/components/metrics/range-picker"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
@@ -203,7 +201,6 @@ export default function MetricsPage() {
   const recorded = useMetricsHistory(win)
   const recordedStorage = useStorageHistory(win)
   const events = useMetricEvents(win)
-  const { health, loading: healthLoading, error: healthError } = useHealth()
 
   const live = win.key === "live" && win.from === undefined
 
@@ -357,13 +354,6 @@ export default function MetricsPage() {
           }
           aside={
             <div className="flex max-w-full flex-wrap items-center gap-2">
-              {health && (
-                <HealthVerdict
-                  partial={!!health.silences?.length}
-                  status={health.status}
-                  className="mr-2 text-body"
-                />
-              )}
               {live && (
                 <IconAction
                   label={paused ? "Resume live feed" : "Pause live feed"}
@@ -414,13 +404,6 @@ export default function MetricsPage() {
             over={span.over}
           />
         </Section>
-
-        {/* The verdict is already in the facts row, and on the page made
-          entirely of the numbers it was computed from, "Warning" with no way
-          to ask why is a dead end. A clean server keeps the strip of areas
-          checked — a line of green that says what was looked at — rather
-          than losing the panel and leaving the verdict unexplained. */}
-        <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
 
         <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
           <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />

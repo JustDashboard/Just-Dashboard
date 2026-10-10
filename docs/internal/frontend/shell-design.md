@@ -292,7 +292,7 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
   destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
   verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
-  a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
+  a container's page, and on a stack's the identity line (`HostIdentity`) with the verdict at its end. The run page (`deploy/run-page.tsx`) goes one step further:
   since 2026-10-05 it opens on the header its project's pages open on (`run-header.tsx`, the
   project's tile, the commit, the run's state and how long it took, one line of provenance),
   because a run is one of the project's Deployments, and that header is the first thing on the
@@ -495,8 +495,8 @@ series.
   width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
   scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
   one, so a failing share is `--chart-3`.
-- `range-picker.tsx`, `health-panel.tsx` — the window control (pan and zoom-out appear only once a window
-  has been dragged) and the verdict.
+- `range-picker.tsx` — the window control (pan and zoom-out appear only once a window has been
+  dragged).
 
 `lib/metrics-crosshair.ts` holds the hovered instant **outside React**, for the reason the live buffer is:
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
