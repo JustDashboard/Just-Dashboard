@@ -2054,6 +2054,28 @@ The passes, in order. Each one is a diff you can review on its own.
    "can the API reach the database" is whether two rows share a colour. The sheet became a live
    readout: four readings over the bridge's two minutes, the bridge wired to each member in the
    wiring vocabulary with a pulse while that member moves bytes, the members as a table, the settings.
+   Network drift took the same exit on 2026-10-10, at the operator's request, because it was a column
+   of six plain panels under four grey figures — known differences, incomplete readings, matching
+   observations, owned repair proposals — and nothing on it moved. The figures went where they are
+   read. Differences, incomplete and matching are the chips in the Comparisons head
+   (`network/drift/drift-table.tsx`), which count and narrow where a tile could only count, *Differ*
+   in amber and drawn only while there is one; the repair proposals are the Owned repair plan's
+   own count; and the verdict is the identity line's end (*4 differences*, *Everything matches*, or
+   *Last known evidence* when the refresh failed). The line opens on the managed network with when it
+   was inspected and when it will be again, both ticking each second. Under it
+   `network/drift/drift-picture.tsx` answers what the tiles never did: the saved configuration wired
+   to each place it is written — the rendered files, the kernel objects, the boot unit and the
+   blocklist sets — each line the reading of that domain (green all matching, amber a difference, red
+   a name another owner occupies, plain where the comparison is incomplete, dashed where there is
+   nothing to compare). The lines are still until an inspection the reader asked for is on its way,
+   when a pulse runs down every one, because that is the one moment something travels along them.
+   Pressing a domain narrows the table. Beside it, *Since this page opened* lists each row whose
+   status was different at the previous inspection (`use-drift-moves.ts`, timed by the inspection's
+   own clock) or says how many inspections it has stood through; a row whose status changes is a
+   new row and rises. The table is every comparison in one framed list, worst first, with the
+   expected and observed digests folded under the reason; the boot unit, the blocklists, the
+   configuration identities and the repair plan keep their sections under it, and the review dialog
+   its exact before/after.
    Docker's Stacks page took the same exit in 0.7.1 at the operator's request, because it was the
    still page of the section: a title over six cards, each a stack's name with its services as a line
    of 6px dots under it, so "is the database up" was a dot, an Alertmanager killed for memory read as

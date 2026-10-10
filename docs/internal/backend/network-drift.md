@@ -172,9 +172,16 @@ inspection and immediate pre-effect checks describe an observation window.
 
 `/network/drift` uses the reading register to show dated desired, rendered and
 runtime evidence, ownership conflicts, and measured unit activation separately
-from reboot attribution. Summary counts include spec, journal, boot-unit,
-measured activation and enabled blocklist readings. Failed refreshes retain dated
-evidence and disable repair selection. Reviewed selections expire when generation,
+from reboot attribution. It opens on an identity line (when the host was
+inspected and when it will be again, the verdict, Inspect again), then a picture
+of the saved configuration wired to the rendered files, kernel objects, boot unit
+and blocklist sets, each line coloured by the worst comparison in that domain,
+and a list of what changed between inspections while the page was open. Every
+comparison is one framed table, worst first, whose chips (differ, incomplete,
+matching) count and narrow it; counts take spec, journal, boot-unit, measured
+activation and enabled blocklist readings, and a blocklist that is not enabled
+has nothing to compare. Failed refreshes retain dated evidence and disable repair
+selection. Reviewed selections expire when generation,
 ownership, selected comparison bytes or journal facts change; polling time alone does not
 invalidate identical evidence. Administrators with destructive permission can
 review executable selections through the ordinary destructive review, including
