@@ -20,13 +20,13 @@ import {
 } from "@/components/ui/table"
 import { Cidr } from "@/components/network/address"
 import { RX, RatePair, TX } from "@/components/network/rate-pair"
-import { del } from "@/lib/api"
+import { membersKnown } from "@/lib/docker-networks"
 import { plural, rate as formatRate } from "@/lib/format"
 import type { Container, DockerNetwork } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import type { ConfirmFn } from "@/components/docker/shared"
 import { memberProducts, type NetworkRate } from "@/components/docker/network-band"
 import {
+  isDashboardOwn,
   isSystem,
   isUnused,
   networkHue,
@@ -37,10 +37,9 @@ import {
 type RowsProps = {
   rates: Map<string, NetworkRate>
   containers: Map<string, Container>
-  confirm: ConfirmFn
   onOpen: (network: DockerNetwork) => void
   onAttach: (network: DockerNetwork) => void
-  onChanged: () => void
+  onRemove: (network: DockerNetwork) => void
 }
 
 /**
@@ -108,12 +107,11 @@ function NetworkTableRow({
   arrived,
   rates,
   containers,
-  confirm,
   onOpen,
   onAttach,
-  onChanged,
+  onRemove,
 }: RowsProps & { network: DockerNetwork; arrived: boolean }) {
-  const verbs = useNetworkVerbs({ network, confirm, onAttach, onChanged })
+  const verbs = useNetworkVerbs({ network, onAttach, onRemove })
   return (
     <TableRow
       data-workspace-item={network.id}
@@ -156,12 +154,11 @@ function NetworkNarrowRow({
   arrived,
   rates,
   containers,
-  confirm,
   onOpen,
   onAttach,
-  onChanged,
+  onRemove,
 }: RowsProps & { network: DockerNetwork; arrived: boolean }) {
-  const verbs = useNetworkVerbs({ network, confirm, onAttach, onChanged })
+  const verbs = useNetworkVerbs({ network, onAttach, onRemove })
   return (
     <li
       data-workspace-item={network.id}
@@ -282,6 +279,17 @@ function MembersReading({
   inline?: boolean
 }) {
   const count = network.usedBy.length
+  // The container listing failed: who is on it is unread, which is not none.
+  if (!membersKnown(network)) {
+    return (
+      <span
+        className="text-hint text-warning"
+        title={network.membersError ?? "Docker listed the network but not its containers"}
+      >
+        members unread
+      </span>
+    )
+  }
   if (count === 0) {
     return (
       <span className="text-hint text-muted-foreground" title="Holds a subnet out of the pool">
@@ -328,12 +336,18 @@ function TrafficReading({
   rate?: NetworkRate
   inline?: boolean
 }) {
-  if (!network.bridge || network.usedBy.length === 0 || !rate) {
+  if (!network.bridge || (membersKnown(network) && network.usedBy.length === 0) || !rate) {
     if (inline) return null
     return (
       <p
         className="text-right text-hint text-muted-foreground"
-        title={network.bridge ? "Nothing attached to carry" : "No bridge on this host carries it"}
+        title={
+          !network.bridge
+            ? "No bridge on this host carries it"
+            : membersKnown(network)
+              ? "Nothing attached to carry"
+              : "Who is attached could not be read"
+        }
       >
         —
       </p>
@@ -353,32 +367,33 @@ function TrafficReading({
 /**
  * A network's verbs: attach a container where it accepts one, and remove it
  * where Docker would. Both are drawn whether or not they would work, disabled
- * with Docker's reason where they would not — a control that disappears says
- * nothing about why.
+ * with the reason where they would not — a control that disappears says
+ * nothing about why. Removing opens what removing it disturbs, read first.
  */
 function useNetworkVerbs({
   network,
-  confirm,
   onAttach,
-  onChanged,
+  onRemove,
 }: {
   network: DockerNetwork
-  confirm: ConfirmFn
   onAttach: (network: DockerNetwork) => void
-  onChanged: () => void
+  onRemove: (network: DockerNetwork) => void
 }): Verb[] {
   const { can } = useAuth()
   const system = isSystem(network)
   const verbs: Verb[] = []
   if (can("service.control") && !system && network.driver !== "host") {
+    const refused = isDashboardOwn(network)
+      ? "The dashboard's own private network takes no other containers"
+      : refusesAttach(network)
+        ? "A swarm network made without --attachable takes only services"
+        : undefined
     verbs.push({
       key: "attach",
-      label: refusesAttach(network)
-        ? "A swarm network made without --attachable takes only services"
-        : `Attach a container to ${network.name}`,
+      label: refused ?? `Attach a container to ${network.name}`,
       icon: Linked,
       inline: true,
-      disabled: refusesAttach(network),
+      disabled: refused !== undefined,
       run: () => onAttach(network),
     })
   }
@@ -388,34 +403,16 @@ function useNetworkVerbs({
       key: "remove",
       label: system
         ? "Docker's own network — cannot be removed"
-        : removable
-          ? `Remove ${network.name}`
-          : `In use by ${plural(network.usedBy.length, "container")} — cannot be removed while attached`,
+        : !membersKnown(network)
+          ? "Who uses it could not be read — cannot judge a removal"
+          : removable
+            ? `Remove ${network.name}`
+            : `In use by ${plural(network.usedBy.length, "container")} — cannot be removed while attached`,
       icon: Trash,
       inline: true,
       danger: removable,
       disabled: !removable,
-      run: () =>
-        confirm({
-          title: "Remove network",
-          confirmLabel: "Remove",
-          description: (
-            <p>
-              Removes <b>{network.name}</b> and returns{" "}
-              {network.subnets[0] ? (
-                <span className="font-mono">{network.subnets[0]}</span>
-              ) : (
-                "its subnet"
-              )}{" "}
-              to the pool. Nothing is attached to it, so nothing loses a route. A compose project
-              recreates its own network on the next deploy.
-            </p>
-          ),
-          action: async (c) => {
-            await del(`/docker/networks/${network.id}`, { confirm: c })
-            onChanged()
-          },
-        }),
+      run: () => onRemove(network),
     })
   }
   return verbs

@@ -84,25 +84,6 @@ export function orderedConflicts(conflicts: NetworkConflict[]): NetworkConflict[
     .map(({ conflict }) => conflict)
 }
 
-/** The owner as the card's tag says it. */
-export function ownerWords(owner: NetworkOwner | undefined): string | undefined {
-  switch (owner?.kind) {
-    case "system":
-      return "Docker system"
-    case "dashboard":
-      return "This dashboard"
-    case "database-link":
-      return owner.deployment ? `Database link · ${owner.deployment}` : "Database link"
-    case "deployment":
-      return owner.deployment ? `Deployment · ${owner.deployment}` : "Deployment (gone)"
-    case "compose":
-      return owner.project ? `Compose · ${owner.project}` : "Compose"
-    case "manual":
-      return "Created by hand"
-  }
-  return undefined
-}
-
 /** What acts on a network next, said where its owner is shown in full. */
 export function ownerConsequence(owner: NetworkOwner | undefined): string | undefined {
   switch (owner?.kind) {

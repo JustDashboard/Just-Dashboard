@@ -1,8 +1,8 @@
 "use client"
 
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
-import { Linked, Slash, Trash } from "@/components/icons"
-import { del, get, post } from "@/lib/api"
+import { Linked, LockClosed, Slash, Trash } from "@/components/icons"
+import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -33,14 +33,16 @@ import { RX, TX } from "@/components/network/rate-pair"
 import { calendarDate, plural, rate } from "@/lib/format"
 import type { Container, DockerNetwork, NetworkDetail, NetworkMember } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import type { ConfirmFn } from "@/components/docker/shared"
 import { Hint } from "@/components/docker/explain"
 import { AttachDialog } from "@/components/docker/network-dialogs"
+import { NetworkChangeDialog } from "@/components/docker/network-conflicts"
 import { HueKey, type NetworkRate } from "@/components/docker/network-band"
 import type { ContainerTraffic } from "@/components/docker/network-members"
+import { membersKnown, ownerConsequence, type NetworkChangePreview } from "@/lib/docker-networks"
 import {
   bareAddress,
   hostCapacity,
+  isDashboardOwn,
   isSystem,
   isUnused,
   networkHue,
@@ -68,9 +70,9 @@ export function NetworkSheet({
   rate: bridge,
   traffic,
   containers,
-  confirm,
   onOpenChange,
   onChanged,
+  onRemove,
 }: {
   id: string | null
   /** The network as the list has it, drawn while its inspect is on its way. */
@@ -78,12 +80,14 @@ export function NetworkSheet({
   rate?: NetworkRate
   traffic: Map<string, ContainerTraffic>
   containers: Map<string, Container>
-  confirm: ConfirmFn
   onOpenChange: (open: boolean) => void
   onChanged: () => void
+  /** Removal is the page's: what it disturbs is read in a dialog the table's row opens too. */
+  onRemove: (network: DockerNetwork) => void
 }) {
   const { can } = useAuth()
   const [attaching, setAttaching] = useState(false)
+  const [detaching, setDetaching] = useState<NetworkMember | null>(null)
   const detail = usePoll<NetworkDetail>(
     (signal) =>
       get<NetworkDetail>(`/docker/networks/${encodeURIComponent(id ?? "")}`, undefined, signal),
@@ -100,16 +104,6 @@ export function NetworkSheet({
   const refresh = () => {
     detail.refresh()
     onChanged()
-  }
-
-  const disconnect = async (member: NetworkMember) => {
-    try {
-      await post(`/docker/networks/${id}/disconnect`, { container: member.id })
-      notify.success(`${member.name} left ${network?.name}`)
-      refresh()
-    } catch (err) {
-      notify.error("Could not detach it", err)
-    }
   }
 
   const system = network !== undefined && isSystem(network)
@@ -136,7 +130,11 @@ export function NetworkSheet({
         network && (
           <>
             {canAttach &&
-              (refusesAttach(network) ? (
+              (isDashboardOwn(network) ? (
+                <Hint className="max-w-72">
+                  The dashboard&apos;s own private network takes no other containers.
+                </Hint>
+              ) : refusesAttach(network) ? (
                 <Hint className="max-w-72">
                   A swarm network made without --attachable takes only swarm services.
                 </Hint>
@@ -151,23 +149,7 @@ export function NetworkSheet({
                 size="xs"
                 variant="outline"
                 className="text-destructive"
-                onClick={() =>
-                  confirm({
-                    title: "Remove network",
-                    confirmLabel: "Remove",
-                    description: (
-                      <p>
-                        Removes <b>{network.name}</b> and returns its subnet to the pool. Nothing is
-                        attached to it, so nothing loses a route.
-                      </p>
-                    ),
-                    action: async (c) => {
-                      await del(`/docker/networks/${network.id}`, { confirm: c })
-                      onOpenChange(false)
-                      onChanged()
-                    },
-                  })
-                }
+                onClick={() => onRemove(network)}
               >
                 <Trash className="size-3" />
                 Remove
@@ -181,6 +163,19 @@ export function NetworkSheet({
       {!network && detail.loading && <LoadingRows />}
       {network && (
         <div className="space-y-7">
+          {!membersKnown(network) && (
+            <Notice tone="warning" title="Who is on it could not be read">
+              Docker listed the network but not the containers on it, so it is not shown as unused
+              and cannot be removed until a refresh reads them
+              {network.membersError ? `: ${network.membersError}` : "."}
+            </Notice>
+          )}
+          {data?.membersError && (
+            <Notice tone="warning" title="The members' details could not all be read">
+              Docker listed who is attached but not the containers themselves, so their states,
+              stacks and other networks are unknown here: {data.membersError}
+            </Notice>
+          )}
           <Facts network={network} />
           <Readings network={network} detail={data} bridge={bridge} containers={containers} />
           {data && data.members.length > 0 && (
@@ -192,7 +187,7 @@ export function NetworkSheet({
               containers={containers}
               traffic={traffic}
               canDetach={can("service.control") && !system}
-              onDetach={disconnect}
+              onDetach={setDetaching}
             />
           )}
           {!data && detail.loading && <LoadingRows rows={3} />}
@@ -207,6 +202,35 @@ export function NetworkSheet({
         onOpenChange={setAttaching}
         onAttached={refresh}
         attached={new Set((data?.members ?? []).map((m) => m.id))}
+      />
+      <NetworkChangeDialog
+        open={detaching !== null}
+        onOpenChange={(open) => !open && setDetaching(null)}
+        target={`${id}:${detaching?.id ?? ""}`}
+        title={`Detach ${detaching?.name ?? ""}`}
+        description={`What detaching ${detaching?.name ?? "the container"} from ${network?.name ?? "the network"} disturbs, read before it happens.`}
+        intro={
+          <p className="text-body">
+            <b>{detaching?.name}</b> leaves <b>{network?.name}</b> immediately. Reattaching puts it
+            back; connections open over this network are cut.
+          </p>
+        }
+        confirmLabel="Detach"
+        emptyLabel="Nothing else on this network reaches it, and it keeps its other networks."
+        load={(signal) =>
+          get<NetworkChangePreview>(
+            `/docker/networks/${encodeURIComponent(id ?? "")}/disconnect`,
+            { container: detaching?.id ?? "" },
+            signal,
+          )
+        }
+        onConfirm={async () => {
+          await post(`/docker/networks/${encodeURIComponent(id ?? "")}/disconnect`, {
+            container: detaching?.id,
+          })
+          notify.success(`${detaching?.name} left ${network?.name}`)
+          refresh()
+        }}
       />
     </SidePanel>
   )
@@ -247,6 +271,7 @@ function Readings({
   bridge?: NetworkRate
   containers: Map<string, Container>
 }) {
+  const unread = !membersKnown(network)
   const members = detail?.members.length ?? network.usedBy.length
   const running = detail
     ? detail.members.filter((m) => (containers.get(m.id)?.state ?? m.state) === "running").length
@@ -286,16 +311,18 @@ function Readings({
       />
       <StatTile
         label="Members"
-        value={members}
-        tone={running !== undefined && running < members ? "warning" : "default"}
+        value={unread ? "—" : members}
+        tone={unread || (running !== undefined && running < members) ? "warning" : "default"}
         hint={
-          members === 0
-            ? "nothing attached"
-            : running === undefined
-              ? plural(members, "container")
-              : running === members
-                ? "all running"
-                : `${running} running`
+          unread
+            ? "members unread"
+            : members === 0
+              ? "nothing attached"
+              : running === undefined
+                ? plural(members, "container")
+                : running === members
+                  ? "all running"
+                  : `${running} running`
         }
       />
       <StatTile
@@ -506,12 +533,18 @@ function Members({
                 const state = c?.state ?? member.state ?? "unknown"
                 const t = traffic.get(member.id)
                 const aliases = member.aliases.filter((a) => !member.id.startsWith(a))
+                const guard = guardedMember(member)
+                const elsewhere = member.networks ?? []
                 return (
                   <TableRow key={member.id} className="group">
                     <TableCell className="py-2">
                       <div className="min-w-0">
-                        <p className="truncate text-body font-medium" title={member.name}>
-                          {member.name}
+                        <p className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-body font-medium" title={member.name}>
+                            {member.name}
+                          </span>
+                          {member.dashboard && <Tag className="shrink-0">This dashboard</Tag>}
+                          {member.ingress && <Tag className="shrink-0">Shared ingress</Tag>}
                         </p>
                         <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
                           <Status state={state} label={state} className="text-hint font-normal" />
@@ -522,6 +555,14 @@ function Members({
                             </span>
                           )}
                         </p>
+                        {elsewhere.length > 0 && (
+                          <p
+                            className="truncate text-hint text-muted-foreground"
+                            title="It joins this network to the others"
+                          >
+                            also on <span className="font-mono">{elsewhere.join(", ")}</span>
+                          </p>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="py-2">
@@ -542,7 +583,11 @@ function Members({
                     {named && (
                       <TableCell className="py-2 whitespace-normal">
                         <span className="flex flex-wrap gap-1">
-                          {aliases.length === 0 ? (
+                          {member.unread ? (
+                            <Tag title="Its own inspect failed, so what it answers to is unknown">
+                              aliases unread
+                            </Tag>
+                          ) : aliases.length === 0 ? (
                             <span className="text-hint text-muted-foreground">{member.name}</span>
                           ) : (
                             aliases.map((a) => (
@@ -555,15 +600,27 @@ function Members({
                       </TableCell>
                     )}
                     <TableCell className="py-2">
-                      {canDetach && (
-                        <IconAction
-                          reveal
-                          label={`Detach ${member.name}`}
-                          onClick={() => onDetach(member)}
-                        >
-                          <Slash />
-                        </IconAction>
-                      )}
+                      {canDetach &&
+                        (guard ? (
+                          // Focusable and not `disabled`, so the reason is
+                          // reachable by keyboard and under the pointer.
+                          <IconAction
+                            label={guard}
+                            aria-disabled
+                            className="text-muted-foreground opacity-40"
+                            onClick={() => undefined}
+                          >
+                            <LockClosed />
+                          </IconAction>
+                        ) : (
+                          <IconAction
+                            reveal
+                            label={`Detach ${member.name}`}
+                            onClick={() => onDetach(member)}
+                          >
+                            <Slash />
+                          </IconAction>
+                        ))}
                     </TableCell>
                   </TableRow>
                 )
@@ -576,10 +633,20 @@ function Members({
   )
 }
 
+/** Why a member offers no detach control: its owner put it there. */
+function guardedMember(member: NetworkMember) {
+  if (member.dashboard) return "Part of the dashboard itself — it is never detached here"
+  if (member.ingress) {
+    return "The shared public Caddy — deployment routes reach their containers through it"
+  }
+  return undefined
+}
+
 /** The rest of what Docker knows about it, for the reader who came to check one setting. */
 function Settings({ network }: { network: NetworkDetail }) {
   const options = Object.entries(network.options ?? {})
   const labels = Object.entries(network.labels ?? {})
+  const consequence = ownerConsequence(network.owner)
   return (
     <section className="space-y-2" aria-label="Settings">
       <p className="eyebrow">Settings</p>
@@ -598,6 +665,11 @@ function Settings({ network }: { network: NetworkDetail }) {
         <Detail label="Gateway" className="font-mono text-body">
           {network.gateway || "—"}
         </Detail>
+        {consequence && (
+          <Detail label="Owner" className="text-body leading-relaxed">
+            {consequence}
+          </Detail>
+        )}
         <Detail label="Reaches the internet" className="text-body">
           {network.internal ? "no — its members reach only each other" : "yes"}
         </Detail>
@@ -607,11 +679,13 @@ function Settings({ network }: { network: NetworkDetail }) {
           onto a swarm overlay, so it is said only for one.
         */}
         <Detail label="Accepts new members" className="text-body">
-          {refusesAttach(network)
-            ? "swarm services only"
-            : network.scope === "swarm"
-              ? "yes, standalone containers too"
-              : "yes, while running"}
+          {isDashboardOwn(network)
+            ? "no — the dashboard's own"
+            : refusesAttach(network)
+              ? "swarm services only"
+              : network.scope === "swarm"
+                ? "yes, standalone containers too"
+                : "yes, while running"}
         </Detail>
         <Detail label="Scope" className="text-body">
           {network.scope || "local"}

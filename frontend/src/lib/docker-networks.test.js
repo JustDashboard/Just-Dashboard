@@ -4,7 +4,7 @@ import {
   isChangePreview,
   membersKnown,
   orderedConflicts,
-  ownerWords,
+  ownerConsequence,
   prunePlan,
 } from "./docker-networks"
 
@@ -23,13 +23,17 @@ test("an older backend's answer is not believed as an empty preview", () => {
   expect(isChangePreview({ conflicts: [], blocked: false })).toBe(true)
 })
 
-test("owners are named by who acts on the network next", () => {
-  expect(ownerWords({ kind: "deployment", deployment: "shop · production" })).toBe(
-    "Deployment · shop · production",
+test("each owner says what acts on its network next", () => {
+  expect(ownerConsequence({ kind: "compose", project: "shop" })).toBe(
+    "Compose recreates it the next time its project comes up.",
   )
-  expect(ownerWords({ kind: "deployment" })).toBe("Deployment (gone)")
-  expect(ownerWords({ kind: "compose", project: "shop" })).toBe("Compose · shop")
-  expect(ownerWords(undefined)).toBeUndefined()
+  expect(ownerConsequence({ kind: "deployment", deployment: "shop · production" })).toBe(
+    "Reconciled by its deployment on the next deploy.",
+  )
+  expect(ownerConsequence({ kind: "deployment" })).toBe(
+    "Its deployment environment no longer exists.",
+  )
+  expect(ownerConsequence(undefined)).toBeUndefined()
 })
 
 test("unread membership never reads as an unused network", () => {
