@@ -240,6 +240,115 @@ test("read-only accounts can inspect executable proposals without an apply contr
   expect(mutations).toEqual([])
 })
 
+const host: DriftReport = {
+  ...report,
+  boot: { ...report.boot, status: "matching", reason: undefined },
+  runtime: [
+    {
+      ...observation,
+      id: "route:3",
+      domain: "route",
+      resource: "3",
+      status: "missing",
+      reason: "The saved managed route is absent.",
+      expected: { family: "inet", destination: "10.30.0.0/24", table: "100" },
+      observed: undefined,
+    },
+    {
+      ...observation,
+      id: "admission:inet/DOCKER-USER",
+      domain: "admission",
+      resource: "inet/DOCKER-USER",
+      status: "conflict",
+      owned: false,
+      reason: "A rule this dashboard does not own occupies the owned comment.",
+      expected: { position: "1" },
+      observed: { position: "3", tool: "iptables" },
+    },
+    {
+      ...observation,
+      id: "sysctl:net.ipv4.ip_forward",
+      domain: "sysctl",
+      resource: "net.ipv4.ip_forward",
+      status: "matching",
+      reason: undefined,
+      expected: { value: "1" },
+      observed: { value: "1" },
+    },
+  ],
+  blocklists: [
+    {
+      id: 1,
+      name: "Spamhaus DROP",
+      enabled: true,
+      enforcement: "verified",
+      renderedGeneration: "drop",
+      cache: { status: "ready", count: 1043, generation: "drop" },
+      runtime: { status: "present", count: 1043, generation: "drop" },
+    },
+  ],
+}
+
+test("the page opens on the host rather than tiles, and its verdict and picture narrow the comparisons", async ({
+  page,
+}) => {
+  await mockNetwork(page, [], { overrides: { "/network/drift": host } })
+  await page.goto("/network/drift")
+  await loaded(page)
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Managed network")
+  await expect(identity.locator("time")).toHaveAttribute("datetime", host.checkedAt)
+  // A changed file, a missing route and a foreign rule: red, because one is someone else's.
+  const verdict = identity.getByRole("button", { name: "3 differences" })
+  await expect(verdict).toBeVisible()
+
+  // Each thing compared is drawn as what reads it.
+  const table = page.getByRole("region", { name: "Comparisons" })
+  for (const logo of ["netfilter.webp", "linux.svg", "spamhaus.svg", "systemd.svg"]) {
+    await expect(page.locator(`img[src='/logos/${logo}']`).first()).toBeAttached()
+  }
+  // A route is named by where it goes, and the worst row leads.
+  await expect(page.getByText("10.30.0.0/24", { exact: true }).first()).toBeVisible()
+  const firstRow = page
+    .locator("[aria-label='Comparisons'] tbody tr, ul[aria-label='Comparisons'] li")
+    .first()
+  await expect(firstRow).toContainText("DOCKER-USER")
+  await expect(firstRow).toContainText("Ownership conflict")
+
+  await verdict.click()
+  await expect(verdict).toHaveAttribute("aria-pressed", "true")
+  await expect(table.getByText("net.ipv4.ip_forward", { exact: true })).toHaveCount(0)
+  await expect(table.getByText("links.batch", { exact: true })).toBeVisible()
+  await verdict.click()
+
+  await page.getByRole("button", { name: "Show kernel objects in the comparisons" }).click()
+  await expect(table.getByText("net.ipv4.ip_forward", { exact: true })).toBeVisible()
+  await expect(table.getByText("links.batch", { exact: true })).toHaveCount(0)
+  await expect(table.getByRole("button", { name: "Show every domain" })).toBeVisible()
+})
+
+test("a second inspection lists what moved since the page opened", async ({ page }) => {
+  await mockNetwork(page, [], { overrides: { "/network/drift": host } })
+  await page.goto("/network/drift")
+  await loaded(page)
+  const since = page.getByRole("region", { name: "Since this page opened" })
+  await expect(since).toContainText("1 inspection")
+  await page.route("**/api/v1/network/drift", (route) =>
+    json(route, {
+      ...host,
+      checkedAt: "2026-10-08T12:00:30Z",
+      files: [{ ...observation, status: "matching", reason: undefined }],
+    }),
+  )
+  await page.getByRole("button", { name: "Inspect again" }).click()
+  await expect(since).toContainText("2 inspections")
+  const moved = since.getByRole("list", { name: "What moved" })
+  await expect(moved).toContainText("links.batch")
+  await expect(moved).toContainText("Changed")
+  await expect(moved).toContainText("Matches")
+})
+
 test.describe("mobile evidence", () => {
   test.use({ viewport: { width: 390, height: 844 } })
   test("long resource identities stay readable without horizontal overflow", async ({ page }) => {

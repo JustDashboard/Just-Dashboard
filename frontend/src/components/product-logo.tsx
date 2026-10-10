@@ -69,6 +69,13 @@ import { cn } from "@/lib/utils"
  * Icons'. Percona Server, KeyDB and Dragonfly are in none of the three, so
  * they have no key here and keep the database glyph: a mark is never drawn
  * from memory.
+ *
+ * Network drift draws where the saved network configuration is written: the
+ * nftables files and admission chains as netfilter's flame, the boot units as
+ * systemd's brackets, the kernel's devices, routes and settings as Linux, and
+ * a blocklist as the project that publishes it — Spamhaus, FireHOL. None of
+ * the three collections has these four, so each is the project's own artwork,
+ * fetched from its own site; `public/logos/NOTICE` says from where.
  */
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
@@ -145,6 +152,7 @@ const LOGOS: Record<string, string> = {
   ferretdb: "ferretdb.svg",
   filebrowser: "filebrowser.svg",
   firefox: "firefox.svg",
+  firehol: "firehol.webp",
   flask: "flask.svg",
   forgejo: "forgejo.svg",
   freshrss: "freshrss.svg",
@@ -206,6 +214,7 @@ const LOGOS: Record<string, string> = {
   neo4j: "neo4j.svg",
   neovim: "neovim.svg",
   nestjs: "nestjs.svg",
+  netfilter: "netfilter.webp",
   nextcloud: "nextcloud.svg",
   nextjs: "nextjs.svg",
   nginx: "nginx.svg",
@@ -270,6 +279,7 @@ const LOGOS: Record<string, string> = {
   shlink: "shlink.svg",
   slack: "slack.svg",
   solid: "solid.svg",
+  spamhaus: "spamhaus.svg",
   "spring-boot": "spring-boot.svg",
   sqlite: "sqlite.svg",
   sqlserver: "sqlserver.svg",
@@ -281,6 +291,7 @@ const LOGOS: Record<string, string> = {
   swift: "swift.svg",
   symfony: "symfony.svg",
   syncthing: "syncthing.svg",
+  systemd: "systemd.svg",
   tailscale: "tailscale.svg",
   tanstack: "tanstack.svg",
   telegram: "telegram.svg",
@@ -474,8 +485,10 @@ export function processProduct(name: string) {
   const bare = name.toLowerCase().replace(/[:\s].*$/, "")
   const id = own(PROCESS_ALIASES, name.toLowerCase()) ?? own(PROCESS_ALIASES, bare) ?? bare
   // Compose's mark is a stack's, not a program's, and a process called `X` is
-  // the X server rather than the site whose mark shares its key.
-  return hasProductLogo(id) && id !== "docker-compose" && id !== "x" ? id : undefined
+  // the X server rather than the site whose mark shares its key. systemd's is
+  // every unit's: on a list of them it would sit beside `systemd-resolved`,
+  // `systemd-journald` and the rest and tell none of them apart.
+  return hasProductLogo(id) && !["docker-compose", "x", "systemd"].includes(id) ? id : undefined
 }
 
 /**
