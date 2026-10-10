@@ -1,0 +1,46 @@
+source 9d120a97 (egress merged beside VPN, diagnostics, topology, gateway, routing, resolver and Docker), 2026-10-10T00:14:21Z
+host before: netns=0 nft=d0e3b1cee4c9 rules=1646c3d2cb97 routes=4493b056bf48
+=== RUN   TestLiveEgressFailoverAndFailbackWithHysteresis
+    egress_live_test.go:276: failover: provider-a is down (no probe answered); provider-b is the best proven member. | through up1 via 10.201.1.1 (table 7700) -> through up2 via 10.202.1.1 (table 7700)
+    egress_live_test.go:303: failback after 6 rounds: provider-a is back and stable for 6s; failing back.
+--- PASS: TestLiveEgressFailoverAndFailbackWithHysteresis (1.89s)
+=== RUN   TestLiveEgressFlapSuppression
+--- PASS: TestLiveEgressFlapSuppression (4.12s)
+=== RUN   TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember
+--- PASS: TestLiveEgressRefusesAnOperatorPathThroughAnUnprovenMember (1.36s)
+=== RUN   TestLiveEgressBootRestoresTheDecidedMemberAndReverifies
+    egress_live_test.go:427: verified: Checked at start: table 7700 sends its traffic through up2 via 10.202.1.1, as decided, with every member table and rule in place. Not yet proven by this process's probes: provider-b (unknown).
+    egress_live_test.go:444: repaired: Checked at start: table 7700 default route (holds no default route) missing (a device may have come up after the boot unit ran); restored the decided route, through up2 via 10.202.1.1.
+--- PASS: TestLiveEgressBootRestoresTheDecidedMemberAndReverifies (1.22s)
+=== RUN   TestLiveEgressRecoveryAfterBackendDeathMidSwitch
+--- PASS: TestLiveEgressRecoveryAfterBackendDeathMidSwitch (0.87s)
+=== RUN   TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember
+    egress_live_test.go:605: failback connections: {Read:19 Truncated:false Error: ByMember:map[1:10 2:9] Moved:8 Pinned:1 Flushed:0 FlushFailed:0 Spared:0 Basis:Pinned connections by their mark; others by the member's local address (its own source, or the address it translated to).}
+    egress_live_test.go:622: flush: Flushed 13 tracked connections of provider-b, which is down, so none stays routed into a dead path.
+--- PASS: TestLiveEgressStickyConnectionsSurviveFailbackAndFlushWithTheirMember (2.48s)
+=== RUN   TestLiveEgressSimulationRunsInDisposableNamespaces
+    egress_live_test.go:678: Every member proves its path: After 3 clean samples every member must be up through its own mark, source and device.
+    egress_live_test.go:678: Latency under the threshold moves nothing: provider-a delayed below 200 ms: 0 switches.
+    egress_live_test.go:678: Fails over after a sustained failure: Failed over to provider-b at sample 2 of the failure, after the 2 bad samples the rules require.
+    egress_live_test.go:678: A flapping member is not failed back to: provider-a alternated between failing and answering for 6 samples: 0 failbacks to it.
+    egress_live_test.go:678: Fails back only after a stable recovery: provider-a was up again at recovery sample 2 and failed back to at sample 5; the stable window is 3 samples.
+    egress_live_test.go:678: Latency over the threshold fails over: provider-a delayed above 200 ms while carrying traffic: failed over true.
+    egress_live_test.go:678: With nothing proven the route is kept: Every member failed: 0 switches, and the rules held the current route: true.
+    egress_live_test.go:678: Never switches to an unproven member: Every switch went to members proven up at that sample.
+    egress_live_test.go:678: Traffic follows the decision: Whenever the decided members were up and clean, unmarked traffic through the group table reached the first target.
+    egress_live_test.go:678: Recovers to a proven member: After the outage, the decided members are up again by the end of the run.
+    egress_live_test.go:684: sample 8 (failure): failover [2] — provider-a is down (no probe answered); provider-b is the best proven member.
+    egress_live_test.go:684: sample 21 (recovery): failback [1] — provider-a is back and stable for 6s; failing back.
+    egress_live_test.go:684: sample 28 (latency-breach): failover [2] — provider-a is down (median round trip 300 ms is above 200 ms); provider-b is the best proven member.
+    egress_live_test.go:726: failed as expected — A flapping member is not failed back to: provider-a alternated between failing and answering for 6 samples: 3 failbacks to it.
+    egress_live_test.go:726: failed as expected — Fails back only after a stable recovery: provider-a was already carrying traffic when its recovery began: it was failed back to while it flapped.
+--- PASS: TestLiveEgressSimulationRunsInDisposableNamespaces (17.03s)
+=== RUN   TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables
+--- PASS: TestLiveOwnedFirewallFiltersRecoversAndLeavesOtherTables (4.95s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.16s)
+=== RUN   TestLiveRoutingMaturity
+--- PASS: TestLiveRoutingMaturity (1.60s)
+PASS
+exit=0
+host after: netns=0 nft=d0e3b1cee4c9 rules=1646c3d2cb97 routes=4493b056bf48

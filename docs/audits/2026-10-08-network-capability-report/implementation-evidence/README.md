@@ -108,6 +108,11 @@ published-port inbound investigator, external proof per binding, claim-aware fre
 posture unknowns, with native runs on owned objects, the first failed attempts and the passing
 gate. Real off-host port measurement remains open.
 
+[Monitored egress groups acceptance](network-egress-groups-acceptance.md) (P15) records member
+probing, hysteresis decisions, guarded journaled switches, boot restore, sticky connections and the
+simulation gate, with seven owned-namespace tests, failed iterations, the passing gate and the
+integration rerun. Failover between real independent upstreams remains open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

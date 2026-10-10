@@ -161,3 +161,12 @@ this work was left running.
 | Row | Proposed | Reason |
 | --- | --- | --- |
 | P15 | implemented / acceptance pending | Implementation, regression, native namespace and browser acceptance pass, including failover, held failback, flap suppression, operator-path refusal, boot restore, recovery after death, sticky connections and a gating simulation. Failover between real independent provider uplinks (this host has one), real tunnel members, the deployed monitor loop and a production reboot remain unverified. |
+
+## Integration
+
+Merged beside the routing package (`9d120a97`), the boot unit carries both new tables: the owned
+firewall file stays the renderer's third flag and `egress.nft` became its fourth, rule-priority
+allocation moved into the routing package's `placeRule` keeps skipping the egress reservation, and
+the journal accepts both files. On the assembled source the seven egress tests, the boot-file,
+owned-firewall and routing namespace tests passed with the host's namespaces, nft tables, rules and
+routes unchanged ([log](network-egress-groups/integration-live.log)).
