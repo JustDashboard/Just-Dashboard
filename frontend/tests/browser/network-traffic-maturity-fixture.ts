@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Page, Route } from "@playwright/test"
 import {
   connections,
   firewall,
@@ -17,8 +17,20 @@ import {
 export const nowSeconds = () => Math.floor(Date.now() / 1000)
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString()
 
-/** The live answer with packets, faults, the TCP ring and latency, newest `ageSeconds` old. */
-export function liveWithContext(ageSeconds = 1) {
+/**
+ * The live answer with packets, faults, the TCP ring and latency, newest `ageSeconds` old.
+ *
+ * Like the API, it returns only the points after `since`: the page asks every
+ * two seconds for what it has not drawn, and a whole ring each time is five
+ * devices of 450 points parsed and merged on every poll, which is enough to
+ * starve the page on a busy host. `dropAt` pins the one fault to a single
+ * instant — the newest point at or before it carries the drop — so that no
+ * poll mints it a second time and the page adds them up.
+ */
+export function liveWithContext(
+  ageSeconds = 1,
+  { dropAt = nowSeconds() - 8, since = 0 }: { dropAt?: number; since?: number } = {},
+) {
   const now = nowSeconds()
   const sampledAt = now - ageSeconds
   const series: Record<
@@ -26,12 +38,15 @@ export function liveWithContext(ageSeconds = 1) {
     { t: number; rx: number; tx: number; rxp: number; txp: number; err?: number; drop?: number }[]
   > = {}
   for (const [name, points] of Object.entries(liveSeries(sampledAt))) {
-    series[name] = points.map((p, i) => ({
-      ...p,
-      rxp: Math.round(p.rx / 900),
-      txp: Math.round(p.tx / 1100),
-      ...(name === "ens3" && i === points.length - 5 ? { drop: 3 } : {}),
-    }))
+    const dropped = points.findLast((p) => p.t <= dropAt)
+    series[name] = points
+      .map((p) => ({
+        ...p,
+        rxp: Math.round(p.rx / 900),
+        txp: Math.round(p.tx / 1100),
+        ...(name === "ens3" && p === dropped ? { drop: 3 } : {}),
+      }))
+      .filter((p) => p.t > since)
   }
   const tcp = Array.from({ length: 60 }, (_, i) => ({
     t: sampledAt - (59 - i) * 2,
@@ -59,6 +74,22 @@ export function liveWithContext(ageSeconds = 1) {
       truncated: false,
     },
   }
+}
+
+/**
+ * The live endpoint's handler, newest `ageSeconds` old. The fault's instant is
+ * fixed here, once, so it is the same at every poll however late the poll is.
+ */
+export function liveRoute(ageSeconds = 1) {
+  const dropAt = nowSeconds() - 8
+  return (route: Route) =>
+    json(
+      route,
+      liveWithContext(ageSeconds, {
+        dropAt,
+        since: Number(new URL(route.request().url()).searchParams.get("since")) || 0,
+      }),
+    )
 }
 
 export function historyWithPercentiles(from: number, to: number) {
@@ -858,7 +889,7 @@ export async function openMaturity(
       ...overrides,
     },
   })
-  await page.route("**/api/v1/network/traffic/live**", (route) => json(route, liveWithContext()))
+  await page.route("**/api/v1/network/traffic/live**", liveRoute())
   await page.route("**/api/v1/network/traffic/history**", (route) => {
     const url = new URL(route.request().url())
     const to = Number(url.searchParams.get("to")) || nowSeconds()

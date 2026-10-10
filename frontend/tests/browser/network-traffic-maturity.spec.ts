@@ -1,15 +1,27 @@
-import { expect, test } from "@playwright/test"
+import { expect as baseExpect, test, type Page } from "@playwright/test"
 import { json, loaded, type Mutation } from "./network-fixture"
-import {
-  blocks,
-  ebpf,
-  liveWithContext,
-  openMaturity as open,
-} from "./network-traffic-maturity-fixture"
+import { blocks, ebpf, liveRoute, openMaturity as open } from "./network-traffic-maturity-fixture"
 
 // Traffic, bandwidth and shaping, and the Connections page's operator
 // workflows, against recorded API shapes. Every mutation is captured so a
 // test reads back exactly what a control sent.
+
+// Both pages draw a dozen reads on arrival, and on a host busy with other work
+// the page shell alone can take fifteen seconds and the last read a few more.
+// An assertion that holds is no slower for the longer wait, so every case gets
+// the budget up front instead of each assertion asking for its own.
+const expect = baseExpect.configure({ timeout: 15_000 })
+test.describe.configure({ timeout: 120_000 })
+
+/**
+ * Opens a page and waits until it has hydrated and every section has landed.
+ * Controls clicked before that are clicked on server-rendered markup that
+ * does nothing, and a locator resolved before the first render can race it.
+ */
+async function visit(page: Page, path: string) {
+  await page.goto(path)
+  await loaded(page)
+}
 
 test("the live window says how old its reading is, with packets, TCP resent and round trip", async ({
   page,
@@ -19,11 +31,9 @@ test("the live window says how old its reading is, with packets, TCP resent and 
     if (r.url().includes("/traffic/live")) requests.push(r.url())
   })
   await open(page, [])
-  await page.goto("/network/traffic")
-  await loaded(page)
+  await visit(page, "/network/traffic")
   const context = page.getByLabel("Live context")
-  // The shared host is busy; a page's first reading can take a few seconds.
-  await expect(context).toContainText("Newest reading", { timeout: 15_000 })
+  await expect(context).toContainText("Newest reading")
   await expect(context).toContainText(/\ds old/)
   await expect(context).toContainText("Packets on ens3")
   await expect(context).toContainText("TCP resent")
@@ -38,8 +48,8 @@ test("the live window says how old its reading is, with packets, TCP resent and 
 
 test("a stopped sampler reads as stale, not as a quiet link", async ({ page }) => {
   await open(page, [])
-  await page.route("**/api/v1/network/traffic/live**", (route) => json(route, liveWithContext(40)))
-  await page.goto("/network/traffic")
+  await page.route("**/api/v1/network/traffic/live**", liveRoute(40))
+  await visit(page, "/network/traffic")
   const context = page.getByLabel("Live context")
   await expect(context).toContainText(/4\ds old/)
   await expect(context).toContainText("the sampler has not stepped; figures are stale")
@@ -55,7 +65,7 @@ test("a typed range reads that window with its percentiles and the incidents in 
     if (r.url().includes("/traffic/annotations")) marks.push(new URL(r.url()))
   })
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   await page.getByRole("radio", { name: "Range" }).click()
   const form = page.getByRole("form", { name: "Recorded range" })
   await form.getByLabel("From").fill("2026-10-01T08:00")
@@ -86,11 +96,9 @@ test("a transfer budget reads exact and estimated bytes, alerts, and is set and 
 }) => {
   const mutations: Mutation[] = []
   await open(page, mutations)
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   const budgets = page.getByLabel("Transfer budgets")
-  await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month", {
-    timeout: 15_000,
-  })
+  await expect(budgets).toContainText("830.0 GB of 1.0 TB in and out this month")
   await expect(budgets).toContainText("40.0 GB estimated from older rows")
   await expect(budgets).toContainText("96% of the month so far was recorded")
   await expect(budgets).toContainText("over 80%")
@@ -123,11 +131,9 @@ test("programs say what a read could not see and list UDP peers without byte cou
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   const limits = page.getByLabel("What the program read could not see")
-  await expect(limits).toContainText("14 TCP connections opened and closed between two reads", {
-    timeout: 15_000,
-  })
+  await expect(limits).toContainText("14 TCP connections opened and closed between two reads")
   await expect(limits).toContainText("3 sockets closed since the last read")
   await expect(limits).toContainText("Nothing before this page opened is kept")
   await page.getByRole("button", { name: "Who agent-cli talks to" }).click()
@@ -148,7 +154,7 @@ test("every container can be listed and one opens into its chart, service and pe
     if (r.url().includes("/network/flows/")) flows.push(new URL(r.url()))
   })
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   const band = page.getByLabel("Traffic by container", { exact: true })
   await expect(band.getByRole("button", { name: "Open registry's traffic" })).toHaveCount(0)
   await band.getByRole("button", { name: "Show all 7" }).click()
@@ -171,11 +177,9 @@ test("shaping says what the next change does with each device's queues, and refu
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   const queues = page.getByRole("table").filter({ hasText: "tailscale0" })
-  await expect(queues).toContainText("captures this fq_codel's parameters and puts them back", {
-    timeout: 15_000,
-  })
+  await expect(queues).toContainText("captures this fq_codel's parameters and puts them back")
   await expect(queues).toContainText("replaces the kernel's default queue")
   await expect(queues).toContainText("Changes are refused: jd-lab has an unmanaged queue hierarchy")
   // Drift names the parameter changed in place.
@@ -191,7 +195,7 @@ test("shaping says what the next change does with each device's queues, and refu
 test("an upload profile goes with CAKE and the delay CAKE measured is shown", async ({ page }) => {
   const mutations: Mutation[] = []
   await open(page, mutations)
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   await expect(
     page.getByText("Upload CAKE delay 1.4 ms average in best effort · 41 ms peak"),
   ).toBeVisible()
@@ -231,11 +235,10 @@ test("congestion control is compared on live sockets, now and before the last sw
   page,
 }) => {
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   const panel = page.getByLabel("Congestion control on live sockets")
   const now = panel.getByLabel("Now")
-  // The panel reads after the shaping view, so it lands last on a busy host.
-  await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms", { timeout: 15_000 })
+  await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms")
   await expect(now.getByRole("row", { name: /cubic/ })).toContainText("0.8%")
   await expect(panel).toContainText("Before the last switch, cubic → bbr")
   await expect(panel.getByLabel("Before the last switch")).toContainText("52 ms")
@@ -245,13 +248,15 @@ test("congestion control is compared on live sockets, now and before the last sw
 test("a loaded program opens into its maps, attachments and cost, and the observer is marked", async ({
   page,
 }) => {
+  // The figure is a spring that counts up once it is on screen, so under load
+  // it reads "40" on its way to "41". Reduced motion writes the value at once;
+  // the animation is the ticker's own, not this page's claim.
+  await page.emulateMedia({ reducedMotion: "reduce" })
   await open(page, [])
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   await expect(page.getByLabel("eBPF platform")).toContainText(
     "Kernel 6.14.0-37-generic · JIT on · unprivileged loading refused · BTF type information present · bpf filesystem mounted · run statistics off",
-    { timeout: 15_000 },
   )
-  // The figure counts up once it is on screen.
   const cgroups = page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" })
   await cgroups.scrollIntoViewIfNeeded()
   await expect(cgroups).toContainText("41")
@@ -321,7 +326,7 @@ test("an install is followed by configured, active and verified phases, not by a
       }),
     )
   })
-  await page.goto("/network/traffic")
+  await visit(page, "/network/traffic")
   await page.getByRole("button", { name: "Install bpftool" }).click()
   const phases = page.getByRole("list", { name: "After installing bpftool" }).first()
   await expect(phases).toContainText("Installed: done")
@@ -333,8 +338,7 @@ test("an install is followed by configured, active and verified phases, not by a
 
 test("a peer opens into its tuples, ages, closes and the layers it crosses", async ({ page }) => {
   await open(page, [])
-  await page.goto("/network/connections")
-  await loaded(page)
+  await visit(page, "/network/connections")
   const row = page.getByRole("row").filter({ hasText: "198.51.100.23" })
   await expect(row).toContainText(
     "TCP/UDP · from 51022, 51023, 51024 +15 · 14 established, 3 time-wait, 1 connected",
@@ -386,10 +390,9 @@ test("a block asks why and until when, opens an incident, and is listed with its
     })
     return json(route, { id: "fedcba9876543210fedcba9876543210", name: "Blocked" }, 202)
   })
-  await page.goto("/network/connections")
-  await loaded(page)
+  await visit(page, "/network/connections")
   const listed = page.getByLabel("Blocks from this page")
-  await expect(listed).toContainText("credential stuffing on /login", { timeout: 15_000 })
+  await expect(listed).toContainText("credential stuffing on /login")
   await expect(listed).toContainText(/Ends in 2\dh|Ends in 1d/)
   await expect(listed).toContainText("Ended on schedule")
   await expect(listed.getByRole("link", { name: "incident" })).toHaveAttribute(
@@ -445,13 +448,11 @@ test("a past hour is read from the socket history in the live table's shape", as
     if (r.url().includes("/network/flows/")) flows.push(new URL(r.url()))
   })
   await open(page, [])
-  await page.goto("/network/connections")
-  await loaded(page)
+  await visit(page, "/network/connections")
   await page.getByRole("radio", { name: "A past hour" }).click()
   const recorded = page.getByLabel("Recorded connections")
   await expect(recorded.getByRole("row").filter({ hasText: "198.51.100.23" })).toContainText(
     "2.0 GiB",
-    { timeout: 15_000 },
   )
   await expect(recorded.getByRole("row").filter({ hasText: "203.0.113.200" })).toContainText("sshd")
   await expect(recorded).toContainText(
@@ -475,7 +476,7 @@ test.describe("at a phone's width", () => {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       )
     await open(page, [])
-    await page.goto("/network/traffic")
+    await visit(page, "/network/traffic")
     await expect(page.getByLabel("Live context")).toContainText("TCP round trip")
     await expect(page.getByLabel("Transfer budgets")).toContainText("over 80%")
     expect(await overflow(), "horizontal overflow on /network/traffic").toBeLessThanOrEqual(0)
@@ -492,8 +493,7 @@ test.describe("at a phone's width", () => {
     await page.screenshot({ path: testInfo.outputPath("upload-profile-390.png") })
     await page.keyboard.press("Escape")
 
-    await page.goto("/network/connections")
-    await loaded(page)
+    await visit(page, "/network/connections")
     expect(await overflow(), "horizontal overflow on /network/connections").toBeLessThanOrEqual(0)
     await page
       .getByRole("row")
