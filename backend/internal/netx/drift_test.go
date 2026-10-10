@@ -252,6 +252,25 @@ func TestDriftBootNeedsMeasuredExecutionAndDetectsIgnoredFailure(t *testing.T) {
 			t.Fatalf("partial results claimed success: %+v", b)
 		}
 	})
+	// systemd 255 prints one ExecStart line per command, as a guest reboot
+	// showed; reading only the last line left every real boot unknown and hid
+	// an earlier command's failure.
+	for _, first := range []string{"0", "1"} {
+		t.Run("one line per command, first exits "+first, func(t *testing.T) {
+			s := testService(t)
+			if err := writeFileAtomic(s.paths.Unit, []byte(generatedHeader+"[Service]\nExecStart=-ip -force -batch links\nExecStart=-sysctl -q -p conf\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			record(t).on("systemctl show", "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nFragmentPath="+s.paths.Unit+"\nDropInPaths=\nNeedDaemonReload=no\nResult=success\nExecMainStartTimestamp=Fri 2026-10-09 23:29:56 UTC\nExecMainExitTimestamp=Fri 2026-10-09 23:29:57 UTC\nExecMainStartTimestampMonotonic=13114874\nExecMainExitTimestampMonotonic=13300000\nExecMainStatus=0\n"+
+				"ExecStart={ path=ip ; argv[]=ip -force -batch links ; ignore_errors=yes ; start_time=[Fri 2026-10-09 23:29:56 UTC] ; stop_time=[Fri 2026-10-09 23:29:56 UTC] ; pid=689 ; code=exited ; status="+first+" }\n"+
+				"ExecStart={ path=sysctl ; argv[]=sysctl -q -p conf ; ignore_errors=yes ; start_time=[Fri 2026-10-09 23:29:57 UTC] ; stop_time=[Fri 2026-10-09 23:29:57 UTC] ; pid=833 ; code=exited ; status=0 }\n")
+			b := s.driftBoot(context.Background())
+			want := map[string]string{"0": "succeeded", "1": "failed"}[first]
+			if len(b.Execution.Commands) != 2 || b.Execution.Status != want {
+				t.Fatalf("activation = %+v, want %s from both commands", b.Execution, want)
+			}
+		})
+	}
 }
 
 func TestDriftBootUnreadableMetadataDoesNotInventAnUnrecordedOrOwnedActivation(t *testing.T) {

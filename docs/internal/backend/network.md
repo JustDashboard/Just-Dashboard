@@ -259,7 +259,8 @@ ufw and Docker drop forwarded traffic by default, so translated connections carr
 `0x4a000000/0xff000000` (outside Tailscale's packet-mark bits) and one rule per chain admits exactly
 them: `-m connmark --mark … -j ACCEPT` at the top of iptables' and ip6tables' `FORWARD`, `INPUT` and
 `DOCKER-USER`. They are re-asserted on every gateway change (a `ufw reload` or a Docker restart can
-remove them), restored at boot by the unit (delete then insert, so idempotent), and removed when
+remove them), restored at boot by the unit (a failure-tolerant `ExecStartPre` delete, then the
+insert, so idempotent), and removed when
 nothing translates (each `-D` repeats until the kernel has none left, at most eight times). Writes are refused (`409 network_read_only`) where firewalld is active or another
 nftables table drops forwarded traffic, naming the chain and the accept to add there. A forward or NAT
 entry that needs forwarding while it is off is refused with `409 forwarding_off`; the page offers the

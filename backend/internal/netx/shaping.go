@@ -131,10 +131,35 @@ func renderShaping(sp *Spec) string {
 		}
 		fmt.Fprintf(&b, "# %s\n", sh.Device)
 		for _, l := range shapeLines(sh) {
-			b.WriteString(l + "\n")
+			if !shapeDelete(l) {
+				b.WriteString(l + "\n")
+			}
 		}
 	}
 	return b.String()
+}
+
+// shapingCleanup is the deletes renderShaping leaves out: the boot unit runs
+// them as separate failure-tolerant steps before the batch (persist.go).
+func shapingCleanup(sp *Spec) [][]string {
+	var out [][]string
+	for _, sh := range sp.Shaping {
+		sh, err := normShape(sh)
+		if err != nil {
+			continue
+		}
+		for _, l := range shapeLines(sh) {
+			if shapeDelete(l) {
+				out = append(out, strings.Fields(l))
+			}
+		}
+	}
+	return out
+}
+
+// shapeDelete reports a line that only clears what may not be there.
+func shapeDelete(l string) bool {
+	return strings.HasPrefix(l, "qdisc del ") || strings.HasPrefix(l, "filter del ")
 }
 
 // runShapeLines runs a device's tc commands one by one, as explicit
@@ -144,7 +169,7 @@ func runShapeLines(ctx context.Context, lines []string) error {
 	for _, l := range lines {
 		args := strings.Fields(l)
 		_, err := run(ctx, "tc", args...)
-		if err != nil && !strings.HasPrefix(l, "qdisc del ") && !strings.HasPrefix(l, "filter del ") {
+		if err != nil && !shapeDelete(l) {
 			return fmt.Errorf("tc %s: %w", l, err)
 		}
 	}

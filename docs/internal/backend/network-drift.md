@@ -80,7 +80,14 @@ can continue restoring. Inspection checks available `ExecStart` command exit
 results and reports a failed ignored command even if the overall unit result is
 success. It reports success only with a measured finished activation and complete
 command outcomes matching the number of commands in the owned file. Missing
-outcomes remain unknown.
+outcomes remain unknown. systemd prints one `ExecStart=` line per command and
+every line is read. Deletes that only clear the way for a replacement (the owned
+admission rule, a shaped device's root queue and ingress policer filter) are
+`ExecStartPre=-` lines: on a fresh boot there is nothing to delete, so they fail
+by design and are not part of the measured result. A boot that first ran an
+interrupted-change recovery replays managed devices and addresses before the
+ordinary unit, whose creation lines then report existing objects; that boot's
+activation reads failed even when every runtime observation matches.
 
 `bootTrigger=unknown` is deliberate: systemd's current activation properties do
 not establish whether a boot transaction, daemon restart or operator started

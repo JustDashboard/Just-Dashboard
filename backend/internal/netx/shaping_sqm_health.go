@@ -33,13 +33,7 @@ func (s *Service) verifySQMBoot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reading loaded SQM boot dependency: %w", err)
 	}
-	properties := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		key, value, found := strings.Cut(line, "=")
-		if found {
-			properties[key] = value
-		}
-	}
+	properties := systemdProperties(out)
 	if properties["FragmentPath"] != s.paths.Unit || properties["DropInPaths"] != "" {
 		return shapingDrift("the loaded SQM boot unit is missing, replaced or has foreign drop-ins")
 	}
