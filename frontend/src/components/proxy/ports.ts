@@ -1,5 +1,22 @@
 import type { Capability, Listener, ListenerClients, ListenerNetwork } from "@/lib/types"
 import { managerHref } from "@/components/procs/shared"
+import { imageProduct, portProduct, processProduct, unitProduct } from "@/components/product-logo"
+
+/**
+ * The owner of a socket as the product it is — Postgres on 5432, nginx on
+ * 443, Grafana for a container of its image. Read from the container's image
+ * or the program first and the port second, so a `postgres` on an unusual
+ * port is still Postgres and a `python` on 5432 is not. The Ports table
+ * draws its rows with it, and the overview the applications its routes reach.
+ */
+export function listenerProduct(listener: Listener): string | undefined {
+  const unit = listener.activates || (listener.manager === "systemd" ? listener.managerName : "")
+  return listener.container
+    ? imageProduct(listener.container.image)
+    : (processProduct(listener.displayName || listener.process || "") ??
+        (unit ? unitProduct(unit) : undefined) ??
+        portProduct(listener.port))
+}
 
 /**
  * Where a socket answers, per network the backend places its address on —
