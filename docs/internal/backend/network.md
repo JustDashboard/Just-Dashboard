@@ -364,7 +364,11 @@ A limit under 1 Mbit/s on the uplink or the client-path device is refused. The i
 ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
 never touched, and a download limit on a device that has one is refused.
 Apply verification reads the exact HTB class/default/leaf and rate/ceil, CAKE bandwidth, and ingress
-matchall/drop policer rate/burst. Detailed policer output supplements iproute2 JSON where its fields
+matchall/drop policer rate/burst. iproute2 releases before JSON class output (Ubuntu 24.04 ships
+6.1) print `tc -j class show` as text, and nothing for a device without classes; that form is read
+too. Its rates are whole units, so a rate of 1 Gbit or more that is not a whole number of Mbit reads
+back as drift there. The boot batch omits the runtime path's clearing deletes; the unit runs them
+first as failure-tolerant `ExecStartPre` lines, so the batch's exit reflects restoration alone. Detailed policer output supplements iproute2 JSON where its fields
 are absent, with a small allowance for kernel clock quantization. First replacement refuses foreign
 hierarchies/filters unless a supported classless fq_codel baseline can be captured and restored.
 Managed-device reads report `verification` as verified, observed drift or unreadable/unknown; saved

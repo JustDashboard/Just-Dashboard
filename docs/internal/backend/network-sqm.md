@@ -72,7 +72,10 @@ down and its CAKE queue recreated, because CAKE/matchall cannot replace themselv
 
 Native verification checks exact CAKE bandwidth, classes, flow mode, NAT/wash, overhead, MPU,
 link accounting, expected RTT, ingress, split GSO, ACK filtering and fwmark; it also checks IFB up
-state and redirect ownership. CAKE's own virtual classes are supported. iproute2 intentionally omits
+state and redirect ownership. CAKE's own virtual classes are supported, in JSON and in the text
+form iproute2 6.1 (Ubuntu 24.04) prints for `tc -j class show`, including its empty output when
+the IFB has no flows yet. Before that was read, every Ubuntu 24.04 apply was refused as "foreign
+classes" and its synchronous and independent recovery stayed degraded on the same check. iproute2 intentionally omits
 zero MPU from its printed options; absent MPU is zero only for that documented case, with all other
 required profile evidence present. See the
 [iproute2 printer](https://raw.githubusercontent.com/iproute2/iproute2/main/tc/q_cake.c).

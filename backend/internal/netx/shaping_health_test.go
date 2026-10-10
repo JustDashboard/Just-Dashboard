@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -15,6 +16,10 @@ func TestShapingHealthDistinguishesRateDriftFromUnreadableKernel(t *testing.T) {
 		{"queue removed", `[]`, "", "drift", false},
 		{"read permission lost", "", "", "unknown", true},
 		{"unreadable class output", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "{", "unknown", false},
+		// iproute2 6.1 (Ubuntu 24.04) ignores -j for classes and prints text.
+		{"iproute2 6.1 text classes", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root leaf 10: prio 0 rate 50Mbit ceil 50Mbit burst 1600b cburst 1600b \n", "verified", false},
+		{"iproute2 6.1 text rate change", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root leaf 10: prio 0 rate 10Mbit ceil 50Mbit burst 1600b cburst 1600b \n", "drift", false},
+		{"unreadable text class", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root rate fast\n", "unknown", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := record(t)
@@ -52,5 +57,30 @@ func TestIngressVerificationAcceptsNativeDescriptorAndDetailsButRejectsExtraFilt
 				t.Fatalf("ingress evidence = %+v, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestTCClassesReadJSONAndTheOlderTextForm(t *testing.T) {
+	for _, tc := range []struct {
+		name, out string
+		want      []tcClass
+	}{
+		{"json", `[{"class":"htb","handle":"1:10","root":true,"rate":2500000,"ceil":2500000}]`, []tcClass{{Kind: "htb", Handle: "1:10", Root: true, Rate: 2500000, Ceil: 2500000}}},
+		{"no classes in text form", "", nil},
+		{"htb text", "class htb 1:10 root leaf 10: prio 0 rate 20Mbit ceil 20Mbit burst 1600b cburst 1600b \n", []tcClass{{Kind: "htb", Handle: "1:10", Root: true, Rate: 2500000, Ceil: 2500000}}},
+		{"kbit text", "class htb 1:10 root prio 0 rate 12345Kbit ceil 12345Kbit burst 1600b cburst 1600b \n", []tcClass{{Kind: "htb", Handle: "1:10", Root: true, Rate: 1543125, Ceil: 1543125}}},
+		{"cake virtual classes", "class cake ca11:1 parent ca11: \nclass cake ca11:2 parent ca11: \n", []tcClass{{Kind: "cake", Handle: "ca11:1", Parent: "ca11:"}, {Kind: "cake", Handle: "ca11:2", Parent: "ca11:"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseTCClasses(tc.out)
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("classes = %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
+	}
+	for _, bad := range []string{"qdisc htb 1: root", "class htb", "class htb 1:10 root rate", "class htb 1:10 root rate 1.5Gbit"} {
+		if _, err := parseTCClasses(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }

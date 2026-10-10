@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,5 +250,48 @@ func TestSQMRechecksIFBIdentityAtTheEffectBoundary(t *testing.T) {
 	}
 	if len(effects) != 0 {
 		t.Fatalf("foreign IFB received effects: %v", effects)
+	}
+}
+
+// iproute2 6.1 (Ubuntu 24.04) prints classes as text even with -j, and
+// nothing for an IFB whose CAKE has no flows yet. A guest acceptance found every
+// SQM apply refused and its recovery left degraded on that release.
+func TestSQMReadsTheOlderTextClassForm(t *testing.T) {
+	sh := testSQMShape(t)
+	for _, tc := range []struct {
+		name, classes string
+		owned         bool
+	}{
+		{"no classes", "", true},
+		{"cake virtual classes", "class cake ca11:1 parent ca11: \nclass cake ca11:3 parent ca11: \n", true},
+		{"foreign hierarchy", "class htb 1:10 root prio 0 rate 8Mbit ceil 8Mbit burst 1600b cburst 1600b \n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			execute := recoveryExecutor(func(ctx context.Context, input []byte, tool string, args ...string) (string, error) {
+				var value any
+				switch command := tool + " " + strings.Join(args, " "); command {
+				case "ip -j -d link show":
+					value = []map[string]any{{"ifname": sh.Device, "address": sh.SQM.SourceMAC, "mtu": 1500}, {"ifname": sh.SQM.IFB, "address": sqmIFBMAC(sh.SQM.Token), "mtu": 1500, "flags": []string{"UP"}, "ifalias": sqmAliasPrefix + sh.SQM.Token, "linkinfo": map[string]string{"info_kind": "ifb"}}}
+				case "tc -j qdisc show dev eth0":
+					value = []tcQdisc{{Kind: "clsact", Handle: "ffff:"}}
+				case "tc -j qdisc show dev " + sh.SQM.IFB:
+					value = sqmCakeFixture(t, sh)
+				case "tc -j filter show dev eth0 ingress":
+					value = sqmRedirectFixture(t, sh)
+				case "tc -j filter show dev " + sh.SQM.IFB:
+					return "[]", nil
+				case "tc -j class show dev " + sh.SQM.IFB:
+					return tc.classes, nil
+				default:
+					return "", fmt.Errorf("unexpected %s", command)
+				}
+				b, _ := json.Marshal(value)
+				return string(b), nil
+			})
+			err := verifySQM(context.WithValue(context.Background(), recoveryExecutorKey{}, execute), sh)
+			if tc.owned && err != nil || !tc.owned && !errors.Is(err, errShapingDrift) {
+				t.Fatalf("verify = %v, want owned=%t", err, tc.owned)
+			}
+		})
 	}
 }

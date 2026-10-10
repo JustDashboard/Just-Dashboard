@@ -308,27 +308,27 @@ func sqmIFBOwned(ctx context.Context, sh ShapeSpec, allowAbsent, allowDefault bo
 	if err := checkSQMCake(qs, sh, allowDefault); err != nil {
 		return false, err
 	}
-	for _, kind := range []string{"filter", "class"} {
-		out, err := executeRecovery(ctx, nil, "tc", "-j", kind, "show", "dev", sh.SQM.IFB)
-		if err != nil {
-			return false, err
-		}
-		var entries []json.RawMessage
-		if !strings.HasPrefix(strings.TrimSpace(out), "[") || json.Unmarshal([]byte(out), &entries) != nil {
-			return false, shapingDrift("%s IFB has foreign %ss", sh.Device, kind)
-		}
-		if kind == "filter" && len(entries) != 0 {
-			return false, shapingDrift("%s IFB has foreign filters", sh.Device)
-		}
-		// CAKE exposes virtual flow/tin classes after the link comes up.
-		// They cannot be configured as an independent hierarchy.
-		if kind == "class" {
-			for _, entry := range entries {
-				var class tcClass
-				if json.Unmarshal(entry, &class) != nil || class.Kind != "cake" || class.Parent != "ca11:" || !regexp.MustCompile(`^ca11:[0-9a-f]+$`).MatchString(class.Handle) {
-					return false, shapingDrift("%s IFB has foreign classes", sh.Device)
-				}
-			}
+	out, err := executeRecovery(ctx, nil, "tc", "-j", "filter", "show", "dev", sh.SQM.IFB)
+	if err != nil {
+		return false, err
+	}
+	var filters []json.RawMessage
+	if !strings.HasPrefix(strings.TrimSpace(out), "[") || json.Unmarshal([]byte(out), &filters) != nil || len(filters) != 0 {
+		return false, shapingDrift("%s IFB has foreign filters", sh.Device)
+	}
+	out, err = executeRecovery(ctx, nil, "tc", "-j", "class", "show", "dev", sh.SQM.IFB)
+	if err != nil {
+		return false, err
+	}
+	classes, err := parseTCClasses(out)
+	if err != nil {
+		return false, shapingDrift("%s IFB has foreign classes", sh.Device)
+	}
+	// CAKE exposes virtual flow/tin classes after the link comes up.
+	// They cannot be configured as an independent hierarchy.
+	for _, class := range classes {
+		if class.Kind != "cake" || class.Parent != "ca11:" || !regexp.MustCompile(`^ca11:[0-9a-f]+$`).MatchString(class.Handle) {
+			return false, shapingDrift("%s IFB has foreign classes", sh.Device)
 		}
 	}
 	return true, nil
