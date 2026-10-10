@@ -1,0 +1,20 @@
+#cloud-config
+# Seed for the disposable reboot-acceptance guest. vm.sh substitutes the
+# ephemeral public key; nothing else in the guest is reachable without it.
+users:
+  - name: jd
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - @SSH_KEY@
+ssh_pwauth: false
+disable_root: true
+# sudo resolves the host name; the native fixtures' DNS servers do not answer.
+manage_etc_hosts: true
+package_update: false
+package_upgrade: false
+growpart:
+  mode: auto
+  devices: ["/"]
