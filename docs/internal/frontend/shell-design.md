@@ -346,8 +346,7 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, every tile the same inset and a lone last tile taking its row. `framed` restores the
   box. `StatLink` wraps a
-  tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
-  overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
+  tile that is also a destination — the Services row on the host overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
   narrows what is under it (a lens's readings wherever a page draws them, a site's request figures)
   with a revealed funnel and `aria-pressed`. `dense` sets the tiles two to a row on a phone.
 - `components/outcome-strip.tsx` — `OutcomeStrip`, the last few attempts at something as a square per

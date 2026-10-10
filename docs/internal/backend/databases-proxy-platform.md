@@ -1901,7 +1901,7 @@ containers/volumes/networks.
   folds a service's two families on one network into one row and one count when one process holds both,
   or one program run by one account was started by one parent (not init) or with the same command line
   but for its addresses — Docker holds a published port's two families in two docker-proxy processes,
-  dockerd's children, each told its own `-host-ip`. The overview's Internet-facing tile counts the same
+  dockerd's children, each told its own `-host-ip`. The overview's internet-facing fact counts the same
   folded rows. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds before
   a retryable 504, which the page offers to try again. `GET /ports/meta` answers `{ephemeralRange: {low,
   high}}` from `EphemeralPorts`, `net.ipv4.ip_local_port_range` read under the same process table
