@@ -32,7 +32,7 @@ import type {
 import { useAuth } from "@/hooks/use-auth"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
-import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
+import { useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
 import { Page, PageContext, PageState, Section } from "@/components/page"
@@ -41,7 +41,6 @@ import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
 import { EmptyState } from "@/components/state"
 import { useConfirm } from "@/components/confirm-dialog"
-import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -49,7 +48,6 @@ import { engineFor } from "@/components/database/engine"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
-import { serverAttention, verdictWith } from "@/components/overview/attention"
 import { ActivityPanel } from "@/components/overview/activity"
 import {
   CoreBars,
@@ -91,31 +89,8 @@ export default function OverviewPage() {
   const { host, snapshot, error, connection } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(DAY)
-  const { health, loading: healthLoading, error: healthError } = useHealth()
   const reads = useModuleReads()
   const { confirm, dialog } = useConfirm()
-
-  const attention = useMemo(
-    () =>
-      serverAttention({
-        deployments: reads.fleet.data?.deployments,
-        pulses: reads.traffic.data,
-        backups: reads.backups.data,
-        certificates: reads.certificates.data,
-        packages: reads.packages.data,
-        databases: reads.databases.data,
-        exposure: reads.exposure.data,
-      }),
-    [
-      reads.fleet.data,
-      reads.traffic.data,
-      reads.backups.data,
-      reads.certificates.data,
-      reads.packages.data,
-      reads.databases.data,
-      reads.exposure.data,
-    ],
-  )
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -207,15 +182,6 @@ export default function OverviewPage() {
             <FactDot />
             <span className="numeric">{snapshot.procs?.total || host.processes} processes</span>
           </>
-        }
-        aside={
-          health && (
-            <HealthVerdict
-              partial={!!health.silences?.length}
-              status={verdictWith(health.status, attention)}
-              className="text-body"
-            />
-          )
         }
       />
 
@@ -321,25 +287,6 @@ export default function OverviewPage() {
         </div>
       </Section>
 
-      {/* What needs the reader, from the machine and from every module on
-          it, as one list: the recorder's findings and a failed deploy, a
-          quiet backup or a certificate past its renewal, worst first. It
-          has the width to itself because it is the first thing to read
-          after the numbers, and a short list beside a tall one left half
-          the row empty. */}
-      <HealthPanel
-        plain
-        health={health}
-        also={attention}
-        error={healthError}
-        loading={healthLoading}
-        emptyLabel={
-          health?.recorded
-            ? "Capacity, memory, CPU steal, pressure, sockets, services, containers, deployments, backups and certificates all within limits"
-            : "Every check passed on the current reading"
-        }
-      />
-
       <DeploymentsSection fleet={reads.fleet} traffic={reads.traffic.data} confirm={confirm} />
 
       {/* Who is spending the machine and what changed on it — the two
@@ -373,9 +320,8 @@ export default function OverviewPage() {
 }
 
 /**
- * Every module's own read, once, at the page: the Services tiles draw them
- * and the Health list reads what is wrong out of them, so a failed backup is
- * one request whether it is said as a figure or as a finding.
+ * Every module's own read, once, at the page: the Services tiles draw them,
+ * and the Deployments section shares the fleet and its traffic.
  */
 function useModuleReads() {
   return {

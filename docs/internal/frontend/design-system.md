@@ -59,10 +59,11 @@ taking a frame:
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
-  metrics page, every block on the Docker pages (the
-  overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
-  volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
-  images; the attention and storage blocks on a container's page), the
+  metrics page, every block on the Docker pages but the overview's container table (the
+  overview's band, attention, compose projects, cleanup and disk; the containers, volumes,
+  networks, stacks and events lists with their toolbars; the Images page's band of what Docker
+  holds on disk and what the registries say, over its framed table; the attention and storage
+  blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
@@ -72,7 +73,7 @@ taking a frame:
   its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
-  health findings, the runtime-health bar, and every block of the deployment section — the fleet
+  the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
   row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
@@ -1018,19 +1019,23 @@ table appeared already scrolling inside its own panel, with Issues and the row's
 right edge — a table that arrives broken.
 
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
-containers, images, volumes, networks and stacks lists are cards at every width — the argument
+containers, images, volumes and networks lists are cards at every width (the stacks list was one too,
+until 0.7.1 made it a table of readings — §15 pass 2) — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
-panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
-paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
-because there is no header over it; below, they go beneath the name at the card's full width. Which
-shape is drawn is chosen once by the page (`useMediaQuery`) rather than by `hidden`/`xl:block` twins,
-because a reading that exists in a hidden copy is two answers to every query a test or a screen
-reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
+panel, so it carries the lit edge. The containers list was the first of them and went back to a
+table in 0.7.1 (§16 says where that leaves the line). `components/docker/container-table.tsx` keeps
+both halves of the paragraphs above: from `xl` a table of fixed columns, each heading naming and
+sorting its reading; below, the same readings beneath the name, nothing dropped. Which shape is drawn
+is chosen once (`useMediaQuery`) rather than by `hidden`/`xl:block` twins, because a reading that
+exists in a hidden copy is two answers to every query a test or a screen reader makes. The list around the cards is a plain panel — a frame around framed cards is two nested
 frames, which is the stacking this section refuses. System users took the same argument in 0.7.0:
 every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
 their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
-trail stays a table.
+trail stays a table. The images were cards from 2026-09-23 and became a table again on 2026-10-08
+at the operator's request, on the Processes, Packages and Services tables' precedent: a row that
+opens a sheet but is read down its columns — which image is largest, oldest, unused or behind — is
+a table of readings with a destination on its name, and it keeps its frame (§2).
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
@@ -1079,6 +1084,18 @@ ellipsing. `RowLink` carries `max-w-full min-w-0` for that reason — the first 
 `max-w-[Nrem] min-w-0` wrapper every title cell is built from, the second lets it shrink where the
 title is laid out with flex beside a tag. Anything else that sizes to its content in a capped cell
 needs the same pair.
+
+**A stack's services went back to a table on 2026-10-08, and the argument above is why.** Each
+service on `/docker/stacks/<name>` opens its container, so it had been a lit card in a
+`ChoiceList`. But a stack is six things read against each other — which one is restarting, which
+one holds the memory — and six cards put each reading in a different place and offered nothing to
+read down. So the services are one framed table (`docker/stack-services-table.tsx`): fixed columns
+for state, CPU (the last hour beside this second's share), memory (against the limit, amber past
+85%), network from 1536 and ports, the service taking what is left, and the compose verbs in a
+`DimActions` column. The row still opens its container through `onActivate` and the name's
+`RowLink`; what it gave up is the lit edge, because a table of readings answers the pointer with
+the row wash (§16). Below 1280 the same row is drawn down instead of across with nothing dropped,
+chosen once by `useMediaQuery`.
 
 ## 13. A verb is a word
 
@@ -1911,6 +1928,30 @@ The passes, in order. Each one is a diff you can review on its own.
    processes it holds now, each opening Live's sheet; and how it runs, with its type in words and
    its overrides.
 
+   Docker's Containers took the same exit in 0.7.1, at the operator's request, because it had no
+   life: a runtime health bar and a list of findings over a column of grey cards, nothing on it that
+   moved but a dot. Its figures went where they are read. Running, failing, starting, paused and
+   stopped are counted chips in the table's head — failing in its tone and starting in amber, each
+   drawn only while there is one — beside Needs attention; the health-check counts the bar drew are a
+   fact in the identity line (how many running containers a passing check vouches for) and each row's
+   second line, where "no health check" is still said out loud. The line opens on the engine as
+   Services' opens on the host: Docker as its mark and version, the host with its distribution, the
+   storage driver, the running count, the stacks and images, and at its right end the verdict — the
+   failing count, a press of which narrows the table. Under it `components/docker/container-band.tsx`
+   answers what the bar never did: the five containers using the most processor and memory on Live's
+   bar the size of the machine (`ShareBar`), figures gliding to each two-second frame of the
+   container socket, and **Recent**, Docker's event log followed live — a restart loop one line ("×14
+   in 9 min · exit 1"), an OOM kill said on the exit it caused, a failing health check in red. Failing
+   is read from the state, the health check, the exit status and that log together
+   (`components/docker/containers.ts`): a 137 is `docker stop`'s as often as the OOM killer's, so only
+   the event log turns it red. The table took Live's fixed columns and figure-beside-a-bar readings —
+   memory against its limit where there is one, amber past 85% — with a ticking uptime under each
+   state, sortable headings that hold still under the pointer (`useInspectionOrder`), the processor's
+   hour and the network rate in the network section's colours from `2xl`, and each compose project in
+   its `LANES` hue as a chip and a press on any of its rows. A container new since the last frame
+   rises. The findings list went under the table: each row's issue count says which containers it is
+   about.
+
    Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
    identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
    count, the security chip and a security-first queue; On disk heads the software band. The band
@@ -1924,6 +1965,35 @@ The passes, in order. Each one is a diff you can review on its own.
    file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
    and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
    their frame and gain fixed responsive columns and a measured size bar per installed row.
+
+   The Docker overview took the same exit on 2026-10-08, at the operator's request, because it was
+   the still page of its section: four grey tiles — running, runtime health, attention, compose
+   stacks — over a list of what was not running and a list of projects, and no figure on it that
+   moved. Each went where it is said better. Running is a fact in the identity line and the
+   containers table's state chips — Failing in its tone and Starting in amber, drawn only while
+   there is one — which count and narrow, and the separate list of what was not running became the
+   table's order, failing first. Runtime health is the verdict at the line's end (*N containers
+   failing*, a press narrowing the table to them) and each container's State cell: up for how long
+   and whether a check passes, fails or does not exist, or how it stopped and when — *killed for
+   memory* where the runtime finding says so rather than a bare 137, and a container stopped
+   cleanly quiet. Attention is the second verdict, which goes to the Attention list, unchanged and
+   still never called health, and a container's issues are counted beside its name. Compose stacks
+   is the line's *3 of 4 projects up* and the projects' head, where each project's card now draws its
+   services as one strip of their states. The line opens on Docker drawn as itself, its version,
+   the host, the storage driver and cgroup version, and the images with what their layers hold
+   (`GET /docker/info` and the disk read). Under it `components/docker/container-band.tsx` answers
+   what the tiles never did, in Services' shape: the five containers using the most processor and
+   memory on Live's bar the size of the machine (`ShareBar`), fed by the containers socket so every
+   span eases and every figure glides with each frame, and a Recent block of the last thing that
+   happened to each container, live off the daemon's events (`components/docker/overview.ts`: an
+   OOM kill and its exit read as one line, a stop's kill, die and stop as one, and a container that
+   came back after crashing says how many times it did in the hour). Then every container as a
+   framed table rather than `/docker/containers`' cards (§16 says why): fixed columns from `xl`, each
+   row the container as its product, its compose project in the project's lane hue (`hueFor(name,
+   LANES)`, the same hue on the project chips and the project cards), its state, its last hour of
+   processor as a sparkline beside the live figure, memory against its limit or the heaviest, its
+   published ports and its verbs. Below `xl` the same row is drawn down. Project chips narrow it;
+   a container that appears rises (`useArrivals`), and one that changes state changes in place.
 
    Scheduled took the same exit in 0.7.1 and for the same reason: five grey figures over three
    tables, and nothing on the page that showed *when* anything ran without reading row by row.
@@ -1953,6 +2023,61 @@ The passes, in order. Each one is a diff you can review on its own.
    service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
+
+   Docker's Stacks page took the same exit in 0.7.1 at the operator's request, because it was the
+   still page of the section: a title over six cards, each a stack's name with its services as a line
+   of 6px dots under it, so "is the database up" was a dot, an Alertmanager killed for memory read as
+   grey as a mail server stopped by hand, and "which application is using the server" had no answer
+   on the page at all. It had no tiles to take apart; what it lacked was readings. It opens now on
+   the server's identity line — the Compose mark, Docker's version, stacks deployed, services running,
+   ports published — with the attention verdict at its right end, red where a service fails its check
+   or exited on an error and amber for the rest, a press of which narrows the table as the chip does.
+   Under it `components/docker/stack-band.tsx` is Services' band for applications: the five stacks
+   using the most processor and memory on Live's bar the size of the machine (`ShareBar`), each a sum
+   over the stack's containers from the containers socket, a press narrowing the table to that stack;
+   and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into the
+   exit they caused and failed checks, each with its time and its stack's name in that stack's lane
+   hue, opening the stack. The stacks themselves are one framed table of their containers
+   (`stack-table.tsx`) — a stack is still a destination, but its containers are rows of readings, and
+   a stack's row is where they add up. A stack's row carries its products, state, how many declared
+   services are up (a service its file dropped is counted as an orphan, not as a fourth of three), the
+   summed CPU and memory as plain figures (a counting figure waits to be scrolled into view, and most
+   rows of a capped table are not), and Deploy when it is down, brand-faced only for a stack never
+   deployed; a lane in its name's hue (`hueFor(name, LANES)`, a compose project being a namespace) runs
+   down its containers. Each container is the containers page's readings in Services' columns: the
+   state with how long — up for, failing its check, killed with exit 137 — CPU as its last hour beside
+   this second's figure, memory beside a short bar against its limit where it has one, the published
+   ports, and its verbs. The chips count and narrow (Running, Needs attention in its tone, Stopped, Not
+   deployed, the last three only while there is one); a stack folds its containers away for the session;
+   a container's state moves the moment Docker's does and the list is read again when one does, so the
+   stack's own state follows within the second. Below 1280px the same rows are drawn down rather than
+   across, chosen once by a media query.
+   Docker's Images page took the same shape on 2026-10-08, at the operator's request, because it
+   had no life: four grey lines of disk figures, a notice and a column of grey cards, nothing on it
+   told apart by anything but its words. It opens on Docker's identity line (the engine's version,
+   how many images, the layers' size, how many are in use and untagged as facts; the registry's
+   verdict at its right end, a press of which narrows the table to what is behind, beside Pull and
+   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker. On
+   disk is one bar of what Docker holds — images, build cache, containers, volumes, each in the
+   colour the Docker overview's `DiskSummary` gives that kind — with the part a prune would give
+   back hatched inside each span, so the reclaimable share is seen before a figure is read; each
+   line keeps its own Reclaim, which now calls that kind's own route rather than the sweep (the
+   sweep also removes stopped containers and networks, which the Images and Build cache lines'
+   confirmations never said). Registry is one bar of every image by what its registry says —
+   update available in amber, current in green, pinned and built here in `--tag-cyan` and
+   `--tag-violet` because they are choices rather than states, unanswered and unused muted — with a
+   line per answer drawn as the products in it, each narrowing the table; a check the reader asked
+   for sweeps the bar. The images are a framed table again (§12): the image as its product, its
+   registry and tag a step back from the repository; the containers running it by name with their
+   state's dot, each a link to its page; the registry's answer in the band's colours; its age; and
+   its size over a bar against the largest, in the Images span's colour. Below `xl` the containers
+   and the answer join the name's second line as a dot, a count and the word. A pulled image rises
+   into the table (`useArrivals`), and its row says *Pulling…* while its pull runs. The pull dialog
+   draws a row per layer from Docker's stream, received bytes in `--chart-2` and written ones in
+   `--chart-4` (§10), with the raw transcript folded. The sheet (`?image=`) opens on four readings,
+   the containers using the image as lit rows, and where the size went: a bar per layer in build
+   order beside the instruction that wrote it, its verb in a `--tag-*` hue and a RUN's command
+   coloured by `ShellWords`, the metadata-only steps folded.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
@@ -2088,34 +2213,20 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts, the verdict at the right end); a Resources `Section`
+hypervisor as bare marks among its facts); a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; the `Health` panel across the full width — a strip of every area checked drawn as the release path's own segments, then its findings as lit cards; the Deployments section; a plain top-processes list beside a
+the Storage band, a capacity bar per filesystem; the Deployments section; a plain top-processes list beside a
 plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
 each naming what it counts with the products themselves. No frame anywhere on the page — the project
 cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
 
 The 0.7.1 pass asked of each block whether it answered the question a reader opens the page with,
-and three did not. The Health list said only what the recorder measures, so a failed deploy, a
-backup gone quiet or a certificate past its renewal was a red figure on a tile two screens down with
-no word of what it was; it now carries what every module found (`components/overview/attention.ts`,
-the fleet's own Attention findings among them), worst first, each opening the page that fixes it,
-and the verdict on the list and the identity line is the worst of all of them.
-
-The 2026-10-08 Health overhaul answered "no life, no colour" without leaving the vocabulary. A
-finding opens its fix, so it is a thing you take and a `ChoiceRow` with the lit edge (§16), on its
-level's `bg-wash-*` with a short bar of the level's hue before the area's glyph; the figure it was
-judged on is a `Meter` with a `mark` at the threshold it crossed. Above them, every area the server
-checked is a cell under one `Segment` of the release path's bar (`deploy/run-pipeline.tsx`): green,
-amber, red, dashed where the area could not be read, and sweeping while a check the reader asked for
-is in flight — so a healthy host is a line of green with a reading under each segment rather than a
-sentence saying nothing was found. Notices fold under a quiet `Disclosure`. Inside the sheet the
-diagnosis is a banner on the level's wash with the server's evidence as figures, and every fix ends
-on a fresh reading drawn as a success or warning outcome line; a control in flight runs `BorderBeam`
-round its card and names its participle in `TextShimmer`. With that it took the
-row's full width — beside the activity list it was one finding over half a row of nothing. The
+and two did not. The Health panel that stood between the readings and the projects — the
+recorder's findings with every module's beside them, and a sheet of fixes behind each — was removed
+on 2026-10-08 at the operator's request, with `GET /system/health` and the advisor routes behind it;
+the machine is read from its readings and each module from its own tile and page. The
 projects, which are why most visits happen, were one figure on one tile; they are the fleet's own
 cards now, worst first and two rows at most, and the tile went to Git. And nothing on the page said
 *who* was spending the CPU the first tile reported, so the Metrics page's top processes sit beside
@@ -2295,6 +2406,63 @@ Each page that reads a tool this host may not have opens on its install where it
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
 Packages page's install job streaming under the button).
 
+**A stack's own page took the Services page's shape on 2026-10-08**, at the operator's request,
+because it had no life: a `MetricStrip` of three facts over a filled tab list and a column of grey
+cards that each said a state word, so a worker in a restart loop read "restarting" beside a
+database a step from its memory limit reading "running", and nothing on the page moved. Where the
+strip's figures went, and what took their place (`docker/stack-detail.tsx`):
+
+- **The identity line.** `HostIdentity` with the stack's services' products overlapping as its
+  mark, the compose file, the directory, the checkout (branch, uncommitted changes in
+  `--git-modified`, how far behind), how many services run and how many ports it publishes; at its
+  end the verdict (`stackVerdict` in `docker/stack-service-readings.ts`, unit-tested): the worst
+  thing true of it, counted — *1 service failing* before *1 not created* before *All 5 running* —
+  which narrows the table to those services when pressed, and the compose verb's participle
+  shimmering while one runs. The deploy verbs stay beside the way back. The views are the
+  underlined strip (`tabClasses`) over Radix's tabs, the identity line's own rule giving way to it.
+- **The services as a table of live readings** (§12), from the containers socket the containers
+  page reads rather than the ten-second stack poll, so a state changes when Docker's does. A state
+  is read with the event log beside it: an exit the OOM killer caused is *Out of memory*, a
+  non-signal exit *Crashed*, a deliberate 0/130/137/143 *Stopped*, and a restart loop says how
+  many times in how long. State chips count and narrow, the toned ones drawn only while something
+  is in them. Each service keeps its lane (`hueFor(name, LANES)`, the hue its lines take in the
+  stack's log) as a stripe down its row, and its compose verbs are declared once per service —
+  Restart and Stop inline, Recreate service and Pull & redeploy in its menu with Logs and Open a
+  shell, each confirmation carrying the command as compose runs it.
+- **The band** (`docker/stack-usage-band.tsx`): Processor and Memory as the Services page's
+  `ShareBar`, the stack's services as spans of one bar the size of the server beside everything
+  else in use, figures gliding to each frame; and Recent, the stack's events with a restart loop on
+  one line, an OOM kill on the exit it caused and a passing health check only after a failing one,
+  each service named in its lane.
+- **A picture of how it is reached** (`docker/stack-map.tsx`), the deployment Runtime map's shape
+  under a plain head: the ports it publishes on this server, its services as their products with
+  their state in the tile's corner, and the Docker networks they are on. A wire pulses while its
+  service moves more than a kilobyte a second, at the Network section's `pulseDuration`; it is
+  dashed and red where a port leads to a service that is not running, and amber where a database
+  answers on every interface.
+- **The other views took the same vocabulary**, borrowed from the pages that did each job first:
+  every service anywhere on the page is its lane, its product and its name (`ServiceLabel` in
+  `docker/stack-diff.tsx`), and every diff of the compose file is one view grouped by the service
+  each hunk changes, `+N −M` in the colours its lines are drawn in.
+  - *Deploy preview* (`docker/stack-preview.tsx`) opens on Deploy's decision as one sentence over a
+    bar of the services in the colour of what happens to each — amber recreate, blue create, green
+    start, red remove, the quiet rest — then a framed table of them with why, the tag the image moves
+    to and what the service is doing now, then the diff beside the volumes. Its Group-tinted verdict
+    fence and its eyebrow sections are gone.
+  - *Compose file* (`docker/stack-compose.tsx`) is the Files editor's shape: a pane with the path
+    and the file's state (*Saved*, *Unsaved changes*, *Valid · 6 services*, *Compose rejects this*)
+    across the top, an outline beside the editor where each service carries its live state, and a
+    status line naming where the cursor is in the stack's terms.
+  - *Files* (`docker/stack-files.tsx`) puts what compose reads from the directory over the browser
+    as a table, with git's word for each change and a missing path's cost, and lets the browser take
+    the tab's height (`fill`); the browser's rows carry the same words after their names.
+  - *History* (`docker/stack-history.tsx`) is a backup job's shape: a strip of time in the colour of
+    each compose file — the lanes in order of first appearance, so the versions a history holds never
+    share one — over a rail of the records and the one picked read whole.
+  - *Logs* (`docker/stack-logs.tsx`) keeps the log page's workspace and puts the services that write
+    into it over it, the way that page's rail lists its sources: lines and errors in the last hour,
+    their shape in the service's lane, a press narrowing the log to one.
+
 ## 16. Two registers
 
 Everything above §15 describes a page that **reports**. The Overview, the metrics page, the Docker
@@ -2443,7 +2611,15 @@ reading page is revamped:
   density and its wash. Twelve columns of readings do not become cards. The containers table was the
   example here until 2026-09-23 and is the case that shows where the line is: its cells were live
   readings, but every row opened the container's own page, so the row was a destination with
-  readings on it — which is the Git card's shape, not a table's (§12);
+  readings on it — which is the Git card's shape, not a table's (§12). The operator reversed it in
+  0.7.1, and the reason moves the line rather than erasing it: thirty containers are read down their
+  columns far more often than one is entered, and Live, PM2 and Services had by then all become
+  tables whose rows open something. A table of readings whose row also opens stays a table — the
+  name is the button, the row takes Enter, and there is no lit edge; the edge stays with lists whose
+  rows are only ways in. The Docker overview drew its containers as a table again on 2026-10-08, at
+  the operator's request, and that is the other side of the same line: there the containers are read
+  down their columns before any one is taken, so the overview's table keeps hairlines and a wash and
+  its rows open by a press anywhere on them;
 - a **figure** is still a `StatTile` (§15 pass 2) in either register.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is

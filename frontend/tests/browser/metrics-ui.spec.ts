@@ -52,8 +52,8 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByText("Last hour", { exact: true })).toBeVisible()
   await expect(page.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
 
-  // Nothing draws a frame but the Interfaces table (§2): the readings, the
-  // charts and the findings are all on the page's own ground.
+  // Nothing draws a frame but the Interfaces table (§2): the readings and the
+  // charts are all on the page's own ground.
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
   // What the machine is made of is the first visible row, and no sentence
@@ -63,8 +63,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByText("Click a chart to pin a moment")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Metrics shortcuts" })).toBeVisible()
 
-  // The verdict's findings are a plain list, and the failed deploy is a moment.
-  await expect(page.getByText("/ is filling up")).toBeVisible()
+  // The failed deploy is a moment.
   await expect(page.getByText("api deploy failed")).toBeVisible()
 
   // Top processes from the process table, ordered by CPU by default.

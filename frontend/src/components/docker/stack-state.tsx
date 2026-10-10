@@ -29,6 +29,11 @@ export function stackTone(state: StackState): DotTone {
   return (STATE[state] ?? STATE.unknown).tone
 }
 
+/** A stack's state as its word. */
+export function stackLabel(state: StackState): string {
+  return (STATE[state] ?? STATE.unknown).label
+}
+
 export function StackStateBadge({
   stack,
   className,
