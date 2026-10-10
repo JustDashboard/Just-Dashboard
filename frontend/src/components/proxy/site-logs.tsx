@@ -4,42 +4,29 @@ import { useMemo, useState } from "react"
 import { ClockRewind, MagnifyingGlassMinus, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
-import type { DeploymentRequests, LogLine, LogSearchResult, RequestEntry } from "@/lib/types"
+import type { LogLine, LogSearchResult, RequestEntry } from "@/lib/types"
 import { EMPTY_FILTER, filterQuery, type LogLevel } from "@/lib/log-filter"
 import { lensFor } from "@/lib/log-lenses"
-import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { LogFields } from "@/components/logs/types"
-import {
-  ServiceLogs,
-  type LogWindow,
-  type ServiceLogsContext,
-  type ServiceLogsView,
-} from "@/components/logs/service-logs"
-import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
+import { ServiceLogs, type LogWindow } from "@/components/logs/service-logs"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
+import { Pane } from "@/components/panel"
 import { EmptyState, ErrorState } from "@/components/state"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { TileTrend } from "@/components/metrics/sparkline"
-import {
-  EMPTY_REQUEST_QUERY,
-  RequestsWorkspace,
-  type RequestQuery,
-} from "@/components/deploy/requests-workspace"
+import { RequestsWorkspace, type RequestQuery } from "@/components/deploy/requests-workspace"
 import { OutputLines } from "@/components/deploy/output-lines"
 import { PROXY_SILENT, proxyWindow } from "@/components/deploy/request-lines"
 import { ProductGlyph } from "@/components/product-logo"
-import type { StatusClass } from "@/lib/requests"
 import type { SiteErrorLog, SiteLogPlan } from "@/components/proxy/site-log-plan"
 
 /** What a failure in the error log is: an error, or the warnings nginx writes beside one. */
 const FAILURES: LogLevel[] = ["critical", "error", "warn"]
 
-/** The Errors view's window: the last day, as the readings' figures are the last hour. */
+/** The Errors view's window: the last day. */
 const ERRORS_WINDOW = 24 * 3_600_000
 
 /** The most lines the Errors view reads of one kind: the newest, as a search keeps them. */
@@ -57,68 +44,89 @@ const logName = (errors: SiteErrorLog) =>
 /** Whether a log other sites share is narrowed to this one's names at all. */
 const narrowed = (errors: SiteErrorLog) => Object.keys(errors.fields).length > 0
 
+/** The pane's views, in the order its strip draws them. */
+export type SiteLogView = "requests" | "insights" | "errors" | "files"
+
+const VIEW_LABEL: Record<SiteLogView, string> = {
+  requests: "Requests",
+  insights: "Insights",
+  errors: "Errors",
+  files: "Log files",
+}
+
+/** The views a site's plan can answer: Requests and Insights need its own request record. */
+export function siteLogViews(plan: SiteLogPlan): SiteLogView[] {
+  const views: SiteLogView[] = []
+  if (plan.requests) views.push("requests", "insights")
+  if (plan.errors) views.push("errors")
+  if (plan.sources.length > 0) views.push("files")
+  return views
+}
+
 /**
- * A site's logs, on the site's page: what it served and what went wrong, as
- * the readings over its last hour and the service logs every page embeds.
+ * The pane's height, the window's less the page's chrome, as the deployment
+ * Logs page sizes its own: a pane that sized itself to its rows made a live
+ * tail the length of the page, with nothing to follow. A floor under it,
+ * lower on a phone.
+ */
+const PANE_SIZE = "h-[max(28rem,calc(100dvh-6rem))] sm:h-[max(40rem,calc(100dvh-6rem))]"
+
+/**
+ * A site's logs, on the site's page, in the pane the deployment Logs page
+ * reads a deployment's in: one strip of views across the top and each view
+ * scrolling inside it, so a site and a deployment are read the same way.
  *
- * The two views are the site's own. **Requests** is its request record —
- * the chart, the families, the rows opening in place — which is the
- * deployment Logs page's workspace over the site's route, so a site and a
- * deployment are read the same way. A failed request shows, in its opened
- * row, what the proxy wrote in its error log in the second around it, which
- * is where "502" turns into "the application refused the connection".
- * **Errors** is that error log's failures over the last day, by kind.
- * Live, History and Insights read the log in the strip, which each view sets
- * to the one it is about, so the name beside the tabs is always the log the
- * lines under it came from.
+ * **Requests** is the site's request record — the chart, the families, the
+ * rows opening in place — the deployment's workspace over the site's route.
+ * A failed request shows, in its opened row, what the proxy wrote in its
+ * error log in the second around it, which is where "502" turns into "the
+ * application refused the connection". **Insights** is what the same window
+ * adds up to. **Errors** is that error log's failures over the last day, by
+ * kind, counted on its tab. **Log files** is the site's logs themselves,
+ * live and back through History, read through the lens of what wrote them.
  *
- * The readings above are the request record's and, where the site has an
- * error log of its own, its upstream failures: four figures a press away
- * from the rows behind them.
+ * The figures that stood over the pane went where they are said better: the
+ * hour's rate and the probes refused are the route's first node, the failed
+ * requests the identity line's verdict — a press of which narrows Requests to
+ * them, as the tile's did — and the upstream failures the Errors tab's count.
  */
 export function SiteLogs({
   name,
   plan,
   engine,
+  view,
+  onViewChange,
+  query,
+  onQueryChange,
 }: {
   name: string
   plan: SiteLogPlan
   /** The engine's name, for who wrote the error lines: "nginx wrote no error…". */
   engine: string
+  view: SiteLogView
+  onViewChange: (view: SiteLogView) => void
+  query: RequestQuery
+  onQueryChange: (query: RequestQuery) => void
 }) {
   const base = `/proxy/sites/${encodeURIComponent(name)}`
   const errors = plan.errors
-  const [view, setView] = useState<string | null>(
-    plan.requests ? "requests" : errors ? "errors" : null,
-  )
+  const views = siteLogViews(plan)
   const [source, setSource] = useState<string | null>(plan.requests ?? errors?.source ?? null)
-  const [query, setQuery] = useSessionState<RequestQuery>(
-    `proxy.site.${name}.requests`,
-    EMPTY_REQUEST_QUERY,
-  )
   const [kind, setKind] = useState("")
   const [around, setAround] = useState<LogWindow | undefined>()
+  const failures = useDayCount(errors)
 
-  // Each view reads one log, and the strip names it: Requests beside the
-  // access log, Errors beside the error log. The minute around a failed
-  // request is History's, and goes when the reader does, or the strip would
-  // go on naming it over the rows of another view.
-  const changeView = (id: string) => {
-    setView(id)
-    if (id !== "search") setAround(undefined)
-    if (id === "requests" && plan.requests) setSource(plan.requests)
-    if (id === "errors" && errors) setSource(errors.source)
+  // A window opened on the log files is a question about one moment, and
+  // goes when the reader leaves for another view, or the strip would come
+  // back on it with nothing to say what it was.
+  const choose = (next: SiteLogView) => {
+    if (next !== "files") setAround(undefined)
+    onViewChange(next)
   }
-  // Another log picked under a view about a different one is a question
-  // about that log, which Live answers.
-  const changeSource = (id: string) => {
-    setSource(id)
-    setAround(undefined)
-    if (
-      (view === "requests" && id !== plan.requests) ||
-      (view === "errors" && id !== errors?.source)
-    )
-      setView("live")
+  const openFiles = (window: LogWindow, at: string) => {
+    setSource(at)
+    setAround(window)
+    onViewChange("files")
   }
   // The minute either side, every level, narrowed as the lines under the
   // request were: a log other sites share is this site's names in it.
@@ -126,31 +134,56 @@ export function SiteLogs({
     if (!errors) return
     const at = Date.parse(entry.time)
     if (!Number.isFinite(at)) return
-    setSource(errors.source)
-    setView("search")
-    setAround({
-      since: iso(at - AROUND_OPEN),
-      until: iso(at + AROUND_OPEN),
-      label: "Around a failed request",
-      fields: requestFields(entry, errors),
-      levels: [],
-      q: "",
-    })
+    openFiles(
+      {
+        since: iso(at - AROUND_OPEN),
+        until: iso(at + AROUND_OPEN),
+        label: "Around a failed request",
+        fields: requestFields(entry, errors),
+        levels: [],
+        q: "",
+      },
+      errors.source,
+    )
   }
 
-  const views: ServiceLogsView[] = []
-  if (plan.requests) {
-    views.push({
-      id: "requests",
-      label: "Requests",
-      render: () => (
+  return (
+    <Pane className={PANE_SIZE}>
+      <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
+        <nav aria-label="Log view" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
+          {views.map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={view === id}
+              className={tabClasses(view === id, "h-10")}
+              onClick={() => choose(id)}
+            >
+              {VIEW_LABEL[id]}
+              {/* The day's failures, the number the Errors view's All chip
+                  counts, so the tab and the rows under it agree. */}
+              {id === "errors" && failures !== undefined && failures > 0 && (
+                <span
+                  aria-hidden
+                  title={`${plural(failures, "error or warning", "errors or warnings")} in the last day`}
+                  className="numeric text-hint text-warning"
+                >
+                  {failures.toLocaleString()}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {(view === "requests" || view === "insights") && plan.requests && (
         <RequestsWorkspace
           base={base}
           subject={`site ${name}`}
           emptyTitle="No request record for this site"
-          view="requests"
+          view={view}
           query={query}
-          onQueryChange={setQuery}
+          onQueryChange={onQueryChange}
           markers={[]}
           renderInline={
             errors
@@ -165,205 +198,54 @@ export function SiteLogs({
               : undefined
           }
         />
-      ),
-    })
-  }
-  if (errors) {
-    views.push({
-      id: "errors",
-      label: "Errors",
-      render: (ctx) => (
-        <SiteErrors ctx={ctx} errors={errors} engine={engine} kind={kind} onKindChange={setKind} />
-      ),
-    })
-  }
-
-  const upstreamOn = view === "errors" && kind === "upstream"
-  const showRequests = (classes: StatusClass[]) => {
-    setQuery({ ...query, classes })
-    changeView("requests")
-  }
-
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      {plan.requests && (
-        <SiteReadings
-          base={base}
-          errors={errors && !errors.shared ? errors : undefined}
-          requestsOn={view === "requests"}
-          classes={query.classes}
-          upstreamOn={upstreamOn}
-          onRequests={showRequests}
-          onUpstream={() => {
-            // Pressed again, the figure lets go of the lines it narrowed to,
-            // as every reading does.
-            if (upstreamOn) {
-              setKind("")
-              return
-            }
-            setKind("upstream")
-            changeView("errors")
+      )}
+      {view === "errors" && errors && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <SiteErrors
+            errors={errors}
+            engine={engine}
+            kind={kind}
+            onKindChange={setKind}
+            onOpenHistory={(window) => openFiles(window, errors.source)}
+          />
+        </div>
+      )}
+      {view === "files" && (
+        <ServiceLogs
+          sources={plan.sources}
+          source={source}
+          onSourceChange={(id) => {
+            setSource(id)
+            setAround(undefined)
           }}
+          storageKey={`proxy.site.${name}`}
+          modes={["live", "search"]}
+          window={around}
+          onLeaveWindow={() => setAround(undefined)}
+          pickerLabel="Site log"
+          flush
+          className="min-h-0 flex-1"
         />
       )}
-      <ServiceLogs
-        sources={plan.sources}
-        source={source}
-        onSourceChange={changeSource}
-        view={view}
-        onViewChange={changeView}
-        storageKey={`proxy.site.${name}`}
-        views={views}
-        window={around}
-        onLeaveWindow={() => setAround(undefined)}
-        pickerLabel="Site log"
-        paneClassName="h-[min(78vh,48rem)] min-h-[28rem]"
-      />
-    </div>
+    </Pane>
   )
 }
 
 /**
- * The site's last hour, as four figures: how much it served, how much of it
- * failed, how much it refused, and — where it has an error log of its own —
- * how often the application behind it would not answer. Each is a press away
- * from the rows it counts. Taken over the hour rather than the view's window
- * so the figures hold still while the rows under them are narrowed.
+ * How many errors and warnings the Errors view will hold, for its tab: the
+ * same day and the same narrowing, read once as the page opens rather than on
+ * a timer — each read is a pass over a day of a log, and on a Caddy ingress
+ * that log is every site's. A log every site shares and nothing narrows is
+ * not counted: its number would be everybody's.
  */
-function SiteReadings({
-  base,
-  errors,
-  requestsOn,
-  classes,
-  upstreamOn,
-  onRequests,
-  onUpstream,
-}: {
-  base: string
-  /** The site's own error log; a shared one would count every site's failures. */
-  errors?: SiteErrorLog
-  requestsOn: boolean
-  classes: StatusClass[]
-  upstreamOn: boolean
-  onRequests: (classes: StatusClass[]) => void
-  onUpstream: () => void
-}) {
-  const hour = usePoll<DeploymentRequests>(
-    (signal) =>
-      get<DeploymentRequests>(
-        `${base}/requests`,
-        { since: iso(Date.now() - 3_600_000), limit: 1 },
-        signal,
-      ),
-    30_000,
-    [base],
-  )
-  // Only the figure this grid draws: each of the lens's other readings is a
-  // search of the error log a minute, for a tile nobody sees.
-  const readings = useLensReadings(errors?.source ?? "", lensFor(errors?.lens), {
-    forcedLens: errors?.lens,
-    enabled: Boolean(errors),
-    only: UPSTREAM,
-  })
-  const upstream = readings.tiles.find((t) => t.reading.id === "upstream")
-
-  const summary = hour.data?.status === "available" ? hour.data.summary : undefined
-  const buckets = summary?.buckets ?? []
-  const count = (klass: StatusClass) => summary?.classes[klass] ?? 0
-  const probes = (summary?.probes ?? []).reduce((n, facet) => n + facet.count, 0)
-  const only = (klass: StatusClass) => requestsOn && classes.length === 1 && classes[0] === klass
-  const tile = "h-full transition-colors group-hover:bg-row-hover"
-
-  return (
-    <StatGrid columns={upstream ? 4 : 3} dense>
-      <StatButton label="Show every request" onClick={() => onRequests([])}>
-        <StatTile
-          className={tile}
-          label="Requests"
-          value={
-            summary
-              ? summary.perMinute.toLocaleString(undefined, {
-                  maximumFractionDigits: summary.perMinute < 10 ? 2 : 0,
-                })
-              : "—"
-          }
-          trailing={summary ? "per minute" : undefined}
-          trend={
-            <TileTrend
-              values={buckets.map((bucket) => bucket.total)}
-              label="Requests over the last hour"
-            />
-          }
-          hint={
-            summary
-              ? `${plural(summary.pages, "page view")} in the last hour`
-              : (hour.data?.reason && "No request record") || undefined
-          }
-        />
-      </StatButton>
-      <StatButton
-        label={only("5xx") ? "Show every request again" : "Show the requests that failed"}
-        pressed={only("5xx")}
-        onClick={() => onRequests(only("5xx") ? [] : ["5xx"])}
-      >
-        <StatTile
-          className={tile}
-          label="Server errors"
-          value={summary ? count("5xx").toLocaleString() : "—"}
-          trailing={summary ? "in 1h" : undefined}
-          tone={count("5xx") > 0 ? "danger" : "default"}
-          trend={
-            count("5xx") > 0 ? (
-              <TileTrend
-                values={buckets.map((bucket) => bucket.counts["5xx"] ?? 0)}
-                color="var(--chart-3)"
-                label="Server errors over the last hour"
-              />
-            ) : undefined
-          }
-          hint={
-            summary
-              ? summary.total > 0
-                ? `${(summary.errorRate * 100).toFixed(1)}% of ${summary.total.toLocaleString()} answered 5xx`
-                : "Nothing asked in the last hour"
-              : undefined
-          }
-        />
-      </StatButton>
-      <StatButton
-        label={only("4xx") ? "Show every request again" : "Show the requests refused"}
-        pressed={only("4xx")}
-        onClick={() => onRequests(only("4xx") ? [] : ["4xx"])}
-      >
-        <StatTile
-          className={tile}
-          label="Refused"
-          value={summary ? count("4xx").toLocaleString() : "—"}
-          trailing={summary ? "in 1h" : undefined}
-          tone={count("4xx") > 0 ? "warning" : "default"}
-          hint={
-            summary
-              ? probes > 0
-                ? `${plural(probes, "probe")} for missing files`
-                : "Not found, not allowed"
-              : undefined
-          }
-        />
-      </StatButton>
-      {upstream && (
-        <ReadingTile
-          tile={upstream}
-          window={readings.window}
-          pressed={upstreamOn}
-          onPick={onUpstream}
-        />
-      )}
-    </StatGrid>
-  )
+function useDayCount(errors: SiteErrorLog | undefined): number | undefined {
+  const counted = errors && (!errors.shared || narrowed(errors)) ? errors : undefined
+  const certificates = counted ? certificateFields(counted) : undefined
+  const all = useFailures(counted, counted?.fields, 1, "event")
+  const certified = useFailures(counted, certificates, 1)
+  if (!all.data) return undefined
+  return all.data.res.matched + (certified.data?.res.matched ?? 0)
 }
-
-/** The one reading the site's grid draws of its error log. */
-const UPSTREAM = ["upstream"]
 
 /**
  * What in the error log is about one request's site: Caddy records the host
@@ -428,9 +310,8 @@ export function FailedRequestLines({
 /**
  * The kinds of failure the Errors view counts: the lens's own quick views
  * that name events — nginx's Upstream, Rate limited, TLS, Config; Caddy's
- * Upstream and Certificates — so its chips are the words the Insights and
- * the Fields popover already use, and the Upstream failures figure above
- * lands on the chip that counts the same four events.
+ * Upstream and Certificates — so its chips are the words the Log files'
+ * quick views and the Fields popover already use.
  */
 function failureKinds(lensId: string): { id: string; label: string; events: string[] }[] {
   return (lensFor(lensId)?.views ?? []).flatMap((view) => {
@@ -438,6 +319,19 @@ function failureKinds(lensId: string): { id: string; label: string; events: stri
     if (view.levels || view.q || keys.length !== 1 || keys[0] !== "event") return []
     return [{ id: view.id, label: view.label, events: view.fields!.event }]
   })
+}
+
+/**
+ * What narrows Caddy's log to this site's certificate lines, where it is
+ * Caddy's: those lines name the domain rather than the host a request asked
+ * for, so the kind that counts them is narrowed by that instead — and asked
+ * on its own, since one search cannot ask for either.
+ */
+function certificateFields(errors: SiteErrorLog): LogFields | undefined {
+  const certificates = errors.certificates
+    ? failureKinds(errors.lens).find((k) => k.id === "certificates")
+    : undefined
+  return certificates && { ...errors.certificates, event: certificates.events }
 }
 
 /**
@@ -451,7 +345,7 @@ function failureKinds(lensId: string): { id: string; label: string; events: stri
  * closed the one the reader had opened. Live is where fresh lines arrive.
  */
 function useFailures(
-  errors: SiteErrorLog,
+  errors: SiteErrorLog | undefined,
   fields: LogFields | undefined,
   limit: number,
   facets?: string,
@@ -463,8 +357,8 @@ function useFailures(
       const res = await get<LogSearchResult>(
         "/logs/search",
         {
-          source: errors.source,
-          lens: errors.lens,
+          source: errors!.source,
+          lens: errors!.lens,
           since: iso(since),
           facets,
           limit,
@@ -475,8 +369,8 @@ function useFailures(
       return { res, since, until }
     },
     0,
-    [errors.source, errors.lens, JSON.stringify(fields), limit, facets],
-    { enabled: fields !== undefined },
+    [errors?.source, errors?.lens, JSON.stringify(fields), limit, facets],
+    { enabled: errors !== undefined && fields !== undefined },
   )
 }
 
@@ -504,33 +398,27 @@ function byTime(a: LogLine[], b: LogLine[]): LogLine[] {
  * a line opened in place asks it too.
  */
 function SiteErrors({
-  ctx,
   errors,
   engine,
   kind,
   onKindChange,
+  onOpenHistory,
 }: {
-  ctx: ServiceLogsContext
   errors: SiteErrorLog
   engine: string
   kind: string
   onKindChange: (kind: string) => void
+  /** The log files' History over a window, narrowed as the lines here are. */
+  onOpenHistory: (window: LogWindow) => void
 }) {
   const kinds = useMemo(() => failureKinds(errors.lens), [errors.lens])
   const chosen = kinds.find((k) => k.id === kind)
-  // Caddy's certificate lines name the domain rather than the host a request
-  // asked for, so the kind that counts them is narrowed by that instead —
-  // and asked on its own, since one search cannot ask for either.
   const certificates = errors.certificates ? kinds.find((k) => k.id === "certificates") : undefined
-  const certificateFields = certificates && {
-    ...errors.certificates,
-    event: certificates.events,
-  }
   const kindFields =
     chosen && chosen !== certificates ? { ...errors.fields, event: chosen.events } : undefined
 
   const all = useFailures(errors, errors.fields, chosen ? 1 : ERRORS_LIMIT, "event")
-  const certified = useFailures(errors, certificateFields, ERRORS_LIMIT)
+  const certified = useFailures(errors, certificateFields(errors), ERRORS_LIMIT)
   const picked = useFailures(errors, kindFields, ERRORS_LIMIT)
 
   const allRes = all.data?.res
@@ -583,7 +471,8 @@ function SiteErrors({
 
   const narrowedTo: LogFields = chosen ? { event: chosen.events } : {}
   const openHistory = (fields: LogFields = narrowedTo) =>
-    ctx.openHistory({
+    onOpenHistory({
+      label: "Errors in the last day",
       since: iso(reading.data?.since ?? Date.now() - ERRORS_WINDOW),
       until: iso(reading.data?.until ?? Date.now()),
       levels: FAILURES,
