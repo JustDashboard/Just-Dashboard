@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { health, json, mockHost } from "./host-fixture"
+import { mockHost } from "./host-fixture"
 
 const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
 test.use({ video: recordWorkspace ? "on" : "off" })
@@ -52,8 +52,8 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByText("Last hour", { exact: true })).toBeVisible()
   await expect(page.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
 
-  // Nothing draws a frame but the Interfaces table (§2): the readings, the
-  // charts and the findings are all on the page's own ground.
+  // Nothing draws a frame but the Interfaces table (§2): the readings and the
+  // charts are all on the page's own ground.
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
   // What the machine is made of is the first visible row, and no sentence
@@ -63,8 +63,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByText("Click a chart to pin a moment")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Metrics shortcuts" })).toBeVisible()
 
-  // The verdict's findings are a plain list, and the failed deploy is a moment.
-  await expect(page.getByText("/ is filling up")).toBeVisible()
+  // The failed deploy is a moment.
   await expect(page.getByText("api deploy failed")).toBeVisible()
 
   // Top processes from the process table, ordered by CPU by default.
@@ -256,42 +255,7 @@ test("workspace: a pinned moment has readings, adjacent samples and a precise lo
   await expect(page.getByRole("link", { name: "Logs around this moment" })).toHaveCount(0)
 })
 
-test("connections are charted by how they fared and a network finding cites its probes", async ({
-  page,
-}) => {
-  await page.route("**/api/v1/system/health", (route) =>
-    json(route, {
-      ...health,
-      findings: [
-        ...health.findings,
-        {
-          id: "tcp:retransmits",
-          level: "warning",
-          title: "Connections are resending a lot",
-          detail: "6,000 of 100,000 segments sent in the last minute were retransmissions (6.0%)",
-          advice: "TCP resends what was not acknowledged.",
-          metric: "tcpRetrans",
-          value: 6,
-          threshold: 5,
-          area: "network",
-          evidence: [
-            { label: "Retransmitted", value: "6,000" },
-            { label: "Probes in trouble", value: "1 in 30m" },
-          ],
-          correlated: [
-            {
-              id: "run-ping-1",
-              name: "ping upstream",
-              tool: "ping",
-              target: "198.51.100.1",
-              outcome: "timed_out",
-              endedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-            },
-          ],
-        },
-      ],
-    }),
-  )
+test("connections are charted by how they fared", async ({ page }) => {
   await page.goto("/metrics")
   await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
   const panel = (title: string) =>
@@ -302,16 +266,4 @@ test("connections are charted by how they fared and a network finding cites its 
   const reading = panel("Resent segments").locator("[data-slot=panel-header]")
   await expect(reading).toContainText("0.25%")
   await expect(reading).toContainText("38 ms")
-
-  await page
-    .getByRole("button", { name: "Fix: Connections are resending a lot", exact: true })
-    .click()
-  const sheet = page.getByRole("dialog", { name: "Connections are resending a lot", exact: true })
-  const probes = sheet.getByLabel("Probes in the same stretch")
-  await expect(probes).toContainText("ping 198.51.100.1")
-  await expect(probes).toContainText("timed out")
-  await expect(probes.getByRole("link", { name: "ping upstream" })).toHaveAttribute(
-    "href",
-    "/network/runs?run=run-ping-1",
-  )
 })

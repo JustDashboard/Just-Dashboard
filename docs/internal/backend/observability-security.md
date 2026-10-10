@@ -1,6 +1,6 @@
 # Observability, host security, and packages
 
-## Metrics, saturation, health
+## Metrics and saturation
 
 The frontend can pin a shared chart instant, inspect adjacent samples and link to the surrounding
 journal History window. Audit/Security filters and package inspectors also preserve URL questions,
@@ -68,97 +68,18 @@ Each of the snapshot's `net` rows carries a `kind`
 metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
 running a dozen containers otherwise lists thirty interfaces with the uplink among them.
 
-`metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
-worst-first. It runs on the server because the thresholds are a claim the product makes, and because
-the CPU steal check uses an hour of recorded history where available. **A finding is only raised for
-a condition that is costing the machine something now**; occupancy that costs nothing is a reading,
-and a list padded with readings teaches the operator to ignore it. So:
-
-- **Pressure is judged on the minute and five-minute averages together** (`sysinfo.ReadPressure`
-  parses `avg10`, `avg60` and `avg300`; the recorder keeps sampling `avg10`). CPU warns at 25% of the
-  minute with 15% of the five, and is critical at 60/40; memory warns at 10/5 and is critical at 40%
-  of the minute or 10% *full* (every task stalled at once); storage warns at 30/20 and is critical at
-  25% full with 25% of the five. A ten-second spike — a build finishing — is not a finding.
-- **Load and I/O wait stand in only where PSI is missing.** Load counts tasks blocked on a disk as
-  well as tasks waiting for a core, so beside pressure readings it told one problem twice.
-- **Memory is judged on available, never on "used"**: Linux counts page cache there. Tight memory
-  (≤10% available) escalates to critical when swap is also ≥90% full, because there is no headroom
-  left anywhere. **Swap occupancy alone is never a finding**: full swap beside free memory is idle
-  pages. Only on a kernel without PSI does swap ≥80% beside ≤20% available stand in for thrashing.
-- **Packet loss is judged over a window, never on since-boot counters.** The recorder keeps each
-  physical and tunnel interface's counters in memory between checks; a window closes once its
-  baseline is a minute old, its verdict stands until the next one closes, counters that go backwards
-  or a baseline older than ten minutes start a fresh window, and the first check after a start has
-  none ("measuring"). A physical link warns at ≥100 drops that are ≥1% of the window's packets, and
-  at ≥10 errors (`neterr:<iface>`); a tunnel is a notice at ≥500 drops and ≥5%. Docker's veths and
-  bridges are not judged — the host's own links carry the same traffic.
-- **Connections are judged by TCP's own counters, over the same windows.** `sysinfo.ReadTCPCounters`
-  reads `/proc/net/snmp` and `/proc/net/netstat` (TCP's MIB is shared by both families) and the
-  collector turns them into per-second rates; `ReadTCPLatency` asks `sock_diag` (`NETLINK_INET_DIAG`,
-  `INET_DIAG_INFO`) for every established socket's `tcpi_rtt` and keeps the median and 90th
-  percentile of those whose peer is off this host's networks (loopback, link-local, RFC 1918 and ULA
-  peers are left out; the tailnet's 100.64/10 is kept). It sends nothing and says "none" when nothing
-  is connected. `metrics.tcpWatch` differences the counters like `linkWatch`: resent segments warn
-  at ≥5% of a window's segments with ≥1,000 resent and are a notice at ≥2% with ≥200
-  (`tcp:retransmits`); ≥10 accept-queue drops warn (`tcp:listen-drops`); failed attempts are a notice
-  at ≥50 that are ≥20% of the window's opens (`tcp:attempt-fails`), since half-open scans count
-  there too. Latency is a notice (`tcp:latency`) only when the median is ≥150 ms and ≥3× the mean of
-  the hour's recorded medians over at least ten buckets. The network area's summary adds the
-  window's resent share and the median RTT.
-- The recorder keeps the rates and the RTT in additive nullable columns (`tcp_out_segs`,
-  `tcp_retrans`, `tcp_attempt_fails`, `tcp_estab_resets`, `tcp_listen_drops`, `tcp_rtt_ms`,
-  `tcp_rtt_p90_ms`), so an hour from before they were sampled reads as unmeasured, not as clean.
-  `Range` returns the bucket's resent share (`retransPct`, from the summed rates) with the worst
-  sample's as its peak, failed attempts and accept drops with peaks, and the mean median RTT with
-  the highest 90th percentile as its peak; the metrics page charts them as Resent segments,
-  Connection RTT and Failed connections. They are recorded, not streamed.
-- **Probes are correlated, not inferred.** For an administrator, `handleSystemHealth` lists the saved
-  diagnostic runs and `metrics.CorrelateProbes` attaches those that ended in the last half hour with
-  an outcome other than completed, cancelled, interrupted, unsupported or denied (up to five, newest
-  first) to every network finding as `correlated`, with a "Probes in trouble" fact. With no network
-  finding and two or more such runs, a notice (`probes:beyond-host`) says the trouble is likely past
-  this host. Saved runs name their targets, so a reader without `system.admin` gets the verdict
-  without them. The advisor sheet links each to `/network/runs?run=<id>`.
-- File handles are judged only against a real ceiling (80% of `max`), and a sensor only against its
-  own thresholds — critical past `critical`, warning past `high`, nothing where the driver reports
-  neither.
-
-Each finding carries its `area` (cpu, memory, storage, network, services, containers, hardware), its
-`evidence` — the two to four measurements behind the verdict, already worded — and, where a remedy
-acts on named things, its `subjects`: the mount, the interface, each failed unit or each container.
-The response's `areas` is one verdict per area, always all seven in that order, each the worst
-finding in it or `ok`, with a few words of current reading ("23% stalled", "6.5 GB free", "/ at 78%");
-an area whose evidence could not be read is `unknown` rather than passing. `Health.Settle` derives the
-area statuses and the host verdict from the findings, so the badge, the coverage and the list cannot
-disagree.
-
-The handler also reads service and container runtime concurrently with a four-second bound. Failed
-units become one `systemd.failed` finding whose subjects carry each unit's description, its last
-`Result` (`exit-code`, `oom-kill`, `start-limit-hit`…) and when it failed — `Systemd.DescribeFailed`
-reads those in one `systemctl show` over the failed units, which `List` leaves empty for speed.
-Unhealthy, dead, restarting and paused containers are grouped by state with each container's id as a
-subject. Exited one-shot containers are not assumed failed. Overview, Metrics and the top bar use this
-same response; the browser no longer folds its own additional verdict. Missing managers, unread
-container checks and missing PSI appear in `silences`; a virtual machine's missing temperature sensors
-do not — there is nothing to read, so the hardware area says "no sensors" instead. A clean partial
-assessment names its missing evidence instead of claiming every check passed. Initial and subsequent
-failed Health reads stay visible on Overview and Metrics; Try again refreshes the mounted Health
-consumers.
-
-`HealthPanel` draws the response in three layers on Overview and Metrics alike. The `areas` are a
-strip of the release path's segments — green, amber, red, dashed where unread, sweeping while a
-manual check is in flight — each with its summary, so a clean host reads as checked rather than empty.
-Critical and warning findings are lit cards on their level's wash carrying the figure they were judged
-on against the line it crossed and how long the condition has held; notices fold under one line.
-Each card opens the [local server advisor](server-advisor.md): the diagnosis with the server's
-`evidence`, then the fix. Storage investigation is requested only when opened, and copy hashing is an
-explicit extra read. CPU, memory, swap, disk I/O and handle findings open grouped process attribution
-with group controls; failed services and containers are fixed in the sheet from their `subjects`;
-network findings distinguish observed deltas from since-boot counters; steal and sensor findings
-state the provider or hardware remedy. Successful controls dispatch `jd:health-changed` so all mounted
-health polls refresh, and a finding fixed from the sheet that is gone from the next verdict stays on
-the list as *Resolved* for a minute and a half.
-
+The recorder also keeps how connections fared. `sysinfo.ReadTCPCounters` reads `/proc/net/snmp`
+and `/proc/net/netstat` (TCP's MIB is shared by both families) and the collector turns them into
+per-second rates; `ReadTCPLatency` asks `sock_diag` (`NETLINK_INET_DIAG`, `INET_DIAG_INFO`) for every
+established socket's `tcpi_rtt` and keeps the median and 90th percentile of those whose peer is off
+this host's networks (loopback, link-local, RFC 1918 and ULA peers are left out; the tailnet's
+100.64/10 is kept). It sends nothing. The rates and the RTT live in additive nullable columns
+(`tcp_out_segs`, `tcp_retrans`, `tcp_attempt_fails`, `tcp_estab_resets`, `tcp_listen_drops`,
+`tcp_rtt_ms`, `tcp_rtt_p90_ms`), so an hour from before they were sampled reads as unmeasured, not as
+clean. `Range` returns the bucket's resent share (`retransPct`) with the worst sample's as its peak,
+failed attempts and accept drops with peaks, and the mean median RTT with the highest 90th percentile
+as its peak; the metrics page charts them as Resent segments, Connection RTT and Failed connections.
+They are recorded and charted; with Health removed, nothing judges them into findings.
 `metrics.Events` (`GET /system/metrics/events`) is the annotation layer, answered from `deploy_runs`,
 `backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. Reboots need no
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
@@ -215,7 +136,7 @@ readable at `read`, as it was before the gate** — narrowing it to sshd is what
 reader without the capability can find those lines in the unfiltered journal; that is a known gap, not
 the boundary.
 
-`netsec.Assess` (`GET /security/posture`) is to security what `metrics.Assess` is to load: every panel
+`netsec.Assess` (`GET /security/posture`) takes a position on security: every panel
 in this class shows facts and leaves the reading to somebody who already knows how; the ones that take a
 position sell a score out of a hundred, which is a number to optimise rather than a thing to fix.
 

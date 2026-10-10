@@ -2,7 +2,7 @@ import type { Page, Route } from "@playwright/test"
 
 /**
  * One mocked host — its identity, a live snapshot, an hour of recorded
- * history with one spike in it, storage, processes and a health verdict —
+ * history with one spike in it, storage and processes —
  * shared by the pages that describe the machine: the Overview and Metrics.
  */
 
@@ -339,40 +339,6 @@ export const processes = [
   ioWriteRate: 2048,
 }))
 
-export const health = {
-  status: "warning",
-  findings: [
-    {
-      id: "disk:/",
-      level: "warning",
-      title: "/ is filling up",
-      detail: "87% used — 10.4 GB free",
-      advice: "Scan the mount from the Filesystems panel to see what is taking the space.",
-      metric: "disk",
-      value: 87,
-      threshold: 85,
-      area: "storage",
-      evidence: [
-        { label: "Used", value: "87%" },
-        { label: "Free", value: "10.4 GB" },
-        { label: "Size", value: "80.0 GB" },
-      ],
-      subjects: [{ kind: "mount", id: "/", name: "/" }],
-    },
-  ],
-  checkedAt: iso(now),
-  recorded: true,
-  areas: [
-    { id: "cpu", status: "ok", summary: "4% stalled" },
-    { id: "memory", status: "ok", summary: "8.2 GB free" },
-    { id: "storage", status: "warning", summary: "/ at 87%" },
-    { id: "network", status: "ok", summary: "no drops" },
-    { id: "services", status: "ok", summary: "none failed" },
-    { id: "containers", status: "ok", summary: "12 running" },
-    { id: "hardware", status: "ok", summary: "no sensors · handles 3%" },
-  ],
-}
-
 export async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -398,7 +364,6 @@ export async function mockHost(page: Page) {
     if (path === "/auth/session") return json(route, user)
     if (path === "/system/host") return json(route, host)
     if (path === "/system/metrics") return json(route, snapshot)
-    if (path === "/system/health") return json(route, health)
     if (path === "/system/metrics/history") {
       const w = windowOf(url)
       // The prior window is quieter, so the tiles have a delta to show.

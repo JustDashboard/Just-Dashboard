@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -16,13 +15,11 @@ import (
 
 func (s *Server) mountSystemRoutes(r chi.Router) {
 	r.Route("/system", func(r chi.Router) {
-		s.mountAdvisorRoutes(r)
 		r.Method(http.MethodGet, "/host", s.handle(s.handleSystemHost))
 		r.Method(http.MethodGet, "/metrics", s.handle(s.handleSystemMetrics))
 		r.Method(http.MethodGet, "/metrics/history", s.handle(s.handleMetricsHistory))
 		r.Method(http.MethodGet, "/metrics/storage", s.handle(s.handleStorageHistory))
 		r.Method(http.MethodGet, "/metrics/events", s.handle(s.handleMetricsEvents))
-		r.Method(http.MethodGet, "/health", s.handle(s.handleSystemHealth))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDiskBreakdown))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
 	})
@@ -113,49 +110,6 @@ func (s *Server) handleMetricsEvents(w http.ResponseWriter, r *http.Request) err
 	}
 	httpx.JSON(w, http.StatusOK, events)
 	return nil
-}
-
-// handleSystemHealth turns the numbers into a verdict.
-//
-// Evaluated on the server rather than in the browser for two reasons: the
-// thresholds are a claim the product is making and belong with the code that
-// records the data, and the checks that look at an hour of history would
-// otherwise mean shipping an hour of history to every client that wants a
-// badge in the top bar.
-func (s *Server) handleSystemHealth(w http.ResponseWriter, r *http.Request) error {
-	snap, err := s.modules.sys.Collect(r.Context())
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	health := s.runtimeHealth(r.Context(), s.modules.metrics.Assess(r.Context(), snap), snap)
-	s.correlateProbes(r, &health)
-	httpx.JSON(w, http.StatusOK, health)
-	return nil
-}
-
-// correlateProbes cites the saved diagnostic runs of the last half hour
-// beside the network verdict. Saved runs name their targets and are an
-// administrator's to read, so a reader without the capability gets the
-// verdict without them.
-func (s *Server) correlateProbes(r *http.Request, health *metrics.Health) {
-	if s.modules.diagnostics == nil || !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
-		return
-	}
-	runs, err := s.modules.diagnostics.List(r.Context())
-	if err != nil {
-		return
-	}
-	evidence := make([]metrics.ProbeEvidence, 0, len(runs))
-	for _, run := range runs {
-		if run.EndedAt == nil {
-			continue
-		}
-		evidence = append(evidence, metrics.ProbeEvidence{
-			ID: run.ID, Name: run.Name, Tool: run.Request.Tool, Target: run.Request.Target,
-			Outcome: run.Outcome, EndedAt: *run.EndedAt,
-		})
-	}
-	metrics.CorrelateProbes(health, evidence, time.Now())
 }
 
 // historyWindow reads the window every history endpoint accepts, so the host

@@ -1,14 +1,11 @@
 "use client"
 
 import { Fragment } from "react"
-import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ChevronRight, Cpu, GridSquare, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { percent } from "@/lib/format"
 import { useMetrics } from "@/hooks/use-metrics"
-import { useHealth } from "@/hooks/use-metrics-history"
-import { HealthVerdict } from "@/components/metrics/health-panel"
 import { navLocation } from "@/components/nav"
 import { useCommandPalette } from "@/components/command-palette"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -77,25 +74,12 @@ export function TopBar() {
  */
 function Vitals() {
   const { snapshot, connection } = useMetrics()
-  // Polled slowly and shared by every page through the shell, so the verdict
-  // follows you around rather than living only on Overview. A server that
-  // started filling its disk while you were reading logs should say so from
-  // wherever you are.
-  const { health } = useHealth()
   const live = connection === "open"
 
   const steal = snapshot?.cpu.modes?.steal ?? 0
 
   return (
     <div className="mr-1 flex items-center gap-3">
-      {health && (health.status !== "ok" || !!health.silences?.length) && (
-        // Only when there is something to say. A permanent green badge in the
-        // chrome is a badge nobody looks at, which makes it useless on the day
-        // it turns red.
-        <Link href="/" aria-label="Health findings" className="hidden items-center sm:flex">
-          <HealthVerdict partial={!!health.silences?.length} status={health.status} />
-        </Link>
-      )}
       {snapshot && (
         <div className="hidden items-center gap-3 md:flex">
           <Reading

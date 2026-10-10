@@ -1,92 +1,108 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useSessionState } from "@/lib/view-state"
-import Link from "next/link"
-import {
-  Code,
-  FolderOpen,
-  FolderPlus,
-  Layers,
-  MoreHorizontal,
-  Play,
-  Terminal,
-  Warning,
-} from "@/components/icons"
+import { Cross, FolderPlus, Layers, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
-import type { ComposeService, ComposeStack } from "@/lib/types"
+import { plural } from "@/lib/format"
+import { useSessionState } from "@/lib/view-state"
+import type {
+  ComposeStack,
+  Container,
+  ContainerSparkline,
+  ContainerStats,
+  DockerEventFeed,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status, StatusDot } from "@/components/status-dot"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { SearchInput } from "@/components/page"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { ProductLogos, imageProducts } from "@/components/product-logo"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { useMetrics } from "@/hooks/use-metrics"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { useSocket, type Envelope } from "@/hooks/use-socket"
+import { useConfirm } from "@/components/confirm-dialog"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { StreamState } from "@/components/overview/readings"
+import { Page, PageContext, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { cn } from "@/lib/utils"
-import { PortLink } from "@/components/docker/shared"
-import { StackSummary, stackTone } from "@/components/docker/stack-state"
 import { ExplainIcon, Field, Term } from "@/components/docker/explain"
+import { useContainerControl } from "@/components/docker/container-actions"
+import { StackBand } from "@/components/docker/stack-band"
+import { StackRows } from "@/components/docker/stack-table"
+import {
+  exitCode,
+  stackChanges,
+  stackLines,
+  type StackBucket,
+  type StackLine,
+} from "@/components/docker/stack-readings"
 import { Modal } from "@/components/modal"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+
+/** The state chips, in the order they are asked about; the toned one only while there is one. */
+const STATES: { value: StackBucket; label: string; dot: string; title: string }[] = [
+  { value: "running", label: "Running", dot: "bg-success", title: "Up, and nothing to act on" },
+  {
+    value: "attention",
+    label: "Needs attention",
+    dot: "bg-warning",
+    title: "A service down or failing its check, or a container the file no longer declares",
+  },
+  {
+    value: "stopped",
+    label: "Stopped",
+    dot: "bg-muted-foreground/50",
+    title: "Deployed, nothing running",
+  },
+  {
+    value: "undeployed",
+    label: "Not deployed",
+    dot: "bg-muted-foreground/30",
+    title: "A compose file with no containers",
+  },
+]
+
+const BUCKETS = new Set<string>(STATES.map((s) => s.value))
 
 /**
- * The stack list, which is a way in rather than the whole feature.
+ * Every compose stack on the server, what each is using, and what just
+ * happened to them.
  *
- * Everything a stack can do moved into its own panel, because a card with six
- * buttons on it is a card nobody reads and there was nowhere to put the compose
- * file, the merged logs, or the output of the command you just ran. What is
- * left here is the question the list should answer at a glance: which
- * applications exist, are they up, and where do I reach them.
+ * It opened on a title and a list of cards, each a stack's name over its
+ * services as a line of 6px dots — a page nothing on which moved, where
+ * "is the database up" was a dot and "which application is using the
+ * memory" had no answer at all. It now reads as Services does (§15):
  *
- * It is one panel of rows rather than a grid of bordered cards. A stack is a
- * row in a list — name, state, the services under it — and a phone is where
- * somebody checks whether the thing they just deployed is alive. The search box
- * and the state chips are the same pair the containers page opens with, because
- * "which of these is down" is the same question asked of the same server.
+ * The server first, as the identity line Services and Live open on — the
+ * Compose mark, Docker's version, how many stacks are deployed and how many
+ * of their services run, how many ports they publish — with the verdict at
+ * its right end: the stacks that need attention, which narrows the table to
+ * them, or that nothing does.
+ *
+ * Then `StackBand`: the stacks using the most processor and memory as spans
+ * of one bar the size of the machine, summed over each one's containers from
+ * the containers socket, and the last things Docker did to them — a start, an
+ * exit and its code, a kill for memory, a failed check.
+ *
+ * Then the table, which is the stacks with their containers under them
+ * (`stack-table.tsx`): each stack a row with its state and its sums, each
+ * container a row of the containers page's own readings. The state chips in
+ * its head count *and* narrow, Needs attention in its tone and first in the
+ * table as it always was. A container's state moves the moment Docker's does,
+ * because it is read off the socket, and the stack list is read again when
+ * one does so a stack's own state follows within the second.
  */
-
-type StateFilter = "all" | "running" | "stopped" | "attention"
-
-const FILTER_LABEL: Record<StateFilter, string> = {
-  all: "All",
-  running: "Running",
-  stopped: "Not running",
-  attention: "Needs attention",
-}
-
-/** A stack the dashboard has something to act on: a bad service or a leftover. */
-function needsAttention(stack: ComposeStack) {
-  return (
-    stack.orphans.length > 0 ||
-    stack.services.some((s) => s.health === "unhealthy") ||
-    stack.state === "degraded" ||
-    stack.state === "partial"
-  )
-}
-
-export function StacksTab({
-  creating: externalCreating,
-  onCreatingChange,
-  actions,
-}: {
-  creating?: boolean
-  onCreatingChange?: (open: boolean) => void
-  actions?: React.ReactNode
-}) {
+export function StacksTab() {
   const { can } = useAuth()
   const router = useRouter()
+  const { confirm, dialog } = useConfirm()
+  const { host, snapshot } = useMetrics()
+  const wide = useMediaQuery("(min-width: 1280px)")
 
   /*
     `?stack=` opened a sheet on this page until 2026-09-21, and a container
@@ -97,352 +113,438 @@ export function StacksTab({
   useEffect(() => {
     if (legacy) router.replace(`/docker/stacks/${encodeURIComponent(legacy)}`)
   }, [legacy, router])
-  const [internalCreating, setInternalCreating] = useState(false)
-  const creating = externalCreating ?? internalCreating
-  const setCreating = onCreatingChange ?? setInternalCreating
-  const [filter, setFilter] = useSessionState("docker.stacks.query", "")
-  const [state, setState] = useSessionState<StateFilter>("docker.stacks.state", "all")
 
-  const { data, error, loading, refresh } = usePoll(
+  const [creating, setCreating] = useState(false)
+  const [query, setQuery] = useSessionState("docker.stacks.query", "")
+  const [remembered, setState] = useSessionState("docker.stacks.state", "")
+  // The chips were All / Running / Not running / Needs attention until the
+  // overhaul; a remembered "all" or "stopped" is no filter now.
+  const state = (BUCKETS.has(remembered) ? remembered : "") as StackBucket | ""
+  const [focus, setFocus] = useState("")
+  const [collapsed, setCollapsed] = useSessionState<string[]>("docker.stacks.collapsed", [])
+  const [deploying, setDeploying] = useState<Record<string, string>>({})
+
+  const list = usePoll(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
-    15000,
+    15_000,
+  )
+  const engine = usePoll(
+    (signal) =>
+      get<{ available: boolean; serverVersion?: string }>("/docker/ping", undefined, signal),
+    60_000,
+  )
+  const feed = usePoll(
+    (signal) => get<DockerEventFeed>("/docker/events", { limit: 200 }, signal),
+    15_000,
+  )
+  // The hour behind each container's figure. A host with the recorder off
+  // answers 503, and the rows simply draw no line.
+  const trends = usePoll<ContainerSparkline[]>(
+    (signal) =>
+      get<ContainerSparkline[]>(
+        "/docker/containers/stats/history",
+        { range: "1h", points: 40 },
+        signal,
+      ),
+    120_000,
+    [],
+  )
+  const trendByName = useMemo(
+    () => new Map((trends.data ?? []).map((line) => [line.name, line])),
+    [trends.data],
   )
 
-  const stacks = useMemo(() => data ?? [], [data])
-
-  const counts = useMemo(
-    () => ({
-      all: stacks.length,
-      running: stacks.filter((s) => s.running > 0).length,
-      stopped: stacks.filter((s) => s.running === 0).length,
-      attention: stacks.filter(needsAttention).length,
-    }),
-    [stacks],
+  const [containers, setContainers] = useState<Container[]>([])
+  const [stats, setStats] = useState<Record<string, ContainerStats>>({})
+  const refreshStacks = list.refresh
+  const signature = useRef("")
+  const onMessage = useCallback(
+    (envelope: Envelope) => {
+      if (envelope.type === "containers") {
+        const next = envelope.data as Container[]
+        setContainers(next)
+        // A stack's own state is the list's to say; read it again the moment
+        // a container's changes rather than up to fifteen seconds later.
+        const changed = next.map((c) => `${c.id}:${c.state}:${c.health ?? ""}`).join(",")
+        if (signature.current && signature.current !== changed) refreshStacks()
+        signature.current = changed
+      } else if (envelope.type === "stats") {
+        const rows = envelope.data as ContainerStats[]
+        setStats(Object.fromEntries(rows.map((r) => [r.id, r])))
+      }
+    },
+    [refreshStacks],
   )
+  const socket = useSocket("/docker/containers/stream", { onMessage })
+  const { pending, act } = useContainerControl(list.refresh)
+
+  const stacks = useMemo(() => list.data ?? [], [list.data])
+  const lines = useMemo(() => stackLines(stacks, containers, stats), [stacks, containers, stats])
+  const changes = useMemo(() => stackChanges(feed.data?.events ?? []), [feed.data])
+
+  const counts = useMemo(() => {
+    const bucket: Record<StackBucket, number> = {
+      attention: 0,
+      running: 0,
+      stopped: 0,
+      undeployed: 0,
+    }
+    for (const line of lines) bucket[line.bucket]++
+    return bucket
+  }, [lines])
 
   const visible = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
-    return stacks.filter((stack) => {
-      if (state === "running" && stack.running === 0) return false
-      if (state === "stopped" && stack.running > 0) return false
-      if (state === "attention" && !needsAttention(stack)) return false
-      if (!needle) return true
-      return (
-        stack.name.toLowerCase().includes(needle) ||
-        stack.services.some(
-          (s) => s.name.toLowerCase().includes(needle) || s.image.toLowerCase().includes(needle),
-        )
+    const needle = query.trim().toLowerCase()
+    return lines.flatMap((line): StackLine[] => {
+      if (state && line.bucket !== state) return []
+      if (focus && line.stack.name !== focus) return []
+      if (!needle || line.stack.name.toLowerCase().includes(needle)) return [line]
+      // A service's name or image narrows the stack to that service.
+      const matching = line.lines.filter(
+        (s) =>
+          s.service.name.toLowerCase().includes(needle) ||
+          s.service.image.toLowerCase().includes(needle),
       )
+      return matching.length > 0 ? [{ ...line, lines: matching }] : []
     })
-  }, [stacks, filter, state])
+  }, [lines, query, state, focus])
 
-  const newStack = can("system.admin") && can("file.write") && (
+  const toggleState = (next: StackBucket) => setState(state === next ? "" : next)
+  const toggleCollapsed = (stack: string) =>
+    setCollapsed(
+      collapsed.includes(stack) ? collapsed.filter((s) => s !== stack) : [...collapsed, stack],
+    )
+  const openStack = (stack: string) => router.push(`/docker/stacks/${encodeURIComponent(stack)}`)
+  const openContainer = (id: string, tab?: string) =>
+    router.push(
+      `/docker/containers/${encodeURIComponent(id)}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`,
+    )
+
+  // An application that is down and should not be is the one thing worth
+  // doing from the list; the rest needs the stack's page, where the output
+  // is and a deploy can be previewed before it runs.
+  const deploy = async (name: string) => {
+    setDeploying((d) => ({ ...d, [name]: "Deploying" }))
+    try {
+      await post(`/docker/stacks/${encodeURIComponent(name)}/up`)
+      notify.success(`${name} deployed`)
+      list.refresh()
+    } catch (err) {
+      notify.error(`Could not deploy ${name}`, err)
+    } finally {
+      setDeploying((d) => {
+        const next = { ...d }
+        delete next[name]
+        return next
+      })
+    }
+  }
+
+  const refreshAll = () => {
+    list.refresh()
+    feed.refresh()
+  }
+
+  const canCreate = can("system.admin") && can("file.write")
+  const createButton = canCreate && (
     <Button size="sm" onClick={() => setCreating(true)}>
       <FolderPlus className="size-4" />
       Create stack
     </Button>
   )
-
-  const filtered = filter.trim().length > 0 || state !== "all"
-  const hasRows = !loading && !error && visible.length > 0
-
-  return (
-    <div className="space-y-4">
-      {/* Plain: the list is the page. */}
-      <Panel plain>
-        <PanelHeader
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              Stacks
-              <ExplainIcon name="stack" />
-            </span>
-          }
-          actions={actions}
-        />
-
-        {stacks.length > 0 && (
-          <PanelToolbar>
-            <SearchInput
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name, service or image"
-            />
-            <div className="flex min-w-0 flex-wrap gap-1">
-              {(["all", "running", "stopped", "attention"] as const).map((key) =>
-                key === "all" || counts[key] > 0 ? (
-                  <FilterChip
-                    key={key}
-                    selected={state === key}
-                    onClick={() => setState(key)}
-                    className={
-                      key === "attention" && counts.attention > 0
-                        ? "text-warning hover:text-warning"
-                        : undefined
-                    }
-                  >
-                    {FILTER_LABEL[key]}
-                    <ChipCount>{counts[key]}</ChipCount>
-                  </FilterChip>
-                ) : null,
-              )}
-            </div>
-          </PanelToolbar>
-        )}
-
-        <PanelBody flush={hasRows}>
-          {loading && !data ? (
-            <LoadingRows rows={3} />
-          ) : error ? (
-            <ErrorState error={error} />
-          ) : stacks.length === 0 ? (
-            <EmptyState
-              icon={Layers}
-              title="No compose stacks found"
-              description={
-                <>
-                  A <Term name="stack">stack</Term> is a directory with a compose file in it. The
-                  dashboard finds them by the labels compose puts on the containers it creates, and
-                  by looking under the configured compose directories.
-                </>
-              }
-              action={newStack}
-            />
-          ) : visible.length === 0 ? (
-            <EmptyState
-              icon={Warning}
-              title="Nothing matches those filters"
-              description="Clear the filter, or look under a different state."
-              action={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setFilter("")
-                    setState("all")
-                  }}
-                >
-                  Clear filters
-                </Button>
-              }
-            />
-          ) : (
-            <ChoiceList aria-label="Stacks" className="animate-rise">
-              {visible.map((stack) => (
-                <StackRow
-                  key={stack.name}
-                  stack={stack}
-                  onOpen={() => router.push(`/docker/stacks/${encodeURIComponent(stack.name)}`)}
-                  onChanged={refresh}
-                />
-              ))}
-            </ChoiceList>
-          )}
-          {/* The filters narrowed everything away to nothing rather than the
-              server having nothing to show; the count is the difference. */}
-          {filtered && !loading && !error && visible.length > 0 && (
-            <p className="border-t border-hairline py-2 text-hint text-muted-foreground">
-              {visible.length} of {stacks.length} stacks.
-            </p>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <NewStackDialog
-        open={creating && can("system.admin") && can("file.write")}
-        onOpenChange={setCreating}
-        onCreated={(name) => {
-          refresh()
-          router.push(`/docker/stacks/${encodeURIComponent(name)}`)
-        }}
-      />
-    </div>
+  const header = <PageContext eyebrow="Docker" title="Stacks" />
+  const newStackDialog = (
+    <NewStackDialog
+      open={creating && canCreate}
+      onOpenChange={setCreating}
+      onCreated={(name) => {
+        list.refresh()
+        openStack(name)
+      }}
+    />
   )
-}
 
-/**
- * One stack, as a card that opens it.
- *
- * The mark is what the stack is made of: the products of its services' images,
- * overlapping, so a stack of Postgres, Redis and an API reads as those three
- * before its name does. A stack with no image anybody makes a logo for is drawn
- * as Compose, which is at least true of every one of them.
- *
- * The service list under the name is the load-bearing part: a stack is an
- * application made of several containers, and "which of its parts is not
- * running" is what the card exists to answer. Each service keeps its dot, its
- * name, its ports and its health, and the ports are still links, so a phone
- * can reach the thing without opening anything.
- */
-function StackRow({
-  stack,
-  onOpen,
-  onChanged,
-}: {
-  stack: ComposeStack
-  onOpen: () => void
-  onChanged: () => void
-}) {
-  const { can } = useAuth()
-  const [busy, setBusy] = useState(false)
-  const unhealthy = stack.services.filter((s) => s.health === "unhealthy").length
-  const canDeploy =
-    can("system.admin") && can("service.control") && stack.managed && stack.state !== "running"
-  const images = stack.services.map((service) => service.image).filter(Boolean)
-  const products = images.length > 0 ? imageProducts(images) : ["docker-compose"]
-
-  // The one action worth having on the card: an application that is down and
-  // should not be. Everything else needs the stack's page, where the output
-  // is — and where a deploy can be previewed before it runs.
-  const deploy = async () => {
-    setBusy(true)
-    try {
-      await post(`/docker/stacks/${encodeURIComponent(stack.name)}/up`)
-      notify.success(`${stack.name} deployed`)
-      onChanged()
-    } catch (err) {
-      notify.error(`Could not deploy ${stack.name}`, err)
-    } finally {
-      setBusy(false)
-    }
+  if (list.loading && !list.data) {
+    return (
+      <Page>
+        {header}
+        <LoadingPanel />
+      </Page>
+    )
+  }
+  if (list.error && !list.data) {
+    return (
+      <Page>
+        {header}
+        <ErrorState error={list.error} />
+      </Page>
+    )
+  }
+  if (stacks.length === 0) {
+    return (
+      <Page>
+        {header}
+        <EmptyState
+          icon={Layers}
+          title="No compose stacks found"
+          description={
+            <>
+              A <Term name="stack">stack</Term> is a directory with a compose file in it. The
+              dashboard finds them by the labels compose puts on the containers it creates, and by
+              looking under the configured compose directories.
+            </>
+          }
+          action={createButton}
+        />
+        {newStackDialog}
+      </Page>
+    )
   }
 
+  const services = lines.reduce((n, l) => n + l.lines.length, 0)
+  const running = lines.reduce((n, l) => n + l.lines.filter((s) => s.state === "running").length, 0)
+  const deployed = stacks.filter((s) => s.deployed).length
+  const published = lines.reduce(
+    (n, l) =>
+      n +
+      l.lines.reduce(
+        (m, s) =>
+          m + (s.state === "running" ? s.service.ports.filter((p) => p.publicPort).length : 0),
+        0,
+      ),
+    0,
+  )
+  // Red when one of them has a service failing its check or one that exited
+  // on an error; amber for the rest — a part stopped, a leftover running.
+  const failing = lines.some(
+    (l) =>
+      l.bucket === "attention" &&
+      l.lines.some(
+        (s) =>
+          s.health === "unhealthy" ||
+          (s.state !== "running" &&
+            !s.service.missing &&
+            (exitCode(s.container?.status ?? s.service.status) ?? 0) !== 0),
+      ),
+  )
+  const shown = visible.reduce((n, l) => n + l.lines.length, 0)
+  const filtered = query.trim().length > 0 || state !== "" || focus !== ""
+
   return (
-    <ChoiceRow
-      verb={stack.name}
-      onSelect={onOpen}
-      className={cn(busy && "opacity-70")}
-      leading={<ProductLogos ids={products} ring="ring-choice-surface" />}
-      title={
-        <span className="flex min-w-0 items-center gap-2">
-          <StatusDot tone={stackTone(stack.state)} live={stack.state === "running"} />
-          <span className="truncate">{stack.name}</span>
-          {unhealthy > 0 && <Status verdict="critical" label={`${unhealthy} unhealthy`} />}
-        </span>
-      }
-      description={<StackSummary stack={stack} />}
-      actions={
-        <span className="flex shrink-0 items-center gap-1" aria-busy={busy ? true : undefined}>
-          {canDeploy && (
-            <Button size="sm" onClick={deploy} pending={busy}>
-              <Play className="size-3.5" />
-              Deploy
-            </Button>
-          )}
-          <StackRowMenu stack={stack} onOpen={onOpen} />
-        </span>
-      }
+    <Workspace
+      name="Stacks"
+      refresh={refreshAll}
+      escape={() => {
+        if (query) {
+          setQuery("")
+          return true
+        }
+        if (focus) {
+          setFocus("")
+          return true
+        }
+        if (state) {
+          setState("")
+          return true
+        }
+        return false
+      }}
+      commands={[
+        {
+          id: "attention",
+          label: state === "attention" ? "Show every stack" : "Show stacks that need attention",
+          run: () => toggleState("attention"),
+        },
+      ]}
     >
-      {(stack.services.length > 0 || stack.orphans.length > 0 || !stack.managed) && (
-        <div className="min-w-0 space-y-1.5">
-          {stack.services.length > 0 && (
-            <ul className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              {stack.services.map((service) => (
-                <ServiceMarker key={service.container || service.name} service={service} />
-              ))}
-            </ul>
-          )}
+      <Page className="animate-rise">
+        {header}
 
-          {stack.orphans.length > 0 && (
-            <p className="flex items-start gap-1.5 text-hint text-warning">
-              <Warning className="mt-0.5 size-3 shrink-0" />
-              <span>
-                {stack.orphans.join(", ")} {stack.orphans.length === 1 ? "is" : "are"} running under
-                this project name and no longer in the compose file. A deploy removes{" "}
-                {stack.orphans.length === 1 ? "it" : "them"}.
+        <HostIdentity
+          mark="docker-compose"
+          fallback={Layers}
+          title={host?.hostname ?? "Stacks"}
+          facts={
+            <>
+              {engine.data?.serverVersion && (
+                <>
+                  <HostFact product="docker">Docker {engine.data.serverVersion}</HostFact>
+                  <FactDot />
+                </>
+              )}
+              <span className="numeric">
+                {deployed} of {plural(stacks.length, "stack")} deployed
               </span>
-            </p>
-          )}
+              <FactDot />
+              <span className="numeric">
+                {running} of {plural(services, "service")} running
+              </span>
+              {published > 0 && (
+                <>
+                  <FactDot />
+                  <span className="numeric">{plural(published, "port")} published</span>
+                </>
+              )}
+            </>
+          }
+          aside={
+            <div className="flex flex-wrap items-center gap-3">
+              {counts.attention > 0 ? (
+                <button
+                  type="button"
+                  aria-pressed={state === "attention"}
+                  onClick={() => toggleState("attention")}
+                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+                >
+                  <Status
+                    tone={failing ? "danger" : "warning"}
+                    label={`${plural(counts.attention, "stack")} need${counts.attention === 1 ? "s" : ""} attention`}
+                  />
+                </button>
+              ) : counts.running > 0 ? (
+                <Status tone="running" label="Nothing needs attention" />
+              ) : (
+                <Status tone="stopped" label="Nothing running" />
+              )}
+              <WorkspaceHelp compact />
+            </div>
+          }
+        />
 
-          {!stack.managed && (
-            <p className="text-hint text-muted-foreground">
-              No compose file reachable from this dashboard, so this stack is read-only here.
-            </p>
-          )}
-        </div>
-      )}
-    </ChoiceRow>
-  )
-}
+        <StackBand
+          lines={lines}
+          snapshot={snapshot}
+          changes={changes}
+          listening={feed.data?.listening ?? true}
+          selected={focus}
+          onSelect={setFocus}
+          onOpen={openStack}
+        />
 
-/** One service of a stack: its dot, its name, its health and where it answers. */
-function ServiceMarker({ service }: { service: ComposeService }) {
-  const ports = service.ports.filter((p) => p.publicPort)
-  return (
-    // Everything on one centred baseline: the port tags and the "defined" mark
-    // are taller than the text beside them, and without a shared line-height
-    // the row reads as bumpy.
-    <li className="inline-flex min-w-0 items-center gap-1.5 text-hint leading-5">
-      <StatusDot state={service.missing ? "unknown" : service.state} />
-      <span className={cn("truncate leading-5", service.missing && "text-muted-foreground")}>
-        {service.name}
-      </span>
-      {service.health && service.health !== "healthy" && (
-        <span
-          className={cn(
-            "shrink-0 leading-5 capitalize",
-            service.health === "unhealthy" ? "text-destructive" : "text-warning",
-          )}
-        >
-          {service.health}
-        </span>
-      )}
-      {service.missing ? (
-        <Tag>defined</Tag>
-      ) : (
-        <span className="inline-flex items-center gap-1">
-          {ports.slice(0, 2).map((p, i) => (
-            <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
-          ))}
-        </span>
-      )}
-    </li>
-  )
-}
+        {/* Framed, because it is a table: the grid owns a scroll region and
+            the edge is what says so (§2). Everything above it stays plain. */}
+        <Panel>
+          <PanelHeader
+            title={
+              <span className="inline-flex items-center gap-1.5">
+                Stacks
+                <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
+                  {stacks.length}
+                </span>
+                <ExplainIcon name="stack" />
+              </span>
+            }
+            actions={
+              <>
+                <StreamState connection={socket.state} />
+                {createButton}
+              </>
+            }
+          >
+            <ChipStrip aria-label="State" className="mr-auto">
+              {STATES.map(({ value, label, dot, title }) => {
+                const count = counts[value]
+                if (value !== "running" && count === 0 && state !== value) return null
+                const attention = value === "attention"
+                return (
+                  <FilterChip
+                    key={value}
+                    selected={state === value}
+                    title={title}
+                    onClick={() => toggleState(value)}
+                  >
+                    <span aria-hidden className={cn("size-1.5 rounded-full", dot)} />
+                    {label}
+                    <ChipCount className={cn(attention && "text-warning opacity-100")}>
+                      {count}
+                    </ChipCount>
+                  </FilterChip>
+                )
+              })}
+            </ChipStrip>
+          </PanelHeader>
+          <PanelToolbar>
+            <SearchInput
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Stack, service or image"
+              containerClassName="sm:w-64"
+            />
+            {focus && (
+              <FilterChip
+                selected
+                aria-label={`Showing ${focus}; press to show every stack`}
+                onClick={() => setFocus("")}
+              >
+                {focus}
+                <Cross aria-hidden className="size-3" />
+              </FilterChip>
+            )}
+            {state && (
+              <FilterChip
+                selected
+                className="ml-auto"
+                aria-label="Show stacks in every state"
+                onClick={() => setState("")}
+              >
+                {STATES.find((s) => s.value === state)?.label}
+                <Cross aria-hidden className="size-3" />
+              </FilterChip>
+            )}
+          </PanelToolbar>
+          <PanelBody flush>
+            {visible.length === 0 ? (
+              <EmptyState
+                icon={Warning}
+                title="Nothing matches those filters"
+                description="Clear the search, or look under a different state."
+                className="my-4"
+                action={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setQuery("")
+                      setFocus("")
+                      setState("")
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <StackRows
+                lines={visible}
+                wide={wide}
+                pending={pending}
+                confirm={confirm}
+                act={act}
+                trends={trendByName}
+                deploying={deploying}
+                collapsed={collapsed}
+                onToggle={toggleCollapsed}
+                onOpenStack={openStack}
+                onOpenContainer={openContainer}
+                onDeploy={(name) => void deploy(name)}
+              />
+            )}
+          </PanelBody>
+          <PanelFooter className="text-hint text-muted-foreground">
+            <span className="numeric">
+              {filtered
+                ? `${plural(visible.length, "stack")} of ${stacks.length} · ${plural(shown, "container")}`
+                : `${plural(stacks.length, "stack")} · ${plural(services, "container")}`}
+            </span>
+            <span className="text-muted-foreground/40">·</span>
+            <span>needs attention first, then by name</span>
+          </PanelFooter>
+        </Panel>
 
-/** The row's overflow: the things that are navigation rather than an action. */
-function StackRowMenu({ stack, onOpen }: { stack: ComposeStack; onOpen: () => void }) {
-  const { can } = useAuth()
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label="More actions"
-          onClick={(event) => event.stopPropagation()}
-          className="[&_svg:not([class*='size-'])]:size-3.5"
-        >
-          <MoreHorizontal />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem
-          onSelect={(event) => {
-            event.preventDefault()
-            onOpen()
-          }}
-        >
-          <Code className="size-3.5" />
-          View
-        </DropdownMenuItem>
-        {stack.workingDir && (
-          <DropdownMenuItem asChild>
-            <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>
-              <FolderOpen className="size-3.5" />
-              Files
-            </Link>
-          </DropdownMenuItem>
-        )}
-        {stack.workingDir && can("terminal") && (
-          <DropdownMenuItem asChild>
-            <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>
-              <Terminal className="size-3.5" />
-              Open shell
-            </Link>
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        {newStackDialog}
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 

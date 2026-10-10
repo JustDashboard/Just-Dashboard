@@ -487,20 +487,16 @@ deploy pages use for the repository a project deploys.
 - **GitLab and Gitea** use the separate `forgex` REST adapter and encrypted per-checkout account setup,
   described in [`git-workspace-expansion.md`](git-workspace-expansion.md#provider-accounts).
 
-## Local workload attribution
+## Measured process readings
 
-`GET /system/advisor/workloads?sort=cpu|memory|swap|io|handles` takes two native snapshots so a cold
-advisor does not rely on another browser warming the process table. CPU is a delta of user+system
-CPU seconds over measured wall time (100% = one core), rather than a lifetime average. Both CPU and
-I/O counters are keyed by PID and creation time, with explicit readiness; new, replaced or
-unreadable counters cannot masquerade as a measured idle process. CPU counter resets also start a new
-interval instead of reporting an idle process. Details share the sampler under its
-mutex, while concurrent full snapshots share the expensive read and receive independent rows.
+CPU is a delta of user+system CPU seconds over measured wall time (100% = one core), rather than a
+lifetime average. Both CPU and I/O counters are keyed by PID and creation time, with explicit
+readiness; new, replaced or unreadable counters cannot masquerade as a measured idle process. CPU
+counter resets also start a new interval instead of reporting an idle process. Details share the
+sampler under its mutex, while concurrent full snapshots share the expensive read and receive
+independent rows.
 
 Resident and swapped bytes come from the process memory read (`statm`, and `VmSwap` from `status`,
-since gopsutil's Linux memory read leaves swap at zero). Handle investigation counts descriptors
-on at most 4096 processes and returns the top 20 with partial/unavailable evidence. Descriptor counts
-are not equivalent to the host's open-file-description count. The advisor reuses the process detail,
-owner deep links, admin priority route and destructive signal route; selected controls include the
-creation timestamp, confirmation and refresh. A supervisor may respawn a signalled child, so its owner
-controls remain available. See [server advisor](server-advisor.md) for bounds and Linux verification.
+since gopsutil's Linux memory read leaves swap at zero). Nice is reported on the −20…19 scale the
+priority route takes: gopsutil returns `getpriority(2)`'s raw value, which is 20 minus the nice
+value, and read as-is every ordinary process was "nice 20" and could not be lowered.

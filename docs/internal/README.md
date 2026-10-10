@@ -55,9 +55,7 @@ strategy, and feature ownership behind those rules.
   telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
-- [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, health (TCP
-  windows and correlated probes), exposure, posture, login history, sshd and its pending apply,
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, posture, login history, sshd and its pending apply,
   firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
   and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
@@ -107,6 +105,11 @@ strategy, and feature ownership behind those rules.
 - [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
   — scored networking feature map, current implementation gaps, official competitor research and
   prioritized proposals from single-host recovery through an optional future network fabric.
+- [`../audits/2026-10-08-docker-networks-overhaul/README.md`](../audits/2026-10-08-docker-networks-overhaul/README.md)
+  — the Docker Networks page's band, address pool, two tables and live sheet, with before/after
+  screenshots.
+- [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
+  — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
 
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
@@ -119,6 +122,10 @@ strategy, and feature ownership behind those rules.
 
 - [`../audits/2026-10-07-packages-overhaul/README.md`](../audits/2026-10-07-packages-overhaul/README.md)
   — Packages' software-size band, update queue, catalogue and single-scroll inspector, with screenshots.
+
+- [`../audits/2026-10-08-docker-images-overhaul/README.md`](../audits/2026-10-08-docker-images-overhaul/README.md)
+  — Docker Images' disk and registry band, the image table and sheet, two reclaim and pull defects
+  fixed, with before/after screenshots.
 
 - [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
   select/menu inventory, single-column option layout, opening behavior and verification coverage.

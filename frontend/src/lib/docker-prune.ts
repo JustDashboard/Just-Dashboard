@@ -75,6 +75,20 @@ export function pruneNetworks() {
   return post<PruneReport>("/docker/networks/prune")
 }
 
+/**
+ * Images alone, tagged ones included. The sweep reaches stopped containers and
+ * networks as well, so a Reclaim beside the Images line that ran it removed
+ * containers its confirmation never named.
+ */
+export function pruneImages() {
+  return post<PruneReport>("/docker/images/prune", undefined, { query: { all: "true" } })
+}
+
+/** BuildKit's cache alone, for the same reason. */
+export function pruneBuildCache() {
+  return post<PruneReport>("/docker/build-cache/prune")
+}
+
 export function pruneSummary(reports: PruneReport[]): {
   reclaimed: number
   message: string

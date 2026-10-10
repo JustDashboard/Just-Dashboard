@@ -593,14 +593,15 @@ export function InterfacesPanel({
 /**
  * In and out as one bar against the busiest interface, in the network chart's
  * two colours: the uplink is the long bar, and which way its traffic runs is
- * the split of it.
+ * the split of it. A container's interfaces are drawn the same way on its
+ * Usage tab, so it takes only the two rates.
  */
-function TrafficBar({
+export function TrafficBar({
   iface,
   busiest,
   colors,
 }: {
-  iface: NetStats
+  iface: Pick<NetStats, "recvRate" | "sendRate">
   busiest: number
   colors: { in: string; out: string }
 }) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -192,6 +193,27 @@ type Volume struct {
 	Size       int64             `json:"size"`
 	RefCount   int64             `json:"refCount"`
 	InUse      bool              `json:"inUse"`
+	// MountType names what a local volume's driver options mount — nfs, cifs,
+	// bind — and is empty for a plain one. Docker's prune never touches a
+	// volume that has options, so the list says which have them for the page
+	// to name exactly what a prune would take. The options themselves stay on
+	// the inspect route: a CIFS `o=` carries the share's password.
+	MountType string `json:"mountType,omitempty"`
+}
+
+// optionMount reads a local volume's driver options as the kind of thing they
+// mount, or "" when there are none.
+func optionMount(options map[string]string) string {
+	if len(options) == 0 {
+		return ""
+	}
+	if strings.Contains(","+options["o"]+",", ",bind,") {
+		return "bind"
+	}
+	if t := options["type"]; t != "" && t != "none" {
+		return t
+	}
+	return "custom"
 }
 
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
@@ -224,6 +246,7 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		vol := Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			MountType: optionMount(v.Options),
 		}
 		if vol.Labels == nil {
 			vol.Labels = map[string]string{}
@@ -318,6 +341,38 @@ type Network struct {
 	// Owner is who created the network, by its labels. The API sets it,
 	// since telling the dashboard's own project needs its data directory.
 	Owner *NetworkOwner `json:"owner,omitempty"`
+	// Gateway is the address the containers on it route through: the host's
+	// own end of the bridge.
+	Gateway string `json:"gateway,omitempty"`
+	// Endpoints is each attached container's place on the network — the
+	// address the others reach it at — so a page can draw who is where for
+	// every network at once. The listing that joins UsedBy carries it for
+	// free; an inspect per network would be a round trip per row.
+	Endpoints []NetworkEndpoint `json:"endpoints,omitempty"`
+}
+
+// NetworkEndpoint is one container's address on one network, as the container
+// listing reports it. The listing leaves aliases out, so the names it answers
+// to beyond its own are NetworkDetail's to say.
+type NetworkEndpoint struct {
+	Container string `json:"container"`
+	Name      string `json:"name"`
+	IPv4      string `json:"ipv4,omitempty"`
+	IPv6      string `json:"ipv6,omitempty"`
+	MAC       string `json:"mac,omitempty"`
+}
+
+// endpointOf is a listing's endpoint as the address the others reach it at,
+// with its prefix, which is how a network's own inspect writes it.
+func endpointOf(ep *network.EndpointSettings) NetworkEndpoint {
+	out := NetworkEndpoint{MAC: ep.MacAddress}
+	if ep.IPAddress != "" {
+		out.IPv4 = fmt.Sprintf("%s/%d", ep.IPAddress, ep.IPPrefixLen)
+	}
+	if ep.GlobalIPv6Address != "" {
+		out.IPv6 = fmt.Sprintf("%s/%d", ep.GlobalIPv6Address, ep.GlobalIPv6PrefixLen)
+	}
+	return out
 }
 
 func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
@@ -341,15 +396,22 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 	// with the container listing, the same way its mounts do for the volumes
 	// view. An inspect per network would be one round trip per row.
 	members := map[string][]string{}
+	endpoints := map[string][]NetworkEndpoint{}
 	containers, membersErr := c.listContainerSummaries(ctx, container.ListOptions{All: true})
 	if membersErr == nil {
 		for _, ct := range containers {
 			for _, name := range ct.Networks {
 				members[name] = append(members[name], ct.Name)
+				ep := ct.Endpoints[name]
+				ep.Container, ep.Name = ct.ID, ct.Name
+				endpoints[name] = append(endpoints[name], ep)
 			}
 		}
 		for name := range members {
 			sort.Strings(members[name])
+			sort.Slice(endpoints[name], func(i, j int) bool {
+				return endpoints[name][i].Name < endpoints[name][j].Name
+			})
 		}
 	}
 	out := make([]Network, 0, len(items))
@@ -358,7 +420,7 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 			ID: n.ID, Name: n.Name, Driver: n.Driver, Scope: n.Scope,
 			Internal: n.Internal, Attachable: n.Attachable, IPv6: n.EnableIPv6,
 			Created: n.Created.UTC(), Labels: n.Labels, Subnets: []string{},
-			UsedBy:       members[n.Name],
+			UsedBy: members[n.Name], Endpoints: endpoints[n.Name],
 			MembersKnown: membersErr == nil,
 		}
 		if membersErr != nil {
@@ -375,6 +437,9 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 		for _, cfg := range n.IPAM.Config {
 			if cfg.Subnet != "" {
 				nw.Subnets = append(nw.Subnets, cfg.Subnet)
+			}
+			if cfg.Gateway != "" && nw.Gateway == "" {
+				nw.Gateway = cfg.Gateway
 			}
 		}
 		out = append(out, nw)

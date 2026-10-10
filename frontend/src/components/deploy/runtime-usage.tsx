@@ -81,7 +81,11 @@ const formatCount = (v: number) => Math.round(v).toLocaleString()
  *
  * `initial` is a polled reading shown until the first frame lands; `onStats`
  * hands each frame on so the service's card shows the figure the charts do.
- * `picker` chooses the service when there is more than one.
+ * `picker` chooses the service when there is more than one. `running` is false
+ * for a container that is not running — a container's own page draws one —
+ * whose socket would only ever wait: it is not opened, the charts open on the
+ * recorded hour, and the readings say it is not running rather than show the
+ * last frame an earlier visit left behind.
  */
 export function RuntimeUsage({
   containerId,
@@ -90,22 +94,26 @@ export function RuntimeUsage({
   picker,
   events: projectEvents,
   onStats,
+  running = true,
 }: {
   containerId: string
   name: string
   initial?: ContainerStats
   picker?: React.ReactNode
-  /** This project's own moments (`releaseEvents`). */
+  /** This project's own moments (`releaseEvents`), or a container's own (`usageMarkers`). */
   events: MetricEvent[]
   onStats?: (stats: ContainerStats) => void
+  running?: boolean
 }) {
-  const feed = useContainerLive(containerId, onStats)
-  const stats = feed.stats ?? (initial?.id === containerId ? initial : undefined)
+  const feed = useContainerLive(running ? containerId : undefined, onStats)
+  const stats = running
+    ? (feed.stats ?? (initial?.id === containerId ? initial : undefined))
+    : undefined
   const buckets = useMemo(() => bucketLive(feed.rows), [feed.rows])
-  const usage = useContainerUsage(containerId, {
-    rows: buckets,
-    memoryLimit: stats?.memLimited ? stats.memLimit : 0,
-  })
+  const usage = useContainerUsage(
+    containerId,
+    running ? { rows: buckets, memoryLimit: stats?.memLimited ? stats.memLimit : 0 } : undefined,
+  )
   const { rows, limit, streaming, history, controls } = usage
   const scales = useContainerScales(rows, limit, streaming)
   const hostEvents = usage.events
@@ -125,13 +133,15 @@ export function RuntimeUsage({
     }
   }, [rows, pidsLimit])
 
-  const label = feed.live
-    ? "Live"
-    : feed.stale
-      ? "Readings stale"
-      : feed.state === "open"
-        ? "Waiting for Docker"
-        : "Connecting"
+  const label = !running
+    ? "Not running"
+    : feed.live
+      ? "Live"
+      : feed.stale
+        ? "Readings stale"
+        : feed.state === "open"
+          ? "Waiting for Docker"
+          : "Connecting"
   const disabled =
     usage.error instanceof ApiError && usage.error.code === "metrics_history_disabled"
   const note = streaming
@@ -152,13 +162,19 @@ export function RuntimeUsage({
   const fallback = initial?.id === containerId ? initial : undefined
   const readings = useMemo(
     () => ({
-      cpu: <Now containerId={containerId} initial={fallback} render={cpuNow} />,
-      memory: <Now containerId={containerId} initial={fallback} render={memoryNow} />,
-      network: <Now containerId={containerId} initial={fallback} render={networkNow} />,
-      disk: <Now containerId={containerId} initial={fallback} render={diskNow} />,
-      processes: <Now containerId={containerId} initial={fallback} render={processesNow} />,
+      cpu: <Now containerId={containerId} initial={fallback} off={!running} render={cpuNow} />,
+      memory: (
+        <Now containerId={containerId} initial={fallback} off={!running} render={memoryNow} />
+      ),
+      network: (
+        <Now containerId={containerId} initial={fallback} off={!running} render={networkNow} />
+      ),
+      disk: <Now containerId={containerId} initial={fallback} off={!running} render={diskNow} />,
+      processes: (
+        <Now containerId={containerId} initial={fallback} off={!running} render={processesNow} />
+      ),
     }),
-    [containerId, fallback],
+    [containerId, fallback, running],
   )
 
   return (
@@ -168,8 +184,8 @@ export function RuntimeUsage({
         actions={
           <>
             <Status
-              tone={feed.live ? "running" : "notice"}
-              live={feed.live}
+              tone={!running ? "stopped" : feed.live ? "running" : "notice"}
+              live={running && feed.live}
               label={label}
               className="mr-2"
             />
@@ -278,7 +294,7 @@ export function RuntimeUsage({
                 note={note}
                 height={150}
               />
-              <Lifetime stats={stats} />
+              <Lifetime stats={stats} running={running} />
             </div>
 
             <p className="text-hint text-muted-foreground">
@@ -297,14 +313,17 @@ export function RuntimeUsage({
 function Now({
   containerId,
   initial,
+  off,
   render,
 }: {
   containerId: string
   initial?: ContainerStats
+  /** Not running: whatever frame is held is an earlier visit's, not now. */
+  off?: boolean
   render: (stats?: ContainerStats, now?: ContainerRow) => React.ReactNode
 }) {
   const frame = useContainerFrame(containerId)
-  return render(frame.stats ?? initial, frame.now)
+  return off ? render() : render(frame.stats ?? initial, frame.now)
 }
 
 function cpuNow(stats?: ContainerStats) {
@@ -455,7 +474,7 @@ function Reading({
  * about the window on screen, so they stand beside the charts rather than
  * under one of them.
  */
-function Lifetime({ stats }: { stats?: ContainerStats }) {
+function Lifetime({ stats, running = true }: { stats?: ContainerStats; running?: boolean }) {
   const counted = stats?.networkAvailable !== false
   const facts: [string, string][] = stats
     ? [
@@ -493,7 +512,9 @@ function Lifetime({ stats }: { stats?: ContainerStats }) {
           </dl>
         ) : (
           <p className="py-2 text-hint text-muted-foreground">
-            Waiting for Docker&apos;s first reading.
+            {running
+              ? "Waiting for Docker's first reading."
+              : "Not running. Docker counts again from its next start."}
           </p>
         )}
       </PanelBody>

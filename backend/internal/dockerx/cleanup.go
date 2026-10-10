@@ -145,7 +145,7 @@ func (c *Client) PreviewCleanup(ctx context.Context) (*CleanupPreview, error) {
 	// go looking is how somebody prunes a database by accident somewhere else.
 	volumes := CleanupCategory{
 		Key: "volumes", Label: "Volumes attached to nothing", Destroys: true, Examples: []string{},
-		Cost: "This destroys data permanently. A volume outlives the container that made it, so an unattached volume is often the only copy of something — and Docker counts a volume belonging to a merely *stopped* stack as unused.",
+		Cost: "This destroys data permanently. A volume outlives the container that made it, so an unattached volume is often the only copy of something — a stack taken down with `docker compose down` leaves its volumes attached to nothing.",
 	}
 	for _, v := range du.Volumes {
 		if v.UsageData == nil || v.UsageData.RefCount > 0 {

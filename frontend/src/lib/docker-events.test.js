@@ -1,10 +1,17 @@
 import { expect, test } from "bun:test"
 import {
   LAST_LINES,
+  axisTicks,
+  comebacks,
+  containerActivity,
   dedupeEvents,
+  foldBursts,
   foldRestarts,
   healthOf,
   lastLinesSearch,
+  outcomeOf,
+  perSlice,
+  settleAskedExits,
   spanWords,
 } from "./docker-events"
 
@@ -232,4 +239,202 @@ test("a container without a health check has none, rather than an empty one", ()
       State: { Health: { Status: "starting" } },
     }),
   ).toEqual({ status: "starting", failingStreak: 0, test: "curl -f http://localhost", probes: [] })
+})
+
+test("an event's outcome is what it did, not its level alone", () => {
+  expect(outcomeOf(ev(0, "die", { exitCode: "1" }))).toBe("failed")
+  expect(outcomeOf(ev(0, "die", { exitCode: "0" }))).toBe("stopped")
+  expect(outcomeOf(ev(0, "oom"))).toBe("failed")
+  expect(outcomeOf(ev(0, "health_status: unhealthy"))).toBe("unhealthy")
+  expect(outcomeOf(ev(0, "health_status: healthy"))).toBe("healthy")
+  expect(outcomeOf(ev(0, "restart"))).toBe("restarted")
+  expect(outcomeOf(ev(0, "start"))).toBe("started")
+  expect(outcomeOf(ev(0, "kill"))).toBe("stopped")
+  expect(outcomeOf(ev(0, "create"))).toBe("changed")
+  expect(outcomeOf(ev(0, "pull", { type: "image", name: "postgres:16" }))).toBe("changed")
+  // A network joined is bookkeeping, and a "start" on anything but a
+  // container is not a container coming up.
+  expect(outcomeOf(ev(0, "connect", { type: "network", name: "shop_default" }))).toBe("other")
+  expect(outcomeOf(ev(0, "start", { type: "plugin" }))).toBe("other")
+})
+
+test("a container's activity counts its comebacks and its failures once each", () => {
+  const now = base + 120_000
+  const db = [
+    ev(0, "start"),
+    ev(10, "die", { exitCode: "1" }),
+    ev(11, "start"),
+    ev(20, "die", { exitCode: "1" }),
+    ev(22, "start"),
+    ev(40, "die", { exitCode: "1" }),
+    ev(44, "start"),
+  ]
+  const worker = { id: "wk2222222222", name: "worker" }
+  const killed = [
+    ev(5, "start", worker),
+    // The kernel's note and the exit it caused are one failure.
+    ev(30, "oom", worker),
+    ev(30.2, "die", { ...worker, exitCode: "137" }),
+  ]
+  const api = { id: "api333333333", name: "shop-api-1" }
+  // `docker restart` from this dashboard: one comeback, no failure.
+  const restarted = [
+    { ...ev(50, "kill", api), source: "dashboard", trigger: { actor: "wayy" } },
+    ev(50.5, "die", { ...api, exitCode: "0" }),
+    { ...ev(51, "start", api), source: "dashboard", trigger: { actor: "wayy" } },
+    { ...ev(51.1, "restart", api), source: "dashboard", trigger: { actor: "wayy" } },
+  ]
+  const network = ev(60, "connect", { type: "network", name: "shop_default", id: "net" })
+
+  const rows = containerActivity([...db, ...killed, ...restarted, network], now)
+  expect(rows.map((r) => r.name)).toEqual(["shop-db-1", "worker", "shop-api-1"])
+
+  const [dbRow, workerRow, apiRow] = rows
+  expect(dbRow.looping).toBe(true)
+  expect(dbRow.restarts).toBe(3)
+  expect(dbRow.failures).toBe(3)
+  expect(dbRow.last.action).toBe("start")
+
+  expect(workerRow.failures).toBe(1)
+  expect(workerRow.oom).toBe(true)
+  expect(workerRow.lastExit?.exitCode).toBe("137")
+  expect(workerRow.looping).toBe(false)
+
+  expect(apiRow.failures).toBe(0)
+  expect(apiRow.restarts).toBe(1)
+  expect(apiRow.actors).toEqual(["wayy"])
+})
+
+test("a loop that stopped going is no longer looping, and a removed container sinks", () => {
+  const loop = [
+    ev(0, "die", { exitCode: "1" }),
+    ev(1, "start"),
+    ev(10, "die", { exitCode: "1" }),
+    ev(11, "start"),
+  ]
+  const gone = { id: "mig444444444", name: "shop-migrate-1" }
+  const removed = [
+    ev(100, "start", gone),
+    ev(101, "die", { ...gone, exitCode: "2" }),
+    ev(102, "destroy", gone),
+  ]
+  const later = base + 60 * 60_000
+  const rows = containerActivity([...loop, ...removed], later)
+  expect(rows.find((r) => r.name === "shop-db-1")?.looping).toBe(false)
+  const migrate = rows.find((r) => r.name === "shop-migrate-1")
+  expect(migrate?.removed).toBe(true)
+  // Failed and newer, but gone: it does not outrank one that failed and is still here.
+  expect(rows.map((r) => r.name)).toEqual(["shop-db-1", "shop-migrate-1"])
+})
+
+test("events are counted into equal slices of the window, oldest first", () => {
+  const events = [
+    ev(0, "start"),
+    ev(30, "die", { exitCode: "1" }),
+    ev(59, "start"),
+    ev(120, "start"),
+  ]
+  const from = base
+  const to = base + 60_000
+  expect(perSlice(events, from, to, 2)).toEqual([1, 2])
+  expect(perSlice(events, from, to, 2, (e) => e.action === "die")).toEqual([0, 1])
+  expect(perSlice(events, to, from, 3)).toEqual([0, 0, 0])
+})
+
+test("a comeback is a start after an exit, not the first start of a new container", () => {
+  const api = { id: "api333333333", name: "shop-api-1" }
+  const events = [
+    ev(0, "create", api),
+    ev(1, "start", api),
+    ev(5, "die", { ...api, exitCode: "0" }),
+    ev(6, "start", api),
+    ev(7, "start"),
+  ]
+  const back = comebacks(events)
+  expect([...back]).toEqual([events[3]])
+})
+
+test("an axis takes the finest round step that keeps its labels few", () => {
+  const hour = 3_600_000
+  const from = new Date(2026, 9, 8, 9, 7).getTime()
+  const ticks = axisTicks(from, from + hour, 6)
+  // Ten minutes is the finest step that fits an hour in six labels.
+  expect(ticks.map((t) => new Date(t).getMinutes())).toEqual([10, 20, 30, 40, 50, 0])
+  const day = axisTicks(from, from + 24 * hour, 6)
+  expect(day.every((t) => new Date(t).getHours() % 6 === 0 && new Date(t).getMinutes() === 0)).toBe(
+    true,
+  )
+  expect(day.length).toBeLessThanOrEqual(6)
+  expect(axisTicks(from, from)).toEqual([])
+})
+
+test("an exit moments after a kill was asked for, and is not a failure", () => {
+  const api = { id: "api333333333", name: "shop-api-1" }
+  const restarted = [
+    ev(0, "kill", api),
+    ev(0.4, "die", { ...api, exitCode: "143" }),
+    ev(1, "start", api),
+  ]
+  // A crash and an OOM kill have no kill before them.
+  const crashed = [
+    ev(5, "die", { exitCode: "1" }),
+    ev(10, "oom"),
+    ev(10.2, "die", { exitCode: "137" }),
+  ]
+  // A kill long before is not what this exit answered.
+  const later = ev(60, "die", { ...api, exitCode: "1" })
+  const settled = settleAskedExits([...restarted, ...crashed, later])
+  expect(settled.map((e) => `${e.action} ${e.level}`)).toEqual([
+    "kill notice",
+    "die notice",
+    "start notice",
+    "die error",
+    "oom notice",
+    "die error",
+    "die error",
+  ])
+  // Still the status it exited with.
+  expect(settled[1].exitCode).toBe("143")
+  expect(outcomeOf(settled[1])).toBe("stopped")
+  // Nothing to settle is the same array back.
+  expect(settleAskedExits(crashed)).toBe(crashed)
+})
+
+test("a container's events moments apart are one row, titled by what they amount to", () => {
+  const api = { id: "api333333333", name: "shop-api-1" }
+  const restart = [
+    ev(0, "kill", api),
+    ev(0.4, "die", { ...api, exitCode: "0" }),
+    ev(0.6, "stop", api),
+    ev(1.4, "start", api),
+    ev(1.5, "restart", api),
+  ]
+  // A crash the restart policy answered at once: the exit leads.
+  const crash = [ev(30, "die", { exitCode: "1" }), ev(30.3, "start")]
+  const health = ev(31, "health_status: unhealthy")
+  const pull = ev(32, "pull", { type: "image", name: "postgres:16", id: "postgres:16" })
+  const lonely = ev(90, "stop", api)
+  const feed = foldBursts(foldRestarts([...restart, ...crash, health, pull, lonely]))
+  const shape = feed.map((e) =>
+    e.kind === "burst"
+      ? `burst ${e.lead.name} ${e.lead.action} ×${e.events.length}`
+      : e.kind === "loop"
+        ? `loop ${e.name}`
+        : `${e.event.name} ${e.event.action}`,
+  )
+  expect(shape).toEqual([
+    "shop-api-1 stop",
+    "postgres:16 pull",
+    "shop-db-1 health_status: unhealthy",
+    "burst shop-db-1 die ×2",
+    "burst shop-api-1 restart ×5",
+  ])
+  const burst = feed[4]
+  expect(burst.kind === "burst" && burst.events.map((e) => e.action)).toEqual([
+    "restart",
+    "start",
+    "stop",
+    "die",
+    "kill",
+  ])
 })

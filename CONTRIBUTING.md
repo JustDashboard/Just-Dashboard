@@ -73,15 +73,10 @@ to the contribution terms above, including the additional licence grant to the p
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
-- Local server advisor changes also run `scripts/test-server-advisor-linux.sh`, which builds static
-  Go test binaries and checks native filesystem/procfs behavior in Ubuntu 22.04/24.04, Debian 12,
-  Alpine 3.20 and Fedora 42 containers. Containers use no network during tests and share the host
-  kernel; this checks userlands, not every kernel. For live Docker resource/policy acceptance, first
-  make `alpine:3.20` available locally, then run from `backend/`:
+- Docker remedy changes run the live resource/policy acceptance: first make `alpine:3.20` available
+  locally, then run from `backend/`:
   `JD_ADVISOR_DOCKER_LIVE=1 go test ./internal/dockerx -run '^TestLiveAdvisor' -count=1 -v`.
-  It owns and removes its temporary fixtures and does not modify existing workloads. The Linux
-  harness also verifies `/host` against host PID 1 using a read-only host-root bind and an isolated
-  fixture. It never cleans host files during that check; restricted roots remain enforced.
+  It owns and removes its temporary fixtures and does not modify existing workloads.
 - Changes to `internal/netx` that apply devices, routes, the gateway table or shaping also run, from
   `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
   passwordless sudo and does everything inside throwaway network namespaces it removes, never on the

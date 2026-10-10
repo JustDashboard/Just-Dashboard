@@ -3,8 +3,10 @@ package procs
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -298,5 +300,32 @@ func writeProcFile(t *testing.T, root string, pid int, name, content string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The table reports nice on the scale SetNice takes, so a process started
+// at nice 10 reads 10, and an ordinary one 0, not the kernel's raw 20.
+func TestProcessNiceIsReadOnTheSettableScale(t *testing.T) {
+	for _, want := range []int32{0, 10, 19} {
+		cmd := exec.Command("nice", "-n", strconv.Itoa(int(want)), "sleep", "5")
+		if err := cmd.Start(); err != nil {
+			t.Skip("no nice binary:", err)
+		}
+		pid := int32(cmd.Process.Pid)
+		// nice execs sleep after setting the value; wait until it has.
+		deadline := time.Now().Add(2 * time.Second)
+		var got int32
+		for time.Now().Before(deadline) {
+			if row, err := NewTable().Detail(t.Context(), pid); err == nil && strings.HasPrefix(row.Name, "sleep") {
+				got = row.Nice
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		if got != want {
+			t.Fatalf("nice -n %d read as %d", want, got)
+		}
 	}
 }

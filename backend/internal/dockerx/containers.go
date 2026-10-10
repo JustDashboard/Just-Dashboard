@@ -43,6 +43,10 @@ type Container struct {
 	// the alternative is an inspect per container on every poll — sixty round
 	// trips to the socket to draw one table.
 	Mounts []MountPoint `json:"mounts,omitempty"`
+	// Endpoints is the address on each network, keyed as Networks is. Kept
+	// off the wire: the containers socket has never carried addresses, and
+	// the network listing that needs them reads them from here.
+	Endpoints map[string]NetworkEndpoint `json:"-"`
 
 	// Exposure is the port list with its meaning attached: which of these
 	// bindings reach beyond this server and which do not. Computed once here
@@ -163,8 +167,12 @@ func (c *Client) listContainerSummaries(ctx context.Context, options container.L
 			})
 		}
 		if it.NetworkSettings != nil {
-			for name := range it.NetworkSettings.Networks {
+			cn.Endpoints = make(map[string]NetworkEndpoint, len(it.NetworkSettings.Networks))
+			for name, ep := range it.NetworkSettings.Networks {
 				cn.Networks = append(cn.Networks, name)
+				if ep != nil {
+					cn.Endpoints[name] = endpointOf(ep)
+				}
 			}
 			sort.Strings(cn.Networks)
 		}

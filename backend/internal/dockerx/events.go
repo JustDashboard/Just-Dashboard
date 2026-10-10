@@ -46,6 +46,9 @@ type Event struct {
 	// Service is the compose service, which is what a stack's log names a
 	// container by: `db`, where the event's name is `shop-db-1`.
 	Service string `json:"service,omitempty"`
+	// Container is the container a network's connect or disconnect moved.
+	// Docker names only its id there, so the reader joins it to a name.
+	Container string `json:"container,omitempty"`
 	// Message is the event as a sentence. The raw pair — "container", "die" —
 	// is precise and means nothing to somebody who has not read the event
 	// reference, and this is the layer where that gets fixed once rather than
@@ -380,6 +383,9 @@ func convertEvent(msg events.Message) Event {
 		Stack:    attrs[labelProject],
 		Service:  attrs[labelService],
 		ExitCode: attrs["exitCode"],
+	}
+	if ev.Type == "network" {
+		ev.Container = attrs["container"]
 	}
 	for key, value := range attrs {
 		if !strings.HasPrefix(key, ownerLabelPrefix) {

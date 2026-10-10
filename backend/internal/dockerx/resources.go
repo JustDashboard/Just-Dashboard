@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -58,6 +59,7 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) (*Volume, er
 	return &Volume{
 		Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: 0,
+		MountType: optionMount(v.Options),
 	}, nil
 }
 
@@ -76,9 +78,9 @@ func labelsOrEmpty(labels map[string]string) map[string]string {
 type VolumeDetail struct {
 	Volume
 	// UsedBy names the containers mounting it, running or not, with the path
-	// each one sees it at. Docker's own RefCount counts running containers
-	// only, so a volume belonging to a stopped stack reads as unused and is
-	// exactly the one an operator prunes by accident.
+	// each one sees it at. Docker's RefCount says how many and not which, and
+	// it is read from a disk-usage walk that can be missing or cached, while
+	// "which container, at which path" is what decides whether to delete.
 	UsedBy []VolumeUser `json:"usedBy"`
 	// Options and the driver, for the volumes that are not plain local ones.
 	Options map[string]string `json:"options,omitempty"`
@@ -106,6 +108,7 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 		Volume: Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			MountType: optionMount(v.Options),
 		},
 		UsedBy:  []VolumeUser{},
 		Options: v.Options,
@@ -125,8 +128,8 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 		if d.UsedBy == nil {
 			d.UsedBy = []VolumeUser{}
 		}
-		// A stopped container still counts as a user for the purpose of "is
-		// this safe to delete", which is the only question being asked.
+		// A stopped container is a user: Docker refuses to remove the volume
+		// under it and its prune leaves it alone.
 		d.InUse = d.InUse || len(d.UsedBy) > 0
 	}
 	return d, nil
@@ -253,7 +256,6 @@ func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network,
 // answers to.
 type NetworkDetail struct {
 	Network
-	Gateway string            `json:"gateway,omitempty"`
 	Options map[string]string `json:"options,omitempty"`
 	Members []NetworkMember   `json:"members"`
 	// System marks bridge, host and none: the three networks Docker creates
@@ -303,7 +305,6 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 			ID: insp.ID, Name: insp.Name, Driver: insp.Driver, Scope: insp.Scope,
 			Internal: insp.Internal, Attachable: insp.Attachable, IPv6: insp.EnableIPv6,
 			Created: insp.Created.UTC(), Labels: insp.Labels, Subnets: []string{},
-			Containers: len(insp.Containers),
 			// The list view fills UsedBy by joining against the containers;
 			// this route never did, so it went out as `null` and the detail
 			// panel's `usedBy.length` took the page down. Members below carries
@@ -325,12 +326,29 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 	// Aliases and state are not in the network inspect, only in the
 	// container's — which is why this joins rather than reads one endpoint.
 	state := map[string]Container{}
-	if list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true}); err == nil {
+	list, listErr := c.listContainerSummaries(ctx, container.ListOptions{All: true})
+	if listErr == nil {
 		for _, ct := range list {
 			state[ct.ID] = ct
 		}
 	} else {
-		d.MembersError = err.Error()
+		d.MembersError = listErr.Error()
+	}
+	// A member whose own inspect fails is marked unread: its aliases are not
+	// known, which is not the same as having none.
+	aliases := func(m *NetworkMember) {
+		member, err := cli.ContainerInspect(ctx, m.ID)
+		switch {
+		case err != nil:
+			m.Unread = true
+		case member.NetworkSettings != nil:
+			if eps := member.NetworkSettings.Networks[d.Name]; eps != nil {
+				m.Aliases = append(m.Aliases, eps.Aliases...)
+				if m.MAC == "" {
+					m.MAC = eps.MacAddress
+				}
+			}
+		}
 	}
 	for memberID, ep := range insp.Containers {
 		m := NetworkMember{
@@ -348,19 +366,26 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 				}
 			}
 		}
-		member, err := cli.ContainerInspect(ctx, memberID)
-		switch {
-		case err != nil:
-			m.Unread = true
-		case member.NetworkSettings != nil:
-			if eps := member.NetworkSettings.Networks[d.Name]; eps != nil {
-				m.Aliases = append(m.Aliases, eps.Aliases...)
-			}
-		}
+		aliases(&m)
 		d.Members = append(d.Members, m)
 		d.UsedBy = append(d.UsedBy, m.Name)
 	}
+	// The inspect lists endpoints, and a stopped container holds none, so it
+	// is missing there while it still names this network and rejoins it on
+	// start — and Docker will remove a network whose members are all stopped,
+	// leaving them unable to start. The listing has them, without an address.
+	for _, ct := range list {
+		if _, ok := insp.Containers[ct.ID]; ok || !slices.Contains(ct.Networks, d.Name) {
+			continue
+		}
+		m := NetworkMember{ID: ct.ID, Name: ct.Name, Aliases: []string{}, State: ct.State, Stack: ct.ComposeStack}
+		aliases(&m)
+		d.Members = append(d.Members, m)
+		d.UsedBy = append(d.UsedBy, m.Name)
+	}
+	d.Containers = len(d.Members)
 	sort.Slice(d.Members, func(i, j int) bool { return d.Members[i].Name < d.Members[j].Name })
+	sort.Strings(d.UsedBy)
 	return d, nil
 }
 

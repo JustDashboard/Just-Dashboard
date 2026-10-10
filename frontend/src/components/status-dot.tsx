@@ -81,11 +81,10 @@ export function toneFor(state: string | undefined): DotTone {
 }
 
 /**
- * `Health.status` and `Posture.status` are the same shape — a hardened/healthy
- * "ok", ranked up through notice, warning and critical — because they're the
- * same kind of thing: a verdict, not a running state. `VERDICT_TONE` is what
- * lets one indicator answer both without `toneFor`'s state-string guessing,
- * which has no `"critical"` case to guess right.
+ * A verdict, not a running state: `Posture.status` and the other assessments
+ * rank a hardened or healthy "ok" up through notice, warning and critical.
+ * `VERDICT_TONE` lets one indicator answer them without `toneFor`'s
+ * state-string guessing, which has no `"critical"` case to guess right.
  */
 export type Verdict = "ok" | "notice" | "warning" | "critical"
 
