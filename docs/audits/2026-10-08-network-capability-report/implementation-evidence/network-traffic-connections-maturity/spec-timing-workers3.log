@@ -1,0 +1,22 @@
+# 2026-10-10T04:57:40Z workers=3 specs=tests/browser/network-traffic-maturity.spec.ts
+
+Running 15 tests using 3 workers
+
+  ✓   2 [chromium] › tests/browser/network-traffic-maturity.spec.ts:26:5 › the live window says how old its reading is, with packets, TCP resent and round trip (10.4s)
+  ✓   1 [chromium] › tests/browser/network-traffic-maturity.spec.ts:49:5 › a stopped sampler reads as stale, not as a quiet link (11.4s)
+  ✓   3 [chromium] › tests/browser/network-traffic-maturity.spec.ts:58:5 › a typed range reads that window with its percentiles and the incidents in it (12.3s)
+  ✓   6 [chromium] › tests/browser/network-traffic-maturity.spec.ts:149:5 › every container can be listed and one opens into its chart, service and peers (10.4s)
+  ✓   5 [chromium] › tests/browser/network-traffic-maturity.spec.ts:130:5 › programs say what a read could not see and list UDP peers without byte counters (12.2s)
+  ✓   4 [chromium] › tests/browser/network-traffic-maturity.spec.ts:94:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared (19.6s)
+  ✓   7 [chromium] › tests/browser/network-traffic-maturity.spec.ts:176:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree (9.6s)
+  ✓   9 [chromium] › tests/browser/network-traffic-maturity.spec.ts:234:5 › congestion control is compared on live sockets, now and before the last switch (7.3s)
+  ✓   8 [chromium] › tests/browser/network-traffic-maturity.spec.ts:195:5 › an upload profile goes with CAKE and the delay CAKE measured is shown (15.0s)
+  ✓  12 [chromium] › tests/browser/network-traffic-maturity.spec.ts:339:5 › a peer opens into its tuples, ages, closes and the layers it crosses (1.9s)
+  ✓  13 [chromium] › tests/browser/network-traffic-maturity.spec.ts:377:5 › a block asks why and until when, opens an incident, and is listed with its end (2.8s)
+  ✓  14 [chromium] › tests/browser/network-traffic-maturity.spec.ts:445:5 › a past hour is read from the socket history in the live table's shape (1.6s)
+  ✓  10 [chromium] › tests/browser/network-traffic-maturity.spec.ts:248:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked (12.7s)
+  ✓  11 [chromium] › tests/browser/network-traffic-maturity.spec.ts:274:5 › an install is followed by configured, active and verified phases, not by a claim (9.1s)
+  ✓  15 [chromium] › tests/browser/network-traffic-maturity.spec.ts:471:7 › at a phone's width › the traffic and connections additions never scroll sideways (9.0s)
+
+  15 passed (55.0s)
+# exit=0 2026-10-10T04:58:35Z
