@@ -786,7 +786,7 @@ failures report the retained original's parking name.
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
 
-## Actionable findings and storage investigation
+## Actionable Docker findings
 
 Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
 Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
@@ -802,8 +802,7 @@ allowance. Explicit combined limits are kept. Empty, negative and overflowing up
 Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
 keep the running PID and start timestamp.
 
-Host storage investigation and selected cleanup are documented in [server advisor](server-advisor.md).
-An advisor file link opens `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
+A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
 entry already returned by that validated directory listing. An explicit click or deselection overrides
 the URL's initial selection. Paths still pass through the existing file service boundary.
 

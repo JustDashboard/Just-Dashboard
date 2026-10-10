@@ -495,8 +495,8 @@ series.
   width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
   scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
   one, so a failing share is `--chart-3`.
-- `range-picker.tsx`, `health-panel.tsx` — the window control (pan and zoom-out appear only once a window
-  has been dragged) and the verdict.
+- `range-picker.tsx` — the window control (pan and zoom-out appear only once a window has been
+  dragged).
 
 `lib/metrics-crosshair.ts` holds the hovered instant **outside React**, for the reason the live buffer is:
 a pointer crossing a chart fires continuously, and a context above the router would re-render the terminal
