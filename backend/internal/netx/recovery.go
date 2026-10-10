@@ -329,8 +329,16 @@ func (s *Service) installRecoveryBinary(ctx context.Context) error {
 			return err
 		}
 	}
-	if _, err := run(ctx, "systemctl", "enable", unitName); err != nil {
-		return fmt.Errorf("enabling interrupted-change recovery at boot: %w", err)
+	// `systemctl enable` reloads the manager even when the unit is already
+	// enabled, and a reload reruns every generator: Netplan rewrites its
+	// networkd and NetworkManager artifacts, after which networkd's next
+	// reload reconfigures every Netplan link, the uplink included. Enable only
+	// when the WantedBy link is not already in place.
+	wants := filepath.Join(filepath.Dir(s.paths.Unit), "multi-user.target.wants", unitName)
+	if target, err := os.Readlink(wants); err != nil || target != unitPath {
+		if _, err := run(ctx, "systemctl", "enable", unitName); err != nil {
+			return fmt.Errorf("enabling interrupted-change recovery at boot: %w", err)
+		}
 	}
 	s.recoveryInstalled = true
 	return nil
