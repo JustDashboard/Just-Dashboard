@@ -174,10 +174,12 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   ).toHaveAttribute("href", "/proxy/sites/just-dashboard-shop")
   // Worst first: the site proxying an application in plain text is under
   // the attention rule, above the two on TLS.
-  await expect(page.getByText("Needs attention")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Needs attention" })).toBeVisible()
   await expect(cards.first()).toContainText("legacy.example.com")
-  // The four readings sit on the page rather than in a box.
-  await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
+  // What the tiles counted is the identity line's and the chips'.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("3 sites")
+  await expect(page.getByRole("button", { name: /^Plain HTTP 1/ })).toBeVisible()
 })
 
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
@@ -337,7 +339,10 @@ for (const width of [390, 1280, 1720]) {
     page.on("pageerror", (error) => failures.push(error.message))
     for (const path of PROXY_PAGES) {
       await page.goto(path)
-      await expect(page.locator("[data-slot='stat-grid']").first()).toBeVisible()
+      // Sites opens on its identity line rather than tiles.
+      await expect(
+        page.locator("[data-slot='stat-grid'], [data-slot='host-identity']").first(),
+      ).toBeVisible()
       await page.waitForLoadState("networkidle")
       const overflow = await page
         .locator("[data-slot='page']")
@@ -792,28 +797,38 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   )
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("reverse proxy")).toBeVisible()
-  // Its two ends in their own columns under the line, as its card draws them.
-  const route = page.getByRole("main").locator("[data-slot='proxy-route']")
-  await expect(route.getByText("app.example.com", { exact: true })).toBeVisible()
-  await expect(route.getByText("http://127.0.0.1:3000", { exact: true })).toBeVisible()
   await expect(identity.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "Edit" })).toBeVisible()
+  // The four figures that stood over the logs are gone: the failed request
+  // is the line's verdict, the hour's rate the route's first node.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  await expect(identity.getByText("1 failed in the last hour")).toBeVisible()
+  // The way a request reaches it: who asked, the name, the engine and what
+  // answers behind it.
+  const route = page.getByRole("region", { name: "How a request reaches the site" })
+  await expect(route.getByText("Visitors", { exact: true })).toBeVisible()
+  await expect(route.getByText("3 requests in the last hour")).toBeVisible()
+  await expect(route.getByText("1 probe refused")).toBeVisible()
+  await expect(route.getByText("app.example.com", { exact: true })).toBeVisible()
+  await expect(route.getByText("29 days left")).toBeVisible()
+  await expect(route.getByText("HTTPS only")).toBeVisible()
+  await expect(route).toContainText("127.0.0.1:3000")
+  await expect(route.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
 
-  // It opens on its requests, from its own record, with the hour's figures
-  // over them.
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  // It opens on its requests, from its own record, in the pane a
+  // deployment's logs are read in.
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
+  await expect(views.getByRole("button", { name: "Insights" })).toBeVisible()
+  await expect(views.getByRole("button", { name: "Log files" })).toBeVisible()
   await expect(page.getByText("/cart", { exact: true })).toBeVisible()
   await expect(page.getByText("/.env", { exact: true })).toBeVisible()
   // The request record exports its own rows; the log's export beside it
   // would be a second Export about other lines.
   await expect(page.getByText("Export", { exact: true })).toHaveCount(1)
-  const readings = page.locator("[data-slot='stat-grid']")
-  await expect(readings.getByText("Server errors")).toBeVisible()
-  await expect(readings.getByText("Upstream failures")).toBeVisible()
   // nginx's combined line has no duration, and the page does not draw one.
   await expect(page.getByText("Took", { exact: true })).toHaveCount(0)
 
@@ -832,8 +847,12 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
   // Nothing on the page sends the reader to the host Logs page.
   await expect(page.locator("a[href^='/logs']")).toHaveCount(0)
 
-  // The error log opens in place on the minute around it.
+  // The error log opens in place, among the log files, on the minute around it.
   await said.getByRole("button", { name: "Open in the error log" }).click()
+  await expect(views.getByRole("button", { name: "Log files" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
   await expect(page.getByRole("combobox", { name: "Site log" })).toHaveText(/Error log/)
   await expect(page.getByText(/^Around a failed request/)).toBeVisible()
   await expect
@@ -846,15 +865,12 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
       ),
     )
     .toBe(true)
-  await page
-    .getByRole("navigation", { name: "Log mode" })
-    .getByRole("button", { name: "Requests" })
-    .click()
+  await views.getByRole("button", { name: "Requests" }).click()
   await expect(page.getByText(/^Around a failed request/)).toHaveCount(0)
 
-  // The 5xx figure narrows the rows to the failed ones, by asking the
-  // site's record for them.
-  await readings.getByRole("button", { name: "Show the requests that failed" }).click()
+  // The verdict narrows the rows to the failed ones, by asking the site's
+  // record for them, as the 5xx figure it replaced did.
+  await identity.getByRole("button", { name: "Show the requests that failed" }).click()
   await expect(
     page.getByRole("button", { name: /^5xx/ }).and(page.locator("[aria-pressed='true']")),
   ).toBeVisible()
@@ -869,10 +885,8 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
   const logs = await mockLogs(page)
   await page.goto("/proxy/sites/app.example.com")
 
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  const views = page.getByRole("navigation", { name: "Log view" })
   await views.getByRole("button", { name: "Errors" }).click()
-  // The strip names the log the view reads.
-  await expect(page.getByRole("combobox", { name: "Site log" })).toHaveText(/Error log/)
   const search = logs.searches.find((q) => q.get("limit") === "1000")!
   expect(search.get("source")).toBe(`file:${ERROR_LOG}`)
   expect(search.get("levels")).toBe("critical,error,warn")
@@ -902,8 +916,11 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
     .poll(() => logs.searches.filter((q) => q.get("limit") === "1000").length)
     .toBeGreaterThan(asked)
 
-  // Live reads the error log through its lens, since that is the log named.
-  await views.getByRole("button", { name: "Live" }).click()
+  // The log files read the error log live through its lens, once it is the
+  // log picked.
+  await views.getByRole("button", { name: "Log files" }).click()
+  await page.getByRole("combobox", { name: "Site log" }).click()
+  await page.getByRole("option", { name: /^Error log/ }).click()
   await expect(page.getByText(`a line from file:${ERROR_LOG}`)).toBeVisible()
   expect(logs.sockets.at(-1)!.get("lens")).toBe("nginx-error")
   await expect(page.locator("a[href^='/logs']")).toHaveCount(0)
@@ -955,33 +972,47 @@ test("/proxy/certificates reads every renewal certbot ran", async ({ page }) => 
   await expect(page.getByRole("option", { name: "certbot.service" })).toBeVisible()
 })
 
-test("/proxy/sites/app.example.com's upstream figure opens its failures, and lets go when pressed again", async ({
+test("/proxy/sites/app.example.com's verdict narrows its requests, and lets go when pressed again", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
-  await mockLogs(page)
+  const logs = await mockLogs(page)
   await page.goto("/proxy/sites/app.example.com")
 
-  const readings = page.locator("[data-slot='stat-grid']")
-  const views = page.getByRole("navigation", { name: "Log mode" })
-  await readings.getByRole("button", { name: /upstream failures/ }).click()
-  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
+  const identity = page.locator("[data-slot='host-identity']")
+  const views = page.getByRole("navigation", { name: "Log view" })
+  // The day's failures are the Errors tab's count, which the view's All chip
+  // agrees with.
+  await expect(views.getByRole("button", { name: "Errors" })).toContainText("2")
+  await views.getByRole("button", { name: "Errors" }).click()
+  await expect(page.getByRole("button", { name: /^All/ })).toContainText("2")
+
+  // From any view, the verdict brings Requests back narrowed to what it counts.
+  await identity.getByRole("button", { name: "Show the requests that failed" }).click()
+  await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
-  const chip = (name: RegExp) =>
-    page.getByRole("button", { name }).and(page.locator("[aria-pressed='true']"))
-  await expect(chip(/^Upstream/)).toBeVisible()
-  // Pressed, the figure says it lets go — and does.
-  await readings
-    .getByRole("button", { name: "Show every line again, not only the upstream failures" })
-    .click()
-  await expect(chip(/^All/)).toBeVisible()
-  await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect.poll(() => logs.requests.some((q) => q.get("classes") === "5xx")).toBe(true)
+  await expect(page.getByText("/.env", { exact: true })).toHaveCount(0)
+  await identity.getByRole("button", { name: "Show every request again" }).click()
+  await expect(page.getByText("/.env", { exact: true })).toBeVisible()
 })
+
+for (const width of [390, 1280, 1720]) {
+  test(`/proxy/sites/app.example.com is contained at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await mockProxy(page, { included: true })
+    await mockLogs(page)
+    await page.goto("/proxy/sites/app.example.com")
+    await expect(page.getByRole("region", { name: "How a request reaches the site" })).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    const overflow = await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+    expect(overflow, `the site page overflows at ${width}`).toBe(false)
+  })
+}
 
 test("/proxy/sites/app.example.com says who balances its requests and what nginx logged of each server", async ({
   page,
@@ -1047,6 +1078,11 @@ test("/proxy/sites/app.example.com says who balances its requests and what nginx
   await expect(refused).toContainText("refused")
   await expect(refused).toContainText("refused 4×, set aside 1×")
   await expect(panel.getByRole("row", { name: /10\.0\.0\.3:3000/ })).toContainText("backup")
+  // The route's far end is the pool's servers, each with the check's reading.
+  const route = page.getByRole("region", { name: "How a request reaches the site" })
+  await expect(route.getByText("Pool · jd_app_example_com_pool")).toBeVisible()
+  await expect(route).toContainText("10.0.0.2:3000")
+  await expect(route).toContainText("refused 4×, set aside 1×")
   // Another site's single endpoint is not this site's.
   await expect(page.getByText("127.0.0.1:9000")).toHaveCount(0)
 })
@@ -1195,9 +1231,13 @@ test("/proxy/sites/legacy.example.com says why it has no requests to read, and r
 
   await expect(page.getByText("This site has no access log of its own")).toBeVisible()
   await expect(page.getByText(/nginx's shared log, syslog or a stream/)).toBeVisible()
-  // Nothing records its requests: no Requests view, and no figures over one.
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  // Nothing records its requests: no Requests view, and the route says so.
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
+  await expect(views.getByRole("button", { name: "Insights" })).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "How a request reaches the site" }).getByText("Not recorded"),
+  ).toBeVisible()
   await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -1329,15 +1369,12 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("a deployment route")).toBeVisible()
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  await expect(identity.getByText("1 failed in the last hour")).toBeVisible()
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
-  // The ingress is every route's, so its figures are nobody's in particular.
-  const readings = page.locator("[data-slot='stat-grid']")
-  await expect(readings.getByText("Server errors")).toBeVisible()
-  await expect(readings.getByText("Upstream failures")).toHaveCount(0)
 
   await page.getByText("/cart", { exact: true }).click()
   const said = page.getByRole("region", { name: "Proxy said" })
@@ -1406,7 +1443,7 @@ test("the Caddyfile's page reads Caddy's journal whole, since its names are addr
   await expect(
     page.locator("[data-slot='host-identity']").getByText("a site in the Caddyfile"),
   ).toBeVisible()
-  const views = page.getByRole("navigation", { name: "Log mode" })
+  const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)
   await expect(views.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",

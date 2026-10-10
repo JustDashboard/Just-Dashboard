@@ -172,8 +172,14 @@ inspection and immediate pre-effect checks describe an observation window.
 
 `/network/drift` uses the reading register to show dated desired, rendered and
 runtime evidence, ownership conflicts, and measured unit activation separately
-from reboot attribution. Summary counts include spec, journal, boot-unit,
-measured activation and enabled blocklist readings. Failed refreshes retain dated
+from reboot attribution. Every comparison is one row (`driftRows` in
+`frontend/src/lib/network-drift.ts`): the spec, the journal, each render and
+runtime observation, the boot unit, its measured activation and each enabled
+blocklist, so the verdict, the table's counts and the picture cannot disagree.
+A route or policy rule is named by its saved destination or priority rather
+than its numeric id. The inspections since the page opened, and each row whose
+status changed between two of them, are kept in the page's memory only; no
+history is stored on the server. Failed refreshes retain dated
 evidence and disable repair selection. Reviewed selections expire when generation,
 ownership, selected comparison bytes or journal facts change; polling time alone does not
 invalidate identical evidence. Administrators with destructive permission can

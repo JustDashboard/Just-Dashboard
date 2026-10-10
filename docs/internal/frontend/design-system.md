@@ -71,8 +71,8 @@ taking a frame:
   facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
   the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
-  Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
-  its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  Certificates; a site's own page, its route picture on the page's ground and its logs one `Pane`
+  under it; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
   the runtime-health bar, and every block of the deployment section — the fleet
@@ -1369,14 +1369,15 @@ for ufw, sshd or an unknown interface. Source choices in the firewall dialog use
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
-register, and every one but the overview begins with four `StatTile` readings, two per row on
-phones; on Sites, what the reader has to act on first — a failed read, nginx not running, changes on
-disk nginx has not loaded, with Test config and Reload nginx — stands above them as a `Notice`. The
-overview took §15's exit in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its
-facts ending on the sites, certificates, streams and internet-facing ports, each a link, and its
-right end on the routes' verdict beside the service commands; then the route picture, the band of
-traffic, certificates and nginx errors, Live traffic, and the routes in the main column with
-attention in a narrower one. On an nginx host Live traffic sits between the band and the routes: two readings
+register. Sites opens on its identity line and the site band (§15, *The proxy's Sites page*); what
+the reader has to act on first — a failed read, nginx not running, changes on disk nginx has not
+loaded, with Test config and Reload nginx — stands under the line as a `Notice`. The other pages but
+the overview begin with four `StatTile` readings, two per row on phones. The overview took §15's exit
+in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its facts ending on the sites,
+certificates, streams and internet-facing ports, each a link, and its right end on the routes' verdict
+beside the service commands; then the route picture, the band of traffic, certificates and nginx
+errors, Live traffic, and the routes in the main column with attention in a narrower one. On an nginx
+host Live traffic sits between the band and the routes: two readings
 (requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
 where the counters come from. Its switch is a `Switch` beside a `Status` in the panel header rather
 than a button, because whether nginx is counting is a state of the engine; a switch in flight reads
@@ -1423,9 +1424,9 @@ needs doing carries the page's one brand command, so "Prepare a stream" stays ou
 connect opens a sheet showing the file before anything is written. The install step keeps the recent
 installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
-site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
-page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to
-that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
+site's own page (`/proxy/sites/<name>`): the same marks as an identity line, the way a request
+reaches it on the page's ground, and its requests and errors read there in one log `Pane`, so a
+site's Logs verb goes to that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
 ends on the engine's own log, a `Pane` across the page under the two columns.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
@@ -2245,11 +2246,63 @@ The passes, in order. Each one is a diff you can review on its own.
    ones last; and **SSH keys**, one bar of every authorised key shared out by account, in the hue
    each account has on the cards. The pure reads are `components/system-users/access.ts`
    (unit-tested); a press on any row opens that account's keys sheet. The cards lead with the
-   account that needs no password and a new account rises into the list (`useArrivals`). The audit
+   account that needs no password and a new account rises into the list (`useArrivals`).
+
+   A proxy site's own page took the same exit in 0.7.1, at the operator's request, because it was
+   four grey figures — requests a minute, server errors, refused, upstream failures — over a
+   two-column route line and its logs, with nothing on it that moved. Each went where it is said
+   better: the rate and the probes refused are the first node of the route, the server errors the
+   identity line's verdict — a press of which narrows Requests to them and brings the pane into
+   view, as the tile's did — and the upstream failures the Errors tab's count, which is the day the
+   view holds. The line keeps the Sites card's facts and adds when the file was edited; its verdict
+   (`components/proxy/site-overview.ts`, unit-tested) is the hour's failed requests, else a pool's
+   servers failing, else the certificate, else how much it answered. Under it
+   `components/proxy/site-route-map.tsx` draws the way a request reaches the site in the wiring
+   vocabulary the dashboard's own request path speaks: who asked as the browsers and bots they were
+   with their share, the names with whose certificate answers them and its term on a meter, the
+   engine with what the file switches on in the hue of its kind (`--tag-green` for what guards,
+   `--tag-blue` for protocols, `--tag-cyan` for what saves work), and what answers behind it — a
+   pool's servers with the check's reading, or the program holding a local upstream's socket drawn
+   as its product, and *nothing listens* in red where a loopback port has none. Its wires carry the
+   readings: a pulse quicker on a busy site, red to a server that refuses, amber through a
+   certificate in its renewal window, still on a site that is off. The logs became the deployment
+   Logs page's `Pane` — Requests, Insights, Errors and Log files in one strip, the service logs
+   `flush` under the last as Output sits under the deployment's — and Controls three to a row, each
+   setting in its kind's hue with on, off or *no module* beside it. The audit
    log, which had no figures at all, gained four readings of
    the last day read from their own query so a filter narrows the trail without narrowing them:
    the changes with their hours as a trend, the failures, the people as their faces and the
    sign-ins with the refused ones.
+
+   The proxy's Sites page took the exit in 0.7.1, at the operator's request, because it had no
+   life: four grey counts — sites, on TLS, plain HTTP, disabled — over a grid of cards that each
+   drew the same nginx mark, so a Grafana and a blog read alike. Each figure went where it is said
+   better. Sites is the identity line's *12 sites* and the All chip; On TLS the line's fact and the
+   Certificates block's head; Plain HTTP a chip, a cause in the verdict and a press under the
+   Certificates block that narrows to it; Disabled a fact in the line — with the sites nginx still
+   serves until it reloads said beside it in amber — and a chip. The line is `HostIdentity`: the
+   host's sites drawn as the applications they front, the commonest first, then the host's name,
+   the engines with their versions, how many sites serve (none of a stopped engine's, none nginx
+   has not loaded), how many are on TLS and the hour's requests; at its right end the verdict —
+   how many sites need attention, said by the worst thing about each (a broken link or an
+   application refusing connections red, plain HTTP, a parked site or a change not live amber), a
+   press of which narrows the cards to exactly them through a *Needs attention* chip — beside
+   Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
+   tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
+   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, each
+   enabled TLS site on an axis from "ends now" to ninety days, a dot in its hue, the last fortnight
+   washed amber; and **Applications**, what the sites stand in front of drawn as itself, each with
+   the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
+   sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
+   else its unit — never the port alone, so an upstream nothing on the list names keeps the
+   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else", and
+   it runs down its card's left edge. The card leads with the application tucked over its engine
+   (`ProductLogos`), names it in its second line and at the route's far end beside the address, and
+   draws a static site's directory as *Files* and a redirect's target as *Redirects to* where both
+   read "Served by configuration"; its hour is a short bar against the busiest site's. A site
+   whose application refuses connections joins Needs attention, since its visitors get a 502.
+   Chips that name something wrong carry its tone in their word, and a site new since the last
+   read rises (`useArrivals`).
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project
@@ -2526,6 +2579,42 @@ needs), because a control that disappears says nothing and one greyed out with n
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
 Packages page's install job streaming under the button).
+
+**Network drift took the exit on 2026-10-10**, at the operator's request, because it was dead:
+four grey figures (known differences, incomplete readings, matching observations, owned repair
+proposals) over six panels of mono paths that each said one state word, a route named by the number
+the saved configuration gave it, and nothing on the page that moved. Where each figure went, and
+what took their place (`components/network/drift/`):
+
+- **The identity line.** `HostIdentity` with the dashboard's own mark, when the host was inspected
+  (ticking), how many comparisons, the saved spec's digest and the journal's phase; at its end the
+  verdict (`driftVerdict`): a failed read before a configuration that changed under the inspection
+  before any difference, the differences counted in red while another owner holds one, its dot
+  breathing only while an inspection is in flight. A press narrows the table to them. The other
+  three figures are the table's chips, and the proposals the plan's own review button.
+- **A picture of where the saved configuration goes** (`drift-picture.tsx`), the backups map's
+  shape: `spec.json` wired to the rendered files, the kernel objects, the boot unit and the
+  blocklists, each drawn as the product that reads it — netfilter's flame for the nftables files and
+  admission chains, systemd's brackets for the units, Linux for the kernel's devices, routes and
+  settings, WireGuard for a tunnel, Spamhaus and FireHOL for their lists (four marks arrived for it,
+  each the project's own artwork, `public/logos/NOTICE`). A wire takes the worst state in its domain
+  (red, amber, green, plain, dashed for nothing to compare), every comparison is a block in its
+  state's colour beside the domain, the wires pulse while an inspection is in flight and once as
+  each lands, and pressing a domain narrows the table to it.
+- **Since this page opened** (`drift-rhythm.tsx`): each inspection a beat on fifteen minutes that end
+  at this second, split into its states and sliding left as the clock runs, the countdown to the
+  next one under it, and each comparison whose state moved between two of them, newest first. It is
+  the page's memory and nothing else; a host that has not drifted says how many inspections it has
+  stood through. The three configuration identities sit under it.
+- **One framed table of every comparison**, worst first, each as its product, named the way a
+  reader knows it (a route by its destination, an address by its prefix and device), its kind in
+  its lane hue, and its evidence read in place — expected beside observed, a digest as seven
+  characters, amber where they disagree. A row whose state changes rises.
+- **The boot unit's activation as its run** (`drift-boot.tsx`): each `ExecStart` as the tool it is
+  over a rule in the colour of its exit, the finish said as how long ago where systemd's zone can be
+  read without guessing. **Each blocklist** is its publisher with its cache, render and kernel set
+  as a chain, a link amber where the later one has fallen behind. **The repair plan** is cards you
+  pick, lit (§16), and the review shows each change as a diff of its before and after.
 
 **A container's page took the Overview's line in 0.7.1** (2026-10-08), at the operator's request,
 because it was the page with no life: a strip of four grey label-and-value pairs (container, image,

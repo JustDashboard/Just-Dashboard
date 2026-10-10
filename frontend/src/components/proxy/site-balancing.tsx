@@ -65,7 +65,9 @@ function PoolPanel({ pool, evidence }: { pool: UpstreamPool; evidence: PoolEvide
               set every server aside.
             </p>
           )}
-          <Table className="table-fixed">
+          {/* Four fixed columns need their width: on a phone the table scrolls
+              sideways rather than laying each column's words over the next. */}
+          <Table className="min-w-[40rem] table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[30%]">Server</TableHead>
@@ -80,7 +82,7 @@ function PoolPanel({ pool, evidence }: { pool: UpstreamPool; evidence: PoolEvide
                 const failures = failuresText(m)
                 return (
                   <TableRow key={m.address}>
-                    <TableCell className="font-mono wrap-anywhere">
+                    <TableCell className="font-mono wrap-anywhere whitespace-normal">
                       {m.address}
                       {m.resolved && m.resolved.length > 0 && (
                         <span className="block text-muted-foreground">
@@ -88,11 +90,13 @@ function PoolPanel({ pool, evidence }: { pool: UpstreamPool; evidence: PoolEvide
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="wrap-anywhere">{memberRole(m)}</TableCell>
+                    <TableCell className="wrap-anywhere whitespace-normal">
+                      {memberRole(m)}
+                    </TableCell>
                     <TableCell>
                       <Status tone={check.tone} label={check.label} />
                     </TableCell>
-                    <TableCell className="wrap-anywhere">
+                    <TableCell className="wrap-anywhere whitespace-normal">
                       {failures || (m.down ? "—" : "nothing logged")}
                     </TableCell>
                   </TableRow>
