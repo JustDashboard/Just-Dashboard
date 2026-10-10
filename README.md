@@ -1,126 +1,269 @@
 <div align="center">
 
+<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="88" height="88" alt="Just Dashboard"></a>
+
 # Just Dashboard
 
-**One authenticated UI for one Linux server.**
-Metrics, Docker, processes, logs, a real shell, files, git, databases, the reverse proxy,
-the firewall, backups and deploys, behind a login that lives on your private network.
+### Your whole Linux server, in one private control panel.
+
+Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
+backed up — behind one login that lives on your private network.
 
 **Version 0.7.1** · Go backend · Next.js frontend · one `docker compose` stack
 
-[Install](#install) · [Security](#read-this-before-you-expose-it) · [Support](#who-makes-this) · [The tour](#the-tour) · [Configuration](#configuration) · [Licence](#licence)
+[![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
+[![Licence](https://img.shields.io/badge/licence-AGPL--3.0-CAE9FF?style=flat-square&labelColor=16181d)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-backend-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=16181d)](backend)
+[![Next.js](https://img.shields.io/badge/Next.js-frontend-ffffff?style=flat-square&logo=nextdotjs&logoColor=white&labelColor=16181d)](frontend)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white&labelColor=16181d)](docker-compose.yml)
+
+**[just-dashboard.com](https://just-dashboard.com)** · [Install](#install) · [Features](#features) · [Tour](#a-quick-tour) · [Admin scripts](#terminal-admin-scripts) · [Security](#security-first) · [Configuration](#configuration) · [Support](#who-makes-this)
 
 </div>
 
-![The server overview with live metrics, what needs attention across every module, the deployed projects and service summaries](docs/overview.png)
+<br>
 
-Screenshots show version 0.7.0 with example data.
+![The server overview: the machine drawn as itself, live resources with their last hour, storage and the deployed projects](docs/readme/overview.png)
+
+<p align="center"><sub>Screenshots show version 0.7.1 with example data.</sub></p>
 
 ---
 
-## Why
+## Why Just Dashboard
 
-Most panels show you a number and leave the reading to you: 68% CPU, exit code 137, restarted
-12 times. Just Dashboard tries to answer the next question instead. It says the server is
-*waiting* rather than merely *busy*, that a container was killed for its memory limit and what
-the limit was, and where the dashboard can fix a finding, the finding comes with a button.
+<table>
+<tr>
+<td width="25%" valign="top">
 
-Attention uses local rules and measurements, with no AI model, API key or paid service. Container
-configuration remedies can be previewed and applied, with Compose changes kept in their owning file.
-Missing evidence is reported instead of treated as a passed check.
+**Answers, not numbers**
 
-It manages exactly one machine. Optional rootless probe agents can report scoped DNS/TCP/TLS
-measurements from controlled sources; they cannot manage a host. There is no fleet view or cluster.
+It says *why*: a server that is waiting rather than busy, a container killed for its memory limit.
+Where it can fix a finding, the finding comes with a button.
 
-## What it does
+</td>
+<td width="25%" valign="top">
 
-- **Deploys from a repository, an image, a template or a Compose file** — including the images and
-  Compose stacks already on the server, several images at once as one stack. Detection fills the
-  form in for Node, Bun and Deno, Python, PHP, Go, Rust, Java and Kotlin, .NET, Ruby, Elixir, Scala,
-  Clojure, Dart, Gleam and static site generators: it picks the application out of a repository's
-  examples, docs and tooling, reads lockfiles to choose the package manager and runtime, plans a
-  volume for the SQLite file, uploads or key ring an app would otherwise lose on its next release, and
-  says before you deploy what it will not run. Every deployment is checked against the commit it
-  builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
-  and a build that still fails names its cause and the setting that fixes it. Every release is
-  immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
-- **Every database on the server, each as its own engine.** It finds what is here — in containers,
-  installed on the machine, a SQLite file on disk — and opens each one as what it is: a table editor
-  and a SQL editor for a SQL server, keys and a console for Redis, documents and pipelines for
-  MongoDB. Start one, connect one, mark one protected, back it up, hand out its connection string.
-- **Boards for the server you run.** Sketch with the bundled Excalidraw editor, keep multiple boards
-  in the dashboard's own database, and place linked cards for this host, deployment projects and
-  database connections. Changes save automatically; an older tab cannot silently replace a newer save.
-- **Fifty-seven reviewed templates, each one saying how you get in.** PostgreSQL, Redis, n8n,
-  Grafana, Uptime Kuma, Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama, Open WebUI, ntfy,
-  Qdrant, NocoDB and more, one click each — and every card says whether you create the first
-  account yourself, sign in with a password this server generated, or find no sign-in page at all.
-- **Automatic Git deployments, previews and notifications.** Push to deploy, approved previews
-  per pull request — test one from the Git page or a project's overview at an address only your
-  tailnet can reach — and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
-  the commit's status on GitHub.
-- **Backups that know what is not backed up.** Every volume, stack, deployment, repository and
-  database listed, one press from a job, with writers frozen while the archive is taken.
-- **The server as a router, drawn live.** Its devices, tunnels and Docker networks as one topology
-  whose wires move with their traffic; bridges, VLANs, VXLAN and GRE tunnels and network namespaces
-  made in a form; IPv4/IPv6 routing tables and policy rules applied, checked against the path back to
-  your browser and taken back if they would cut you off; monitored egress groups that fail over
-  between gateways or owned tunnels on measured latency, loss and failure with hysteresis, recorded
-  decisions and a namespace simulation before any automation; port forwarding and NAT that admit their own
-  traffic past ufw and Docker; rate limits, country and feed blocklists and the kernel's DDoS-related
-  settings; per-device speed limits and BBR; a WireGuard server in one step with a QR code per phone,
-  site-to-site peers and an exit node; Tailscale's exit node and subnet routes; the resolver's
-  upstreams, DNS over TLS and ad-blocking presets; and traffic per device, program and container.
-  Administrator Socket History keeps bounded observations with capped retention and exact JSON
-  export. Its optional fixed kernel observer needs an explicit opt-in and reports TCP/UDP transport
-  byte subtotals, short socket events and coverage gaps; it does not resume automatically after restart.
-  Twenty-six diagnostics include route and path-MTU checks, bounded packet snapshots, Wake-on-LAN
-  and host prerequisites, with an IPv4/IPv6 subnet
-  calculator. The [complete networking inventory and compatibility boundaries](docs/audits/2026-10-08-network-audit/README.md)
-  explain supported controls and external requirements. Managed network configuration is restored
-  at boot by a unit of its own, with or without the dashboard. Managed changes retain a durable undo
-  journal and use independent host recovery when systemd is available; the Network overview reports
-  apply, save and recovery phases. Covered interactive changes can require a fresh dashboard
-  reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets
-  and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
-  configured resolver chain, checking native split policy when supported and reporting unknowns
-  for other paths; direct comparisons require named destinations and a disclosure acknowledgment,
-  and can use DNS over TLS and the DNSSEC OK bit. A private name is not sent to a public resolver by
-  the default test, and a configured private resolver whose forwarding is unseen needs an explicit
-  acknowledgment. The DNS page names who writes `/etc/resolv.conf` on the host (systemd-resolved,
-  NetworkManager, resolvconf, netconfig, dhcpcd, Tailscale and others) and where a change is made
-  instead; edits a link's split DNS through its native profile with temporary apply; shows the
-  checks an upstream change is held to before applying it and each result after, rolling back when
-  a required one fails; checks configured DNS-over-TLS certificates; traces a name's DNSSEC chain;
-  previews host-record overlaps and checks local resolution after saving.
-  Administrators can connect supported native AdGuard Home, Pi-hole or Technitium engines read-only
-  by default, inspect their separate configured/runtime evidence and review supported policy changes.
-  A detected AdGuard Home, Pi-hole or Technitium hands off to its connection, or opens the connection
-  form with its loopback origin, and connections read the engine's DHCP ranges and leases read-only.
-  Native filter readings show redacted subscription origins, custom-rule metadata and native group
-  memberships. Failed reads retain dated evidence; configured counts do not prove client filtering.
-  Reviewed controls include exact A/AAAA local overrides, supported unsigned Technitium primary-zone
-  records with explicit TTL, and existing Pi-hole client group assignments, including no memberships.
-  Custom-domain reviews distinguish AdGuard domain-and-subdomain rules from Pi-hole exact-domain
-  rules, retaining native group memberships and unselected policy without claiming client filtering.
-  Unsupported records remain visible; fresh selected native policy is checked before apply.
-  Optional owned DNS setup reviews an already cached pinned image and exact loopback-only resources;
-  creation and removal are separately confirmed, and removal includes both persistent data volumes.
-  Retained outcomes remain inspectable after uncertainty; the dashboard does not replay an apply.
-  Existing native profiles expose owner, saved intent and current evidence separately. The
-  [native profile adapter and its current limits](docs/internal/backend/network-native-managers.md)
-  describe conservative L3 editing, durable terminal cleanup, verified Ubuntu Netplan/NetworkManager
-  origin recovery, direct DHCPv4/SLAAC acquisition and bounded authored Netplan automatic-policy
-  preservation. Structural editing, broader native policies and host reboot still await acceptance.
-  Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
-  measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
-  outcomes across restarts; Drift compares
-  owned saved, rendered and runtime state with measured unit activation. Reviewed selected owned
-  repairs require temporary apply and reconnect confirmation; wider native repairs remain advisory.
-- **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
-  the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
-  that open beside the listing or in a full workspace with a file tree, and every Git checkout with
-  staging, history, branches and pull requests.
+**Private by design**
+
+Root-equivalent power belongs behind Tailscale or an SSH tunnel. The allowlist runs before the
+login, two-factor is per account, and every change is audited.
+
+</td>
+<td width="25%" valign="top">
+
+**One server, done properly**
+
+No fleet, no cloud account, no AI model or API key. One `docker compose` stack that knows the
+machine it runs on, end to end.
+
+</td>
+<td width="25%" valign="top">
+
+**Free, every feature**
+
+Self-hosted and AGPL-3.0. Nothing is held back for a paid tier — every feature is free and stays
+free.
+
+</td>
+</tr>
+</table>
+
+## Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🖥️ Overview & monitoring
+
+- A live overview of the machine: CPU, memory, load, network, storage and disk I/O
+- Metrics with seven days of history the backend records itself, and CSV export
+- Notable moments, top processes and the day's activity at a glance
+- Processes, PM2 apps, systemd services and scheduled jobs, each with its verbs
+- One log viewer for files, containers, stacks, PM2 and the journal, with insights
+- Every service shows its own logs on its own page
+
+</td>
+<td width="50%" valign="top">
+
+### 🚀 Deployments
+
+- Deploy from a repository, an image, a Compose stack or **57 reviewed templates**
+- Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more
+- Push to deploy, plus pull-request previews only your tailnet can reach
+- Immutable releases, one-click rollback and health-gated cutover
+- Build logs, runtime, console, request logs and traffic alerts per project
+- Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🐳 Docker
+
+- Overview of what every container uses and what just happened to it
+- Containers, stacks, images, volumes, networks and events, each a page
+- Create from a template, a pasted `docker run` or a form
+- Crash loops, failing health checks and memory kills said in words
+- Prepared fixes for exposure, limits and security posture
+- Browse a volume's or a container's files in place
+
+</td>
+<td width="50%" valign="top">
+
+### 🗄️ Databases
+
+- A control center for every database on the server — even unconnected ones
+- PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
+- Table editor with staged, reviewed edits and a SQL editor with plans
+- Schema browser, diagram, code generation, performance and an advisor
+- Key browser and console for Redis, documents and pipelines for MongoDB
+- Protected connections, dump backups, accounts, grants and a live map
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🧰 Workspace
+
+- A real terminal whose sessions survive the tab closing and dashboard restarts
+- Split panes, drag-and-drop docking and one-click Codex and Claude launchers
+- A file manager with search, previews, Monaco and image editors
+- A full Git workspace: staging by line, history, branches, conflicts, PR reviews
+- GitHub, GitLab and Gitea pull requests and Actions logs
+- Boards: Excalidraw sketches with live cards for the host, projects and databases
+
+</td>
+<td width="50%" valign="top">
+
+### 🌐 Network
+
+- A live topology of devices, tunnels and Docker networks
+- Interfaces, bridges, VLANs, namespaces, routing and policy rules
+- Firewall, port forwarding, NAT, rate limits and blocklists
+- WireGuard and Tailscale, DNS and ad-blocking, egress groups with failover
+- Traffic per device, program and container, plus speed limits and SQM
+- 26 diagnostics, packet captures, connection paths, drift and saved runs
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🔒 Proxy & TLS
+
+- Every domain drawn through nginx or Caddy to the application it reaches
+- Sites written as ordinary config, with a builder for auth and access rules
+- Certificates through certbot, including DNS wildcards, with runway at a glance
+- A live TLS report, streams, ports and per-site traffic
+- Alerts on renewals and certificate drift
+
+</td>
+<td width="50%" valign="top">
+
+### 🛡️ Security & backups
+
+- A verdict on the host: exposure, SSH, logins and who is attacking
+- fail2ban, CrowdSec and Suricata where they run
+- Scheduled backups to disk, S3 or Backblaze B2, and native database dumps
+- A coverage map of everything that is *not* backed up yet
+- Single-file and in-place restore
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### ⚙️ Server & accounts
+
+- Host package updates on apt, dnf, yum, zypper, pacman or apk
+- System users, an audit log of every change and the panel's own settings
+- Address, certificate, allowlist and ports applied with automatic rollback
+- Roles, two-factor, sessions and API keys for every account
+- One-click self-update, with the release notes compiled in
+
+</td>
+<td width="50%" valign="top">
+
+### ⌨️ Everywhere
+
+- **Ctrl/⌘K** searches projects, sites, containers, databases, repos and pages
+- Previews each result with what it is connected to
+- Keyboard shortcuts on every page — press **?** to see them
+- Every page remembers where you left it
+- A consistent, dark design built around readings rather than tiles
+
+</td>
+</tr>
+</table>
+
+## A quick tour
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/deployments.png" alt="Deployment projects as cards with their state, source, traffic and recent runs">
+<p align="center"><b>Deployments</b> — every project, its traffic and its runs</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/deployment.png" alt="A project's overview with a live website preview, its source, release, runtime and domains">
+<p align="center"><b>A project</b> — live preview, release, runtime and domains</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/docker.png" alt="The Docker overview: processor and memory by container, recent events and every container's live readings">
+<p align="center"><b>Docker</b> — who uses what, and what just happened</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/databases.png" alt="The database control center with every database as a card">
+<p align="center"><b>Databases</b> — every engine on the server, each as itself</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/terminal.png" alt="Two terminal panes side by side running tests and htop">
+<p align="center"><b>Terminal</b> — persistent sessions and split panes</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/git.png" alt="The Git workspace with staged changes and a diff">
+<p align="center"><b>Git</b> — stage, review and ship from the browser</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/network.png" alt="The network topology from the uplink and tunnels through the server to its Docker networks">
+<p align="center"><b>Network</b> — the server as a router, drawn live</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/proxy.png" alt="The proxy overview drawing domains through nginx to their applications">
+<p align="center"><b>Proxy & TLS</b> — domains, applications and certificates</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/files.png" alt="The file manager with a Compose file previewed beside the listing">
+<p align="center"><b>Files</b> — browse, preview and edit anywhere you allow</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/backups.png" alt="Backups drawn as what is covered flowing to each destination">
+<p align="center"><b>Backups</b> — what is covered, and what is not</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/readme/metrics.png" alt="Metrics with live readings, notable moments and top processes">
+<p align="center"><b>Metrics</b> — a week of history, recorded by the server</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/readme/command-palette.png" alt="The command palette searching for shop across projects, repositories, databases and containers">
+<p align="center"><b>Ctrl/⌘K</b> — everything one keystroke away</p>
+</td>
+</tr>
+</table>
 
 ## Install
 
@@ -129,274 +272,90 @@ git clone https://github.com/JustDashboard/Just-Dashboard.git
 cd Just-Dashboard && sudo ./install.sh
 ```
 
-The installer asks how you intend to reach it. **Tailscale is the default**: the machine stays
-invisible to the internet and the dashboard answers at `https://your-box.tailnet-name.ts.net:8443`
-with a real certificate. **An SSH tunnel is the fallback**, served on loopback. It then generates
-the master key and a first password, builds the stack and prints the command to get in.
-Four labeled stages show progress; the completion guide includes terminal admin commands.
-Use `./install.sh --help` to preview the steps or `sudo NO_COLOR=1 ./install.sh` for plain output.
-Everything it asked is editable afterwards under **Settings → Configuration**. It also installs
-the host tools the web terminal and the dashboard's pages run on the server itself — `gh` from
-GitHub's own repository, `git-lfs`, `whois` and `traceroute` — where they are missing, so a GitHub
-sign-in on the Git page works from the terminal and over ssh too.
+The installer asks one question that matters — how you will reach the dashboard — then does the
+rest in four labelled stages:
 
-To upgrade, `git pull` and `docker compose up -d --build`, use the in-app update, or run
-`sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions; only
-the installer adds host tools a newer release relies on.
+- **Tailscale (default):** the machine stays invisible to the internet and the dashboard answers at
+  `https://your-box.tailnet-name.ts.net:8443` with a real certificate.
+- **SSH tunnel (fallback):** the dashboard is served on loopback only.
+- It generates the master key and a first password, builds the stack and prints how to get in.
+- It installs the host tools the terminal and pages rely on — `gh`, `git-lfs`, `whois`,
+  `traceroute` — where they are missing.
 
-### Terminal admin tools
+Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
+Everything it asked is editable afterwards under **Settings → Configuration**.
 
-Run these on the server from your checkout. They manage **dashboard accounts**, separate from Linux
-users, and use the built backend image, so Go and a browser login are not needed. Account commands
-also work when the backend is stopped; Docker must be running and installation must be complete.
+**Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
+followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and
+sessions.
 
-```bash
-sudo ./scripts/reset-password.sh admin         # recover an account with a temporary password
-sudo ./scripts/create-user.sh alice limited    # readonly, limited or admin; default is readonly
-sudo ./scripts/manage.sh users                 # list accounts, roles and two-factor status
-sudo ./scripts/manage.sh revoke-sessions alice # sign out all browser sessions
-sudo ./scripts/manage.sh status                # show containers and health
-sudo ./scripts/manage.sh logs                  # follow backend logs; Ctrl+C exits
-sudo ./scripts/manage.sh logs proxy            # backend, frontend or proxy
-sudo ./scripts/manage.sh restart               # recreate containers to apply .env edits
-./scripts/manage.sh --help                     # usage without sudo
-```
+## Terminal admin scripts
+
+Run these on the server from your checkout. They manage **dashboard accounts** (not Linux users) and
+use the built backend image, so neither Go nor a browser login is needed — account commands work even
+while the backend is stopped.
+
+| Script | What it does |
+| --- | --- |
+| `sudo ./scripts/reset-password.sh admin` | Recover an account with a temporary password |
+| `sudo ./scripts/create-user.sh alice limited` | Create an account (`readonly`, `limited` or `admin`) |
+| `sudo ./scripts/manage.sh users` | List accounts, roles and two-factor status |
+| `sudo ./scripts/manage.sh revoke-sessions alice` | Sign out every browser session for an account |
+| `sudo ./scripts/manage.sh status` | Show the containers and their health |
+| `sudo ./scripts/manage.sh logs [backend\|frontend\|proxy]` | Follow logs (Ctrl+C exits) |
+| `sudo ./scripts/manage.sh restart` | Recreate the stack to apply `.env` edits |
+| `./scripts/manage.sh --help` | Usage, no sudo needed |
+
+<details>
+<summary>How passwords and resets behave</summary>
+
+<br>
 
 Passwords are entered twice with hidden input and must meet the dashboard's strength rules. New and
-reset passwords are temporary: the account holder must change them at sign-in, after completing any
-required two-factor step. A reset clears failed-login lockout and revokes that account's sessions and
-API tokens, while keeping two-factor enrollment, recovery codes, role and disabled state. Account
-changes are audited as local root. `revoke-sessions` leaves API tokens unchanged.
+reset passwords are temporary: the account holder changes them at sign-in, after any required
+two-factor step. A reset clears failed-login lockout and revokes that account's sessions and API
+tokens, while keeping two-factor enrolment, recovery codes, role and disabled state. Account changes
+are audited as local root; `revoke-sessions` leaves API tokens unchanged.
 
 For automation, append `--password-stdin` to either password command and pipe one password line from
-a trusted source. Never put passwords in command arguments or shell history. The scripts locate the
-checkout from their own path and let Compose read `.env`; they do not execute it as shell code.
-Run a stack restart from SSH because it disconnects the web terminal. The restart command recreates
-containers with current settings; `docker compose restart` alone keeps their previous environment.
+a trusted source — never put passwords in arguments or shell history. The scripts find the checkout
+from their own path and let Compose read `.env` without executing it. Run `restart` from SSH, since it
+disconnects the web terminal; it recreates containers with current settings, which
+`docker compose restart` alone does not.
 
-## Read this before you expose it
+</details>
 
-**This dashboard is root-equivalent.** Anyone who reaches it with a valid session has root on
-the machine. It is built to sit behind a VPN or an SSH tunnel, and that is enforced:
+## Security first
+
+**This dashboard is root-equivalent.** Anyone who reaches it with a valid session has root on the
+machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enforced:
 
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
-  and the allowlist is checked before authentication.
-- Two-factor is enforced for every account that has enrolled. `JD_REQUIRE_2FA` decides whether an
+  and the allowlist is checked **before** authentication.
+- Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
   account *must* enrol.
-- Destructive actions are capability checked and audited. Deleting a deployment project, database,
-  Docker stack, or Git checkout requires a typed phrase checked on the server; other risky actions use
-  ordinary confirmation.
-- Every state-changing request lands in an audit log.
+- Capabilities are checked on every backend route, never in the UI alone.
+- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout
+  asks for a typed phrase checked on the server.
+- Every state-changing request lands in the audit log.
 
-## Who makes this
-
-Just Dashboard is built by one person, [Wayy01](https://github.com/Wayy01), under the
-[JustDashboard](https://github.com/JustDashboard) organisation. The dashboard is free and every
-feature stays free. If it has saved you an evening, there is a
-[Buy Me a Coffee page](https://buymeacoffee.com/ionmoisei72) — entirely optional.
-
-**Sponsors.** Companies and individuals who would like to sponsor the project can write to
-[ionmoisei755@gmail.com](mailto:ionmoisei755@gmail.com) and will be listed here with a logo and
-a link. *No sponsors yet — the space is open.*
-
----
-
-## The tour
-
-### Everything is one keystroke away
-
-![The command palette with search and shortcuts to server tools](docs/command-palette.png)
-
-**Ctrl/⌘K** from anywhere. Press **Enter** with no search to return to the previous destination;
-recent places come first. Search the live dashboard by a name, domain, container ID or repository
-path, across projects, proxy sites, saved databases, containers, stacks, Git repositories, services,
-PM2 apps, backups and boards, each drawn with its real product logo. Narrow with **domain:**, **db:**,
-**container:** or the scopes under the input, which count each kind's matches as you type. On a wide
-screen the selected result is previewed beside the list — a container's image and health, a site's
-domains, a repository's branch — with what it is connected to: the site serving a project's domain,
-the stack and backup in a repository's folder.
-Exact names rank first and small typos are tolerated. Arrows choose a result; Escape clears the
-search, then closes it. Inventories refresh each time you open search, and unavailable sources are
-named with a retry control. Search and recent destinations stay in memory and clear on sign-out.
-The sidebar stays expanded on desktop and opens as a drawer on mobile. It drills into a section —
-Docker, Databases, Security, one deployment — and every page comes back the way you left it.
-Processes, Git, Logs, Docker containers,
-Packages, Backups, deployment setup and Audit/Security lists add page shortcuts, focus restoration
-and browser history where you change the question. Press **?** for the page's commands; **Ctrl/⌘F**
-finds locally and **F5** refreshes its data. Walk lists with arrows or type a name. Keep a Git commit
-message while reviewing another tab, select archive ranges with Shift, or pin a chart moment and
-open its surrounding logs.
-
-### Docker
-
-![The Docker overview: what the containers use, what just happened to them, and every container with its live readings](docs/docker.png)
-
-Create containers from a template, a pasted `docker run` or a form, with the command rendered
-before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
-memory limits, security posture — each with an explanation and, where possible, a button.
-The overview shows which containers use the most processor and memory, the last thing that
-happened to each, and every container's live readings in one table, failing ones first.
-Stacks deploy, rebuild and roll back with the compose diff shown first.
-A container's page opens on whether it works — a crash loop or a failing health check is said as
-one — its live readings, a picture of how it is reached and what it keeps, and the rest of its
-compose project as a live table beside it. Its Usage tab heads every chart with its live reading
-and marks the container's crashes and restart loops on them, then breaks memory, CPU quota and
-throttling, limits and each interface down; unavailable readings stay distinct from zero activity.
-Storage is a rail of its mounts beside the file listing of the one picked, Inspect is Docker's
-document a section at a time in colour, and Configuration turns each finding into a prepared fix.
-
-### Terminal
-
-![A terminal window, with the Files companion beside it](docs/terminal.png)
-
-A real PTY into a host account. Sessions group windows, each named after what it is running,
-and they keep running on the server until you close them — with the tab closed, and across
-dashboard restarts, rebuilds and upgrades — so an agent left working is still working when you come back,
-even with nobody connected. Terminals have no idle timeout. Restart protection requires a host running
-systemd and the dashboard's data directory mounted at the same path on the host; if that protection
-cannot be set up, new sessions are refused with a reason instead of opening a terminal that would end
-on restart. Existing held sessions remain running. Rebooting the Linux server ends running terminals.
-
-Split a terminal above, below, left or right, then drag the divider to resize it. Click a pane to
-move typing focus; the Keyboard shortcuts menu lists editable split and focus bindings. Split panes
-share one window tab. Each pane's **Open as separate window** button returns it to its own tab without
-restarting its shell. Drag a window tab onto a terminal to split at the hovered edge; a live overlay
-previews the placement. The Split terminal menu can also move an existing window into a split. Windows
-retain their screens when switching tabs or sessions, and each browser remembers its split layout.
-The Codex and Claude buttons run `codex --yolo` or `claude --dangerously-skip-permissions` in the
-focused terminal, in whatever directory its shell is in. If that terminal is already running a
-program, the agent opens in a new window there instead. The tools must already be installed for the
-terminal account; the new-window launch supports Bash and Zsh. Search remains available with its
-keyboard shortcut.
-Files and Git sit beside the shell: the Git tab shows what changed, switches branch and checks out an
-open pull request to try it. An open file shows Save only once it has been edited.
-
-### Boards
-
-Open **Boards** in Workspace to create a drawing. Each board has its own address and is saved in
-`JD_DATA_DIR` with the dashboard's other state. **Add server item** inserts a linked host, project or
-database card. The card shows the resource's name and status when inserted; its link opens the current
-resource page. Board editing needs `service.control`, and deletion asks for the board's name.
-
-### Files
-
-![The file manager with coloured folders and a Compose file preview](docs/files.png)
-
-Browse compact tiles, find files by name or matching content, preview, edit with a diff before
-saving, drag and drop, upload whole folders, crop pictures, chmod, archive and extract. Text and
-image editors open beside the listing or in a full workspace with a collapsible folder tree.
-Every path is checked against `JD_FILE_ROOTS` before anything happens.
-Click once to inspect and double-click or press Enter to open. After checking an item, click anywhere
-on another item to add or remove it from the selection; Shift selects a range. Drag across empty
-space to select a group (Ctrl/Cmd or Shift adds to it), then drag the group to a folder, breadcrumb or
-sidebar place. Ctrl or Alt copies instead of moving. Selection and clipboard actions float over the
-listing without moving it. Right-click, Shift+F10 or touch long-press opens an item's menu.
-Folder visits have their own URLs: browser Back/Forward, mouse history buttons and the Files
-navigation controls walk through folders, restoring selection and scroll position. Backspace or
-Alt+Up goes to the parent. Type a name to jump to it; Ctrl/Cmd+F finds files in this folder, its home
-or everywhere, Ctrl/Cmd+L types a path,
-and F5 or Ctrl/Cmd+R refreshes the folder in place. The **Files shortcuts** button lists every command.
-Text fields, dialogs, menus and the dashboard rail keep their own keys.
-The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
-then set a different colour for one folder.
-
-### Git
-
-![A Git workspace with staged and unstaged changes beside the file editor](docs/git.png)
-
-Every repository under the configured roots. Stage, commit, push, stash, branch, merge, tag, and
-open pull requests from the page, signed in to GitHub with the same device flow `gh` uses.
-Stage individual lines or chunks, resolve conflicts, compare branches, inspect blame and signatures,
-recover commits, and edit local history with a recovery branch. Worktrees, submodules, Git LFS and
-patch import/export open in the same workspace. Review GitHub pull requests and Actions job logs,
-or connect a GitLab/Gitea token for requests on those providers.
-Pull establishes missing upstream tracking when the same branch has one unambiguous remote match or
-a configured remote preference. If it needs a choice, use **Branches → Set upstream**. Pull remains
-fast-forward-only and refuses to overwrite local work.
-
-### Deployments
-
-![A project's website preview, live release, running containers and traffic metrics](docs/deployments.png)
-
-Point it at a repository, an image, a template, a Compose stack or something already running. It
-says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
-an overview with a live preview, deployments with rollback, logs, runtime, a console and settings.
-Setup can generate template credentials and suggest a public address, create and connect a private
-database on this server, or use an external database connection. Build commands, variables, storage,
-health checks and runtime limits remain editable before the first deployment.
-
-Existing-workload deployment import is unavailable after reverting PRs #136 and #145. Previously
-imported projects keep their records and running resources, but deployment mutations and automation
-are blocked. Manage those workloads with Docker/Compose/PM2/systemd directly, or restore an
-import-capable version. Stop or drain deployment runs before changing versions.
-
-The Database source uses the same engine catalogue and settings panel as Add a database, with animated
-startup stages until the connection is verified. It then offers the connection string and a link to
-the database's page.
-
-### Databases
-
-![A PostgreSQL database's home: its activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
-
-Every database on the server, not only the connected ones: containers running or stopped, servers
-installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
-from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
-SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis are opened, and what answers behind them
-is named: TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey, KeyDB, Dragonfly, FerretDB.
-A database has a home with recorded activity and only the pages and controls its engine has.
-Activity is collected every 30 seconds while the dashboard runs and kept for seven days, even while
-its pages are closed; the chart can show the last hour, six hours, day or week. SQL engines
-get a table editor whose edits are staged, reviewed as statements and applied in one transaction, a
-SQL editor with plans, a schema browser, a diagram, generated model code, and sessions, locks,
-maintenance and an advisor; Redis and its forks a key browser, a console that classifies each
-command before it is sent, and memory analysis; MongoDB documents, an aggregation builder, schema
-analysis and indexes.
-
-A connection marked **protected** refuses every change to its data or schema, for every role;
-reading, taking a dump and stopping a runaway query still work. A backup is a dump taken as a job;
-it can be downloaded, uploaded from elsewhere and restored into the same database — after a safety
-dump, if asked — or into a new one where the engine can make one. Accounts and their grants, the
-server's parameters and where a database is reachable from are edited on its own pages.
-`readonly` reads; `limited` also edits rows, runs statements that destroy nothing, imports, takes
-backups and starts a stopped server; deleting, dropping, stopping, restoring, connecting a database
-and changing accounts or settings are `admin`'s, and deleting a whole database asks for its name.
-
-### And the rest
-
-| | |
-| --- | --- |
-| **Metrics** | CPU split by user, system, iowait and steal; memory judged on what is available; pressure, disks, inodes, sockets and interfaces, with seven days of history the backend records itself. |
-| **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
-| **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
-| **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
-| **Network** | Topology, interfaces and namespaces, routing and policy rules, monitored egress groups with simulated failover, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, source-scoped investigation, saved diagnostic runs, bounded private packet captures, drift review and selected owned repair, address planning, controlled external checks, opt-in socket history, download SQM, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
-| **Security** | A verdict on the host: exposure, sshd (with a jump-host profile), fail2ban, CrowdSec and Suricata where they run, logins and who is attacking. |
-| **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |
-| **Updates** | The dashboard updates itself in one click; host packages on apt, dnf, yum, zypper, pacman or apk. |
-| **Settings** | The panel's own address, certificate, allowlist, two-factor policy and ports, applied with automatic rollback if the new configuration does not come up. |
-
----
-
-## Version, and updating
-
-This is **0.7.1**. It is not 1.0 because the API is still moving. Every release is in
-[CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds
-and restarts from a container that outlives the restart. The update check is one unauthenticated
-GET of one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
-
-Cutting a release: write the notes in `backend/internal/selfupdate/changelog.json`, then run
-`scripts/release.sh <version>`. It bumps the version everywhere and regenerates the changelog.
-
-## Roles
+### Roles
 
 | | `readonly` | `limited` | `admin` |
 | --- | :---: | :---: | :---: |
 | View everything | ✅ | ✅ | ✅ |
-| Start / stop / restart, git, edit files | | ✅ | ✅ |
+| Start / stop / restart, Git, edit files | | ✅ | ✅ |
 | Terminal, delete, prune, restore, updates, accounts, firewall | | | ✅ |
 
-Capabilities are checked on the route, never in the UI alone. `readonly` reads any file inside
-`JD_FILE_ROOTS`, so give it to someone you would let read the disk.
+`readonly` can read any file inside `JD_FILE_ROOTS`, so give it to someone you would let read the
+disk.
+
+## Version, and updating
+
+This is **0.7.1**. It is not 1.0 because the API is still moving. Every release is in
+[CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
+restarts from a container that outlives the restart. The update check is one unauthenticated GET of
+one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
 
 ## Configuration
 
@@ -483,7 +442,7 @@ than falling back to the default, so a typo is visible instead of silently in ef
 </details>
 
 <details>
-<summary>Running it locally, and setting it up by hand</summary>
+<summary>Running it locally, setting it up by hand, and contributor scripts</summary>
 
 <br>
 
@@ -493,27 +452,51 @@ cd frontend && bun install && bun dev  # UI on :3000
 ```
 
 Set `NEXT_PUBLIC_WS_BASE=http://localhost:8080` for WebSockets and `JD_ALLOWED_ORIGINS=http://localhost:3000`
-on the backend. Before a pull request, run the checks your change can reach:
-
-```bash
-scripts/test-changed.sh
-```
+on the backend.
 
 Without the installer: `cp .env.example .env`, set `JD_MASTER_KEY` (`openssl rand -hex 32`),
 `JD_SITE` and `JD_TLS`, then `docker compose up -d --build`. The generated admin password is
 printed once in `docker compose logs backend`.
 
+| Script | What it is for |
+| --- | --- |
+| `scripts/test-changed.sh` | Runs exactly the checks, Go tests and browser specs your diff can reach — run it before a pull request |
+| `scripts/go-test-race.sh` | Runs Go packages under the race detector, split across processes |
+| `scripts/release.sh <version>` | Cuts a release: bumps the version everywhere and regenerates the changelog from `backend/internal/selfupdate/changelog.json` |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
 </details>
 
 ## Backing it up
 
-The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`).
-Back up that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not
-restore. The Backups page lists the dashboard itself under Coverage and writes that job for you.
+The dashboard's own state is a SQLite database in `JD_DATA_DIR` (`/var/lib/just-dashboard`). Back up
+that directory **and** keep `JD_MASTER_KEY` somewhere separate; either alone will not restore. The
+Backups page lists the dashboard itself under Coverage and writes that job for you.
+
+## Who makes this
+
+Just Dashboard is built by one person, [Wayy01](https://github.com/Wayy01), under the
+[JustDashboard](https://github.com/JustDashboard) organisation. Find out more at
+**[just-dashboard.com](https://just-dashboard.com)**.
+
+The dashboard is free and every feature stays free. If it has saved you an evening, there is a
+[Buy Me a Coffee page](https://buymeacoffee.com/ionmoisei72) — entirely optional.
+
+**Sponsors.** Companies and individuals who would like to sponsor the project can write to
+[ionmoisei755@gmail.com](mailto:ionmoisei755@gmail.com) and will be listed here with a logo and a
+link. *No sponsors yet — the space is open.*
 
 ## Licence
 
-[AGPL-3.0](LICENSE). Run it, change it, distribute it, but if you run a modified version as a
-network service, publish your changes. Contributions are welcome under the terms in
+[AGPL-3.0](LICENSE). Run it, change it, distribute it, but if you run a modified version as a network
+service, publish your changes. Contributions are welcome under the terms in
 [CONTRIBUTING.md](CONTRIBUTING.md). The product logos bundled in `frontend/public/logos/` are their
 owners' trademarks and keep their own licences, listed in that directory's `NOTICE`.
+
+<div align="center">
+<br>
+<a href="https://just-dashboard.com"><img src="docs/readme/logo.svg" width="40" height="40" alt="Just Dashboard"></a>
+<br>
+<sub><a href="https://just-dashboard.com">just-dashboard.com</a></sub>
+</div>
