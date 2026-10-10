@@ -1,0 +1,60 @@
+
+Running 15 tests using 1 worker
+
+  ✓   1 [chromium] › tests/browser/network-traffic-maturity.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip (7.3s)
+  ✓   2 [chromium] › tests/browser/network-traffic-maturity.spec.ts:38:5 › a stopped sampler reads as stale, not as a quiet link (7.2s)
+  ✓   3 [chromium] › tests/browser/network-traffic-maturity.spec.ts:47:5 › a typed range reads that window with its percentiles and the incidents in it (8.2s)
+  ✓   4 [chromium] › tests/browser/network-traffic-maturity.spec.ts:83:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared (11.8s)
+  ✓   5 [chromium] › tests/browser/network-traffic-maturity.spec.ts:119:5 › programs say what a read could not see and list UDP peers without byte counters (9.3s)
+  ✓   6 [chromium] › tests/browser/network-traffic-maturity.spec.ts:138:5 › every container can be listed and one opens into its chart, service and peers (9.0s)
+  ✓   7 [chromium] › tests/browser/network-traffic-maturity.spec.ts:165:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree (9.2s)
+  ✓   8 [chromium] › tests/browser/network-traffic-maturity.spec.ts:184:5 › an upload profile goes with CAKE and the delay CAKE measured is shown (14.4s)
+  ✘   9 [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch (8.3s)
+  ✓  10 [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked (14.4s)
+  ✓  11 [chromium] › tests/browser/network-traffic-maturity.spec.ts:260:5 › an install is followed by configured, active and verified phases, not by a claim (9.2s)
+  ✓  12 [chromium] › tests/browser/network-traffic-maturity.spec.ts:325:5 › a peer opens into its tuples, ages, closes and the layers it crosses (2.1s)
+  ✓  13 [chromium] › tests/browser/network-traffic-maturity.spec.ts:364:5 › a block asks why and until when, opens an incident, and is listed with its end (3.2s)
+  ✓  14 [chromium] › tests/browser/network-traffic-maturity.spec.ts:433:5 › a past hour is read from the socket history in the live table's shape (1.9s)
+  ✓  15 [chromium] › tests/browser/network-traffic-maturity.spec.ts:460:7 › at a phone's width › the traffic and connections additions never scroll sideways (11.0s)
+
+
+  1) [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByLabel('Congestion control on live sockets').getByLabel('Now').getByRole('row', { name: /bbr/ })
+    Expected substring: "22 ms"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByLabel('Congestion control on live sockets').getByLabel('Now').getByRole('row', { name: /bbr/ })
+
+
+      228 |   const panel = page.getByLabel("Congestion control on live sockets")
+      229 |   const now = panel.getByLabel("Now")
+    > 230 |   await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms")
+          |                                                       ^
+      231 |   await expect(now.getByRole("row", { name: /cubic/ })).toContainText("0.8%")
+      232 |   await expect(panel).toContainText("Before the last switch, cubic → bbr")
+      233 |   await expect(panel.getByLabel("Before the last switch")).toContainText("52 ms")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:230:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-c-cd6a0--and-before-the-last-switch-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch 
+  14 passed (2.2m)

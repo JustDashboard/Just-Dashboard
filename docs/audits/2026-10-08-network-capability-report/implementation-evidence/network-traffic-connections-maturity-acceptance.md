@@ -266,11 +266,10 @@ a readable Suricata event log, bpftool allowed to list, the WireGuard module pre
 
 | Check | Result | Raw log |
 | --- | --- | --- |
-| `JD_BROWSER_BASE_URL=http://127.0.0.1:43211 JD_BROWSER_WORKERS=1 scripts/test-changed.sh 465480ba` against a production build of the same tree (final) | FINAL_GATE_RESULT | [`test-changed-final.log`](network-traffic-connections-maturity/test-changed-final.log) |
+| `JD_BROWSER_BASE_URL=http://127.0.0.1:43211 JD_BROWSER_WORKERS=1 scripts/test-changed.sh 465480ba` against a production build of the same tree (final) | **exit 0 in 1586 s** on source `389e1896` (the only uncommitted path was this document): Prettier, ESLint and `tsc` clean; 3,290 Bun tests; `go build`/`go vet` and the tests of `internal/api`, `internal/netflows`, `internal/netx`, `internal/store`, `internal/netsec` passed (reported from Go's cache: the same binaries and inputs ran uncached and passed in the first gate); **560 browser passes, 60 optional skips, 0 failures** across 31 selected specs, including all 15 `network-traffic-maturity` cases and the existing network, security, proxy-ports, VPN, design-system and navigation specs | [`test-changed-final.log`](network-traffic-connections-maturity/test-changed-final.log) |
 | `JD_NETNS_LIVE=1 go test ./internal/netx -run '^TestLiveUploadProfileMeasuresQueueDelayUnderDeclaredLoad$'`, twice | **PASS** both (15.1 s each): FIFO median 187.2/197.6 ms, CAKE upload profile 1.0/0.9 ms; profile verified against the kernel before measuring | [`upload-profile-live-attempt1.log`](network-traffic-connections-maturity/upload-profile-live-attempt1.log), [`attempt2`](network-traffic-connections-maturity/upload-profile-live-attempt2.log) |
 | `JD_NETNS_LIVE=1 go test ./internal/netx -run '^(TestLiveQueueOwnershipAndAppliedParameters|TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree|TestLiveShapingVerifiesEveryRequestedParameter)$'` | **PASS** (the new ownership fixture with the existing F6 natives) | [`queue-ownership-live-attempt2.log`](network-traffic-connections-maturity/queue-ownership-live-attempt2.log) |
 | `go test ./internal/netx/ ./internal/netsec/ ./internal/store/ ./internal/netflows/` (whole packages, non-live) | ok | inside the final gate log |
-| `bun test src` | 3,290+ pass (before the gate), included in the gate | inside the final gate log |
 
 ### Failed iterations retained
 
@@ -293,6 +292,16 @@ a readable Suricata event log, bpftool allowed to list, the WireGuard module pre
   failures, because the locator fix had not been written to the spec (a scripted edit failed and the
   commit that claimed it carried only the phone-width case). Go, Bun, Prettier, ESLint and `tsc` were
   clean. The fix is commit `12bf9297`.
+- [`test-changed-attempt2.log`](network-traffic-connections-maturity/test-changed-attempt2.log):
+  the second full gate, exit 1 — 558 passes, 60 optional skips and two test faults: a tuple age read
+  as exactly "1h 30m" from a fixture whose times are fixed when it loads (the gate ran for twenty
+  minutes, so it read "1h 31m"), and a wait for every animation to finish before the phone
+  screenshots, which never ends on a page with an infinite live pulse. Both assertions were
+  corrected (`f83bf539`); the product was unchanged.
+- [`browser-maturity-attempt4.log`](network-traffic-connections-maturity/browser-maturity-attempt4.log):
+  the spec alone on that build, 14 of 15; the congestion panel's request started 3.6 s into the
+  assertion's 5 s window on the shared, busy host (the panel reads after the shaping view) and
+  answered after it. Each case's first reading now allows 15 s (`389e1896`).
 
 ### Screenshots
 
