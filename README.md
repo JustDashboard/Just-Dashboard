@@ -6,7 +6,7 @@
 Metrics, Docker, processes, logs, a real shell, files, git, databases, the reverse proxy,
 the firewall, backups and deploys, behind a login that lives on your private network.
 
-**Version 0.7.0** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.1** · Go backend · Next.js frontend · one `docker compose` stack
 
 [Install](#install) · [Security](#read-this-before-you-expose-it) · [Support](#who-makes-this) · [The tour](#the-tour) · [Configuration](#configuration) · [Licence](#licence)
 
@@ -379,7 +379,7 @@ and changing accounts or settings are `admin`'s, and deleting a whole database a
 
 ## Version, and updating
 
-This is **0.7.0**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.1**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds
 and restarts from a container that outlives the restart. The update check is one unauthenticated
 GET of one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
