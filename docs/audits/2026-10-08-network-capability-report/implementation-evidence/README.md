@@ -119,6 +119,12 @@ ownership and the fq_codel restore fix, CAKE upload profiles, congestion compari
 ages, expiring blocks and install phases, with native fixtures, failed runs and the passing gate.
 Production accounting, real-firewall blocks and BBR remain open.
 
+[Proxy and certificates acceptance](network-proxy-certs-maturity-acceptance.md) (C120–C126)
+records reload proof, pool outcomes, stream joins, access explanations, measured controls,
+issuance diagnosis and watched network probes, with native nginx/certbot runs, review fixes and the
+final gate including its one unrelated retried timing case. HTTP/3 and the connection limit remain
+unmeasured.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

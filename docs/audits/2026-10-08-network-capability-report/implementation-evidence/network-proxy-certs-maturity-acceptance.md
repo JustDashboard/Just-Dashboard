@@ -299,3 +299,12 @@ administrator.
 | C124 | implemented / acceptance pending | Policy reading, Network reuse and measured verification pass against native nginx, but the connection limit is unmeasured and HTTP/3 is shown reachable and advertised, not exercised by a QUIC client. |
 | C125 | verified | The host's real certbot output, failed in Let's Encrypt's problem wording, is read into stage and owner for issuance and renewal, and both browser paths show it; no real-authority failure was produced, by design. |
 | C126 | verified | TCP probes reuse the watch monitor, history and alerts; a real loopback listener is watched, checked and alerted on; browser acceptance passes on Network and Proxy. |
+
+## Integration
+
+Merged after the routing package, whose ufw parser moves `on tailscale0` from the destination
+column into the rule's `Interface`, the per-address firewall judgement no longer saw interface-limited
+rules: `TestJudgeFirewallFromOneSource` failed on the assembled source, counting a port-22 rule
+on `tailscale0` against a port-443 check. The judgement now reads the interface from either place.
+On the assembled source `netsec`, `netpath`, `proxysvc`, `store`, `netx` and the whole `api`
+package, 3,374 Bun tests, `tsc`, ESLint and Prettier passed.
