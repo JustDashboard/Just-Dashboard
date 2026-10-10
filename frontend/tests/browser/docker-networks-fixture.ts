@@ -654,8 +654,10 @@ export async function mockNetworks(
     if (path === "/docker/networks/" && method === "GET") {
       return json(route, options.networks ?? NETWORKS)
     }
+    // `prune` and `drivers` are routes of their own, as the server's router
+    // matches them before a network's id.
     const one = path.match(/^\/docker\/networks\/([^/]+)$/)
-    if (one && method === "GET") {
+    if (one && method === "GET" && !["prune", "drivers"].includes(one[1])) {
       const net = NETS.find((n) => n.id === decodeURIComponent(one[1]))
       return net
         ? json(route, networkDetail(net))
