@@ -1,0 +1,128 @@
+{
+  "at": "2026-10-10T00:58:14Z",
+  "bootId": "53665561-24a4-4da7-bb80-15a178631416",
+  "evidence": {
+    "capabilitiesSystemd": null,
+    "modules": {
+      "ifb": false,
+      "nf_tables": true,
+      "sch_cake": false,
+      "tcp_bbr": false,
+      "vrf": false
+    },
+    "nativeManagers": {
+      "capabilities": [
+        {
+          "edits": [
+            "existing static/automatic addresses",
+            "per-link DNS and domains",
+            "explicit unicast routes"
+          ],
+          "manager": "NetworkManager",
+          "status": "supported",
+          "version": "1.46.0"
+        },
+        {
+          "edits": [
+            "existing static/automatic addresses",
+            "per-link DNS and domains",
+            "explicit unicast routes"
+          ],
+          "manager": "networkd",
+          "status": "supported",
+          "version": "systemd 255 (255.4-1ubuntu8.17)"
+        },
+        {
+          "edits": [
+            "existing static/automatic addresses",
+            "per-link DNS and domains",
+            "explicit unicast routes"
+          ],
+          "manager": "netplan",
+          "status": "supported",
+          "version": "1.1.2-8ubuntu1~24.04.3"
+        }
+      ],
+      "checkedAt": "2026-10-10T00:58:14.171440701Z",
+      "devices": [
+        {
+          "kind": "physical",
+          "mac": "52:54:00:4a:44:03",
+          "name": "enp0s3"
+        },
+        {
+          "kind": "physical",
+          "mac": "52:54:00:4a:44:04",
+          "name": "enp0s4"
+        },
+        {
+          "kind": "physical",
+          "mac": "52:54:00:4a:44:05",
+          "name": "enp0s5"
+        },
+        {
+          "kind": "physical",
+          "mac": "52:54:00:4a:44:06",
+          "name": "enp0s6"
+        },
+        {
+          "kind": "dummy",
+          "mac": "3a:b5:f5:56:71:b1",
+          "name": "jdnm0"
+        },
+        {
+          "kind": "bridge",
+          "mac": "0a:d9:d4:62:ab:e8",
+          "name": "docker0"
+        }
+      ],
+      "warnings": []
+    },
+    "nics": {
+      "enp0s3": {
+        "ifindex": 2,
+        "mac": "52:54:00:4a:44:03",
+        "operstate": "UP",
+        "permanent": "52:54:00:4a:44:03"
+      },
+      "enp0s4": {
+        "ifindex": 3,
+        "mac": "52:54:00:4a:44:04",
+        "operstate": "UP",
+        "permanent": "52:54:00:4a:44:04"
+      },
+      "enp0s5": {
+        "ifindex": 4,
+        "mac": "52:54:00:4a:44:05",
+        "operstate": "UP",
+        "permanent": "52:54:00:4a:44:05"
+      },
+      "enp0s6": {
+        "ifindex": 5,
+        "mac": "52:54:00:4a:44:06",
+        "operstate": "UP",
+        "permanent": "52:54:00:4a:44:06"
+      }
+    },
+    "owners": {
+      "networkctl": "IDX LINK    TYPE     OPERATIONAL SETUP\n  1 lo      loopback carrier     unmanaged\n  2 enp0s3  ether    routable    configured\n  3 enp0s4  ether    routable    configured\n  4 enp0s5  ether    routable    unmanaged\n  5 enp0s6  ether    routable    configured\n  6 jdnm0   ether    routable    unmanaged\n  7 docker0 bridge   no-carrier  unmanaged\n\n7 links listed.\n",
+      "nmcli": "jdnm0:dummy:connected:jdnm0\nenp0s5:ethernet:connected:jdvm-nm\nlo:loopback:connected (externally):lo\ndocker0:bridge:connected (externally):docker0\nenp0s3:ethernet:unmanaged:\nenp0s4:ethernet:unmanaged:\nenp0s6:ethernet:unmanaged:\n"
+    },
+    "versions": {
+      "iproute2": "6.1.0-1ubuntu6.4",
+      "iptables": "1.8.10-3ubuntu2",
+      "kernel": "6.8.0-146-generic",
+      "linux-image-virtual": "6.8.0-146.146",
+      "linux-modules-extra-6.8.0-146-generic": "6.8.0-146.146",
+      "netplan.io": "1.1.2-8ubuntu1~24.04.3",
+      "network-manager": "1.46.0-1ubuntu2.8",
+      "networkctl": "systemd 255 (255.4-1ubuntu8.17)",
+      "nftables": "1.0.9-1ubuntu0.1",
+      "systemd": "255.4-1ubuntu8.17"
+    }
+  },
+  "failures": [],
+  "phase": "baseline",
+  "result": "pass",
+  "seconds": 3.7
+}

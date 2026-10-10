@@ -43,7 +43,18 @@ NetworkManager is inspected through its native selected connection and applied s
 its UUID and exact interface binding. Its offline client stages a profile; the selected native owner
 loads and activates it. networkd stages the selected `.network` file and reconfigures the device.
 Netplan preserves its exact YAML origin, generates in a private root, then replaces only the selected
-source and generated renderer artifact. It does not run a global `netplan apply`.
+source and generated renderer artifact. It does not run a global `netplan apply`. Staging runs the
+generator `/usr/libexec/netplan/generate --root-dir` directly: the `netplan generate` CLI also
+reloads udev and systemd on the live host even with `--root-dir`, and that reload reruns Netplan's
+systemd generator over the real configuration. In a booted Ubuntu 24.04 guest it rewrote the live
+artifacts with new inodes mid-transaction, and every Netplan edit was refused as an ownership change.
+
+networkd activation reloads networkd globally before reconfiguring the selected link, and networkd's
+reload also reconfigures any other link whose file changed since it last loaded. Netplan rewrites
+every generated artifact on each systemd reload; on Ubuntu, NetworkManager's start triggers one after
+networkd has loaded. The first networkd edit after such a boot therefore also restarted the uplink's
+DHCP and router-advertisement state in the guest, and the IPv6 anchor guard refused and rolled it
+back; a retry from a settled networkd passed. This remains an open limit of the global reload.
 Native INI rendering preserves comments and intentional blank lines in retained sections. Its
 terminal LF ends the last line, so repeated rendering of unchanged networkd address, DNS, domain and
 route intent does not create another blank line. A missing final LF is normalized once.
@@ -206,6 +217,13 @@ direct NetworkManager/networkd fixtures against the assembled owner-reader and v
 The [v8 authored Netplan proof](evidence/native-manager-netplan-v8-2026-10-09.md) measures the explicit
 standalone policy above. Default Netplan DHCP MTU, DHCPv6 acquisition, wider platform owners and host
 reboot remain open; source ancestry is not interchangeable.
+
+The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md) runs real
+owners in a booted Ubuntu 24.04 guest: authored Netplan/networkd, authored Netplan/NetworkManager on a
+dummy device and direct networkd. Confirmed edits persist across reboots by the owner alone; unconfirmed
+edits are recovered by the real timer and, after an immediate reboot, by the boot unit on the new boot.
+Netplan renders `[ethernet] wake-on-lan=0` into every NetworkManager ethernet profile, which the
+adapter refuses as an unverified property, so NetworkManager ethernet profiles remain refused there.
 
 The earlier v8 checkpoint has a separately observed equal-byte ownership defect. When a staged
 candidate has the same bytes as the saved prior profile but a different captured inode, byte-first

@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-10T01:07:26Z",
+  "bootId": "0811de16-2f74-44a2-914a-c2b4ece6be71",
+  "evidence": {
+    "candidateFile": {
+      "inode": 23089,
+      "mode": "0o600",
+      "path": "/etc/netplan/60-jdvm-networkd.yaml",
+      "sha256": "f5ca3599ffddbb05884923e6b4d720064bcf509098cb0b37802b8d03be3ed810"
+    },
+    "journalAtKill": {
+      "appliedAt": "2026-10-10T01:07:25.303089123Z",
+      "boot": "enabled",
+      "bootDependencies": 0,
+      "cleanup": "pending",
+      "commandTools": [
+        "native"
+      ],
+      "expiresAt": "2026-10-10T01:08:55.181238876Z",
+      "files": [],
+      "generation": "450aabcb561cd2c4a24ddb04d6f0513e1b598586fbfd58c6b79d111a2a17e50f",
+      "id": "56440ce453ddbe69e44d042c5bde9797",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:07:25.674595287Z",
+      "watchdog": "armed"
+    },
+    "networkdSettled": true
+  },
+  "failures": [],
+  "phase": "p11-kill netplan-networkd 17",
+  "result": "pass",
+  "seconds": 5.6
+}

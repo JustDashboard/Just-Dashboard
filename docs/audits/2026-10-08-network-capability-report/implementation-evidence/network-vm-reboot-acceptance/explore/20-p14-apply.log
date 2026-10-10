@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-09T23:41:55Z",
+  "bootId": "b21e1c10-d281-41ac-8d31-0457ace47bf1",
+  "evidence": {},
+  "failures": [
+    "POST /network/shaping/enp0s6 -> 400: {'error': {'code': 'bad_request', 'message': 'shaping differs from the saved configuration: enp0s6 IFB has foreign classs'}}"
+  ],
+  "phase": "p14-apply",
+  "result": "fail",
+  "seconds": 1.8
+}

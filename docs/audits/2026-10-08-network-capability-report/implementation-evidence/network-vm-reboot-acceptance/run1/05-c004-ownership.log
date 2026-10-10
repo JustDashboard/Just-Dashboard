@@ -1,0 +1,93 @@
+{
+  "at": "2026-10-10T00:58:53Z",
+  "bootId": "046e6291-9dd3-4547-a9a2-4a757abce173",
+  "evidence": {
+    "deleteManagedWithDependents": {
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "message": "jdvmbr0 is used by a route to 10.233.0.0/24; remove that first"
+        }
+      },
+      "status": 400
+    },
+    "deleteNative": {
+      "body": {
+        "error": {
+          "code": "not_managed",
+          "message": "enp0s4: this was not created by Just Dashboard"
+        }
+      },
+      "status": 409
+    },
+    "links": {
+      "enp0s3": {
+        "guard": "enp0s3 carries the default route: it is how this server reaches the internet.",
+        "kind": "physical",
+        "managed": false,
+        "owner": "system",
+        "role": "uplink"
+      },
+      "enp0s4": {
+        "guard": null,
+        "kind": "physical",
+        "managed": false,
+        "owner": "system",
+        "role": "physical"
+      },
+      "enp0s5": {
+        "guard": null,
+        "kind": "physical",
+        "managed": false,
+        "owner": "system",
+        "role": "physical"
+      },
+      "enp0s6": {
+        "guard": null,
+        "kind": "physical",
+        "managed": false,
+        "owner": "system",
+        "role": "physical"
+      },
+      "jdvm-veth0": {
+        "guard": null,
+        "kind": "veth",
+        "managed": true,
+        "owner": "just-dashboard",
+        "role": "virtual"
+      },
+      "jdvmbr0": {
+        "guard": null,
+        "kind": "bridge",
+        "managed": true,
+        "owner": "just-dashboard",
+        "role": "bridge"
+      },
+      "jdvmdum0": {
+        "guard": null,
+        "kind": "dummy",
+        "managed": true,
+        "owner": "just-dashboard",
+        "role": "virtual"
+      },
+      "jdvmdum1": {
+        "guard": null,
+        "kind": "dummy",
+        "managed": true,
+        "owner": "just-dashboard",
+        "role": "virtual"
+      },
+      "jdvmvlan42": {
+        "guard": null,
+        "kind": "vlan",
+        "managed": true,
+        "owner": "just-dashboard",
+        "role": "vlan"
+      }
+    }
+  },
+  "failures": [],
+  "phase": "c004-ownership",
+  "result": "pass",
+  "seconds": 1.2
+}

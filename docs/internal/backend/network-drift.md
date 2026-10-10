@@ -87,13 +87,16 @@ admission rule, a shaped device's root queue and ingress policer filter) are
 by design and are not part of the measured result. A boot that first ran an
 interrupted-change recovery replays managed devices and addresses before the
 ordinary unit, whose creation lines then report existing objects; that boot's
-activation reads failed even when every runtime observation matches.
+activation reads failed even when every runtime observation matches. A restart
+of the unit (it is `PartOf` systemd-networkd) finds its devices and addresses
+still present and reads failed for the same reason.
 
 `bootTrigger=unknown` is deliberate: systemd's current activation properties do
 not establish whether a boot transaction, daemon restart or operator started
-the unit. A measured successful activation does not establish reboot acceptance.
-Actual reboot and daemon restart acceptance remain pending until separately
-exercised and recorded.
+the unit. A measured successful activation does not by itself establish reboot
+acceptance. The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md)
+records actual guest reboots and a systemd-networkd restart against this
+inspection; a disposable guest is not the production host.
 
 ## Owned repair plan
 

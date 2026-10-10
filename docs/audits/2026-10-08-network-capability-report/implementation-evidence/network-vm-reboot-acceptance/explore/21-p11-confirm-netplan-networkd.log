@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-09T23:42:10Z",
+  "bootId": "b21e1c10-d281-41ac-8d31-0457ace47bf1",
+  "evidence": {},
+  "failures": [
+    "PUT /network/native/profiles/enp0s4 -> 409: {'error': {'code': 'network_read_only', 'message': 'An earlier network change needs confirmation or recovery; its journal has been preserved.'}}"
+  ],
+  "phase": "p11-confirm netplan-networkd",
+  "result": "fail",
+  "seconds": 0.5
+}

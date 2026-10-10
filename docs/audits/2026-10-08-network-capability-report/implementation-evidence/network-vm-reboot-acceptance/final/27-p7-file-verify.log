@@ -1,0 +1,417 @@
+{
+  "at": "2026-10-10T01:25:36Z",
+  "bootId": "720a6047-e221-452a-a0da-c9b34647d1f4",
+  "evidence": {
+    "confirmed": {
+      "appliedAt": "2026-10-10T01:25:34.870573257Z",
+      "boot": "not_verified",
+      "expiresAt": "2026-10-10T01:27:04.154726402Z",
+      "generation": "4f6946ba9551507cb0785e59be542eeb3232ac647dc868306b9d6a5c014e3bee",
+      "id": "4ef756d02b4a3d73feba760637256b6c",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "not_applied",
+      "updatedAt": "2026-10-10T01:25:34.902292794Z",
+      "verifiedAt": "2026-10-10T01:25:34.888791612Z",
+      "watchdog": "completed"
+    },
+    "driftAfterBoot": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "720a6047-e221-452a-a0da-c9b34647d1f4",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:25:26 UTC",
+        "invocationId": "f8ad0f78f6ec4ad7914f0f3558921b33",
+        "reason": null,
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:25:26 UTC",
+        "status": "succeeded"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "address:jdvmdum1/10.232.2.1/24",
+          "reason": "The saved managed address is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "render:/etc/just-dashboard/network/links.batch",
+          "reason": "The owned file differs from the saved configuration.",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": true,
+        "items": [
+          [
+            "repair:render:/etc/just-dashboard/network/links.batch",
+            "regenerate_owned_file",
+            true
+          ],
+          [
+            "repair:address:jdvmdum1/10.232.2.1/24",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "driftAfterRepair": {
+      "boot": {
+        "activeState": "active",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "ip",
+          0,
+          "exited"
+        ],
+        [
+          "tc",
+          0,
+          "exited"
+        ],
+        [
+          "nft",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "iptables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "ip6tables",
+          0,
+          "exited"
+        ],
+        [
+          "sysctl",
+          0,
+          "exited"
+        ]
+      ],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "gateway:jd_gateway",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "720a6047-e221-452a-a0da-c9b34647d1f4",
+        "bootTrigger": "unknown",
+        "finishedAt": "Sat 2026-10-10 01:25:26 UTC",
+        "invocationId": "f8ad0f78f6ec4ad7914f0f3558921b33",
+        "reason": null,
+        "result": "success",
+        "startedAt": "Sat 2026-10-10 01:25:26 UTC",
+        "status": "succeeded"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "address:jdvmdum1/10.232.2.1/24",
+          "reason": "The saved managed address is absent.",
+          "status": "missing"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": false,
+        "items": [
+          [
+            "repair:address:jdvmdum1/10.232.2.1/24",
+            "restore_owned_configuration",
+            false
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "journal": {
+      "appliedAt": "2026-10-10T01:25:34.870573257Z",
+      "boot": "not_verified",
+      "bootDependencies": 0,
+      "commandTools": [],
+      "expiresAt": "2026-10-10T01:27:04.154726402Z",
+      "files": [
+        "/etc/just-dashboard/network/links.batch"
+      ],
+      "generation": "4f6946ba9551507cb0785e59be542eeb3232ac647dc868306b9d6a5c014e3bee",
+      "id": "4ef756d02b4a3d73feba760637256b6c",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "confirmed",
+      "runtime": "not_applied",
+      "updatedAt": "2026-10-10T01:25:34.902292794Z",
+      "verifiedAt": "2026-10-10T01:25:34.888791612Z",
+      "watchdog": "completed"
+    },
+    "journalPending": {
+      "appliedAt": "2026-10-10T01:25:34.870573257Z",
+      "boot": "not_verified",
+      "bootDependencies": 0,
+      "commandTools": [],
+      "expiresAt": "2026-10-10T01:27:04.154726402Z",
+      "files": [
+        "/etc/just-dashboard/network/links.batch"
+      ],
+      "generation": "4f6946ba9551507cb0785e59be542eeb3232ac647dc868306b9d6a5c014e3bee",
+      "id": "4ef756d02b4a3d73feba760637256b6c",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "not_applied",
+      "updatedAt": "2026-10-10T01:25:34.87612768Z",
+      "watchdog": "armed"
+    },
+    "networkUnit": {
+      "ActiveState": "active",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:25:26 UTC",
+      "ExecMainStartTimestampMonotonic": "15643550",
+      "ExecMainStatus": "0",
+      "InvocationID": "f8ad0f78f6ec4ad7914f0f3558921b33",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      }
+    ],
+    "networkUnitFailedCommands": [],
+    "networkUnitJournal": [
+      "2026-10-10T01:25:25.682229+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made...",
+      "2026-10-10T01:25:25.900662+00:00 jd-vm-reboot iptables[881]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:25.926457+00:00 jd-vm-reboot iptables[886]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:25.949819+00:00 jd-vm-reboot iptables[887]: iptables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:25.972937+00:00 jd-vm-reboot ip6tables[890]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:25.992283+00:00 jd-vm-reboot ip6tables[891]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:26.013617+00:00 jd-vm-reboot ip6tables[893]: ip6tables: Bad rule (does a matching rule exist in that chain?).",
+      "2026-10-10T01:25:26.065357+00:00 jd-vm-reboot tc[895]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:25:26.086063+00:00 jd-vm-reboot tc[899]: Cannot find device \"jdvmdum1\"",
+      "2026-10-10T01:25:26.102721+00:00 jd-vm-reboot tc[903]: Cannot find device \"jdvmbr0\"",
+      "2026-10-10T01:25:26.268367+00:00 jd-vm-reboot tc[928]: Warning: sch_htb: quantum of class 10010 is big. Consider r2q change.",
+      "2026-10-10T01:25:26.823916+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network.service - Just Dashboard network: the devices, routes, gateway and shaping it made."
+    ],
+    "recoveryUnit": {
+      "ActiveState": "inactive",
+      "ExecMainExitTimestamp": "Sat 2026-10-10 01:25:25 UTC",
+      "ExecMainStartTimestampMonotonic": "14005253",
+      "ExecMainStatus": "0",
+      "Result": "success",
+      "UnitFileState": "enabled"
+    },
+    "recoveryUnitJournal": [
+      "2026-10-10T01:25:25.167596+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes...",
+      "2026-10-10T01:25:25.663040+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recovery.service: Deactivated successfully.",
+      "2026-10-10T01:25:25.663283+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recovery.service - Recover interrupted Just Dashboard network changes."
+    ],
+    "repairItem": {
+      "action": "regenerate_owned_file",
+      "effect": "boot_files",
+      "id": "repair:render:/etc/just-dashboard/network/links.batch",
+      "preconditions": [
+        "Verify this resource is still owned and has the observed state.",
+        "Refuse a foreign replacement or occupied identity."
+      ]
+    },
+    "repairResult": {
+      "appliedAt": "2026-10-10T01:25:34.870573257Z",
+      "boot": "not_verified",
+      "expiresAt": "2026-10-10T01:27:04.154726402Z",
+      "generation": "4f6946ba9551507cb0785e59be542eeb3232ac647dc868306b9d6a5c014e3bee",
+      "id": "4ef756d02b4a3d73feba760637256b6c",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "not_applied",
+      "updatedAt": "2026-10-10T01:25:34.87612768Z",
+      "watchdog": "armed"
+    }
+  },
+  "failures": [],
+  "phase": "p7-file-verify",
+  "result": "pass",
+  "seconds": 7.0
+}

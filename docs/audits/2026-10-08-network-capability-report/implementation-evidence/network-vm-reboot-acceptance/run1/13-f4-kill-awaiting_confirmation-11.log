@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-10T01:03:42Z",
+  "bootId": "046e6291-9dd3-4547-a9a2-4a757abce173",
+  "evidence": {
+    "backendAfterKill": {
+      "active": "failed",
+      "pid": "0",
+      "startedThisBoot": true,
+      "sub": "failed"
+    },
+    "journalAtKill": {
+      "appliedAt": "2026-10-10T01:03:41.917461562Z",
+      "boot": "enabled",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "expiresAt": "2026-10-10T01:05:11.889047771Z",
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "d7ce5018060bd79cdeb7a5671ec3a8176a4508bd032b1f8d5be72116e2c2ad47",
+      "id": "269f9185f7c837d890bd4cd5c7636157",
+      "ownerUserId": 1,
+      "persistence": "written",
+      "phase": "awaiting_confirmation",
+      "runtime": "applied",
+      "updatedAt": "2026-10-10T01:03:41.96321313Z",
+      "watchdog": "armed"
+    },
+    "timer": {
+      "ActiveState": "active",
+      "LoadState": "loaded",
+      "NextElapseUSecMonotonic": "6min 38.579707s"
+    }
+  },
+  "failures": [],
+  "phase": "f4-kill awaiting_confirmation 11",
+  "result": "pass",
+  "seconds": 1.7
+}

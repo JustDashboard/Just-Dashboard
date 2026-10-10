@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-09T23:41:03Z",
+  "bootId": "b21e1c10-d281-41ac-8d31-0457ace47bf1",
+  "evidence": {},
+  "failures": [
+    "POST /network/shaping/enp0s6 -> 400: {'error': {'code': 'bad_request', 'message': 'enp0s6 has an unmanaged fq queue whose recovery is unsupported; change it through its owner before shaping'}}"
+  ],
+  "phase": "p14-apply",
+  "result": "fail",
+  "seconds": 0.6
+}

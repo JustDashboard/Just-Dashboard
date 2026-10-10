@@ -365,7 +365,8 @@ A limit under 1 Mbit/s on the uplink or the client-path device is refused. The i
 ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
 never touched, and a download limit on a device that has one is refused.
 Apply verification reads the exact HTB class/default/leaf and rate/ceil, CAKE bandwidth, and ingress
-matchall/drop policer rate/burst. iproute2 releases before JSON class output (Ubuntu 24.04 ships
+matchall/drop policer rate/burst. The fq_codel leaf lists each flow holding packets as a class
+beneath `10:`; those belong to the leaf and are not counted as HTB classes. iproute2 releases before JSON class output (Ubuntu 24.04 ships
 6.1) print `tc -j class show` as text, and nothing for a device without classes; that form is read
 too. Its rates are whole units, so a rate of 1 Gbit or more that is not a whole number of Mbit reads
 back as drift there. The boot batch omits the runtime path's clearing deletes; the unit runs them
@@ -561,7 +562,10 @@ after its first `bridge vlan` change and recovers the previous membership from a
 only the journal; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reachability and parent
 isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
 (`sudo -E JD_NETNS_LIVE=1 go test ./internal/netx -run TestLiveConntrack`) because the netlink reader
-enters the throwaway namespace in-process.
+enters the throwaway namespace in-process. Reboots are accepted only in a disposable QEMU guest:
+`testdata/vm-reboot-acceptance/` boots Ubuntu 24.04 with user-mode networking, installs the backend in
+the production layout and reboots the guest between phases; see the
+[guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md).
 
 ### Retained capture routes
 

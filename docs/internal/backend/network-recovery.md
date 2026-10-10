@@ -51,7 +51,9 @@ gateway. Those checks cannot establish the actual allowlist, tunnel transport or
 The production network module opts into independent recovery. On systemd hosts the backend copies
 its own static executable to `network-recovery` (0700), checks that it runs in the host mount
 namespace, installs an owned recovery unit and enables it before runtime mutation. A foreign unit
-at that path is refused. The unit is checked/enabled again on subsequent applies. A transient
+at that path is refused. The unit is checked again on subsequent applies and enabled only when its
+`multi-user.target.wants` link is missing: `systemctl enable` reloads systemd even for an enabled
+unit, and on Netplan hosts each reload rewrites the generated networkd artifacts. A transient
 `systemd-run` timer invokes the helper after ninety seconds using explicit argv. Failure to install
 or arm it refuses the change before applying it. Non-systemd hosts report independent recovery as
 unsupported; immediate synchronous recovery is still available.
@@ -116,6 +118,13 @@ Package tests kill an applying child process after runtime mutation, first rende
 and boot setup, then recover from a fresh process. Namespace tests exercise real device/cache/nft
 changes after process death; they use temporary namespaces and directories. Run the required lane
 from `backend/`: `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`.
+
+The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md) runs the
+production layout in a disposable Ubuntu 24.04 QEMU guest
+(`backend/internal/netx/testdata/vm-reboot-acceptance/`). The backend is SIGKILLed when the durable
+journal reaches `runtime_applied`, `persisted` or `awaiting_confirmation`; each case is recovered both by
+the real transient timer with the backend dead and by a real guest reboot before the deadline, through
+the boot recovery unit. A guest is not the production host.
 
 These checks do not establish provider reachability, a production reboot or compatibility with every
 systemd/native-manager configuration. The [report ledger](../../audits/2026-10-08-network-capability-report/implementation-status.md)

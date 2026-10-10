@@ -1,0 +1,219 @@
+{
+  "at": "2026-10-10T01:06:26Z",
+  "bootId": "ae48a199-6254-40f5-a306-d7aaeae3f7ac",
+  "evidence": {
+    "drift": {
+      "boot": {
+        "activeState": "activating",
+        "needDaemonReload": "no",
+        "reason": null,
+        "status": "matching",
+        "unitFileState": "enabled"
+      },
+      "commands": [],
+      "consistent": true,
+      "documentedUnknown": [
+        "link:jdvm-veth0",
+        "recovery-helper:/etc/just-dashboard/network/network-recovery"
+      ],
+      "execution": {
+        "bootId": "ae48a199-6254-40f5-a306-d7aaeae3f7ac",
+        "bootTrigger": "unknown",
+        "finishedAt": null,
+        "invocationId": "db0e18ee36f2431c872181be915c1728",
+        "reason": "No measured activation is available in this boot; a default Result value proves no execution.",
+        "result": null,
+        "startedAt": null,
+        "status": "unrecorded"
+      },
+      "files": 8,
+      "notMatching": [
+        {
+          "id": "route:5",
+          "reason": "The saved managed route is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "rule:6",
+          "reason": "The saved managed policy rule is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "rule:8",
+          "reason": "The saved managed policy rule is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "rule:7",
+          "reason": "The saved managed policy rule is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "gateway:jd_gateway",
+          "reason": "The managed gateway table is absent.",
+          "status": "missing"
+        },
+        {
+          "id": "admission:inet/FORWARD",
+          "reason": "The dashboard's translation admission rule is missing from this chain.",
+          "status": "drift"
+        },
+        {
+          "id": "admission:inet/INPUT",
+          "reason": "The dashboard's translation admission rule is missing from this chain.",
+          "status": "drift"
+        },
+        {
+          "id": "admission:inet/DOCKER-USER",
+          "reason": "The dashboard's translation admission rule is missing from this chain.",
+          "status": "drift"
+        }
+      ],
+      "repairPlan": {
+        "blockers": [],
+        "executable": true,
+        "items": [
+          [
+            "repair:route:5",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:rule:6",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:rule:8",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:rule:7",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:gateway:jd_gateway",
+            "restore_owned_configuration",
+            false
+          ],
+          [
+            "repair:admission:inet/FORWARD",
+            "reconcile_owned_admission",
+            true
+          ],
+          [
+            "repair:admission:inet/INPUT",
+            "reconcile_owned_admission",
+            true
+          ],
+          [
+            "repair:admission:inet/DOCKER-USER",
+            "reconcile_owned_admission",
+            true
+          ]
+        ],
+        "status": "review_required"
+      },
+      "runtime": 35,
+      "status": "drift"
+    },
+    "invocations": {
+      "after": {
+        "ActiveState": "active",
+        "InvocationID": "814e5d9f5aea47828dba0318e933622d",
+        "Result": "success"
+      },
+      "before": "012fc602a0244d34a7ff840417904634"
+    },
+    "kernelAfterNetworkdRestartMissing": [],
+    "networkUnitCommands": [
+      {
+        "argv": "ip -force -batch /etc/just-dashboard/network/links.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "1"
+      },
+      {
+        "argv": "ip -6 -force -batch /etc/just-dashboard/network/rules6.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip",
+        "status": "0"
+      },
+      {
+        "argv": "tc -force -batch /etc/just-dashboard/network/shaping.batch",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "tc",
+        "status": "0"
+      },
+      {
+        "argv": "nft -f /etc/just-dashboard/network/gateway.nft",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "nft",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "iptables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "iptables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I FORWARD 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I INPUT 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "ip6tables -I DOCKER-USER 1 -m connmark --mark 0x4a000000/0xff000000 -m comment --comment just-dashboard-gateway -j ACCEPT",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "ip6tables",
+        "status": "0"
+      },
+      {
+        "argv": "sysctl -q -p /etc/sysctl.d/90-just-dashboard.conf",
+        "code": "exited",
+        "ignoreErrors": "yes",
+        "path": "sysctl",
+        "status": "0"
+      }
+    ],
+    "restartFailedCommands": []
+  },
+  "failures": [
+    "drift after networkd restart: [{'id': 'route:5', 'status': 'missing', 'reason': 'The saved managed route is absent.'}, {'id': 'rule:6', 'status': 'missing', 'reason': 'The saved managed policy rule is absent.'}, {'id': 'rule:8', 'status': 'missing', 'reason': 'The saved managed policy rule is absent.'}, {'id': 'rule:7', 'status': 'missing', 'reason': 'The saved managed policy rule is absent.'}, {'id': 'gateway:jd_gateway', 'status': 'missing', 'reason': 'The managed gateway table is absent.'}, {'id': 'admission:inet/FORWARD', 'status': 'drift', 'reason': \"The dashboard's translation admission rule is missing from this chain.\"}, {'id': 'admission:inet/INPUT', 'status': 'drift', 'reason': \"The dashboard's translation admission rule is missing from this chain.\"}, {'id': 'admission:inet/DOCKER-USER', 'status': 'drift', 'reason': \"The dashboard's translation admission rule is missing from this chain.\"}]",
+    "measured activation is not the restart's: {'status': 'unrecorded', 'reason': 'No measured activation is available in this boot; a default Result value proves no execution.', 'bootId': 'ae48a199-6254-40f5-a306-d7aaeae3f7ac', 'invocationId': 'db0e18ee36f2431c872181be915c1728', 'startedAt': None, 'finishedAt': None, 'result': None, 'bootTrigger': 'unknown'}"
+  ],
+  "phase": "p7-daemon-restart",
+  "result": "fail",
+  "seconds": 3.8
+}

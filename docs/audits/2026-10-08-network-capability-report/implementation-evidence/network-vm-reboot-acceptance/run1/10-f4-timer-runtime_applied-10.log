@@ -1,0 +1,42 @@
+{
+  "at": "2026-10-10T01:02:06Z",
+  "bootId": "046e6291-9dd3-4547-a9a2-4a757abce173",
+  "evidence": {
+    "backend": {
+      "active": "failed",
+      "pid": "0",
+      "startedThisBoot": true,
+      "sub": "failed"
+    },
+    "helperJournal": [
+      "2026-10-10T01:02:04.160527+00:00 jd-vm-reboot systemd[1]: Starting just-dashboard-network-recover-b48c8efb8cc226fc3ada8817d3bae9a7.service - /etc/just-dashboard/network/network-recovery --network-recover /etc/just-dashboard/network b48c8efb8cc226fc3ada8817d3bae9a7...",
+      "2026-10-10T01:02:04.895488+00:00 jd-vm-reboot systemd[1]: just-dashboard-network-recover-b48c8efb8cc226fc3ada8817d3bae9a7.service: Deactivated successfully.",
+      "2026-10-10T01:02:04.895824+00:00 jd-vm-reboot systemd[1]: Finished just-dashboard-network-recover-b48c8efb8cc226fc3ada8817d3bae9a7.service - /etc/just-dashboard/network/network-recovery --network-recover /etc/just-dashboard/network b48c8efb8cc226fc3ada8817d3bae9a7."
+    ],
+    "journal": {
+      "appliedAt": "2026-10-10T01:00:33.564750548Z",
+      "boot": "not_verified",
+      "bootDependencies": 22,
+      "commandTools": [
+        "ip"
+      ],
+      "files": [
+        "/etc/just-dashboard/network/links.batch",
+        "/etc/just-dashboard/network/spec.json"
+      ],
+      "generation": "dc7694a314933f9433f3b02cb1d441bf38c9eae1119c3ca8f1a22c43bb9bef89",
+      "id": "b48c8efb8cc226fc3ada8817d3bae9a7",
+      "persistence": "restored",
+      "phase": "recovered",
+      "runtime": "restored",
+      "updatedAt": "2026-10-10T01:02:04.873895497Z",
+      "watchdog": "recovered"
+    },
+    "priorGenerationInKernelMissing": [],
+    "waitedSeconds": 92.4
+  },
+  "failures": [],
+  "phase": "f4-timer runtime_applied-10",
+  "result": "pass",
+  "seconds": 92.2
+}

@@ -48,3 +48,9 @@ transient units and namespace; it does not install persistent host units or chan
 The marker is an explicit systemd `ExecStartPost` command, so observing it proves the helper exited
 successfully after timer dispatch. This is timer acceptance, separate from the cold-runtime boot
 fixture and from an actual host reboot.
+
+The [guest reboot acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/network-vm-reboot-acceptance.md) adds actual
+reboots of a disposable Ubuntu 24.04 guest (systemd 255): after a kill at each journal phase and an
+immediate reboot, `just-dashboard-network-recovery.service` recovered the change with the backend never
+started, the ordinary unit then restored the prior generation, and drift matched. That boot's ordinary
+activation reads failed because its creation lines meet the devices the recovery already recreated.
