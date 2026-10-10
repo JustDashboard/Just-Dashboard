@@ -25,11 +25,9 @@ Most panels show you a number and leave the reading to you: 68% CPU, exit code 1
 *waiting* rather than merely *busy*, that a container was killed for its memory limit and what
 the limit was, and where the dashboard can fix a finding, the finding comes with a button.
 
-Health and Attention use local rules and measurements, with no AI model, API key or paid service.
-Disk findings show allocated space, large folders, exact copies and old temporary files for selected
-cleanup. Resource findings show the processes responsible, their service owner and reviewed controls.
-Container configuration remedies can be previewed and applied, with Compose changes kept in their
-owning file. Missing evidence is reported instead of treated as a passed check.
+Attention uses local rules and measurements, with no AI model, API key or paid service. Container
+configuration remedies can be previewed and applied, with Compose changes kept in their owning file.
+Missing evidence is reported instead of treated as a passed check.
 
 It manages exactly one machine. There is no fleet view, no agents to enrol, no cluster.
 
@@ -187,11 +185,13 @@ open its surrounding logs.
 
 ### Docker
 
-![The Docker overview, with what needs attention above the stacks](docs/docker.png)
+![The Docker overview: what the containers use, what just happened to them, and every container with its live readings](docs/docker.png)
 
 Create containers from a template, a pasted `docker run` or a form, with the command rendered
 before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
 memory limits, security posture — each with an explanation and, where possible, a button.
+The overview shows which containers use the most processor and memory, the last thing that
+happened to each, and every container's live readings in one table, failing ones first.
 Stacks deploy, rebuild and roll back with the compose diff shown first.
 Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
 history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU

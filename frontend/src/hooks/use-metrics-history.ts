@@ -14,7 +14,7 @@ import {
   type MetricsWindow,
   type RangeKey,
 } from "@/lib/metrics-range"
-import type { Health, MetricEvent, MetricsHistory, StorageHistory } from "@/lib/types"
+import type { MetricEvent, MetricsHistory, StorageHistory } from "@/lib/types"
 
 function useMetricsRefresh(refresh: () => void) {
   useEffect(() => {
@@ -171,31 +171,6 @@ export function useMetricEvents(win: MetricsWindow): MetricEvent[] {
 // Module-level so a component reading events does not see a fresh array
 // identity every render and re-run whatever depends on it.
 const EMPTY_EVENTS: MetricEvent[] = []
-
-/**
- * The server's verdict on the host.
- *
- * Polled rather than streamed: the checks read an hour of recorded history to
- * tell a spike from a trend, which is not work to repeat on every 2s frame. A
- * minute is fast enough for a condition that is, by construction, sustained.
- */
-export function useHealth(intervalMs = 60_000): {
-  health: Health | undefined
-  error: Error | undefined
-  loading: boolean
-} {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => get<Health>("/system/health", undefined, signal),
-    [],
-  )
-  const { data, error, loading, refresh } = usePoll<Health>(fetcher, intervalMs, [])
-  useMetricsRefresh(refresh)
-  useEffect(() => {
-    window.addEventListener("jd:health-changed", refresh)
-    return () => window.removeEventListener("jd:health-changed", refresh)
-  }, [refresh])
-  return { health: data, error, loading }
-}
 
 /**
  * The chosen window, remembered across reloads.

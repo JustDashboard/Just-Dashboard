@@ -43,9 +43,25 @@
   distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
   five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
   and the container's page asks for one.
-  `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
-  list of problems can never say "eight healthy, four with no health check at all" — and that last
-  number is what stops "all healthy" meaning "nothing is being watched".
+  The other half — what is *fine* as well as what is not — was `RuntimeHealthPanel`, a bar of the
+  health-check counts over the containers list, because a list of problems can never say "eight
+  healthy, four with no health check at all" and that last number is what stops "all healthy" meaning
+  "nothing is being watched". The 0.7.1 containers overhaul moved those counts to where they are read:
+  the page's identity line says how many running containers a passing health check vouches for, and
+  every running row says its own verdict, "no health check" included.
+- The containers page (`app/(dashboard)/docker/containers/page.tsx`) is three parts under the engine's
+  identity line. `container-band.tsx` draws the five containers using the most processor and memory
+  as spans of one bar the size of the host (the Processes band's `ShareBar`), figures gliding to each
+  two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`,
+  a restart loop folded to one line and an OOM kill said on the exit it caused (`foldRestarts`).
+  `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
+  memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
+  hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
+  — drawn down the row below `xl`. `containers.ts` (unit-tested) holds what the rows say: the five
+  buckets the state chips count (failing, starting, running, paused, stopped — failing being a restart
+  loop, a dead container, a failed health check, a crash exit or an exit the event log says the OOM
+  killer caused, since `docker stop` also leaves 137), the exit words, the sort, and the network rate
+  from two frames of Docker's cumulative counters.
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
@@ -55,6 +71,14 @@
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
+- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
+  table read the containers socket, so the overview's figures move with every frame where the four
+  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
+  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
+  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
+  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
+  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
+  row below the fold read 0.0% until it was.
 - `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
   volumes, stated whether or not any are affected. The preview's services are a flat list, not
@@ -75,6 +99,17 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
+  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
+  and a history line read as its instruction — in `images.ts` (unit-tested). Its disk lines reclaim
+  their own kind: unused images through `POST /docker/images/prune?all=true`, the build cache through
+  `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
+  only Reclaim beside the total runs the sweep, and says it reaches stopped containers and networks.
+  The pull socket is enabled only while a pull is in flight: the server closes it when the pull
+  ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
+  one about once a second until the page was left. Tag names the same image again, so the copy a
+  container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
   published, and the attention verdict that presses the Needs attention chip), then `stack-band.tsx`
