@@ -113,6 +113,12 @@ probing, hysteresis decisions, guarded journaled switches, boot restore, sticky 
 simulation gate, with seven owned-namespace tests, failed iterations, the passing gate and the
 integration rerun. Failover between real independent upstreams remains open.
 
+[Traffic and connections acceptance](network-traffic-connections-maturity-acceptance.md)
+(C075–C087) records live TCP context, recorded ranges and budgets, container detail, queue
+ownership and the fq_codel restore fix, CAKE upload profiles, congestion comparison, connection
+ages, expiring blocks and install phases, with native fixtures, failed runs and the passing gate.
+Production accounting, real-firewall blocks and BBR remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
