@@ -141,13 +141,23 @@ func egressViews(g EgressGroupSpec, st *egressGroupState, now time.Time) map[int
 
 func (m *egressMonitor) start(ctx context.Context) {
 	m.startOnce.Do(func() {
+		m.mu.Lock()
 		m.started = m.clock()
+		m.mu.Unlock()
 		go m.loop(ctx)
 	})
 }
 
+// halt stops the loop and waits for its round to end; a monitor that never
+// started has nothing to wait for.
 func (m *egressMonitor) halt() {
 	m.stopOnce.Do(func() { close(m.stop) })
+	m.mu.Lock()
+	started := !m.started.IsZero()
+	m.mu.Unlock()
+	if !started {
+		return
+	}
 	select {
 	case <-m.done:
 	case <-time.After(5 * time.Second):
@@ -680,7 +690,10 @@ func (s *Service) Egress(ctx context.Context) (*EgressView, error) {
 	if err != nil {
 		return nil, err
 	}
-	view := &EgressView{Groups: []EgressGroupView{}, Capacity: egressSlots, Persistent: s.egress.store.persistent(), Monitoring: s.egress.started}
+	s.egress.mu.Lock()
+	monitoring := s.egress.started
+	s.egress.mu.Unlock()
+	view := &EgressView{Groups: []EgressGroupView{}, Capacity: egressSlots, Persistent: s.egress.store.persistent(), Monitoring: monitoring}
 	now := time.Now()
 	for _, g := range sp.EgressGroups {
 		gv := EgressGroupView{EgressGroupSpec: g, Fingerprint: g.Fingerprint(), Table: egressGroupTable(g.Slot), Members: []EgressMemberView{}, Events: []EgressEvent{}}
