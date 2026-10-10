@@ -624,6 +624,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
                     filter={shown}
                     boot={boot}
                     lens={forced}
+                    compact
                   />
                 )}
               </>

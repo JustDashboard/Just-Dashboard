@@ -21,7 +21,6 @@ import { journalSource } from "@/lib/log-sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -35,7 +34,7 @@ import { SourceIdentity } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { askOf, withAsk } from "@/components/logs/logs-model"
 import { LogWorkspace } from "@/components/logs/log-workspace"
-import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
+import { useLensReadings } from "@/components/logs/lens-readings"
 import type {
   LogWindow,
   ServiceLogSource,
@@ -105,9 +104,7 @@ function toLocalInput(date: Date) {
  *
  * Over the frame, the page reads the way a deployment's Logs page does: the
  * chosen source as its identity line, with Export and the shortcuts at its
- * end, then the readings its lens takes — what the log adds up to, each with
- * its window's shape — which hold still while the reader moves between the
- * views in the strip beneath them.
+ * end, then the frame, whose lens row counts what the log adds up to.
  *
  * It is every service page's reading in one place. A source is offered the
  * views its own page has beside Live, History and Insights — a container's
@@ -297,12 +294,9 @@ function LogsScreen() {
   }, [selected, sourceId, unit, units, detectedLens, host?.platform])
   const finds = useServiceFinds(record ? undefined : viewSource, readLens, requests.sites)
 
-  // The lens's readings stand over the frame where five fit across it and
-  // the console keeps its height under them. On a narrower or shorter window
-  // they are the counts on the lens row's chips, as a database's Logs
-  // workbench carries them: tiles over a laptop's 720px left the live tail
-  // nine lines, and on a phone pushed the first line a screen down.
-  const roomy = useMediaQuery("(min-width: 1280px) and (min-height: 800px)")
+  // The lens's readings are the counts on the lens row's chips, as a
+  // deployment's output carries them: tiles over the frame took a laptop's
+  // live tail down to nine lines and said again what the chips count.
   const readings = useLensReadings(
     sourceId,
     lensFor(
@@ -312,7 +306,6 @@ function LogsScreen() {
     ),
     { forcedLens: lens, enabled: !record && !windowError },
   )
-  const showReadings = roomy && !record && !windowError && readings.tiles.length > 0
 
   // Another log opened on a stretch of time, from a view or a request —
   // History on it, narrowed where the asker knows how. A source the rail
@@ -494,15 +487,6 @@ function LogsScreen() {
           actions={identity ? undefined : <WorkspaceHelp />}
         />
         {identity}
-        {showReadings && (
-          <LensReadings
-            key={sourceId}
-            readings={readings}
-            filter={filter}
-            onFilterChange={onFilterChange}
-            className="shrink-0 animate-rise"
-          />
-        )}
 
         {/* One frame around the whole workbench. The rail and the lines are
           separated by a hairline rather than by a gutter and two borders: two
@@ -634,8 +618,7 @@ function LogsScreen() {
                 setFilter((f) => ({ ...f, fields: {} }))
               }}
               detectedLens={detectedLens}
-              readings={showReadings ? undefined : readings}
-              answered={showReadings ? readings : undefined}
+              readings={readings}
               range={range}
               onRangeChange={setRange}
               since={since}

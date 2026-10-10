@@ -2513,6 +2513,14 @@ and the live tail keeps its height under them — a window of at least 1280 by 8
 three and two at the old 200px tile floor, now 180 — and on a smaller window the same figures are
 the counts on the lens row's chips, the database workbench's answer.
 
+**Later in 0.7.1 the tiles went**, at the operator's request: three cards over the frame said again
+what the lens row's chips count, and took the live tail's height. The readings are the chips' counts
+at every width. The same pass fixed every service page's pane (`ServiceLogs` — the engine log on
+`/proxy`, a site's, a container's, a database's, a deployment's output, Security's): its Export was an
+outlined box between the source's facts and the view tabs, splitting the strip and reading as one
+more tab. The strip is the name and facts, the views, then the page's commands as glyphs at its end,
+Export an `IconAction`.
+
 **Docker's Events page took the overhaul on 2026-10-08**, at the operator's request, because it
 was the greyest page in the section: one plain column of 13px sentences with a grey dot each, no
 figure anywhere, and a database in a restart loop as sixteen identical rows that pushed everything

@@ -157,9 +157,7 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("button", { name: "Clear the user filter" })).toBeVisible()
 })
 
-test("the source is named over the workbench with its readings, and the strip is its views", async ({
-  page,
-}) => {
+test("the source is named over the workbench, and the strip is its views", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const mocks = await mockLensLogs(page)
   await page.goto(pgLog)
@@ -178,35 +176,18 @@ test("the source is named over the workbench with its readings, and the strip is
   const live = await strip.getByRole("button", { name: "Live", exact: true }).boundingBox()
   expect(live!.x - (toggle!.x + toggle!.width)).toBeLessThan(16)
 
-  // The lens's five readings, the quick view each answers carrying no second count.
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(5)
-  await expect(tiles.filter({ hasText: "Slow statements" })).toContainText("4")
-  await expect(page.getByRole("button", { name: /^Slow\b/ })).toHaveText("Slow")
+  // No tiles over the frame: the lens's readings are the counts on its row's
+  // chips, at every width, and the lines keep the height.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const slow = page.getByRole("button", { name: /^Slow\b/ })
+  await expect(slow).toContainText("4")
 
   // A press narrows the lines to what it counts, and a second lets it go.
-  const reading = page.getByRole("button", { name: "Show the lines behind slow statements" })
-  await reading.click()
+  await slow.click()
   await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual(["event:slow"])
-  await expect(page.getByRole("button", { name: /^Slow\b/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await page
-    .getByRole("button", { name: "Show every line again, not only the slow statements" })
-    .click()
+  await expect(slow).toHaveAttribute("aria-pressed", "true")
+  await slow.click()
   await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual([])
-})
-
-test("on a laptop's window the readings are the lens row's counts, and the lines keep the height", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
-  await mockLensLogs(page)
-  await page.goto(pgLog)
-  await expect(page.locator("[data-slot=host-identity]")).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /^Slow\b/ })).toContainText("4")
 })
 
 test("the rail draws a stack as what it runs and offers the journal's readings a host lacks", async ({
