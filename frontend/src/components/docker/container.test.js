@@ -175,6 +175,12 @@ describe("portRows", () => {
     expect(reachWords(rows[2]).word).toBe("from this server only")
     expect(reachWords(rows[3]).word).toBe("from its networks only")
   })
+
+  test("keeps the binding's address and family, which the path to a port is asked for", () => {
+    const rows = portRows([...exposure, { ...exposure[2], ipv6: true }], undefined)
+    expect(rows[2]).toMatchObject({ hostIp: "::1", hostPort: 8080 })
+    expect(rows[4].ipv6).toBe(true)
+  })
 })
 
 describe("trendOf", () => {

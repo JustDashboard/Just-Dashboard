@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Copy, Eye, EyeOff, ShieldOff, Warning } from "@/components/icons"
+import { Copy, Eye, EyeOff, Route, ShieldOff, Warning } from "@/components/icons"
+import { useAuth } from "@/hooks/use-auth"
 import { copyText } from "@/lib/clipboard"
 import type { ContainerDetail, PortRoute } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -11,6 +12,7 @@ import { EmptyNote, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { IconAction } from "@/components/icon-action"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -20,6 +22,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Hint, Term } from "@/components/docker/explain"
+import {
+  bindingFamily,
+  PublishedPathSheet,
+  type PublishedBinding,
+} from "@/components/docker/published-path"
 import {
   envKind,
   envPrefix,
@@ -67,9 +74,14 @@ export function PortsTable({
   detail,
   routes,
 }: {
-  detail: Pick<ContainerDetail, "exposure">
+  detail: Pick<ContainerDetail, "id" | "exposure">
   routes?: PortRoute[]
 }) {
+  const { can } = useAuth()
+  const [tracing, setTracing] = useState<PublishedBinding | null>(null)
+  // The path reads the host's iptables and firewall, as the connection
+  // investigator does, so it is an administrator's.
+  const trace = can("system.admin")
   const rows = portRows(detail.exposure ?? [], routes).filter((row) => row.hostPort !== undefined)
   if (rows.length === 0) return null
   const bypassed = (routes ?? []).some(
@@ -90,7 +102,12 @@ export function PortsTable({
               <TableHead className="pl-5">Published</TableHead>
               <TableHead>Inside</TableHead>
               <TableHead>Reached</TableHead>
-              <TableHead className="pr-5">Firewall</TableHead>
+              <TableHead className={cn(!trace && "pr-5")}>Firewall</TableHead>
+              {trace && (
+                <TableHead className="pr-5">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -113,18 +130,46 @@ export function PortsTable({
                   </TableCell>
                   <TableCell
                     className={cn(
-                      "py-2.5 pr-5 whitespace-normal",
+                      "py-2.5 whitespace-normal",
+                      !trace && "pr-5",
                       firewall.tone === "warning" ? "text-warning" : "text-muted-foreground",
                     )}
                   >
                     {firewall.word}
                   </TableCell>
+                  {trace && (
+                    <TableCell className="py-2 pr-5 text-right whitespace-nowrap">
+                      {/* The verdict is the binding, proxy and firewall read together;
+                          the path is every layer between the outside and the container,
+                          with the ones nothing here can see said as unknown. */}
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        aria-label={`Trace the path to port ${row.hostPort}/${row.protocol}`}
+                        onClick={() =>
+                          setTracing({
+                            hostPort: row.hostPort!,
+                            protocol: row.protocol,
+                            family: bindingFamily(row.hostIp, row.ipv6),
+                          })
+                        }
+                      >
+                        <Route className="size-3" />
+                        Trace the path
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               )
             })}
           </TableBody>
         </Table>
       </Panel>
+      <PublishedPathSheet
+        container={detail.id}
+        binding={tracing}
+        onClose={() => setTracing(null)}
+      />
       {bypassed && (
         <Notice title="The firewall does not apply to these ports" icon={Warning} tone="warning">
           Docker publishes a port by writing NAT rules that are consulted before the firewall&apos;s

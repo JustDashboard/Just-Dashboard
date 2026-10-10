@@ -1,10 +1,9 @@
 "use client"
 
-import { External, Globe, LockClosed, Route, Servers, Shield } from "@/components/icons"
+import { External, Globe, LockClosed, Servers, Shield } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { PortExposure, PortRoute } from "@/lib/types"
 import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 /**
@@ -170,7 +169,7 @@ const REACH_STYLE = {
  * A row in a hairline list, not a fenced card: three ports were three boxes
  * inside the detail panel, and the frames separated them from nothing.
  */
-export function RouteRow({ route, onTrace }: { route: PortRoute; onTrace?: () => void }) {
+export function RouteRow({ route }: { route: PortRoute }) {
   const style = REACH_STYLE[route.reach] ?? REACH_STYLE.unknown
   const Icon = style.icon
   return (
@@ -218,15 +217,6 @@ export function RouteRow({ route, onTrace }: { route: PortRoute; onTrace?: () =>
         <p className="text-hint text-muted-foreground">
           No firewall this dashboard can read, so external reachability cannot be judged from here.
         </p>
-      )}
-      {/* The verdict above is the binding, proxy and firewall read together;
-          the path is every layer between the outside and the container, with
-          the ones nothing here can see said as unknown. */}
-      {onTrace && (
-        <Button size="xs" variant="outline" onClick={onTrace}>
-          <Route className="size-3" />
-          Trace the path
-        </Button>
       )}
     </li>
   )
