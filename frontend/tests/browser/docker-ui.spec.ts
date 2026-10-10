@@ -614,19 +614,24 @@ test("a link to the old stack query lands on the stack", async ({ page }) => {
   await expect(page).toHaveURL(/\/docker\/stacks\/running-app$/)
 })
 
-test("a volume in use offers no delete button", async ({ page }) => {
+test("a volume in use cannot be removed, and says what mounts it", async ({ page }) => {
   await mockDocker(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/docker/volumes")
 
-  const inUse = page.getByRole("listitem").filter({ hasText: "app-data" })
-  await expect(inUse.getByText("1 container")).toBeVisible()
-  await expect(inUse.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+  // Drawn and disabled, with the reason as its name: Docker refuses it.
+  const inUse = page.getByRole("row", { name: /app-data/ })
+  await expect(inUse.getByRole("link", { name: "db" })).toBeVisible()
+  await expect(inUse.getByText("/var/lib/postgresql/data")).toBeVisible()
+  await expect(
+    inUse.getByRole("button", { name: "Remove — mounted by 1 container", exact: true }),
+  ).toBeDisabled()
 
   // The unattached one still can be removed — the gate is usage, not caution.
-  const free = page.getByRole("listitem").filter({ hasText: "orphaned" })
-  await expect(free.getByRole("button", { name: "Remove", exact: true })).toHaveCount(1)
-  // And an unmeasured size says which of the three things a dash used to mean.
-  await expect(free.getByText("not measured")).toBeVisible()
+  const free = page.getByRole("row", { name: /orphaned/ })
+  await expect(free.getByRole("button", { name: "Remove", exact: true })).toBeEnabled()
+  // Measured and empty says so, rather than the dash it shared with "not measured".
+  await expect(free.getByText("empty", { exact: true })).toBeVisible()
 })
 
 /**
@@ -802,23 +807,15 @@ test("on a phone the containers are a list rather than a table with columns remo
 
 /**
  * The containers page was the only one that replaced its table on a phone; the
- * volume and network tables were still the remains of one: columns dropped
- * until a wide first cell and two stubs were left. The same test applies to
- * them as to the containers list — the table is replaced, not squeezed, and
- * nothing the table carried is lost on the way. The images are a table again,
- * with their phone shape checked in `docker-images.spec.ts`.
+ * network table was still the remains of one: columns dropped until a wide first cell
+ * and a stub were left. The same test applies to it as to the containers list — the table is
+ * replaced, not squeezed, and nothing the table carried is lost on the way. The images and
+ * volumes are tables again, with their phone shapes checked in `docker-images.spec.ts` and
+ * `docker-volumes.spec.ts`.
  */
-test("the volume and network lists read down the row on a phone", async ({ page }) => {
+test("the network list reads down the row on a phone", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 390, height: 844 })
-
-  await page.goto("/docker/volumes")
-  await expect(page.getByRole("columnheader")).toHaveCount(0)
-  const volumeList = page.getByRole("list").filter({ hasText: "app-data" })
-  await expect(volumeList.getByRole("button", { name: "app-data" })).toBeVisible()
-  await expect(volumeList.getByText("not measured")).toBeVisible()
-  // The volume Docker's own prune would delete while calling it unused.
-  await expect(volumeList.getByText("unused")).toBeVisible()
 
   await page.goto("/docker/networks")
   await expect(page.getByRole("columnheader")).toHaveCount(0)
@@ -1798,7 +1795,8 @@ test("the storage browser draws a directory the way the file manager does", asyn
   await page.goto("/docker/volumes")
   await page.getByRole("button", { name: "app-data", exact: true }).first().click()
 
-  const panel = page.getByRole("dialog")
+  // The sheet has a table of its own, of the containers mounting the volume.
+  const panel = page.getByRole("dialog").locator("[data-slot=pane]")
   await expect(panel.getByRole("columnheader", { name: "Name" })).toBeVisible()
   await expect(panel.getByRole("columnheader", { name: "Size" })).toBeVisible()
   await expect(panel.getByText("1 folder, 1 file · 28.0 KB")).toBeVisible()

@@ -561,6 +561,8 @@ export type DockerVolume = {
   size: number
   refCount: number
   inUse: boolean
+  /** What a local volume's driver options mount (nfs, cifs, bind); a prune skips such a volume. */
+  mountType?: string
 }
 
 export type DockerNetwork = {

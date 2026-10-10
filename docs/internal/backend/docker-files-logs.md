@@ -103,6 +103,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
 - **`cleanup.go` replaces one word covering five sweeps.** Each category reports what it holds, what
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
   Volumes are always listed and never recommended; selecting them still uses ordinary confirmation.
+- **A volume's standing follows the daemon's own rule.** `ListVolumesWithUsers` joins every
+  container's mounts, running or stopped, and each listed volume says what its driver options mount
+  (`mountType`: nfs, cifs, bind, or custom) without carrying the options — a CIFS `o=` holds the
+  share's password, so the options stay on the inspect route. Docker's prune removes only local
+  volumes without options that nothing references: a stopped container's volume is kept, and what a
+  prune takes is what `docker compose down` or a container removed without `-v` left behind. The
+  Volumes page reads the list again before it names that set, and compares the prune's report with
+  it afterwards, because the reference count it would otherwise trust is cached.
 - **Authorization uses effective container resources.** Creation and recreation validate the selected
   spec, including a spec reused from an existing container. Limited accounts may use plain local
   volumes; references to existing named volumes are inspected first. Custom drivers or driver options
