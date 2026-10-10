@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/go-chi/chi/v5"
 )
@@ -108,5 +109,43 @@ func TestPendingHeaderDoesNotEnrollUnsupportedNetworkOwners(t *testing.T) {
 		if response.Code != http.StatusBadRequest || called {
 			t.Fatalf("unsupported owner enrolled: %s %d", path, response.Code)
 		}
+	}
+}
+
+// The verification a confirming session receives carries the access boundary
+// as it is now, paired with the picture taken before the pending apply.
+func TestVerificationComparesTheBoundaryWithItsBeforePicture(t *testing.T) {
+	_, router, _ := confirmationRouter(t, auth.RoleAdmin, "session", 7)
+	held := netsec.AccessBoundary{Checks: []netsec.BoundaryCheck{
+		{ID: "ingress", State: netsec.BoundaryHeld}, {ID: "allowlist", State: netsec.BoundaryHeld},
+		{ID: "tailnet", State: netsec.BoundaryHeld}, {ID: "ssh", State: netsec.BoundaryHeld},
+		{ID: "previews", State: netsec.BoundaryHeld},
+	}}
+	rememberBoundary("pending-one", held)
+	t.Cleanup(func() { pendingBoundaries.Delete("pending-one") })
+	verify := gwDo(router, http.MethodPost, "/network/changes/pending-one/verify", "")
+	var body struct {
+		Challenge string `json:"challenge"`
+		Boundary  struct {
+			Before  bool                    `json:"before"`
+			Checks  []netsec.BoundaryCheck  `json:"checks"`
+			Changes []netsec.BoundaryChange `json:"changes"`
+		} `json:"boundary"`
+	}
+	if err := json.Unmarshal(verify.Body.Bytes(), &body); err != nil || verify.Code != http.StatusOK {
+		t.Fatalf("verify=%d %s %v", verify.Code, verify.Body.String(), err)
+	}
+	if body.Challenge == "" || !body.Boundary.Before || len(body.Boundary.Checks) != 5 || len(body.Boundary.Changes) != 5 {
+		t.Fatalf("boundary=%+v", body.Boundary)
+	}
+	for _, change := range body.Boundary.Changes {
+		if change.Before != netsec.BoundaryHeld || change.Lost != (change.After != netsec.BoundaryHeld) {
+			t.Fatalf("change=%+v", change)
+		}
+	}
+	pendingBoundaries.Delete("pending-one")
+	again := gwDo(router, http.MethodPost, "/network/changes/pending-one/verify", "")
+	if !strings.Contains(again.Body.String(), `"before":false`) {
+		t.Fatalf("a missing before-picture was invented: %s", again.Body.String())
 	}
 }

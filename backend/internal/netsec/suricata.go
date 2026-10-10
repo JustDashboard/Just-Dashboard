@@ -95,6 +95,15 @@ type SuricataView struct {
 	// dashboard may read. LogError is any other reason it was not.
 	LogRefused string `json:"logRefused,omitempty"`
 	LogError   string `json:"logError,omitempty"`
+
+	// The setup the page walks an operator through after installing: what
+	// the newest stats event says the capture sees (nil where eve.json holds
+	// none or could not be read), where it captures, where the rules came
+	// from, and the queue rules an inline deployment depends on.
+	Capture    *SuricataCapture   `json:"capture,omitempty"`
+	Interfaces SuricataInterfaces `json:"interfaces"`
+	Rules      SuricataRules      `json:"rules"`
+	Inline     SuricataInline     `json:"inline"`
 }
 
 var versionRe = regexp.MustCompile(`(?i)version\s+(\S+)`)
@@ -127,11 +136,13 @@ func (s *Service) Suricata(ctx context.Context, allow func(path string) (string,
 
 	if allow == nil {
 		v.LogRefused = "no log roots are configured"
+		s.suricataSetup(ctx, v, nil)
 		return v, nil
 	}
 	path, err := allow(suricataEvePath)
 	if err != nil {
 		v.LogRefused = err.Error()
+		s.suricataSetup(ctx, v, nil)
 		return v, nil
 	}
 	data, err := tailFile(path, eveTail)
@@ -141,8 +152,10 @@ func (s *Service) Suricata(ctx context.Context, allow func(path string) (string,
 		} else {
 			v.LogError = err.Error()
 		}
+		s.suricataSetup(ctx, v, nil)
 		return v, nil
 	}
+	s.suricataSetup(ctx, v, data)
 	alerts := parseEveAlerts(data)
 	v.Scanned = len(alerts)
 	v.BySeverity, v.TopSignatures = summariseAlerts(alerts)
@@ -153,12 +166,36 @@ func (s *Service) Suricata(ctx context.Context, allow func(path string) (string,
 	return v, nil
 }
 
-// suricataMode says whether Suricata is dropping or only watching. A packaged
-// install chooses in /etc/default/suricata (LISTENMODE=nfqueue, af-packet,
-// pcap); a hand-written unit shows it on its command line, where -q is the
-// nfqueue option. suricata.yaml is not consulted: its nfq section is in every
-// default file and says nothing about whether it is used.
+// suricataMode says whether Suricata is dropping or only watching.
+//
+// The service's own command line decides first: it is what runs. Debian's
+// package ships /etc/default/suricata with LISTENMODE=nfqueue beside a unit
+// that starts `suricata --af-packet` and never reads that file, so trusting
+// the file first called every stock install an IPS. The file decides only
+// where the command line does not say — an init script, or a unit that
+// expands the file's variables. suricata.yaml is not consulted: its nfq
+// section is in every default file and says nothing about whether it is used.
 func suricataMode(ctx context.Context) (mode, source string) {
+	if out, err := run(ctx, "systemctl", "show", "-p", "ExecStart", "suricata"); err == nil {
+		argv := execArgv(out)
+		if argv == "" {
+			argv = out
+		}
+		if !strings.Contains(argv, "$") {
+			lower := strings.ToLower(argv)
+			for _, f := range strings.Fields(argv) {
+				if f == "-q" || (strings.HasPrefix(f, "-q") && len(f) > 2 && f[2] >= '0' && f[2] <= '9') {
+					return "ips", "the service's command line"
+				}
+			}
+			if strings.Contains(lower, "nfqueue") || strings.Contains(lower, "--nfq") {
+				return "ips", "the service's command line"
+			}
+			if strings.Contains(lower, "--af-packet") || strings.Contains(lower, "--pcap") || containsField(argv, "-i") {
+				return "ids", "the service's command line"
+			}
+		}
+	}
 	if b, err := os.ReadFile(suricataDefaultFile); err == nil {
 		sc := bufio.NewScanner(bytes.NewReader(b))
 		for sc.Scan() {
@@ -176,21 +213,16 @@ func suricataMode(ctx context.Context) (mode, source string) {
 			}
 		}
 	}
-	if out, err := run(ctx, "systemctl", "show", "-p", "ExecStart", "suricata"); err == nil {
-		lower := strings.ToLower(out)
-		for _, f := range strings.Fields(out) {
-			if f == "-q" || (strings.HasPrefix(f, "-q") && len(f) > 2 && f[2] >= '0' && f[2] <= '9') {
-				return "ips", "the service's command line"
-			}
-		}
-		if strings.Contains(lower, "nfqueue") || strings.Contains(lower, "--nfq") {
-			return "ips", "the service's command line"
-		}
-		if strings.Contains(lower, "--af-packet") || strings.Contains(lower, "--pcap") {
-			return "ids", "the service's command line"
+	return "ids", "default"
+}
+
+func containsField(s, field string) bool {
+	for _, f := range strings.Fields(s) {
+		if f == field {
+			return true
 		}
 	}
-	return "ids", "default"
+	return false
 }
 
 // countRules counts the enabled rules in the rule file: a line that is not

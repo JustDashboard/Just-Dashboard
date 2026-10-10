@@ -1393,6 +1393,18 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"watched_endpoints", "kind", "TEXT NOT NULL DEFAULT 'tls'"},
 	{"watched_endpoints", "probe", "TEXT NOT NULL DEFAULT ''"},
 	{"watched_checks", "ms", "INTEGER NOT NULL DEFAULT 0"},
+	// How connections fared, not only how many there were: TCP's own rates of
+	// resent segments, failed attempts, resets and accept-queue drops, and the
+	// kernel's RTT of established connections to peers elsewhere. NULL on a
+	// row from before they were sampled, so an old hour reads as unmeasured
+	// rather than as a clean one.
+	{"metric_samples", "tcp_out_segs", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_retrans", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_attempt_fails", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_estab_resets", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_listen_drops", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_rtt_ms", "REAL DEFAULT NULL"},
+	{"metric_samples", "tcp_rtt_p90_ms", "REAL DEFAULT NULL"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

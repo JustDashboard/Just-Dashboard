@@ -196,7 +196,9 @@ func (s *Service) JailConfig(ctx context.Context, jail string) (*JailConfig, err
 	cfg.FindTime = atoi(get("findtime"))
 	cfg.MaxRetry = atoi(get("maxretry"))
 	cfg.IgnoreIP = parseClientList(get("ignoreip"))
-	cfg.Actions = parseClientList(get("actions"))
+	// One comma-separated line under a heading, which the address-list
+	// parser read as prose whenever a jail had more than one action.
+	cfg.Actions = parseActionList(get("actions"))
 	return cfg, nil
 }
 

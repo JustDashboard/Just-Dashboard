@@ -536,3 +536,40 @@ func TestGuardSSHLockoutIgnoresBastionSettings(t *testing.T) {
 		t.Fatal("a lockout was let through because it came with a forwarding change")
 	}
 }
+
+// A pending apply snapshots every file before the first write, so the plan
+// has to name the socket drop-in a port move writes as well as the directive
+// file, with the bytes each will hold.
+func TestSSHPlanNamesEveryFileItWrites(t *testing.T) {
+	plan := &SSHApplyPlan{File: "/etc/ssh/sshd_config.d/99-just-dashboard.conf", Content: "Port 2222\n"}
+	if files := plan.Files(); len(files) != 1 || files[0].Path != plan.File || plan.SocketUnit() != "" {
+		t.Fatalf("directive-only plan=%+v unit=%q", files, plan.SocketUnit())
+	}
+	plan.Socket = SSHSocket{Unit: "ssh.socket", DropIn: "/etc/systemd/system/ssh.socket.d/10-just-dashboard.conf", Listen: []string{"0.0.0.0:22", "[::]:22"}}
+	plan.SocketPort = "2222"
+	files := plan.Files()
+	if len(files) != 2 || files[1].Path != plan.Socket.DropIn || plan.SocketUnit() != "ssh.socket" {
+		t.Fatalf("socket plan=%+v", files)
+	}
+	if !strings.Contains(files[1].Content, "ListenStream=0.0.0.0:2222") || !strings.Contains(files[1].Content, "ListenStream=[::]:2222") {
+		t.Fatalf("socket candidate=%q", files[1].Content)
+	}
+}
+
+// What an immediate apply reports as a partial success is a failure a
+// pending apply must restore.
+func TestSSHApplyResultFailureCoversWhatDidNotTakeEffect(t *testing.T) {
+	for _, tc := range []struct {
+		res  *SSHApplyResult
+		fail bool
+	}{
+		{&SSHApplyResult{Written: true, Valid: true, Reloaded: true}, false},
+		{&SSHApplyResult{Written: true, Valid: true, ReloadError: "unit not found"}, true},
+		{&SSHApplyResult{Written: true, Valid: true, Reloaded: true, SocketUnit: "ssh.socket", SocketError: "restart failed"}, true},
+		{nil, true},
+	} {
+		if got := tc.res.Failure() != nil; got != tc.fail {
+			t.Errorf("Failure(%+v)=%v", tc.res, got)
+		}
+	}
+}

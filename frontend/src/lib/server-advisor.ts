@@ -105,6 +105,7 @@ export function healthInvestigation(id: string): HealthInvestigation | undefined
   if (id === "timewait") return { kind: "network" }
   if (id.startsWith("drops:")) return { kind: "network", networkInterface: id.slice(6) }
   if (id.startsWith("neterr:")) return { kind: "network", networkInterface: id.slice(7) }
+  if (id.startsWith("tcp:") || id === "probes:beyond-host") return { kind: "network" }
   if (id === "steal")
     return {
       kind: "external",

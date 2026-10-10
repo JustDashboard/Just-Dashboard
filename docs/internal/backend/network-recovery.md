@@ -15,9 +15,11 @@ request opens no journal; then the journal names the tool (`firewall`), snapshot
 own files and records a closed set of commands that put its switch back (`ufw --force
 enable|disable`, `ufw reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd
 --reload`; the unit command only when its prior state read as plainly enabled or disabled); a
-journal naming any other file or command is refused before recovery starts. DNS and WireGuard
-configuration and Tailscale preferences have separate owners and are not covered by this journal.
-Their existing synchronous rollback does not imply independent recovery.
+journal naming any other file or command is refused before recovery starts. A pending SSH apply
+enrols as subsystem `sshd` with a closed set of sshd files and systemctl undo (see
+[sshd](observability-security.md#sshd)). DNS and WireGuard configuration and Tailscale preferences
+have separate owners and are not covered by this journal. Their existing synchronous rollback does
+not imply independent recovery.
 
 [Selected persistent native profiles](network-native-managers.md) also use this journal with a
 closed native owner/checkpoint recovery payload. Their addressing, DNS/domain and explicit-route
@@ -116,6 +118,11 @@ generation with a bounded cancellation-independent context.
 capability, and audits a retry of terminal native cleanup. Failed cleanup never authorizes rollback
 of a durable confirmed candidate. Native checkpoint timeout holds and owner bus/boot identities are
 private journal evidence; the native adapter guide explains their failure/restart boundaries.
+
+The verification response also carries the access boundary after the change beside the picture
+taken before the apply (`boundary`: Caddy-only ingress, allowlist, tailnet, SSH, previews), so the
+session sees a lost boundary before it confirms; see
+[the access boundary](observability-security.md#the-access-boundary).
 
 Confirmation establishes a returned dashboard response, not application, tunnel or provider health.
 The UI retains pending evidence during disconnection and waits for recovered/degraded host evidence

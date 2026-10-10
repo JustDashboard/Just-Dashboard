@@ -12,6 +12,7 @@ import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Address } from "@/components/security/marks"
+import { SuricataSetup } from "@/components/security/suricata-setup"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -49,7 +50,8 @@ const SEVERITY: Record<number, { label: string; tone: Tone; dot: DotTone }> = {
  * path (NFQUEUE) and may drop. Switching between them is Suricata's own
  * configuration and a service restart, not something to flip from a dashboard
  * whose own traffic passes through the same queue, so this page reads the mode
- * and never sets it.
+ * and the queue rules and never sets them. The setup it does carry — the
+ * capture interface, the rules, starting the service — is `suricata-setup`.
  *
  * Everything comes from the tail of eve.json: the readings count the alerts
  * the server scanned there, the signatures are ranked, and the latest alerts
@@ -154,6 +156,8 @@ export function SuricataPanel() {
           Nothing is being inspected. What is listed below is what it wrote before it stopped.
         </Notice>
       )}
+
+      <SuricataSetup data={data} onChanged={refresh} />
 
       {!readable && (
         <Notice tone="warning" icon={TerminalWindow} title="Suricata's alert log could not be read">

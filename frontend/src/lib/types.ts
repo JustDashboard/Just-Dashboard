@@ -85,6 +85,8 @@ export type Snapshot = {
   mounts: MountStats[]
   net: NetStats[]
   uptimeSeconds: number
+  /** How connections fare: TCP's own rates and established connections' RTT. */
+  tcp?: TCPStats
   pressure: Pressure
   sockets: Sockets
   procs: ProcCounts
@@ -149,6 +151,18 @@ export type Pressure = {
   memFull: number
   ioSome: number
   ioFull: number
+}
+
+export type TCPStats = {
+  supported: boolean
+  outSegsRate: number
+  retransRate: number
+  attemptFailsRate: number
+  estabResetsRate: number
+  listenDropsRate: number
+  retransPercent: number
+  /** The kernel's smoothed RTT of established connections to peers elsewhere. */
+  latency: { supported: boolean; sockets: number; medianMs: number; p90Ms: number }
 }
 
 export type Sockets = {
@@ -223,6 +237,17 @@ export type MetricsHistoryPoint = {
   tcpConns: number
   tcpConnsPeak: number
   tcpTimeWait: number
+
+  /** Null where the bucket holds no measurement — before these were sampled. */
+  retransPct: number | null
+  retransPctPeak: number | null
+  attemptFails: number | null
+  attemptFailsPeak: number | null
+  resets: number | null
+  listenDrops: number | null
+  listenDropsPeak: number | null
+  rtt: number | null
+  rttPeak: number | null
 
   load5: number
   load15: number
@@ -356,6 +381,15 @@ export type HealthFinding = {
   /** The measured facts behind the verdict, already worded by the server. */
   evidence?: { label: string; value: string }[]
   subjects?: HealthSubject[]
+  /** Saved diagnostic runs that met trouble in the same stretch (administrators only). */
+  correlated?: {
+    id: string
+    name: string
+    tool: string
+    target?: string
+    outcome: string
+    endedAt: string
+  }[]
 }
 
 /** One area's verdict, so a clean area reads as checked rather than as absent. */
@@ -2659,6 +2693,113 @@ export type JailConfig = {
   ignoreIp: string[]
   actions: string[]
   error?: string
+}
+
+/** What a jail's numbers and actions mean together, read from the running server. */
+export type JailPolicy = {
+  name: string
+  rule: string
+  values: { key: string; running: string; dropIn?: string; drift?: boolean }[]
+  watches: { kind: "files" | "journal" | "none"; files?: string[]; match?: string }
+  actions: {
+    name: string
+    kind: "firewall" | "route" | "edge" | "report" | "unknown"
+    enforces: boolean
+    allPorts: boolean
+    ports?: string[]
+    words: string
+  }[]
+  coverage?: { service: string; listening: string[]; covered: string[]; uncovered: string[] }
+  ignoreSelf: boolean
+  ignoreIp: string[]
+  findings: { level: "critical" | "warning" | "notice"; text: string }[]
+  error?: string
+}
+
+export type BoundaryState = "held" | "broken" | "unknown"
+
+export type BoundaryCheck = {
+  id: "ingress" | "allowlist" | "tailnet" | "ssh" | "previews"
+  state: BoundaryState
+  title: string
+  detail: string
+  facts?: string[]
+}
+
+/** How the dashboard and its previews are reached, read as they are. */
+export type AccessBoundary = {
+  checks: BoundaryCheck[]
+  checkedAt: string
+  allowlist: string[]
+  client?: string
+  operator?: string
+  caddyPort: number
+  sshPorts: string[]
+  tailnetIp?: string
+  previewMin: number
+  previewMax: number
+}
+
+export type BoundaryProposal = {
+  kind: "ban" | "firewall.rule" | "firewall.policy" | "ssh"
+  target?: string
+  action?: string
+  port?: string
+  protocol?: string
+  policy?: string
+  settings?: Record<string, string>
+}
+
+/** A cut ends this session's way in and is refused; an effect needs acknowledgement. */
+export type BoundaryImpact = {
+  boundary: BoundaryCheck["id"]
+  level: "cuts" | "affects"
+  text: string
+}
+
+export type BoundaryChange = {
+  id: BoundaryCheck["id"]
+  title: string
+  before: BoundaryState
+  after: BoundaryState
+  detail: string
+  lost: boolean
+}
+
+/** What a reconnection verification says about the boundary after a pending apply. */
+export type BoundaryAfterVerify = {
+  before: boolean
+  checks: BoundaryCheck[]
+  changes: BoundaryChange[]
+  lost: number
+}
+
+export type BlockEngine = "fail2ban" | "crowdsec" | "firewall"
+
+export type BlockedEntry = {
+  value: string
+  range: boolean
+  sources: {
+    engine: BlockEngine
+    ref: string
+    detail?: string
+    origin?: string
+    until?: string
+    community?: boolean
+  }[]
+  engines: BlockEngine[]
+  coveredBy?: string[]
+}
+
+/** fail2ban's bans, CrowdSec's decisions and the firewall's denies, folded by address. */
+export type BlocksView = {
+  entries: BlockedEntry[]
+  distinct: number
+  duplicated: number
+  covered: number
+  communityOnly: number
+  truncated: boolean
+  engines: { engine: BlockEngine; read: boolean; count: number; note?: string }[]
 }
 
 export type Offender = {
@@ -7090,6 +7231,8 @@ export type NetworkChangeStatus = {
   boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown" | "not_applicable"
   recoveryErrors?: string[]
   cleanup?: "pending" | "failed" | "complete"
+  /** A journal enrolled by another owner than the network spec: sshd's apply. */
+  subsystem?: "sshd"
   ownerUserId?: number
   expiresAt?: string
   appliedAt?: string
@@ -8315,7 +8458,46 @@ export type CrowdSecView = {
     type?: string
     version?: string
   }[]
+  /** Whether a bouncer verifiably turns decisions into dropped traffic. */
+  enforcement?: CrowdSecEnforcement
   error?: string
+}
+
+export type CrowdSecEnforcementState =
+  "stopped" | "unenforced" | "stale" | "degraded" | "unverified" | "partial" | "enforcing"
+
+export type CrowdSecEnforcement = {
+  state: CrowdSecEnforcementState
+  summary: string
+  bouncers: {
+    name: string
+    kind: "firewall" | "proxy" | "other"
+    valid: boolean
+    lastPull?: string
+    /** Seconds since the last pull; -1 for never. */
+    pullAgeSeconds: number
+    fresh: boolean
+    unit?: string
+    unitActive?: boolean
+  }[]
+  kernel?: {
+    backend?: "nftables" | "ipset"
+    sets: {
+      family?: string
+      table?: string
+      name: string
+      entries: number
+      dropped: boolean
+      hooks?: string[]
+    }[]
+    entries: number
+    error?: string
+  }
+  checkedAt: string
+  /** How recent a pull must be, in Go's duration spelling ("3m0s"). */
+  freshness: string
+  enforcedBy: string[]
+  missing?: { bouncer?: string; reason: string }[]
 }
 
 export type SuricataView = {
@@ -8351,6 +8533,34 @@ export type SuricataView = {
   logPath: string
   logRefused?: string
   logError?: string
+  /** The newest stats event in eve.json: whether the capture sees packets. */
+  capture?: {
+    at: string
+    uptimeSeconds: number
+    kernelPackets: number
+    kernelDrops: number
+    decoderPackets: number
+  }
+  interfaces: {
+    configured: string[]
+    candidates: string[]
+    editable: boolean
+    reason?: string
+  }
+  rules: { file: string; updatedAt?: string; sources: string[]; updater: boolean }
+  /** Read only: the queue rules an inline deployment depends on. */
+  inline: {
+    queues: {
+      source: string
+      chain: string
+      queue: string
+      bypass: boolean
+      rule: string
+    }[]
+    failOpen: boolean
+    words: string
+    error?: string
+  }
 }
 
 type NetworkMade = { createdAt: string; createdBy?: string }

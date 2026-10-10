@@ -2,7 +2,10 @@ package api
 
 import (
 	"errors"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -63,6 +66,9 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/history", s.handle(s.handleBanHistory))
 		r.Method(http.MethodGet, "/offenders", s.handle(s.handleBanOffenders))
 		r.Method(http.MethodGet, "/{jail}/config", s.handle(s.handleJailConfig))
+		// What the jail's numbers and actions mean together, and whether its
+		// ban lands on the port the service listens on. Read like the config.
+		r.Method(http.MethodGet, "/{jail}/policy", s.handle(s.handleJailPolicy))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/{jail}/unban", s.handle(s.handleFail2banUnban))
@@ -189,6 +195,9 @@ func (s *Server) handleFail2banStatus(w http.ResponseWriter, r *http.Request) er
 
 type banRequest struct {
 	IP string `json:"ip"`
+	// AcknowledgeBoundary is the operator having seen what the ban does to
+	// the dashboard's boundary — an allowlisted network, the tailnet.
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 func (s *Server) handleFail2banUnban(w http.ResponseWriter, r *http.Request) error {
@@ -212,6 +221,13 @@ func (s *Server) handleFail2banBan(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	jail := chi.URLParam(r, "jail")
+	// An address that is not one is refused by Ban below; only a real one
+	// has a boundary to judge.
+	if net.ParseIP(strings.TrimSpace(req.IP)) != nil {
+		if err := s.boundaryGate(r, "fail2ban.ban", netsec.BoundaryProposal{Kind: "ban", Target: req.IP}, req.AcknowledgeBoundary); err != nil {
+			return err
+		}
+	}
 	// The caller's own address goes down with the request for the reason it
 	// does on the firewall route: a ban is a drop rule, and banning yourself
 	// ends this session and every future one from here.

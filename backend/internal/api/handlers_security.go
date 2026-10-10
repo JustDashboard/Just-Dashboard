@@ -76,6 +76,7 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	// owns everything under /network.
 
 	s.mountSecurityIntrusionRoutes(r)
+	s.mountSecurityBoundaryRoutes(r)
 }
 
 // handleSecurityPosture gathers every input and grades the host.
@@ -108,6 +109,11 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 	run(func() {
 		if st, err := s.modules.netsec.Fail2banStatus(ctx); err == nil {
 			in.Fail2ban = st
+		}
+	})
+	run(func() {
+		if view, err := s.modules.netsec.CrowdSec(ctx); err == nil {
+			in.CrowdSec = view
 		}
 	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
@@ -222,6 +228,9 @@ func (s *Server) handleSSHConfig(w http.ResponseWriter, r *http.Request) error {
 
 type sshApplyRequest struct {
 	Settings map[string]string `json:"settings"`
+	// AcknowledgeBoundary says the operator saw what the change does to the
+	// way the dashboard is reached (a moved port, forwarding, AllowUsers).
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 // handleSSHApply plans synchronously and applies as a job.
@@ -249,6 +258,13 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 				"you reach the dashboard through an SSH tunnel, which needs sshd's TCP forwarding; turning it off would refuse your next tunnel")
 		}
 	}
+	pending, err := s.pendingSSHApply(r)
+	if err != nil {
+		return err
+	}
+	if err := s.boundaryGate(r, "ssh.config", netsec.BoundaryProposal{Kind: "ssh", Settings: req.Settings}, req.AcknowledgeBoundary); err != nil {
+		return err
+	}
 	plan, err := s.modules.netsec.PlanSSHSettings(r.Context(), req.Settings)
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
@@ -256,6 +272,9 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
 		}
 		return httpx.BadRequest("%v", err)
+	}
+	if pending {
+		return s.startPendingSSHApply(w, r, plan)
 	}
 	httpx.SetAudit(r, "ssh.config", plan.File,
 		map[string]any{"applied": plan.Applied, "streamed": true})
@@ -275,6 +294,76 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 		if res.ReloadError != "" {
 			return fmt.Errorf("the configuration is valid and written, but sshd did not reload: %s", res.ReloadError)
 		}
+		return nil
+	})
+	return nil
+}
+
+// pendingSSHApply reads the opt-in a network mutation uses. It is refused
+// for anything but an administrator's interactive session, because only a
+// session can return the reconnection challenge that keeps the change.
+func (s *Server) pendingSSHApply(r *http.Request) (bool, error) {
+	mode := r.Header.Get(networkApplyHeader)
+	if mode == "" {
+		return false, nil
+	}
+	if mode != "pending" {
+		return false, httpx.BadRequest("%s accepts only pending", networkApplyHeader)
+	}
+	p := httpx.MustPrincipal(r)
+	if p.Kind != "session" || p.SessionID == "" || p.UserID() <= 0 || !p.Can(auth.CapSystemAdmin) {
+		return false, httpx.Err(http.StatusForbidden, "session_required",
+			"Pending SSH apply requires an administrator's interactive session.")
+	}
+	if s.modules.network == nil {
+		return false, httpx.Err(http.StatusServiceUnavailable, "network_unavailable",
+			"The network module that keeps the recovery journal is not running.")
+	}
+	return true, nil
+}
+
+// startPendingSSHApply enrols the apply in the network journal before the
+// first write, so the independent host watchdog restores the previous files
+// and reloads sshd unless this session confirms a fresh response in time.
+// Every guard PlanSSHSettings ran still applies; this adds recovery, not
+// permission.
+func (s *Server) startPendingSSHApply(w http.ResponseWriter, r *http.Request, plan *netsec.SSHApplyPlan) error {
+	files := []netx.SSHFile{}
+	for _, f := range plan.Files() {
+		files = append(files, netx.SSHFile{Path: f.Path, Candidate: []byte(f.Content)})
+	}
+	ctx := netx.WithPendingConfirmation(r.Context(), httpx.MustPrincipal(r).UserID())
+	readCtx, cancel := timeoutCtx(r, 30*time.Second)
+	before := s.accessBoundary(readCtx, r)
+	cancel()
+	change, err := s.modules.network.BeginSSHChange(ctx, files, plan.SocketUnit())
+	if err != nil {
+		httpx.SetAudit(r, "ssh.config", plan.File, map[string]any{"result": "refused_pending", "pending": true})
+		return mapNetworkConfirmationError(err)
+	}
+	rememberBoundary(change.ID, before)
+	httpx.SetAudit(r, "ssh.config", plan.File,
+		map[string]any{"applied": plan.Applied, "streamed": true, "pending": true, "change": change.ID})
+	w.Header().Set("X-JD-Network-Change", change.ID)
+	w.Header().Set("X-JD-Network-Expires", change.ExpiresAt.Format(time.RFC3339Nano))
+	s.startJob(w, r, jobs.Spec{
+		Kind:   "ssh.apply",
+		Title:  "Applying SSH settings until confirmed: " + strings.Join(plan.Applied, ", "),
+		Target: plan.File, Timeout: 2 * time.Minute,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		res, err := s.modules.netsec.ApplySSHPlan(ctx, plan, out)
+		if err == nil {
+			err = res.Failure()
+		}
+		status, finishErr := s.modules.network.FinishSSHChange(ctx, change, err)
+		if finishErr != nil {
+			if status != nil && status.Phase == "recovered" {
+				return fmt.Errorf("the previous SSH configuration was restored: %w", finishErr)
+			}
+			return fmt.Errorf("SSH recovery needs attention: %w", finishErr)
+		}
+		out.Status("Applied until confirmed. Verify a new dashboard response and confirm before %s, or the host restores the previous SSH configuration.",
+			change.ExpiresAt.Local().Format(time.TimeOnly))
 		return nil
 	})
 	return nil
@@ -432,6 +521,24 @@ func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.JSON(w, http.StatusOK, cfg)
+	return nil
+}
+
+func (s *Server) handleJailPolicy(w http.ResponseWriter, r *http.Request) error {
+	jail := chi.URLParam(r, "jail")
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	var ports []string
+	if jail == "sshd" {
+		// Only the listening ports leave this read; the keyed accounts the
+		// full SSH configuration names stay behind system.admin.
+		ports = s.modules.netsec.SSHDStatus(ctx).Ports
+	}
+	policy, err := s.modules.netsec.JailPolicy(ctx, jail, ports)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, policy)
 	return nil
 }
 

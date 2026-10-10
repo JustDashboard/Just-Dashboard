@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -126,8 +127,35 @@ func (s *Server) handleSystemHealth(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	httpx.JSON(w, http.StatusOK, s.runtimeHealth(r.Context(), s.modules.metrics.Assess(r.Context(), snap), snap))
+	health := s.runtimeHealth(r.Context(), s.modules.metrics.Assess(r.Context(), snap), snap)
+	s.correlateProbes(r, &health)
+	httpx.JSON(w, http.StatusOK, health)
 	return nil
+}
+
+// correlateProbes cites the saved diagnostic runs of the last half hour
+// beside the network verdict. Saved runs name their targets and are an
+// administrator's to read, so a reader without the capability gets the
+// verdict without them.
+func (s *Server) correlateProbes(r *http.Request, health *metrics.Health) {
+	if s.modules.diagnostics == nil || !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		return
+	}
+	runs, err := s.modules.diagnostics.List(r.Context())
+	if err != nil {
+		return
+	}
+	evidence := make([]metrics.ProbeEvidence, 0, len(runs))
+	for _, run := range runs {
+		if run.EndedAt == nil {
+			continue
+		}
+		evidence = append(evidence, metrics.ProbeEvidence{
+			ID: run.ID, Name: run.Name, Tool: run.Request.Tool, Target: run.Request.Target,
+			Outcome: run.Outcome, EndedAt: *run.EndedAt,
+		})
+	}
+	metrics.CorrelateProbes(health, evidence, time.Now())
 }
 
 // historyWindow reads the window every history endpoint accepts, so the host

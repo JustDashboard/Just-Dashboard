@@ -157,8 +157,10 @@ a check that could not run, and a segment narrows the findings to its area), the
 readings, then the ways onto the machine as a wiring picture (`perimeter.tsx`: the internet through
 the firewall, fail2ban and sshd, and this browser through the allowlist to the dashboard) in the
 deployment section's `WireNode` and `AnimatedBeam` vocabulary. It describes the layers and their
-states, not the reach of every port on the host. The finding severity counts sit in the Findings
-head.
+states, not the reach of every port on the host. Under it the **Access boundary** lists the five
+boundaries every change is judged against — Caddy-only ingress, the allowlist, the tailnet, SSH for
+a tunnel, tailnet-only previews — each held, broken or unknown (`boundary-view.tsx`). The finding
+severity counts sit in the Findings head.
 
 - **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
   with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
@@ -173,7 +175,11 @@ head.
   The **Jump host** section reads the five forwarding directives the closed list gained in 0.7.1
   (`AllowTcpForwarding`, `GatewayPorts`, `AllowAgentForwarding`, `PermitTunnel`, `MaxSessions`), stages
   a safe bastion profile into the same draft, and writes a ProxyJump snippet for the hosts behind this
-  server (`bastion.tsx`).
+  server (`bastion.tsx`). Where the host can run the independent recovery watchdog, the apply bar
+  carries a "Restore unless confirmed (90 s)" switch, on by default: the apply is sent pending, and
+  the global network confirmation notice, worded for SSH, keeps it only after this session verifies
+  a fresh response. A staged change is judged against the access boundary as it is made
+  (`useBoundaryCheck`); the dialog shows what it does to tunnels, and confirming it acknowledges it.
 - **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
   of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
   the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
@@ -184,7 +190,17 @@ head.
   and Suricata follow, each opening on its install where it is missing (`network/install.tsx`):
   CrowdSec's decisions with release and a ban form that refuses the reader's own address, its alerts
   and bouncers (`crowdsec-panel.tsx`); Suricata's mode, rules and alerts by severity, read from
-  `eve.json` through the log roots (`suricata-panel.tsx`).
+  `eve.json` through the log roots (`suricata-panel.tsx`). The page opens on **Blocked across
+  engines** (`blocks-panel.tsx`): every refused address once, with each engine holding it and the
+  broader blocks it already sits inside. Both ban forms say which engine already holds the typed
+  address (`blocks.ts`) and what the ban does to the access boundary, and send the acknowledgement
+  only after showing it. The jail sheet adds the jail's **Policy** — the rule as a sentence, what it
+  reads, what each action does with a ban, whether the sshd ban covers sshd's actual port, and values
+  a restart would change. CrowdSec's head, tile and notice say the server's enforcement verdict
+  (`enforcement.ts`) rather than whether the engine runs, with each bouncer's pull age and the kernel
+  sets under the bouncers. Suricata adds **Setup** (`suricata-setup.tsx`: capture interface with a
+  tested move, whether the capture sees packets, rules with an update job, start) and the read-only
+  **Inline queue**, which says whether each queue rule fails open.
 - **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
   would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
   and fall back to the journal's reading of the same program, saying in the pane's facts whether the

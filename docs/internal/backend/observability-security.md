@@ -92,6 +92,33 @@ and a list padded with readings teaches the operator to ignore it. So:
   none ("measuring"). A physical link warns at ≥100 drops that are ≥1% of the window's packets, and
   at ≥10 errors (`neterr:<iface>`); a tunnel is a notice at ≥500 drops and ≥5%. Docker's veths and
   bridges are not judged — the host's own links carry the same traffic.
+- **Connections are judged by TCP's own counters, over the same windows.** `sysinfo.ReadTCPCounters`
+  reads `/proc/net/snmp` and `/proc/net/netstat` (TCP's MIB is shared by both families) and the
+  collector turns them into per-second rates; `ReadTCPLatency` asks `sock_diag` (`NETLINK_INET_DIAG`,
+  `INET_DIAG_INFO`) for every established socket's `tcpi_rtt` and keeps the median and 90th
+  percentile of those whose peer is off this host's networks (loopback, link-local, RFC 1918 and ULA
+  peers are left out; the tailnet's 100.64/10 is kept). It sends nothing and says "none" when nothing
+  is connected. `metrics.tcpWatch` differences the counters like `linkWatch`: resent segments warn
+  at ≥5% of a window's segments with ≥1,000 resent and are a notice at ≥2% with ≥200
+  (`tcp:retransmits`); ≥10 accept-queue drops warn (`tcp:listen-drops`); failed attempts are a notice
+  at ≥50 that are ≥20% of the window's opens (`tcp:attempt-fails`), since half-open scans count
+  there too. Latency is a notice (`tcp:latency`) only when the median is ≥150 ms and ≥3× the mean of
+  the hour's recorded medians over at least ten buckets. The network area's summary adds the
+  window's resent share and the median RTT.
+- The recorder keeps the rates and the RTT in additive nullable columns (`tcp_out_segs`,
+  `tcp_retrans`, `tcp_attempt_fails`, `tcp_estab_resets`, `tcp_listen_drops`, `tcp_rtt_ms`,
+  `tcp_rtt_p90_ms`), so an hour from before they were sampled reads as unmeasured, not as clean.
+  `Range` returns the bucket's resent share (`retransPct`, from the summed rates) with the worst
+  sample's as its peak, failed attempts and accept drops with peaks, and the mean median RTT with
+  the highest 90th percentile as its peak; the metrics page charts them as Resent segments,
+  Connection RTT and Failed connections. They are recorded, not streamed.
+- **Probes are correlated, not inferred.** For an administrator, `handleSystemHealth` lists the saved
+  diagnostic runs and `metrics.CorrelateProbes` attaches those that ended in the last half hour with
+  an outcome other than completed, cancelled, interrupted, unsupported or denied (up to five, newest
+  first) to every network finding as `correlated`, with a "Probes in trouble" fact. With no network
+  finding and two or more such runs, a notice (`probes:beyond-host`) says the trouble is likely past
+  this host. Saved runs name their targets, so a reader without `system.admin` gets the verdict
+  without them. The advisor sheet links each to `/network/runs?run=<id>`.
 - File handles are judged only against a real ceiling (80% of `max`), and a sensor only against its
   own thresholds — critical past `critical`, warning past `high`, nothing where the driver reports
   neither.
@@ -322,6 +349,24 @@ restore on failure → reload only then.
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
   deprecated spelling distributions ship as default and a dropdown missing it renders empty.
 - `reloadSSH` tries systemd units, then `rc-service`, then `service`.
+- **A pending apply is kept only once this session returns a fresh dashboard response.** With
+  `X-JD-Network-Apply: pending` (the SSH page sends it wherever `GET /network/changes/current` says the
+  independent watchdog is available, behind a "Restore unless confirmed" switch), `handleSSHApply`
+  plans as before, then `netx.BeginSSHChange` snapshots every file the plan writes
+  (`SSHApplyPlan.Files`: the managed file and, for a socket port move, the socket drop-in) into the
+  network journal with subsystem `sshd`, arms the ninety-second `systemd-run` timer and only then
+  starts the job. The journal accepts only `sshd_config`, `sshd_config.d/99-just-dashboard.conf` and
+  `<ssh|sshd>.socket.d/10-just-dashboard.conf` beside the boot unit, and an undo vocabulary of
+  `reload` (`systemctl reload-or-restart ssh`, then `sshd`) and `socket <unit>` (`daemon-reload`,
+  `restart`); any other file, command or subsystem is refused before recovery touches anything. A
+  reload or socket failure, which an immediate apply reports as partial success
+  (`SSHApplyResult.Failure`), restores the snapshots at once in pending mode. The confirmation is the
+  network one — verify, then confirm within thirty seconds, from the same account, session and
+  source — and the global notice words it as an SSH change. Unconfirmed, the standalone
+  `--network-recover` helper restores the files and reloads sshd without the backend; at boot it
+  uses `--no-block` and `try-reload-or-restart`, since the recovery unit is not ordered against sshd.
+  A journal is one change at a time: a pending SSH change blocks network changes until it is
+  confirmed or recovered, and the other way round.
 
 **Where sshd listens is not always sshd's decision.** Ubuntu ships socket-activated SSH by default on
 24.04+: `ssh.socket` holds the listener, `sshd_config`'s `Port` is read, reported by `sshd -T`, and
@@ -457,7 +502,25 @@ Cross-cutting:
   an address, a network or a path, and prose is not.
 - **No start/stop for a jail**: `fail2ban-client status` lists only running jails, so one stopped from the
   UI would vanish with nothing left to start it. A control usable once is a trap.
-- `FailedLoginVolume` counts inside a **window** and reports `Capped`. The posture verdict used `len()`
+- **A jail's policy is explained, not only shown.** `GET /fail2ban/{jail}/policy` (`JailPolicy`, read
+  like the config) reads the running values, `logpath`, `journalmatch`, `ignoreself`, the actions and
+  each action's `port` and `type`, and `ExplainJailPolicy` turns them into the rule as a sentence
+  ("5 failures within 10 minutes earn a 2-hour ban"), what the jail reads, what each action does
+  with a ban (firewall, blackhole route, Cloudflare edge, report only, unknown — classified by the
+  action's name; `allports`, `type=allports` or `0:65535` cover every port), and findings: no action
+  that blocks is critical, a watch with neither file nor journal match is a warning, and for the
+  `sshd` jail a ban whose ports do not cover a port sshd actually listens on (service names from
+  `/etc/services`, ranges included) is critical. Values in `jail.d/99-just-dashboard.local` that differ
+  from the running server are marked as what a restart will load — the dashboard's drop-in only; the
+  distribution's files are not merged. `get <jail> actions` prints several actions on one
+  comma-separated line, which the address-list parser read as prose; `parseActionList` reads it.
+- **Every engine's refused addresses are folded by address.** `GET /security/blocks` reads fail2ban's
+  banned addresses, CrowdSec's `ban` decisions on an address or range (`CrowdSecDecisions`, the
+  decision list alone) and the firewall's inbound `DENY`/`REJECT`/`DROP` sources concurrently, and
+  `MergeBlocks` keys them by canonical prefix: each entry names every source holding it and the
+  broader blocks (any engine) that already contain it. Community decisions no local source touches
+  are counted, not listed; an engine that was not read is reported as such. The Intrusion page draws
+  it first, and both ban forms say which engine already holds the address being typed. The posture verdict used `len()`
   of a 500-record btmp listing, which made the 2000-attempt threshold unreachable and the 200-attempt
   notice permanent on every host with a public SSH port.
 
@@ -551,6 +614,71 @@ several pages poll) for any reader;
 for administrators `GET /history` and `GET /preflight`, `POST /plans/preview`, `POST /rules`,
 `PUT /rules/{n}?id=`, `POST /logging`, and inside `s.destructive` `POST /enabled`, `/policy`, `/reset`,
 `/plans` and `DELETE /rules/{n}?id=`. Every change is audited; the covered ones accept pending apply.
+
+## CrowdSec: enforcement is verified, not assumed
+
+`CrowdSecView.enforcement` (`AssessEnforcement`, pure) decides whether the decisions are dropping
+anything. A bouncer counts only if its key is valid, it pulled within three minutes and, for the
+firewall bouncer, `crowdsec-firewall-bouncer` is active. A fresh firewall bouncer is `enforcing` only
+when the kernel holds a CrowdSec set with a drop or reject rule in a chain attached to a netfilter
+hook — read from `nft -j list tables` and `nft -j list table <family> <crowdsec…>`, or from
+`ipset list -t` with the `iptables -S`/`ip6tables -S` rule matching the set — and the sets are not
+empty while ban decisions are in force; otherwise `degraded`. Proxy bouncers alone are `partial`
+(HTTP only; their drop cannot be read here); an unreadable kernel or an unknown bouncer kind is
+`unverified`; no fresh pull is `stale`; none registered is `unenforced`; a stopped engine is
+`stopped`. An unreadable bouncer list is `unverified`, never `unenforced`. Every read is a listing.
+The panel claims protection only for `enforcing` and `partial`, and the posture raises
+`intrusion.crowdsec-unenforced` (warning), `-partial` or `-unverified` (notices) from the same
+verdict. The nft fixtures are nft's own JSON from a throwaway namespace; the ipset one follows
+`ipset list -t`'s format.
+
+## Suricata: setup after installing
+
+The view carries the setup evidence: the newest `stats` event in the eve.json tail (kernel packets,
+kernel drops, decoder packets, uptime — absent where there is none), the af-packet interfaces in
+`suricata.yaml` with the host's up, non-loopback interfaces as candidates, the rule file's age and
+the enabled `suricata-update` sources, and every NFQUEUE rule (`iptables-save`, `ip6tables-save`,
+`nft -j list ruleset`) with whether it bypasses when nothing reads the queue. The mode is read from
+the service's command line first: Debian ships `LISTENMODE=nfqueue` beside a unit that runs
+`--af-packet` and never reads that file, so the defaults file decides only where the command line
+does not say.
+
+Three admin jobs, each a fixed argv: `POST /security/suricata/interface` rewrites the first
+non-default af-packet `interface:` line in place (every other line kept), tests with
+`suricata -T`, restores the file on failure, and restarts a running Suricata — restoring the
+previous interface and restarting again if it does not come back; it is refused in inline mode, when
+the unit names its interface on its command line, and for an interface that is not up.
+`POST /security/suricata/rules/update` runs `suricata-update` (which tests the rule set with Suricata
+itself) and reloads a running Suricata; `POST /security/suricata/start` runs
+`systemctl enable --now suricata` and checks it stayed up. Inline queue rules are read and never
+changed: a queue without bypass drops what it queues while Suricata is not reading, the dashboard's
+own traffic included if it is queued.
+
+## The access boundary
+
+`netsec.DescribeBoundary` (pure; `GET /security/boundary`, readable by every role) reads five checks
+from evidence the API gathers concurrently: **ingress** (Caddy holds the configured port and no
+other dashboard socket answers on a routable address — the listener walk with owners), **allowlist**
+(this request's address is inside the running allowlist; a loopback request names the SSH session
+carrying it), **tailnet** (an allowlist that admits 100.64/10 has a tailscale interface up),
+**ssh** (a socket listens on sshd's port, for a tunnel) and **previews** (every served port in
+21000–21999 maps to a loopback upstream and is not funnelled, from `ServedTailnetPorts`). Each is
+`held`, `broken` or `unknown` — unread evidence is never held.
+
+`BoundaryImpacts` judges a proposal (`ban`, `firewall.rule`, `firewall.policy`, `ssh`) against it:
+a ban or a deny covering this session's address or tunnel peer on the dashboard's or sshd's port
+`cuts`; one overlapping an allowlisted network other than loopback or `0.0.0.0/0`, or the tailnet
+previews are served to, `affects`; a deny of UDP 41641 from everywhere sends tailnet peers through
+DERP; an inbound deny default leaves the dashboard and sshd to their rules; an SSH port move,
+`AllowTcpForwarding no|remote` (a cut from a tunnel session) and `AllowUsers` affect who can open a
+tunnel. `GET /security/boundary/check` answers it for the forms; `api.boundaryGate` enforces it on
+the fail2ban ban, CrowdSec decision and SSH routes. A pending network change (any route that takes
+`X-JD-Network-Apply: pending`, and a pending SSH apply) has the boundary read before it is applied;
+the verification returns the boundary now beside that picture (`CompareBoundaries`, `lost` for a
+boundary that held and does not), and the confirmation notice lists it and words its button
+"Confirm anyway" when one was lost. The before-picture is held in memory for ten minutes; after a
+backend restart the verification says it has none. Firewall, gateway and other Network forms can
+ask the check route; wiring their own forms to it belongs with those owners.
 
 ## Packages: six managers, one interface
 

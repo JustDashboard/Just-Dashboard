@@ -1,0 +1,2 @@
+Current match filter:
+_SYSTEMD_UNIT=ssh.service + _COMM=sshd

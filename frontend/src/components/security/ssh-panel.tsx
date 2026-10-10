@@ -7,7 +7,14 @@ import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/co
 import { plural } from "@/lib/format"
 import { get, post } from "@/lib/api"
 import { lensFor } from "@/lib/log-lenses"
-import type { Job, Posture, SecurityFinding, SSHDConfig, SSHSetting } from "@/lib/types"
+import type {
+  Job,
+  NetworkConfirmationView,
+  Posture,
+  SecurityFinding,
+  SSHDConfig,
+  SSHSetting,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -33,9 +40,12 @@ import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status, StatusDot } from "@/components/status-dot"
 import { BASTION_PROFILE, JUMP_KEYS, JumpHost } from "@/components/security/bastion"
 import { SSHPicture } from "@/components/security/ssh-picture"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -97,6 +107,18 @@ export function SSHPanel({
     "all",
   )
   const [busy, setBusy] = useState(false)
+  // The network journal's temporary apply covers sshd too: where the host can
+  // run the independent watchdog, a change is kept only once this session
+  // returns a fresh dashboard response, and restored by the host otherwise.
+  const recovery = usePoll<NetworkConfirmationView>(
+    (signal) => get("/network/changes/current", undefined, signal),
+    0,
+    [],
+    { enabled: admin },
+  )
+  const recoverable = recovery.data?.available === true
+  const [confirmAfter, setConfirmAfter] = useState(true)
+  const pendingApply = recoverable && confirmAfter
   const console_ = useJobConsole()
   // Asked beside the config, not after it: the grid's second row waits on it.
   const authLog = useHostLog(AUTH_LOG, admin)
@@ -127,6 +149,10 @@ export function SSHPanel({
     [pending, data],
   )
   const dirty = Object.keys(changes).length > 0
+  // Port, forwarding and AllowUsers decide who can still open a tunnel to the
+  // dashboard; the staged change is judged against the boundary as it is made.
+  const boundary = useBoundaryCheck(dirty ? { kind: "ssh", settings: changes } : undefined)
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
 
   const header = <PageContext eyebrow="Security" title="SSH" />
 
@@ -210,10 +236,19 @@ export function SSHPanel({
             parser and put back if the test fails. Existing sessions are not disconnected by a
             reload.
           </p>
-          <p className="text-destructive">
-            Keep this session open and confirm you can still log in from a second terminal before
-            closing it.
-          </p>
+          <BoundaryImpacts impacts={boundary.impacts} />
+          {pendingApply ? (
+            <p>
+              The previous files are kept by the host. Unless you verify a new dashboard response
+              and confirm within 90 seconds, the host restores them and reloads sshd — even if this
+              dashboard can no longer be reached.
+            </p>
+          ) : (
+            <p className="text-destructive">
+              Keep this session open and confirm you can still log in from a second terminal before
+              closing it.
+            </p>
+          )}
         </div>
       ),
       action: async (c) => {
@@ -224,7 +259,14 @@ export function SSHPanel({
           // a job for the write, the sshd -t and the reload, which is the part
           // worth watching: this is the one operation where "it said it
           // worked" is not the same as knowing the daemon came back.
-          const job = await post<Job>("/ssh/config", { settings: changes }, { confirm: c })
+          const job = await post<Job>(
+            "/ssh/config",
+            {
+              settings: changes,
+              ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
+            },
+            { confirm: c, networkApply: pendingApply ? "pending" : undefined },
+          )
           console_.attach(job)
           setPending({})
         } finally {
@@ -528,11 +570,25 @@ export function SSHPanel({
               </span>
               <span className="text-muted-foreground">— tested with sshd -t before it reloads</span>
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {recoverable && (
+                <label className="flex min-h-9 items-center gap-2 text-hint text-muted-foreground">
+                  <Switch
+                    checked={confirmAfter}
+                    onCheckedChange={setConfirmAfter}
+                    aria-label="Restore unless confirmed after reconnecting"
+                  />
+                  Restore unless confirmed (90 s)
+                </label>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setPending({})} disabled={busy}>
                 Discard
               </Button>
-              <Button size="sm" onClick={apply} disabled={busy}>
+              <Button
+                size="sm"
+                onClick={apply}
+                disabled={busy || boundary.checking || crossing === "refused"}
+              >
                 Test and apply
               </Button>
             </div>

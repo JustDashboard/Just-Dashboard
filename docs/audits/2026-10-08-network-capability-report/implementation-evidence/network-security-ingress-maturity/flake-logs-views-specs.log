@@ -1,0 +1,52 @@
+
+Running 5 tests using 1 worker
+
+  ✓  1 [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view (2.5s)
+  ✓  2 [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view (2.5s)
+  ✓  3 [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view (2.2s)
+  ✓  4 [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view (2.5s)
+  ✘  5 [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view (7.3s)
+
+
+  1) [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view 
+
+    Error: expect(locator).toHaveCount(expected) failed
+
+    Locator:  locator('[data-line-detail]')
+    Expected: 1
+    Received: 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveCount" with timeout 5000ms
+      - waiting for locator('[data-line-detail]')
+        14 × locator resolved to 0 elements
+           - unexpected value "0"
+
+
+      531 |   const identity = await first.getAttribute("data-workspace-item")
+      532 |   await first.click()
+    > 533 |   await expect(page.locator("[data-line-detail]")).toHaveCount(1)
+          |                                                    ^
+      534 |   await page.goBack()
+      535 |   await expect(strip(page).getByRole("button", { name: "Runs", exact: true })).toHaveAttribute(
+      536 |     "aria-pressed",
+        at /home/ubuntu/Just-Dashboard-net-security/frontend/tests/browser/logs-views.spec.ts:533:52
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/logs-views-workspace-Back--c7bf4-s-question-to-its-Runs-view-chromium-repeat4/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/logs-views-workspace-Back--c7bf4-s-question-to-its-Runs-view-chromium-repeat4/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/logs-views-workspace-Back--c7bf4-s-question-to-its-Runs-view-chromium-repeat4/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/logs-views-workspace-Back--c7bf4-s-question-to-its-Runs-view-chromium-repeat4/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/browser/logs-views.spec.ts:510:5 › workspace: Back returns from a unit run's question to its Runs view 
+  4 passed (22.2s)

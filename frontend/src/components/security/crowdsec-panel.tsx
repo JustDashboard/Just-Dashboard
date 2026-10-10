@@ -5,7 +5,7 @@ import { Slash } from "@/components/icons"
 import { del, get, post, ApiError } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { CrowdSecView } from "@/lib/types"
+import type { BlocksView, CrowdSecView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -15,6 +15,10 @@ import { Modal } from "@/components/modal"
 import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
+import { heldSentence } from "@/components/security/blocks"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
+import { ENFORCEMENT, enforcementOf, goDuration, pullAge } from "@/components/security/enforcement"
 import { Address } from "@/components/security/marks"
 import { useSecurity } from "@/components/security/security-context"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -55,9 +59,11 @@ const ALERTS_SHOWN = 10
  * community list is thousands of addresses already attacking somebody else —
  * and it hands every decision to a bouncer, a small program in the firewall or
  * the proxy that actually enforces it. That second part is the thing to check
- * first: a decision nothing pulls is a sentence in a database, so the page
- * reads the bouncers as one of its three figures and says so in a notice when
- * none is valid.
+ * first: a decision nothing pulls is a sentence in a database. The server
+ * judges enforcement from evidence — a bouncer that pulled within the last
+ * few minutes and, for the firewall bouncer, a kernel set holding the
+ * addresses with a hooked rule dropping on it — and the page claims
+ * protection only where that verdict does.
  *
  * The decisions are the one table, framed because it scrolls (§2). The
  * community list is most of it on any host that has joined, so a chip narrows
@@ -65,12 +71,25 @@ const ALERTS_SHOWN = 10
  * table stops at fifty rows. Everything else is plain: the alerts that made
  * those decisions, and the bouncers that enforce them.
  */
-export function CrowdSecPanel() {
+export function CrowdSecPanel({
+  blocks,
+  onBlocked,
+}: {
+  /** Every engine's refused addresses, so the ban form can say what already holds one. */
+  blocks?: BlocksView
+  onBlocked?: () => void
+}) {
   const { can } = useAuth()
-  const { data, error, loading, refresh } = usePoll<CrowdSecView>(
-    (signal) => get("/security/crowdsec/", undefined, signal),
-    20_000,
-  )
+  const {
+    data,
+    error,
+    loading,
+    refresh: reload,
+  } = usePoll<CrowdSecView>((signal) => get("/security/crowdsec/", undefined, signal), 20_000)
+  const refresh = () => {
+    reload()
+    onBlocked?.()
+  }
 
   if (loading && !data) return <LoadingPanel />
   if (error && !data) return <ErrorState error={error} onRetry={refresh} />
@@ -90,8 +109,10 @@ export function CrowdSecPanel() {
 
   const admin = can("system.admin")
   const alertsToday = data.alerts.filter((a) => inLastDay(a.createdAt)).length
-  const validBouncers = data.bouncers.filter((b) => b.valid).length
-  const unenforced = data.active && validBouncers === 0
+  const state = enforcementOf(data)
+  const words = ENFORCEMENT[state]
+  const enforcement = data.enforcement
+  const freshBouncers = enforcement?.bouncers.filter((b) => b.fresh).length ?? 0
 
   return (
     <>
@@ -104,15 +125,20 @@ export function CrowdSecPanel() {
             <span className="numeric">{plural(data.decisions.length, "decision")} in force</span>
             <FactDot />
             <span className="numeric">{plural(data.bouncers.length, "bouncer")}</span>
+            {words.protects && enforcement && enforcement.enforcedBy.length > 0 && (
+              <>
+                <FactDot />
+                <span>
+                  enforced by{" "}
+                  <span className="font-mono text-foreground">
+                    {enforcement.enforcedBy.join(", ")}
+                  </span>
+                </span>
+              </>
+            )}
           </>
         }
-        aside={
-          <Status
-            tone={data.active ? "running" : "stopped"}
-            label={data.active ? "active" : "not running"}
-            className="text-body"
-          />
-        }
+        aside={<Status verdict={words.verdict} label={words.label} className="text-body" />}
       />
 
       {/* What stops being true when the engine is down: nothing is deciding
@@ -141,21 +167,51 @@ export function CrowdSecPanel() {
           hint={`${data.alerts.length} on record`}
         />
         <StatTile
-          label="Bouncers valid"
-          value={`${validBouncers} / ${data.bouncers.length}`}
-          tone={unenforced || validBouncers < data.bouncers.length ? "warning" : "default"}
-          hint={unenforced ? "nothing enforces a decision" : "pulling decisions"}
+          label="Enforcement"
+          value={words.label[0].toUpperCase() + words.label.slice(1)}
+          tone={
+            words.verdict === "critical" ? "danger" : words.verdict === "ok" ? "default" : "warning"
+          }
+          hint={
+            enforcement
+              ? `${freshBouncers} of ${data.bouncers.length} pulled within ${goDuration(enforcement.freshness)}`
+              : "no verdict from the server"
+          }
         />
       </StatGrid>
 
-      {unenforced && (
-        <Notice tone="warning" icon={Slash} title="No bouncer is pulling decisions">
-          CrowdSec records who to block and leaves the blocking to a bouncer. Until one is
-          registered and valid, every decision below is advice nobody is following.
+      {/* The engine running is not the claim; the verdict is. Anything short
+          of a verified drop says what is missing, in the server's words. */}
+      {data.active && state !== "enforcing" && (
+        <Notice
+          tone={words.verdict === "critical" ? "danger" : words.protects ? "default" : "warning"}
+          icon={words.protects ? undefined : Slash}
+          title={words.title}
+        >
+          <p>
+            {enforcement?.summary ??
+              "This server did not say whether a bouncer enforces the decisions, so nothing here claims they are."}
+          </p>
+          {enforcement?.missing && enforcement.missing.length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+              {enforcement.missing.map((cause) => (
+                <li key={`${cause.bouncer}-${cause.reason}`}>
+                  {cause.bouncer && <span className="font-mono">{cause.bouncer}</span>}
+                  {cause.bouncer ? ": " : ""}
+                  {cause.reason}
+                </li>
+              ))}
+            </ul>
+          )}
         </Notice>
       )}
 
-      <DecisionsPanel decisions={data.decisions} canManage={admin} onChanged={refresh} />
+      <DecisionsPanel
+        decisions={data.decisions}
+        canManage={admin}
+        blocks={blocks}
+        onChanged={refresh}
+      />
 
       <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:gap-12">
         <Panel plain>
@@ -185,7 +241,9 @@ export function CrowdSecPanel() {
         <Panel plain>
           <PanelHeader title="Bouncers" />
           <PanelBody flush>
-            {data.bouncers.length === 0 ? (
+            {enforcement && enforcement.bouncers.length > 0 ? (
+              <EnforcementEvidence enforcement={enforcement} />
+            ) : data.bouncers.length === 0 ? (
               <p className="py-3 text-body text-muted-foreground">
                 None registered. Install one, such as{" "}
                 <span className="font-mono">crowdsec-firewall-bouncer-nftables</span>, so the
@@ -227,6 +285,103 @@ export function CrowdSecPanel() {
     </>
   )
 }
+
+/**
+ * Each bouncer with what was read about it — what it enforces, when it last
+ * pulled, whether its unit runs — and, under them, the firewall bouncer's
+ * footprint in the kernel: the sets that hold the addresses and whether a
+ * hooked rule drops on each.
+ */
+function EnforcementEvidence({
+  enforcement,
+}: {
+  enforcement: NonNullable<CrowdSecView["enforcement"]>
+}) {
+  const kernel = enforcement.kernel
+  return (
+    <div className="flex flex-col gap-4">
+      <RowList className="animate-rise">
+        {enforcement.bouncers.map((bouncer) => (
+          <Row
+            key={bouncer.name}
+            title={bouncer.name}
+            subtitle={
+              <span className="inline-flex flex-wrap items-center gap-x-2">
+                <Tag>{BOUNCER_KIND[bouncer.kind]}</Tag>
+                {bouncer.unit && (
+                  <span className="font-mono">
+                    {bouncer.unit}{" "}
+                    {bouncer.unitActive === undefined
+                      ? ""
+                      : bouncer.unitActive
+                        ? "running"
+                        : "not running"}
+                  </span>
+                )}
+              </span>
+            }
+            mono
+            className="py-2.5"
+            trailing={
+              <>
+                <span className="numeric text-hint text-muted-foreground">
+                  {bouncer.pullAgeSeconds < 0
+                    ? "never pulled"
+                    : `pulled ${pullAge(bouncer.pullAgeSeconds)} ago`}
+                </span>
+                <Status
+                  verdict={!bouncer.valid ? "critical" : bouncer.fresh ? "ok" : "warning"}
+                  label={!bouncer.valid ? "not valid" : bouncer.fresh ? "pulling" : "stale"}
+                />
+              </>
+            }
+          />
+        ))}
+      </RowList>
+      {kernel && (
+        <div className="space-y-1.5" aria-label="Kernel sets">
+          <p className="eyebrow">In the kernel{kernel.backend ? ` · ${kernel.backend}` : ""}</p>
+          {kernel.error ? (
+            <p className="text-body text-muted-foreground">{kernel.error}</p>
+          ) : kernel.sets.length === 0 ? (
+            <p className="text-body text-muted-foreground">
+              No CrowdSec set exists in nftables or ipset.
+            </p>
+          ) : (
+            <RowList>
+              {kernel.sets.map((set) => (
+                <Row
+                  key={`${set.family}-${set.table}-${set.name}`}
+                  title={set.name}
+                  subtitle={
+                    set.dropped
+                      ? `dropped on the ${(set.hooks ?? ["input"]).join(", ")} hook`
+                      : "no hooked rule drops on it"
+                  }
+                  mono
+                  className="py-2"
+                  trailing={
+                    <>
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(set.entries, "address", "addresses")}
+                      </span>
+                      <Status
+                        verdict={set.dropped ? "ok" : "critical"}
+                        label={set.dropped ? "dropping" : "inert"}
+                      />
+                    </>
+                  }
+                />
+              ))}
+            </RowList>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const BOUNCER_KIND = { firewall: "firewall", proxy: "proxy", other: "other" } as const
 
 /** Whether a moment is within the last twenty-four hours, as the tile counts alerts. */
 function inLastDay(iso: string) {
@@ -298,10 +453,12 @@ function DecisionValue({ decision }: { decision: Decision }) {
 function DecisionsPanel({
   decisions,
   canManage,
+  blocks,
   onChanged,
 }: {
   decisions: Decision[]
   canManage: boolean
+  blocks?: BlocksView
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
@@ -439,7 +596,7 @@ function DecisionsPanel({
         </PanelBody>
       </Panel>
 
-      <BanDialog open={banning} onOpenChange={setBanning} onBanned={onChanged} />
+      <BanDialog open={banning} onOpenChange={setBanning} blocks={blocks} onBanned={onChanged} />
       {dialog}
     </>
   )
@@ -463,10 +620,12 @@ const DURATIONS = [
 function BanDialog({
   open,
   onOpenChange,
+  blocks,
   onBanned,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  blocks?: BlocksView
   onBanned: () => void
 }) {
   const { exposure } = useSecurity()
@@ -475,6 +634,10 @@ function BanDialog({
   const [reason, setReason] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ field: boolean; message: string }>()
+  const boundary = useBoundaryCheck(
+    open && value.trim() ? { kind: "ban", target: value.trim() } : undefined,
+  )
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
 
   if (!open) return null
 
@@ -486,6 +649,7 @@ function BanDialog({
         value: value.trim(),
         duration,
         reason: reason.trim() || undefined,
+        ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
       })
       notify.success(
         `${value.trim()} banned for ${DURATIONS.find((d) => d.value === duration)?.label}`,
@@ -515,7 +679,12 @@ function BanDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" form="crowdsec-ban" pending={busy} disabled={busy || !value.trim()}>
+          <Button
+            type="submit"
+            form="crowdsec-ban"
+            pending={busy}
+            disabled={busy || !value.trim() || boundary.checking || crossing === "refused"}
+          >
             Ban
           </Button>
         </>
@@ -541,6 +710,7 @@ function BanDialog({
         >
           <Input
             id="crowdsec-value"
+            aria-describedby="crowdsec-value-held"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="203.0.113.77"
@@ -549,7 +719,13 @@ function BanDialog({
             spellCheck={false}
             aria-invalid={error?.field || undefined}
           />
+          {heldSentence(value, blocks) && (
+            <p id="crowdsec-value-held" className="mt-1.5 text-hint text-warning">
+              {heldSentence(value, blocks)}
+            </p>
+          )}
         </Field>
+        <BoundaryImpacts impacts={boundary.impacts} />
         <Field label="For how long" htmlFor="crowdsec-duration">
           <Select value={duration} onValueChange={setDuration}>
             <SelectTrigger id="crowdsec-duration" className="w-full">

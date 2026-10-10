@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import {
   crowdsec,
+  crowdsecFlushed,
   mockIntrusion,
   sshd,
   suricata,
@@ -121,7 +122,8 @@ test("CrowdSec reads its decisions, alerts and bouncers", async ({ page }) => {
   const tiles = section.locator("[data-slot=stat-tile]")
   await expect(tiles.filter({ hasText: "Decisions in force" })).toContainText("8")
   await expect(tiles.filter({ hasText: "Alerts, last day" })).toContainText("5")
-  await expect(tiles.filter({ hasText: "Bouncers valid" })).toContainText("2 / 2")
+  await expect(tiles.filter({ hasText: "Enforcement" })).toContainText("Enforcing")
+  await expect(tiles.filter({ hasText: "Enforcement" })).toContainText("2 of 2 pulled within 3 min")
 
   // The origin is said in words, and the community list is the one CAPI means.
   const rows = section.getByRole("row")
@@ -136,8 +138,33 @@ test("CrowdSec reads its decisions, alerts and bouncers", async ({ page }) => {
   await section.getByRole("button", { name: /^Community list/ }).click()
   await expect(section.getByRole("row")).toHaveCount(1 + 5)
 
-  await expect(section.getByText("firewall-bouncer-nftables")).toBeVisible()
-  await expect(section.getByText("caddy-bouncer")).toBeVisible()
+  await expect(section.getByText("firewall-bouncer-nftables", { exact: true })).toBeVisible()
+  await expect(section.getByText("caddy-bouncer", { exact: true })).toBeVisible()
+  // The claim is the verdict's: the engine running is not what the head says.
+  await expect(section.getByText("enforcing", { exact: true })).toBeVisible()
+  const kernel = section.getByLabel("Kernel sets")
+  await expect(kernel).toContainText("nftables")
+  await expect(kernel).toContainText("crowdsec-blacklists-crowdsec")
+  await expect(kernel).toContainText("5 addresses")
+  await expect(kernel).toContainText("dropped on the input hook")
+})
+
+test("a bouncer pulling into a flushed kernel table is not called protection", async ({ page }) => {
+  await mockIntrusion(page, [], { overrides: { "/security/crowdsec/": crowdsecFlushed } })
+  await page.goto("/security/intrusion")
+  const section = page.getByRole("region", { name: "CrowdSec" })
+  await expect(
+    section.getByText("The bouncer is pulling and nothing is dropped", { exact: true }),
+  ).toBeVisible()
+  // The cause, named beside the bouncer it is about, as well as under the kernel sets.
+  await expect(
+    section
+      .getByRole("listitem")
+      .filter({ hasText: "no CrowdSec set exists in nftables or ipset" }),
+  ).toContainText("firewall-bouncer-nftables")
+  await expect(section.getByText("not dropping", { exact: true }).first()).toBeVisible()
+  await expect(section.getByText(/enforced by/)).toHaveCount(0)
+  await expect(section.getByLabel("Kernel sets")).toContainText("No CrowdSec set exists")
 })
 
 test("a CrowdSec ban sends exactly the value, the duration and the reason", async ({ page }) => {
@@ -204,14 +231,230 @@ test("releasing a decision asks first, then deletes that decision", async ({ pag
 
 test("with no valid bouncer CrowdSec says nothing is enforcing its decisions", async ({ page }) => {
   await mockIntrusion(page, [], {
-    overrides: { "/security/crowdsec/": { ...crowdsec, bouncers: [] } },
+    overrides: {
+      "/security/crowdsec/": {
+        ...crowdsec,
+        bouncers: [],
+        enforcement: {
+          ...crowdsec.enforcement,
+          state: "unenforced",
+          summary:
+            "No bouncer is registered. Every decision is recorded and nothing drops the traffic it names.",
+          bouncers: [],
+          kernel: undefined,
+          enforcedBy: [],
+        },
+      },
+    },
   })
   await page.goto("/security/intrusion")
   const section = page.getByRole("region", { name: "CrowdSec" })
-  await expect(section.getByText("No bouncer is pulling decisions")).toBeVisible()
+  await expect(section.getByText("No bouncer enforces the decisions")).toBeVisible()
+  await expect(section.getByText(/nothing drops the traffic it names/)).toBeVisible()
   await expect(
-    section.locator("[data-slot=stat-tile]").filter({ hasText: "Bouncers valid" }),
-  ).toContainText("0 / 0")
+    section.locator("[data-slot=stat-tile]").filter({ hasText: "Enforcement" }),
+  ).toContainText("0 of 0 pulled")
+})
+
+test("every engine's refused addresses are folded into one list by address", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  const panel = page.locator("[data-slot=panel]").filter({ hasText: "Blocked across engines" })
+  await expect(panel).toContainText("9 addresses")
+  const held = panel.getByRole("row").filter({ hasText: "203.0.113.9" })
+  await expect(held).toContainText("fail2ban sshd")
+  await expect(held).toContainText("CrowdSec #11")
+  await expect(held).toContainText("held 2 times")
+  await expect(held).toContainText("203.0.113.0/24")
+
+  await panel.getByRole("button", { name: /^Held more than once/ }).click()
+  await expect(panel.getByRole("row")).toHaveCount(1 + 2)
+  await panel.getByRole("button", { name: /^Inside a broader block/ }).click()
+  await expect(panel.getByRole("row")).toHaveCount(1 + 1)
+  await expect(panel).toContainText("4 community decisions touch nothing else")
+})
+
+test("both ban forms say which engine already holds the address", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Ban an address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Ban an address" })
+  await dialog.getByLabel("Address or range").fill("203.0.113.9")
+  await expect(dialog.getByText(/already held by fail2ban sshd, CrowdSec #11/)).toBeVisible()
+  await dialog.getByLabel("Address or range").fill("203.0.113.200")
+  await expect(
+    dialog.getByText("203.0.113.200 is inside 203.0.113.0/24 (the firewall)."),
+  ).toBeVisible()
+  await dialog.getByLabel("Address or range").fill("198.51.100.99")
+  await expect(dialog.getByText(/already held|is inside/)).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "sshd" })
+  await sheet.getByLabel("Ban an address now").fill("198.51.100.4")
+  await expect(sheet.getByText(/already held by fail2ban sshd, CrowdSec #12/)).toBeVisible()
+})
+
+test("the sshd jail's policy says its ban misses the port sshd moved to", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const policy = page.getByRole("dialog", { name: "sshd" }).getByRole("region", { name: "Policy" })
+  await expect(policy).toContainText("5 failures within 10 minutes earn a 2-hour ban.")
+  await expect(policy).toContainText("Bans here do not stop the traffic")
+  await expect(policy).toContainText("sshd listens on 2222, and the ban drops only ssh")
+  await expect(policy).toContainText("journal: _SYSTEMD_UNIT=ssh.service + _COMM=sshd")
+  await expect(policy).toContainText("2222 not covered")
+  await expect(policy).toContainText("blocks nothing")
+  await expect(policy).toContainText("restart loads 3")
+})
+
+test("a ban across the access boundary is shown first and sent acknowledged", async ({ page }) => {
+  const mutations: Mutation[] = []
+  const impacts = [
+    {
+      boundary: "allowlist",
+      level: "affects",
+      text: "100.64.0.12 overlaps 100.64.0.0/10, which the allowlist admits: a ban refuses the dashboard's port to anyone else arriving from it.",
+    },
+  ]
+  await mockIntrusion(page, mutations, { overrides: { "/security/boundary/check": { impacts } } })
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Ban an address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Ban an address" })
+  await dialog.getByLabel("Address or range").fill("100.64.0.12")
+  await expect(dialog.getByText("This crosses the dashboard's access boundary")).toBeVisible()
+  await expect(dialog.getByText(/which the allowlist admits/)).toBeVisible()
+  await dialog.getByRole("button", { name: "Ban", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/security/crowdsec/decisions")?.body)
+    .toEqual({ value: "100.64.0.12", duration: "4h", acknowledgeBoundary: true })
+})
+
+test("a ban that would cut this session cannot be sent", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockIntrusion(page, mutations, {
+    overrides: {
+      "/security/boundary/check": {
+        impacts: [
+          {
+            boundary: "allowlist",
+            level: "cuts",
+            text: "100.110.34.0/24 covers 100.110.34.9, the address this session arrives from: a ban would end it.",
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "sshd" })
+  await sheet.getByLabel("Ban an address now").fill("100.110.34.0/24")
+  await expect(sheet.getByText("This would cut your way in")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Ban", exact: true })).toBeDisabled()
+  expect(mutations).toHaveLength(0)
+})
+
+test("an SSH change applies until confirmed, with what it does to the tunnel shown first", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  const headers: Record<string, string>[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/v1/ssh/config"))
+      headers.push(request.headers())
+  })
+  await mockIntrusion(page, mutations, {
+    overrides: {
+      "/network/changes/current": { available: true, owned: false, change: null },
+      "/security/boundary/check": {
+        impacts: [
+          {
+            boundary: "ssh",
+            level: "affects",
+            text: "sshd moves from 22 to 2222: every SSH tunnel to the dashboard must be opened on 2222.",
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security/ssh")
+  await page.getByRole("textbox", { name: "Port" }).fill("2222")
+  await expect(
+    page.getByRole("switch", { name: "Restore unless confirmed after reconnecting" }),
+  ).toBeChecked()
+  await page.getByRole("button", { name: "Test and apply" }).click()
+  const dialog = page.getByRole("dialog", { name: "Apply SSH changes" })
+  await expect(dialog).toContainText("sshd moves from 22 to 2222")
+  await expect(dialog).toContainText("the host restores them and reloads sshd")
+  await dialog.getByRole("button", { name: "Test and apply" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/ssh/config")?.body)
+    .toEqual({ settings: { port: "2222" }, acknowledgeBoundary: true })
+  expect(headers[0]["x-jd-network-apply"]).toBe("pending")
+})
+
+test("an SSH change on a host without the watchdog applies immediately as before", async ({
+  page,
+}) => {
+  const headers: Record<string, string>[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/v1/ssh/config"))
+      headers.push(request.headers())
+  })
+  await mockIntrusion(page)
+  await page.goto("/security/ssh")
+  await page.getByRole("textbox", { name: "Sessions per connection" }).fill("4")
+  await expect(
+    page.getByRole("switch", { name: "Restore unless confirmed after reconnecting" }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "Test and apply" }).click()
+  const dialog = page.getByRole("dialog", { name: "Apply SSH changes" })
+  await expect(dialog).toContainText("confirm you can still log in from a second terminal")
+  await dialog.getByRole("button", { name: "Test and apply" }).click()
+  await expect.poll(() => headers.length).toBe(1)
+  expect(headers[0]["x-jd-network-apply"]).toBeUndefined()
+})
+
+test("Suricata's setup moves the capture, fetches rules and reads the queue it depends on", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockIntrusion(page, mutations, {
+    overrides: { "/security/suricata/": { ...suricata, active: false } },
+  })
+  await page.goto("/security/intrusion")
+  const section = page.getByRole("region", { name: "Suricata" })
+  const setup = section.locator("[data-slot=panel]").filter({ hasText: "Setup" })
+  await expect(setup).toContainText("af-packet in suricata.yaml · eth0")
+  await expect(setup).toContainText("1,824,113 packets captured")
+  await expect(setup).toContainText("capturing")
+  await expect(setup).toContainText("47,213 rules enabled")
+  await expect(setup).toContainText("et/open")
+
+  await setup.getByRole("combobox", { name: "Capture interface" }).click()
+  await page.getByRole("option", { name: "ens4" }).click()
+  await setup.getByRole("button", { name: "Move capture" }).click()
+  const dialog = page.getByRole("dialog", { name: "Capture on ens4" })
+  await expect(dialog).toContainText("suricata -T")
+  expect(mutations).toHaveLength(0)
+  await dialog.getByRole("button", { name: "Test and move" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/security/suricata/interface")?.body)
+    .toEqual({ interface: "ens4" })
+
+  await setup.getByRole("button", { name: "Update rules" }).click()
+  await expect
+    .poll(() => mutations.some((m) => m.path === "/security/suricata/rules/update"))
+    .toBe(true)
+  await setup.getByRole("button", { name: "Start Suricata" }).click()
+  await expect.poll(() => mutations.some((m) => m.path === "/security/suricata/start")).toBe(true)
+
+  const inline = section.locator("[data-slot=panel]").filter({ hasText: "Inline queue" })
+  await expect(inline).toContainText("A queue fails closed")
+  await expect(inline).toContainText("FORWARD → queue 0")
+  await expect(inline).toContainText("fails closed")
+  await expect(inline).toContainText("never changed")
 })
 
 test("Suricata reads its mode, its severities, its signatures and its latest alerts", async ({

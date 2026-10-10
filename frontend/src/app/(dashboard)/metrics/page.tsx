@@ -151,6 +151,29 @@ const socketSeries: Series[] = [
 ]
 
 /*
+ * How connections fared rather than how many there were: the share of
+ * segments TCP had to send again, the kernel's round trip of established
+ * connections to peers elsewhere, and the attempts that never became a
+ * connection. Three charts, because a percentage, milliseconds and a rate
+ * share no scale.
+ */
+const retransSeries: Series[] = [
+  { key: "retransPct", label: "Resent", color: HUE.net, kind: "area", peakKey: "retransPctPeak" },
+]
+
+const rttSeries: Series[] = [{ key: "rtt", label: "Median RTT", color: OUT, peakKey: "rttPeak" }]
+
+const failureSeries: Series[] = [
+  { key: "attemptFails", label: "Failed attempts", color: WRITE, peakKey: "attemptFailsPeak" },
+  {
+    key: "listenDrops",
+    label: "Refused at accept",
+    color: "var(--destructive)",
+    peakKey: "listenDropsPeak",
+  },
+]
+
+/*
  * Formatters, domains and thresholds as module constants.
  *
  * These are passed to a memoised ChartPanel, whose bail-out is a shallow prop
@@ -165,6 +188,9 @@ const fmtLoad = (v: number) => v.toFixed(2)
 const fmtOps = (v: number) => `${Math.round(v)}/s`
 const fmtMillis = (v: number) => v.toFixed(1)
 const fmtCount = (v: number) => Math.round(v).toLocaleString()
+const fmtPercent2 = (v: number) => percent(v, 2)
+const fmtMs = (v: number) => `${Math.round(v)} ms`
+const fmtPerSecond = (v: number) => `${v.toFixed(2)}/s`
 
 /**
  * A byte figure short enough for an axis gutter.
@@ -505,6 +531,45 @@ export default function MetricsPage() {
               showPeaks={showPeaks}
               height={180}
               note={note}
+            />
+          </div>
+          <div className="grid gap-8 lg:grid-cols-3 [&>*]:min-w-0">
+            <ChartPanel
+              plain
+              title="Resent segments"
+              actions={<ConnectionReading snapshot={snapshot} />}
+              rows={rows}
+              series={retransSeries}
+              format={fmtPercent2}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={160}
+              note={live ? RECORDED_ONLY : note}
+            />
+            <ChartPanel
+              plain
+              title="Connection RTT"
+              rows={rows}
+              series={rttSeries}
+              format={fmtMs}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={160}
+              note={live ? RECORDED_ONLY : note}
+            />
+            <ChartPanel
+              plain
+              title="Failed connections"
+              rows={rows}
+              series={failureSeries}
+              format={fmtPerSecond}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={160}
+              note={live ? RECORDED_ONLY : note}
             />
           </div>
           <InterfacesPanel snapshot={snapshot} colors={{ in: HUE.net, out: OUT }} />
@@ -986,6 +1051,35 @@ function ProcessReading({ snapshot }: { snapshot: Snapshot }) {
  * the point where ephemeral ports start to run short, and the kernel's open
  * file handles against its ceiling where it has one.
  */
+const RECORDED_ONLY = "Recorded every interval, not streamed: pick a range to see it."
+
+/**
+ * How connections fare now, from the newest frame: the share of segments
+ * resent in its interval and the median RTT of established connections to
+ * peers elsewhere — "none" where nothing is connected, never a zero.
+ */
+function ConnectionReading({ snapshot }: { snapshot: Snapshot }) {
+  const tcp = snapshot.tcp
+  if (!tcp?.supported) return null
+  return (
+    <HeadReading
+      items={[
+        {
+          label: "resent",
+          value: percent(tcp.retransPercent, 2),
+          color: HUE.net,
+          tone: tcp.retransPercent >= 5 ? "warning" : "default",
+        },
+        {
+          label: "RTT",
+          value: tcp.latency.sockets > 0 ? `${Math.round(tcp.latency.medianMs)} ms` : "none",
+          color: OUT,
+        },
+      ]}
+    />
+  )
+}
+
 function SocketReading({ snapshot }: { snapshot: Snapshot }) {
   const sockets = snapshot.sockets
   const files = snapshot.files

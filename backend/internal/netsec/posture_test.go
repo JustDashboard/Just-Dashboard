@@ -1050,3 +1050,32 @@ func TestAPortDockerPublishesIsPastTheDefaultWhateverHoldsIt(t *testing.T) {
 		t.Errorf("an unpublished socket behind deny = %+v, want the default's warning", got)
 	}
 }
+
+// Decisions nobody enforces are a defence that only looks like one, so the
+// posture takes CrowdSec's verdict rather than its running state.
+func TestPostureTakesCrowdSecEnforcementNotItsRunningState(t *testing.T) {
+	for _, tc := range []struct {
+		state, id, level string
+	}{
+		{EnforcementEnforcing, "", ""},
+		{EnforcementPartial, "intrusion.crowdsec-partial", "notice"},
+		{EnforcementUnverified, "intrusion.crowdsec-unverified", "notice"},
+		{EnforcementStale, "intrusion.crowdsec-unenforced", "warning"},
+		{EnforcementDegraded, "intrusion.crowdsec-unenforced", "warning"},
+		{EnforcementUnenforced, "intrusion.crowdsec-unenforced", "warning"},
+	} {
+		got := assessCrowdSecEnforcement(&CrowdSecView{Installed: true, Active: true, Enforcement: &CrowdSecEnforcement{State: tc.state, Summary: "evidence"}})
+		if tc.id == "" {
+			if len(got) != 0 {
+				t.Fatalf("%s raised %+v", tc.state, got)
+			}
+			continue
+		}
+		if len(got) != 1 || got[0].ID != tc.id || got[0].Level != tc.level || got[0].Detail != "evidence" {
+			t.Fatalf("%s=%+v", tc.state, got)
+		}
+	}
+	if got := assessCrowdSecEnforcement(&CrowdSecView{Installed: false}); len(got) != 0 {
+		t.Fatal("an absent CrowdSec raised a finding")
+	}
+}

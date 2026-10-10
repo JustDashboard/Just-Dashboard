@@ -45,6 +45,11 @@ A change that weakens any of these has to say so explicitly.
      removed by hand, and an unreadable dependency reading refuses the change;
    - the generic job handlers for `network.diagnostic.*` jobs: lists filter them and get/stream/cancel
      require `system.admin`, matching the saved-artifact routes;
+   - `api.boundaryGate` for a fail2ban ban, a CrowdSec decision and an SSH settings change: one that
+     cuts this session's own way in is refused, and one that touches the dashboard's access boundary
+     for anybody else (an allowlisted network, the tailnet's previews, the SSH tunnel) needs an
+     explicit `acknowledgeBoundary` (`netsec.BoundaryImpacts`,
+     [observability-security](../backend/observability-security.md#the-access-boundary));
    - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
      `system.admin` on every `/logs` route that reads a source — except the whole journal
      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
@@ -83,6 +88,10 @@ A change that weakens any of these has to say so explicitly.
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
    [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
+   on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
+   serves anything but a loopback upstream is a broken boundary on the Security overview — but the
+   report is evidence, not the enforcement.
 8. Store schema changes are additive and tolerate an existing database. `CREATE TABLE IF NOT EXISTS` is a
    no-op against a table that exists, so a **column** added later also goes in `store.addedColumns`, which
    `applyAddedColumns` ALTERs in at open. Every entry needs a `DEFAULT` (SQLite refuses a NOT NULL column
