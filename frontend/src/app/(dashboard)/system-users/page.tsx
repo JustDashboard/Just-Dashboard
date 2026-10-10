@@ -7,10 +7,15 @@ import { del, get, patch, post } from "@/lib/api"
 import { keyProduct } from "@/lib/clients"
 import { plural, relativeTime } from "@/lib/format"
 import type { SSHKey, SystemUser } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { useArrivals } from "@/hooks/use-arrivals"
+import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useNow } from "@/components/deploy/vocabulary"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
@@ -19,9 +24,10 @@ import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
 import { SidePanel } from "@/components/side-panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
+import { AccessBand } from "@/components/system-users/access-band"
+import { isBare, signIns, verdict } from "@/components/system-users/access"
 import { AccountMark, FaceRun, GroupList, isAdmin } from "@/components/system-users/marks"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -30,12 +36,11 @@ import { IconAction } from "@/components/icon-action"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { Textarea } from "@/components/ui/textarea"
 
 type Pending = Record<string, string | undefined>
 
-type Scope = "all" | "signin" | "admins" | "locked"
+type Scope = "all" | "signin" | "admins" | "bare" | "locked"
 
 /**
  * The one word an account's state comes down to. Locked wins over everything —
@@ -52,16 +57,23 @@ function accountState(user: SystemUser): { tone: DotTone; label: string } {
 /**
  * The host's own accounts, as the people and daemons they are.
  *
- * Four readings open the page — how many accounts there are with the people
- * among them drawn as their faces, who can run anything as root, who can sign
- * in and whether any of them needs no password to, and who last did — and the
- * accounts are cards under them (§12, §16): each opens its authorised keys,
- * so the list is a run of places to go rather than a table of readings. The
- * locked count that had a tile of its own is a filter chip over the cards,
- * where it also narrows the list to what it counts, beside who can sign in
- * and who administers the host. With system accounts shown they are a second
- * shelf under the people, each drawn as the daemon it runs where its name
- * says (`system-users/marks.tsx`).
+ * The page opens on the host's identity line (the Overview's): the people on
+ * it drawn as their faces, how many of them can sign in, how many keys open
+ * the host and who signed in last and from where, with the verdict at its
+ * right end — an administrator who needs no password, else an account that
+ * needs none, else that none does — a press of which narrows the cards to
+ * them. Four tiles used to stand there, each a count with no name in it;
+ * where each went is the line's facts, the chips' counts and the band under
+ * it (`system-users/access-band.tsx`), which answers what the tiles never
+ * did: who last signed in and when, on an axis that ends at this second, who
+ * can become root and by which route, and whose keys open the host.
+ *
+ * The accounts are cards under it (§12, §16): each opens its authorised keys,
+ * so the list is a run of places to go rather than a table of readings, worst
+ * first — an account that needs no password leads its shelf. With system
+ * accounts shown they are a second shelf under the people, each drawn as the
+ * daemon it runs where its name says (`system-users/marks.tsx`). An account
+ * that appears rises into the list; one that signs in changes in place.
  */
 export default function SystemUsersPage() {
   const { confirm, dialog } = useConfirm()
@@ -71,6 +83,8 @@ export default function SystemUsersPage() {
   const [scope, setScope] = useSessionState<Scope>("system-users.scope", "all")
   const [keysFor, setKeysFor] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending>({})
+  const { host } = useMetrics()
+  const now = useNow(15_000)
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<SystemUser[]>("/system-users/", { system: showSystem }, signal),
     30000,
@@ -122,30 +136,31 @@ export default function SystemUsersPage() {
   // and the chips narrow the cards without narrowing the readings above them.
   const figures = useMemo(() => {
     const users = data ?? []
-    const latest = users
-      .filter((u) => u.lastLogin)
-      .sort((a, b) => (b.lastLogin ?? "").localeCompare(a.lastLogin ?? ""))[0]
-    const admins = users.filter(isAdmin)
     return {
       people: users.filter((u) => !u.system),
       system: users.filter((u) => u.system).length,
       signIn: users.filter((u) => u.canLogin && !u.locked),
-      noPassword: users.filter((u) => u.noPassword && !u.locked).length,
-      admins,
-      bareAdmins: admins.filter((u) => u.noPassword && !u.locked).length,
+      bare: users.filter((u) => isBare(u)).length,
+      admins: users.filter(isAdmin),
       locked: users.filter((u) => u.locked).length,
       keys: users.reduce((sum, u) => sum + u.sshKeyCount, 0),
-      latest,
+      latest: signIns(users, now, Infinity).latest,
+      verdict: verdict(users),
     }
-  }, [data])
+  }, [data, now])
+
+  // The No password chip is drawn only while an account needs none; a scope
+  // saved for the session must not outlive the chip that sets it.
+  const activeScope = scope === "bare" && figures.bare === 0 ? "all" : scope
 
   const rows = useMemo(() => {
     if (!data) return []
     const q = query.trim().toLowerCase()
     return data.filter((u) => {
-      if (scope === "signin" && !(u.canLogin && !u.locked)) return false
-      if (scope === "admins" && !isAdmin(u)) return false
-      if (scope === "locked" && !u.locked) return false
+      if (activeScope === "signin" && !(u.canLogin && !u.locked)) return false
+      if (activeScope === "admins" && !isAdmin(u)) return false
+      if (activeScope === "bare" && !isBare(u)) return false
+      if (activeScope === "locked" && !u.locked) return false
       if (!q) return true
       return (
         u.username.toLowerCase().includes(q) ||
@@ -154,7 +169,7 @@ export default function SystemUsersPage() {
         u.groups.some((g) => g.toLowerCase().includes(q))
       )
     })
-  }, [data, query, scope])
+  }, [data, query, activeScope])
 
   // People first, then the accounts packages made — the order the host lists
   // them in, as two shelves once both are on the page.
@@ -163,87 +178,73 @@ export default function SystemUsersPage() {
       [
         { key: "people", label: "People", users: rows.filter((u) => !u.system) },
         { key: "system", label: "System accounts", users: rows.filter((u) => u.system) },
-      ].filter((shelf) => shelf.users.length > 0),
+      ]
+        .map((shelf) => ({
+          ...shelf,
+          // Worst first, stably: the list is already in the host's order.
+          users: [...shelf.users].sort((a, b) => Number(isBare(b)) - Number(isBare(a))),
+        }))
+        .filter((shelf) => shelf.users.length > 0),
     [rows],
   )
+  const arrived = useArrivals((data ?? []).map((u) => u.username))
 
-  const cardProps = { pending, setLocked, remove, onKeys: setKeysFor, wide }
+  const cardProps = { pending, setLocked, remove, onKeys: setKeysFor, wide, arrived }
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Advanced" title="System users" />
 
       {data && (
-        <StatGrid columns={4} key="figures" className="animate-rise">
-          <StatTile
-            label="Accounts"
-            value={<NumberTicker value={data.length} />}
-            hint={
-              <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-                <FaceRun names={figures.people.map((u) => u.username)} />
-                <span className="truncate">
-                  {showSystem
-                    ? `${figures.people.length} people · ${figures.system} system`
-                    : "system accounts hidden"}
-                </span>
+        <HostIdentity
+          className="animate-rise"
+          logo={
+            <span className="flex h-12 shrink-0 items-center rounded-xl border bg-card px-3">
+              <FaceRun names={figures.people.map((u) => u.username)} max={3} />
+            </span>
+          }
+          title={host?.hostname ?? "Accounts"}
+          facts={
+            <>
+              <span className="numeric">
+                {showSystem
+                  ? `${plural(figures.people.length, "person", "people")} · ${figures.system} system`
+                  : plural(figures.people.length, "person", "people")}
               </span>
-            }
-          />
-          <StatTile
-            label="Administrators"
-            value={<NumberTicker value={figures.admins.length} />}
-            tone={figures.bareAdmins > 0 ? "warning" : "default"}
-            hint={
-              <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-                <FaceRun names={figures.admins.map((u) => u.username)} />
-                <span className="truncate">
-                  {figures.bareAdmins > 0
-                    ? `${figures.bareAdmins} without a password`
-                    : figures.admins.length === 1
-                      ? figures.admins[0].username
-                      : figures.admins.length > 0
-                        ? "can run anything as root"
-                        : "nobody holds sudo"}
-                </span>
-              </span>
-            }
-          />
-          <StatTile
-            label="Can sign in"
-            value={<NumberTicker value={figures.signIn.length} />}
-            tone={figures.noPassword > 0 ? "warning" : "default"}
-            hint={
-              <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-                {figures.noPassword === 0 && (
-                  <Key aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                )}
-                <span className="truncate">
-                  {figures.noPassword > 0
-                    ? `${figures.noPassword} without a password`
-                    : `${plural(figures.keys, "SSH key")} authorised`}
-                </span>
-              </span>
-            }
-          />
-          <StatTile
-            label="Last sign-in"
-            value={figures.latest ? relativeTime(figures.latest.lastLogin) : "Never"}
-            hint={
-              figures.latest ? (
-                <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-                  <FaceRun names={[figures.latest.username]} />
-                  <span className="shrink-0">{figures.latest.username}</span>
-                  {figures.latest.lastLoginFrom && (
-                    <Address ip={figures.latest.lastLoginFrom} className="min-w-0" />
-                  )}
-                </span>
-              ) : (
-                "no sign-in recorded"
-              )
-            }
-          />
-        </StatGrid>
+              <FactDot />
+              <span className="numeric">{figures.signIn.length} can sign in</span>
+              <FactDot />
+              <span className="numeric">{plural(figures.keys, "SSH key")} authorised</span>
+              {figures.latest && (
+                <>
+                  <FactDot />
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <span className="shrink-0 text-foreground">{figures.latest.user.username}</span>
+                    <span className="numeric shrink-0">
+                      {relativeTime(figures.latest.user.lastLogin)}
+                    </span>
+                    {figures.latest.user.lastLoginFrom && (
+                      <Address ip={figures.latest.user.lastLoginFrom} className="min-w-0" />
+                    )}
+                  </span>
+                </>
+              )}
+            </>
+          }
+          aside={
+            <Verdict
+              {...figures.verdict}
+              pressed={scope === figures.verdict.scope}
+              onPress={() =>
+                figures.verdict.scope &&
+                setScope(scope === figures.verdict.scope ? "all" : figures.verdict.scope)
+              }
+            />
+          }
+        />
       )}
+
+      {data && <AccessBand users={data} onOpen={setKeysFor} />}
 
       {/* The accounts are cards you open, so the list around them is plain: a
           frame around framed cards is two nested frames (§12). */}
@@ -267,6 +268,12 @@ export default function SystemUsersPage() {
               <FilterChip selected={scope === "admins"} onClick={() => setScope("admins")}>
                 Administrators <ChipCount>{figures.admins.length}</ChipCount>
               </FilterChip>
+              {figures.bare > 0 && (
+                <FilterChip selected={scope === "bare"} onClick={() => setScope("bare")}>
+                  <span className="text-warning">No password</span>
+                  <ChipCount>{figures.bare}</ChipCount>
+                </FilterChip>
+              )}
               <FilterChip selected={scope === "locked"} onClick={() => setScope("locked")}>
                 Locked <ChipCount>{figures.locked}</ChipCount>
               </FilterChip>
@@ -335,9 +342,45 @@ export default function SystemUsersPage() {
   )
 }
 
+/**
+ * The line's verdict: how many accounts need no password, and how many of
+ * those are administrators. An account that needs none is the one thing on
+ * this page that is a warning, so a press narrows the cards to exactly the
+ * accounts counted; when none does the line says so, and there is nothing to
+ * press.
+ */
+function Verdict({
+  tone,
+  count,
+  admins,
+  scope,
+  pressed,
+  onPress,
+}: ReturnType<typeof verdict> & { pressed: boolean; onPress: () => void }) {
+  if (!scope) return <Status tone={tone} label="No account signs in without a password" />
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onPress}
+      className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+    >
+      <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
+        <Status tone={tone} label={`${count} without a password`} />
+        {admins > 0 && (
+          <span className="text-hint text-muted-foreground">
+            {admins === 1 ? "1 can" : `${admins} can`} run anything as root
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
 type CardProps = {
   user: SystemUser
   index: number
+  arrived: Set<string>
   wide: boolean
   pending: Pending
   setLocked: (user: SystemUser, locked: boolean) => void
@@ -379,7 +422,7 @@ function userVerbs({ user, pending, setLocked, remove }: CardProps): Verb[] {
  * While the lock is changing a light runs round its edge (§11 *live*).
  */
 function AccountCard(props: CardProps) {
-  const { user, index, wide, pending, onKeys } = props
+  const { user, index, wide, pending, onKeys, arrived } = props
   const busy = pending[user.username]
   const state = accountState(user)
   const readings = (
@@ -416,7 +459,7 @@ function AccountCard(props: CardProps) {
       verb={`SSH keys for ${user.username}`}
       onSelect={() => onKeys(user.username)}
       busy={Boolean(busy)}
-      className={user.locked ? "opacity-70" : undefined}
+      className={cn(user.locked && "opacity-70", arrived.has(user.username) && "animate-rise")}
       leading={<AccountMark user={user} />}
       title={<span className="font-mono">{user.username}</span>}
       description={

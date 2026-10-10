@@ -2191,7 +2191,26 @@ The passes, in order. Each one is a diff you can review on its own.
    System users kept its four and changed one: the Locked count became a filter chip over the
    cards beside who can sign in and who administers the host, where it also narrows the list, and
    its tile went to the administrators — the members of `sudo`, `wheel` or `admin`, amber while one
-   of them needs no password. The audit log, which had no figures at all, gained four readings of
+   of them needs no password. It took the exit in 0.7.1, at the operator's request, because four
+   counts with no name in them stood over a column of cards and nothing on the page moved. Accounts
+   is the identity line's *6 people* and the chips' All count; Can sign in the line's fact and a
+   chip; Administrators a chip and the Can become root block; Last sign-in the line's last fact
+   (who, how long ago, from where) and the first block of the band. The line is the Overview's
+   (`HostIdentity`: the people as their faces, the host's name, the people, who can sign in, the
+   keys authorised, who signed in last) with the verdict at its right end — how many accounts need
+   no password and how many of those are administrators, a press of which narrows the cards to
+   exactly the accounts counted, beside a *No password* chip drawn only while there is one. Under
+   it `components/system-users/access-band.tsx` answers what the tiles never did, three blocks over
+   the accounts the page holds: **Last sign-ins**, one lane per account on an axis of 24h, 7d or 30d
+   that ends at this second, each a dot in the account's initials hue that moves toward now as the
+   clock runs, with a halo while the sign-in is under two minutes old and the places it came from
+   drawn as the network they are on; **Can become root**, every account with `sudo`, `wheel`,
+   `admin`, `docker` (root by another name) or uid 0, those needing no password first and locked
+   ones last; and **SSH keys**, one bar of every authorised key shared out by account, in the hue
+   each account has on the cards. The pure reads are `components/system-users/access.ts`
+   (unit-tested); a press on any row opens that account's keys sheet. The cards lead with the
+   account that needs no password and a new account rises into the list (`useArrivals`). The audit
+   log, which had no figures at all, gained four readings of
    the last day read from their own query so a filter narrows the trail without narrowing them:
    the changes with their hours as a trend, the failures, the people as their faces and the
    sign-ins with the refused ones.
