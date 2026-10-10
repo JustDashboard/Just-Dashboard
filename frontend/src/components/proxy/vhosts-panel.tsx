@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { forgetSessionState, useSessionState, useViewState } from "@/lib/view-state"
@@ -20,6 +20,7 @@ import type {
   SiteRenameResult,
   SiteResult,
   SitesBulkResult,
+  SiteTrafficReading,
   SitesTraffic,
   SiteUpstreamHealth,
   SiteUpstreams,
@@ -30,13 +31,16 @@ import type {
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
+import { useArrivals } from "@/hooks/use-arrivals"
+import { useMetrics } from "@/hooks/use-metrics"
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
 import { ChoiceRow, GroupRule } from "@/components/flow"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ProductGlyph, ProductLogos } from "@/components/product-logo"
+import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
@@ -63,7 +67,16 @@ import { RouteResolver } from "@/components/proxy/route-resolver"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNewSiteLink } from "@/components/proxy/site-link"
 import { DefaultSitePanel } from "@/components/proxy/default-site"
-import { siteProduct } from "@/components/proxy/marks"
+import { SiteBand, SiteMark } from "@/components/proxy/site-band"
+import {
+  errorTone,
+  siteApp,
+  siteHue,
+  siteTraffic,
+  sitesVerdict,
+  type SiteApp,
+  type SitesVerdict,
+} from "@/components/proxy/site-apps"
 import { SiteForm } from "@/components/proxy/site-form"
 import { SiteRenameDialog } from "@/components/proxy/site-rename"
 import { SiteImportDialog } from "@/components/proxy/site-import"
@@ -81,9 +94,11 @@ import {
   CHIP_LABEL,
   SORT_LABEL,
   exportBundle,
+  isRedirect,
+  isStatic,
   matchesChip,
+  redirectTargets,
   siteCert,
-  siteRequests,
   siteUpstreams,
   sortSites,
   stepSelection,
@@ -125,7 +140,8 @@ import {
   useSiteVerbs,
 } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
-import { isBroken, isDisabled, isPlain, sharedNames, waiting } from "@/components/proxy/site-order"
+import { isDisabled, sharedNames, waiting } from "@/components/proxy/site-order"
+import { isDown } from "@/components/proxy/upstream-health"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -137,6 +153,20 @@ const BULK = {
 } as const
 
 type BulkAction = keyof typeof BULK
+
+/**
+ * The chips that name something wrong carry its tone in their word, so the
+ * strip says where the trouble is before a count is read. Drawn only while
+ * there is one (the strip leaves out an empty chip).
+ */
+const CHIP_TONE: Partial<Record<SiteChip, string>> = {
+  attention: "text-warning",
+  broken: "text-destructive",
+  down: "text-destructive",
+  notlive: "text-warning",
+  expiring: "text-warning",
+  plain: "text-warning",
+}
 
 /** A card's identity in the list: two entries may share a name across layouts. */
 const siteKey = (v: VHost) => `${v.kind}:${v.layout ?? ""}:${v.name}`
@@ -225,6 +255,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // traffic summary on this build — rather than an error on a page about
   // sites, and nothing drawn is never read as "fine".
   const certPoll = useProxyRead("certs")
+  const portsPoll = useProxyRead("ports")
+  const { host } = useMetrics()
   const upstreamPoll = usePoll(
     (signal) => get<SiteUpstreams>("/proxy/upstreams", undefined, signal),
     30_000,
@@ -375,24 +407,39 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
   const hosts = useMemo(() => data ?? [], [data])
   const shared = useMemo(() => sharedNames(hosts), [hosts])
+  const arrived = useArrivals(hosts.map(siteKey))
   const counts = useMemo(
     () => ({
       all: hosts.length,
-      broken: hosts.filter(isBroken).length,
       tls: hosts.filter((v) => v.tls).length,
-      plain: hosts.filter(isPlain).length,
       disabled: hosts.filter(isDisabled).length,
-      nginx: hosts.filter((v) => v.kind === "nginx").length,
       caddy: hosts.filter((v) => v.kind === "caddy").length,
     }),
     [hosts],
   )
+  // What each site hands its requests to, read through the Ports page's list
+  // of sockets: the card's logo and the Applications block are this answer.
+  const listeners = portsPoll.error ? undefined : portsPoll.data
+  const apps = useMemo(() => {
+    const out = new Map<string, SiteApp | undefined>()
+    for (const v of hosts)
+      out.set(siteKey(v), siteApp(v, listeners, siteUpstreams(v, upstreamPoll.data)))
+    return out
+  }, [hosts, listeners, upstreamPoll.data])
+  const appOf = (v: VHost) => apps.get(siteKey(v))
   // A change nginx did not load waits for a reload; with the engine
   // stopped, the rest are enabled rather than serving, and nothing is live.
   const notLive = (v: VHost) =>
     run?.running === false ? undefined : notLiveLabel(v, siteChanges(pendingPoll.data, v))
+  // A card whose change nginx has not loaded is not drawn as serving it.
+  // Only a card with a link in sites-enabled can carry one: a verb acts on
+  // that link, and a conf.d file of the same name is not what it changed.
+  const isUnloaded = (v: VHost) =>
+    Boolean(v.enabledPath) &&
+    stillUnloaded(pending[v.name]?.unloaded, reloads.loadedAt, unitReading)
   const readings: SiteReadings = {
     notLive: (v) => Boolean(notLive(v)),
+    unloaded: isUnloaded,
     certs: certPoll.data,
     upstreams: upstreamPoll.data,
     traffic: trafficPoll.data,
@@ -460,12 +507,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     setPending((p) => (p[name] ? { ...p, [name]: { ...p[name], unloaded: mark } } : p))
     return outcome
   }
-  // A card whose change nginx has not loaded is not drawn as serving it.
-  // Only a card with a link in sites-enabled can carry one: a verb acts on
-  // that link, and a conf.d file of the same name is not what it changed.
-  const isUnloaded = (v: VHost) =>
-    Boolean(v.enabledPath) &&
-    stillUnloaded(pending[v.name]?.unloaded, reloads.loadedAt, unitReading)
   // A read that failed after the verb answered, with no good one since,
   // leaves the card with only the rows from before the change: its state
   // is not drawn from them, under a toast saying what the verb did.
@@ -1093,7 +1134,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // filter is on, its name *is* the group.
   // Nor once another order is chosen: the groups are the urgency order.
   const narrowed = filter.trim().length > 0 || chip !== "all" || sort !== "urgency"
-  const needsMe = (v: VHost) => waiting(v) || isUnloaded(v) || Boolean(notLive(v))
+  // The attention chip's test, spelled out here rather than called through
+  // the readings: React's compiler reads a call handed the readings during
+  // render as one that may run the page's verbs.
+  const refuses = (v: VHost) => siteUpstreams(v, upstreamPoll.data).some(isDown)
+  const needsMe = (v: VHost) => waiting(v) || isUnloaded(v) || Boolean(notLive(v)) || refuses(v)
   const attention = visible.filter(needsMe)
   const active = visible.filter((v) => !needsMe(v) && v.enabled)
   // Off, and nothing to decide about — the distribution's untouched default
@@ -1107,15 +1152,111 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   ].filter((group) => group.sites.length > 0)
   const groups =
     narrowed || sorted.length < 2 ? [{ key: "all", label: "", sites: visible }] : sorted
-  const allServing = run?.running !== false && !hosts.some((v) => isUnloaded(v) || notLive(v))
   const disabledServed = hosts.filter((v) => isDisabled(v) && notLive(v)).length
+
+  // The line's facts, read over every site rather than the ones a filter
+  // leaves, so narrowing the list does not narrow what the host is.
+  const serving = hosts.filter(
+    (v) => v.enabled && !v.broken && !engineStopped(v) && !isUnloaded(v) && !notLive(v),
+  ).length
+  const hour = hasTraffic
+    ? hosts.reduce((sum, v) => sum + (siteTraffic(v, trafficPoll.data)?.requests ?? 0), 0)
+    : undefined
+  const busiest = Math.max(0, ...hosts.map((v) => siteTraffic(v, trafficPoll.data)?.requests ?? 0))
+  const verdict = sitesVerdict({
+    attention: hosts.filter(needsMe),
+    isDown: refuses,
+    stopped: run?.running === false,
+    engine: engineName,
+    total: hosts.length,
+  })
+  const engines = [
+    status?.nginx && { id: "nginx-static", name: status.nginxVersion || "nginx" },
+    (status?.caddy || counts.caddy > 0) && {
+      id: "caddy",
+      name: status?.caddyVersion || (status?.ingressContainer ? "Caddy ingress" : "Caddy"),
+    },
+  ].filter((e): e is { id: string; name: string } => Boolean(e))
+  // The host's sites as the applications they put a domain on, the commonest
+  // first; a host whose sites proxy nothing it can name is its engines.
+  const fronted = new Map<string, number>()
+  for (const v of hosts) {
+    const product = v.enabled ? appOf(v)?.product : undefined
+    if (product) fronted.set(product, (fronted.get(product) ?? 0) + 1)
+  }
+  const marks = [...fronted.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
+  const tiles = marks.length > 0 ? marks : engines.map((e) => e.id)
 
   return (
     <Page className="animate-rise">
       {header}
 
+      {/* What the host serves, as one line: its sites as the applications
+          they front, the engines, how many serve and on TLS, the hour's
+          requests, and at its right end the verdict — a press of which
+          narrows the cards to exactly what it counts — beside the commands
+          that add to the list. Four tiles stood here, each one count with
+          no site named in it; site-band.tsx says where each went. */}
+      <HostIdentity
+        className="animate-rise"
+        logo={
+          tiles.length > 0 ? (
+            <span className="flex h-12 shrink-0 items-center">
+              <ProductLogos ids={tiles} size="md" />
+            </span>
+          ) : undefined
+        }
+        fallback={Globe}
+        title={host?.hostname ?? "This server"}
+        facts={
+          <>
+            {engines.map((engine, i) => (
+              <Fragment key={engine.id}>
+                {i > 0 && <FactDot />}
+                <HostFact product={engine.id}>{engine.name}</HostFact>
+              </Fragment>
+            ))}
+            {engines.length > 0 && <FactDot />}
+            <span className="numeric">{plural(counts.all, "site")}</span>
+            <FactDot />
+            <span className="numeric">{serving} serving</span>
+            <FactDot />
+            <span className="numeric">{counts.tls} on TLS</span>
+            {hour !== undefined && (
+              <>
+                <FactDot />
+                <span className="numeric">{compact.format(hour)} requests in the hour</span>
+              </>
+            )}
+            {counts.disabled > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric">
+                  {counts.disabled} disabled
+                  {disabledServed > 0 && (
+                    <>
+                      , <span className="text-warning">{disabledHint(disabledServed)}</span>
+                    </>
+                  )}
+                </span>
+              </>
+            )}
+          </>
+        }
+        aside={
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <Verdict
+              verdict={verdict}
+              pressed={Boolean(verdict.chip) && chip === verdict.chip}
+              onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
+            />
+            {hosts.length > 0 && newSite}
+          </div>
+        }
+      />
+
       {/* The rows stay on a failed read, and would pass for what nginx
-          serves now: the tiles and cards below are from the last good one. */}
+          serves now: the readings and cards below are from the last good one. */}
       {error && (
         <div role="alert">
           <Notice tone="warning" icon={Warning} title="Could not read the sites again">
@@ -1165,57 +1306,16 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         />
       )}
 
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Sites"
-          value={counts.all}
-          hint={
-            counts.all === 0 ? (
-              "none configured"
-            ) : (
-              <span className="inline-flex items-center gap-1.5">
-                {counts.nginx > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <ProductGlyph id="nginx-static" className="size-3" />
-                    {counts.nginx} nginx
-                  </span>
-                )}
-                {counts.caddy > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <ProductGlyph id="caddy" className="size-3" />
-                    {counts.caddy} Caddy
-                  </span>
-                )}
-              </span>
-            )
-          }
+      {hosts.length > 0 && (
+        <SiteBand
+          hosts={hosts}
+          appOf={appOf}
+          healthOf={(v) => siteUpstreams(v, upstreamPoll.data)}
+          traffic={hasTraffic ? trafficPoll.data : undefined}
+          certs={certPoll.data}
+          onChip={setChip}
         />
-        <StatTile
-          label="On TLS"
-          value={counts.tls}
-          hint={counts.all > 0 ? `of ${counts.all}` : "—"}
-          tone={counts.all > 0 && counts.tls === counts.all ? "success" : "default"}
-        />
-        <StatTile
-          label="Plain HTTP"
-          value={counts.plain}
-          tone={counts.plain > 0 ? "warning" : "default"}
-          hint={counts.plain > 0 ? "proxying an app unencrypted" : "every app on TLS"}
-        />
-        <StatTile
-          label="Disabled"
-          value={counts.disabled}
-          hint={
-            counts.disabled > 0
-              ? disabledHint(disabledServed)
-              : counts.broken > 0
-                ? `none, but ${plural(counts.broken, "broken link")}`
-                : allServing
-                  ? "every site serving"
-                  : "every site enabled"
-          }
-        />
-      </StatGrid>
+      )}
 
       {hosts.length === 0 ? (
         <EmptyState
@@ -1231,11 +1331,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       ) : (
         <div className="flex min-w-0 flex-col gap-4">
           {/* The filters stand on the page rather than inside a panel
-              header: the list is the whole page, and the command to add to
-              it sits with the filters that narrow it. */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
+              header: the list is the whole page, and the commands to add to
+              it are the identity line's. */}
+          <div className="flex min-w-0 items-baseline gap-2.5">
             <h2 className="text-section font-semibold">Routing</h2>
-            {newSite}
+            <span className="numeric text-hint text-muted-foreground">
+              {visible.length === hosts.length
+                ? plural(hosts.length, "site")
+                : `${visible.length} of ${plural(hosts.length, "site")}`}
+            </span>
           </div>
           <Toolbar className="justify-between gap-x-4">
             <SearchInput
@@ -1276,7 +1380,8 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                 .filter((key) => key === "all" || key === chip || chipCounts[key] > 0)
                 .map((key) => (
                   <FilterChip key={key} selected={chip === key} onClick={() => setChip(key)}>
-                    {CHIP_LABEL[key]} <ChipCount>{chipCounts[key]}</ChipCount>
+                    <span className={CHIP_TONE[key]}>{CHIP_LABEL[key]}</span>
+                    <ChipCount>{chipCounts[key]}</ChipCount>
                   </FilterChip>
                 ))}
             </ChipStrip>
@@ -1383,7 +1488,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                           ambiguous={shared.has(vhost.name)}
                           cert={siteCert(vhost, certPoll.data)}
                           health={siteUpstreams(vhost, upstreamPoll.data)}
-                          requests={siteRequests(vhost, trafficPoll.data)}
+                          app={appOf(vhost)}
+                          hour={siteTraffic(vhost, trafficPoll.data)}
+                          busiest={busiest}
+                          arrived={arrived.has(siteKey(vhost))}
                           selectable={allChosen.includes(vhost)}
                           selected={selected.includes(vhost.name)}
                           onSelectedChange={(on) => toggleSelected(vhost, on)}
@@ -1415,7 +1523,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
                           ambiguous={shared.has(vhost.name)}
                           cert={siteCert(vhost, certPoll.data)}
                           health={siteUpstreams(vhost, upstreamPoll.data)}
-                          requests={siteRequests(vhost, trafficPoll.data)}
+                          app={appOf(vhost)}
+                          hour={siteTraffic(vhost, trafficPoll.data)}
+                          busiest={busiest}
+                          arrived={arrived.has(siteKey(vhost))}
                           selectable={allChosen.includes(vhost)}
                           selected={selected.includes(vhost.name)}
                           onSelectedChange={(on) => toggleSelected(vhost, on)}
@@ -1532,8 +1643,14 @@ type CardProps = {
   cert?: Certificate
   /** Its upstreams as the health check last found them. */
   health: SiteUpstreamHealth[]
-  /** Requests in the last hour, when the traffic summary has the site. */
-  requests?: number
+  /** What the site hands its requests to, where it proxies. */
+  app?: SiteApp
+  /** Its last hour, when the traffic summary could read its log. */
+  hour?: SiteTrafficReading
+  /** The busiest site's hour, which a card's meter is drawn against. */
+  busiest: number
+  /** New since the last read of the list: it rises in (§11). */
+  arrived: boolean
   selectable: boolean
   selected: boolean
   onSelectedChange: (selected: boolean) => void
@@ -1564,6 +1681,11 @@ type CardProps = {
  * card's verbs: the form for an administrator and a file the form saves back,
  * the file itself for everything else with one, read-only unless the reader
  * may write it — and a deployment's route read-only for everyone.
+ *
+ * The site is drawn as what it is made of — the application it fronts over
+ * the engine serving it — with its hue down its left edge: the colour its
+ * span, its certificate's dot and its application's key carry in the band
+ * above, so a card and its readings there are found by colour.
  */
 function SiteCard({
   vhost,
@@ -1576,7 +1698,10 @@ function SiteCard({
   ambiguous,
   cert,
   health,
-  requests,
+  app,
+  hour,
+  busiest,
+  arrived,
   selectable,
   selected,
   onSelectedChange,
@@ -1586,6 +1711,7 @@ function SiteCard({
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
   // A link to nothing has no domain or upstream to draw, only where it points.
   const linkOnly = vhost.broken === "dangling" && !vhost.path
+  const end = routeEnd(vhost, app)
   return (
     <ChoiceRow
       actions={
@@ -1601,10 +1727,15 @@ function SiteCard({
       href={sitePath(vhost.name)}
       index={index}
       busy={Boolean(busy)}
-      className={cn("h-full gap-4 p-4", cursor && "ring-2 ring-ring")}
-      leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
-      title={<span className="text-title">{vhost.name}</span>}
-      description={siteKind(vhost)}
+      className={cn(
+        "h-full gap-4 p-4 pl-5",
+        cursor && "ring-2 ring-ring",
+        arrived && "animate-rise",
+        !vhost.enabled && "opacity-80",
+      )}
+      leading={<SiteMark vhost={vhost} app={app} />}
+      title={<span className="text-title font-semibold tracking-tight">{vhost.name}</span>}
+      description={app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)}
       trailing={
         <ServingStatus
           vhost={vhost}
@@ -1616,11 +1747,17 @@ function SiteCard({
         />
       }
     >
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-4 left-0 w-0.75 rounded-r-full"
+        style={{ background: siteHue(vhost.name) }}
+      />
       {cursor && <ScrollHere />}
       {!linkOnly && (
         <RoutePath
           source={vhost.serverNames.join(", ") || "Default host"}
-          destination={upstreamTargets(vhost).join(", ") || "Served by configuration"}
+          destinationLabel={end.label}
+          destination={end.node}
         />
       )}
       <SiteNotes vhost={vhost} />
@@ -1630,8 +1767,8 @@ function SiteCard({
             <SiteTLS vhost={vhost} />
             {cert && <ExpiryStatus cert={cert} />}
             <UpstreamHealth targets={health} />
+            {hour && <HourMeter vhost={vhost} hour={hour} busiest={busiest} />}
             <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
-            {requests !== undefined && <span>{compact.format(requests)} req/h</span>}
             <Edited vhost={vhost} />
             <SiteFeatures vhost={vhost} />
           </div>
@@ -1639,6 +1776,111 @@ function SiteCard({
         <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} className="ml-auto" />
       </div>
     </ChoiceRow>
+  )
+}
+
+/**
+ * The far end of a route, as what it is: the application and where nginx
+ * dials it; the directory a static site serves; where a redirect sends.
+ * "Served by configuration" is left for a site whose file says none of these.
+ */
+function routeEnd(
+  vhost: VHost,
+  app: SiteApp | undefined,
+): { label: string; node: React.ReactNode } {
+  if (isRedirect(vhost)) return { label: "Redirects to", node: redirectTargets(vhost).join(", ") }
+  if (isStatic(vhost)) return { label: "Files", node: (vhost.roots ?? []).join(", ") }
+  const targets = upstreamTargets(vhost).join(", ")
+  if (!targets) return { label: "Upstream", node: "Served by configuration" }
+  return {
+    label: "Upstream",
+    node: app?.name ? (
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5 font-sans font-medium">
+          {app.product && <ProductGlyph id={app.product} className="size-4" />}
+          <span className="truncate">{app.name}</span>
+        </span>
+        <span className="text-muted-foreground">{targets}</span>
+      </span>
+    ) : (
+      targets
+    ),
+  }
+}
+
+/**
+ * The site's last hour: a short bar against the busiest site's, in the
+ * site's hue, its requests, and its share answered with a 5xx where that is
+ * worth saying.
+ */
+function HourMeter({
+  vhost,
+  hour,
+  busiest,
+}: {
+  vhost: VHost
+  hour: SiteTrafficReading
+  busiest: number
+}) {
+  const tone = errorTone(hour.errorRate)
+  return (
+    <span
+      className="inline-flex items-center gap-1.5"
+      title={`${hour.requests.toLocaleString()} requests in the last hour`}
+    >
+      <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-meter-track">
+        <span
+          className="block h-full rounded-full transition-[width] duration-700 ease-out"
+          style={{
+            width: `${busiest > 0 ? (hour.requests / busiest) * 100 : 0}%`,
+            background: siteHue(vhost.name),
+          }}
+        />
+      </span>
+      <span className="numeric text-foreground">{compact.format(hour.requests)}</span>
+      <span>req/h</span>
+      {tone && (
+        <span className={cn("numeric", tone === "danger" ? "text-destructive" : "text-warning")}>
+          {(hour.errorRate * 100).toFixed(1)}% 5xx
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The identity line's verdict. A count of sites is a question about which,
+ * so a press narrows the cards to exactly them; an all-clear has nothing to
+ * press.
+ */
+function Verdict({
+  verdict,
+  pressed,
+  onPress,
+}: {
+  verdict: SitesVerdict
+  pressed: boolean
+  onPress: () => void
+}) {
+  const status = <Status tone={verdict.tone} label={verdict.label} />
+  if (!verdict.chip) return status
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onPress}
+      className={cn(
+        "rounded-md px-1.5 py-1 focus-ring transition-colors",
+        pressed ? "bg-accent" : "hover:bg-row-hover",
+      )}
+    >
+      <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
+        {status}
+        {verdict.detail && (
+          <span className="text-hint text-muted-foreground">{verdict.detail}</span>
+        )}
+      </span>
+    </button>
   )
 }
 
@@ -1668,7 +1910,9 @@ function SiteTableRow({
   ambiguous,
   cert,
   health,
-  requests,
+  app,
+  hour,
+  busiest,
   selectable,
   selected,
   onSelectedChange,
@@ -1691,7 +1935,12 @@ function SiteTableRow({
       <TableCell className={cn(cursor && "outline-2 -outline-offset-2 outline-ring")}>
         {cursor && <ScrollHere />}
         <div className="flex min-w-0 items-center gap-2.5">
-          <ProductLogo id={siteProduct(vhost)} size="sm" />
+          <span
+            aria-hidden
+            className="h-6 w-0.75 shrink-0 rounded-full"
+            style={{ background: siteHue(vhost.name) }}
+          />
+          <SiteMark vhost={vhost} app={app} size="sm" />
           <div className="min-w-0">
             <Link
               href={sitePath(vhost.name)}
@@ -1701,7 +1950,7 @@ function SiteTableRow({
               {vhost.name}
             </Link>
             <span className="block truncate text-hint text-muted-foreground">
-              {siteKind(vhost)}
+              {app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)}
             </span>
           </div>
         </div>
@@ -1739,7 +1988,11 @@ function SiteTableRow({
       </TableCell>
       <TableCell className="text-hint text-muted-foreground">
         <Edited vhost={vhost} />
-        {requests !== undefined && <p>{compact.format(requests)} req/h</p>}
+        {hour && (
+          <p>
+            <HourMeter vhost={vhost} hour={hour} busiest={busiest} />
+          </p>
+        )}
       </TableCell>
       <TableCell>
         <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} />

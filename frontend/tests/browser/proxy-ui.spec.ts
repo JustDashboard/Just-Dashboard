@@ -104,10 +104,12 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   ).toHaveAttribute("href", "/proxy/sites/just-dashboard-shop")
   // Worst first: the site proxying an application in plain text is under
   // the attention rule, above the two on TLS.
-  await expect(page.getByText("Needs attention")).toBeVisible()
+  await expect(page.getByRole("list", { name: "Needs attention" })).toBeVisible()
   await expect(cards.first()).toContainText("legacy.example.com")
-  // The four readings sit on the page rather than in a box.
-  await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
+  // What the tiles counted is the identity line's and the chips'.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("3 sites")
+  await expect(page.getByRole("button", { name: /^Plain HTTP 1/ })).toBeVisible()
 })
 
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
@@ -267,7 +269,10 @@ for (const width of [390, 1280, 1720]) {
     page.on("pageerror", (error) => failures.push(error.message))
     for (const path of PROXY_PAGES) {
       await page.goto(path)
-      await expect(page.locator("[data-slot='stat-grid']").first()).toBeVisible()
+      // Sites opens on its identity line rather than tiles.
+      await expect(
+        page.locator("[data-slot='stat-grid'], [data-slot='host-identity']").first(),
+      ).toBeVisible()
       await page.waitForLoadState("networkidle")
       const overflow = await page
         .locator("[data-slot='page']")

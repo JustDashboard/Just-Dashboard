@@ -1039,7 +1039,7 @@ test("a read-only account following the link gets no form", async ({ page }) => 
   await page.goto("/proxy/sites?new=1&upstream=http%3A%2F%2F127.0.0.1%3A8081")
   // Taken off the address once the account is known, and nothing opened.
   await expect(page).toHaveURL(/\/proxy\/sites$/)
-  await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+  await expect(page.locator("[data-slot='host-identity']")).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
