@@ -72,7 +72,7 @@ taking a frame:
   its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
   preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
   connection rows; the password files and DNS provider lists),
-  health findings, the runtime-health bar, and every block of the deployment section — the fleet
+  the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
   row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
@@ -2088,34 +2088,20 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts, the verdict at the right end); a Resources `Section`
+hypervisor as bare marks among its facts); a Resources `Section`
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; the `Health` panel across the full width — a strip of every area checked drawn as the release path's own segments, then its findings as lit cards; the Deployments section; a plain top-processes list beside a
+the Storage band, a capacity bar per filesystem; the Deployments section; a plain top-processes list beside a
 plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
 each naming what it counts with the products themselves. No frame anywhere on the page — the project
 cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
 
 The 0.7.1 pass asked of each block whether it answered the question a reader opens the page with,
-and three did not. The Health list said only what the recorder measures, so a failed deploy, a
-backup gone quiet or a certificate past its renewal was a red figure on a tile two screens down with
-no word of what it was; it now carries what every module found (`components/overview/attention.ts`,
-the fleet's own Attention findings among them), worst first, each opening the page that fixes it,
-and the verdict on the list and the identity line is the worst of all of them.
-
-The 2026-10-08 Health overhaul answered "no life, no colour" without leaving the vocabulary. A
-finding opens its fix, so it is a thing you take and a `ChoiceRow` with the lit edge (§16), on its
-level's `bg-wash-*` with a short bar of the level's hue before the area's glyph; the figure it was
-judged on is a `Meter` with a `mark` at the threshold it crossed. Above them, every area the server
-checked is a cell under one `Segment` of the release path's bar (`deploy/run-pipeline.tsx`): green,
-amber, red, dashed where the area could not be read, and sweeping while a check the reader asked for
-is in flight — so a healthy host is a line of green with a reading under each segment rather than a
-sentence saying nothing was found. Notices fold under a quiet `Disclosure`. Inside the sheet the
-diagnosis is a banner on the level's wash with the server's evidence as figures, and every fix ends
-on a fresh reading drawn as a success or warning outcome line; a control in flight runs `BorderBeam`
-round its card and names its participle in `TextShimmer`. With that it took the
-row's full width — beside the activity list it was one finding over half a row of nothing. The
+and two did not. The Health panel that stood between the readings and the projects — the
+recorder's findings with every module's beside them, and a sheet of fixes behind each — was removed
+on 2026-10-08 at the operator's request, with `GET /system/health` and the advisor routes behind it;
+the machine is read from its readings and each module from its own tile and page. The
 projects, which are why most visits happen, were one figure on one tile; they are the fleet's own
 cards now, worst first and two rows at most, and the tile went to Git. And nothing on the page said
 *who* was spending the CPU the first tile reported, so the Metrics page's top processes sit beside
