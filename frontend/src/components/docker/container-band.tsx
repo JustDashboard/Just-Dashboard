@@ -1,82 +1,87 @@
 "use client"
 
-import { ArrowRight, Box } from "@/components/icons"
+import Link from "next/link"
+import { ArrowRight } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
+import { useNow } from "@/components/deploy/vocabulary"
 import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, containerProduct, imageProduct } from "@/components/product-logo"
-import { Status, StatusDot, type DotTone } from "@/components/status-dot"
+import { StatusDot } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ShareBar, shade } from "@/components/procs/workloads"
-import { cores } from "@/components/procs/shared"
-import { ago } from "@/components/procs/units"
-import { spanWords, type EventEntry } from "@/lib/docker-events"
+import { useArrivals } from "@/hooks/use-arrivals"
 import { bytes, percent, plural } from "@/lib/format"
-import type { Container, ContainerStats, DockerEvent, Snapshot } from "@/lib/types"
+import type { Container, ContainerStats, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { exitWords } from "@/components/docker/containers"
+import { cores } from "@/components/procs/shared"
+import { ShareBar, shade } from "@/components/procs/workloads"
+import { ago } from "@/components/procs/units"
+import type { ContainerChange } from "@/components/docker/overview"
 
-/** How many containers each block names; the rest of the host is one muted span. */
+/** How many containers each block names. */
 const SHOWN = 5
 
 /**
  * What the containers are doing: the five using the most processor and the
  * most memory, each a span of one bar as wide as the machine, and the last
- * things that happened to them.
+ * thing that happened to each container.
  *
- * It replaced the runtime health bar, which said how many containers were up
- * and checked and nothing about which of them was busy or what had just gone
- * wrong — the two questions a reader opens Containers with after "is anything
- * down". The figures are the container socket's own frames, so a span eases
- * and a figure glides every two seconds; the host's readings size the bars,
- * with everything the host has in use beyond these five drawn muted. Recent
- * is Docker's event log, the one Events reads, with a restart loop folded to
- * one line and an OOM kill on the exit it caused. A row opens its container.
+ * It replaced four tiles — running, runtime health, attention, compose stacks
+ * — none of which said *which* container was busy or what had just happened
+ * to one, which are what a reader opens Docker to find out once they know
+ * nothing is down. The figures are the containers socket's, so they move with
+ * every frame: each span eases to its next width and each figure glides.
+ * Everything else the host has in use is one muted span, so the bar also says
+ * how much of the machine is Docker's. A row opens its container.
  */
 export function ContainerBand({
   containers,
   stats,
   snapshot,
-  entries,
+  hostCpus,
+  hostMemory,
+  changes,
   listening,
-  now,
   onOpen,
 }: {
   containers: Container[]
   stats: Record<string, ContainerStats>
   snapshot?: Snapshot
-  entries: EventEntry[]
-  /** Whether the event socket is open, so an empty Recent means nothing happened. */
+  /** The daemon's count, for a host whose metrics have not arrived. */
+  hostCpus: number
+  hostMemory: number
+  changes: ContainerChange[]
+  /** Whether the events feed is connected; an empty Recent means nothing only while it is. */
   listening: boolean
-  now: number
-  onOpen: (id: string) => void
+  onOpen: (container: { id?: string; name: string }) => void
 }) {
-  const byId = new Map(containers.map((c) => [c.id, c]))
-  const measured = containers.flatMap((c) => {
-    const stat = stats[c.id]
-    return stat && c.state === "running" ? [{ container: c, stat }] : []
-  })
+  const now = useNow(15_000)
+  const up = containers.filter((c) => c.state === "running").length
+  const running = containers.filter((c) => c.state === "running" && stats[c.id])
+  const measured = running.filter((c) => stats[c.id].cpuReady !== false)
   const byCPU = measured
-    .filter(({ stat }) => stat.cpuReady !== false && stat.cpuPercent > 0)
-    .sort((a, b) => b.stat.cpuPercent - a.stat.cpuPercent)
+    .filter((c) => stats[c.id].cpuPercent > 0)
+    .sort((a, b) => stats[b.id].cpuPercent - stats[a.id].cpuPercent)
     .slice(0, SHOWN)
-  const byMemory = measured
-    .filter(({ stat }) => stat.memUsage > 0)
-    .sort((a, b) => b.stat.memUsage - a.stat.memUsage)
+  const byMemory = running
+    .filter((c) => stats[c.id].memUsage > 0)
+    .sort((a, b) => stats[b.id].memUsage - stats[a.id].memUsage)
     .slice(0, SHOWN)
-  const waiting = measured.length > 0 && measured.every(({ stat }) => stat.cpuReady === false)
 
-  const coreCount =
-    snapshot?.cpu?.cores || snapshot?.cpu?.perCore?.length || measured[0]?.stat.hostCpus || 0
-  const busy = snapshot?.cpu ? (snapshot.cpu.totalPercent * coreCount) / 100 : undefined
-  const memTotal = snapshot?.memory?.total ?? 0
-  const memUsed = snapshot?.memory?.used ?? 0
-  const cpuSum = sum(byCPU, ({ stat }) => stat.cpuPercent)
-  const memSum = sum(byMemory, ({ stat }) => stat.memUsage)
-  // Everything the containers hold, which the header says against the host:
-  // the five named are the bar, the sum is how much of the machine is Docker.
-  const allCPU = sum(measured, ({ stat }) => (stat.cpuReady === false ? 0 : stat.cpuPercent))
-  const allMemory = sum(measured, ({ stat }) => stat.memUsage)
+  const coreCount = snapshot?.cpu?.cores || snapshot?.cpu?.perCore?.length || hostCpus
+  const memTotal = snapshot?.memory?.total || hostMemory
+  const cpuAll = sum(measured, (c) => stats[c.id].cpuPercent)
+  const memAll = sum(running, (c) => stats[c.id].memUsage)
+  const cpuShown = sum(byCPU, (c) => stats[c.id].cpuPercent)
+  const memShown = sum(byMemory, (c) => stats[c.id].memUsage)
+  // The rest of the bar is everything else in use on the host, the other
+  // containers among it; without the host's own reading, only those.
+  const cpuRest = snapshot?.cpu
+    ? Math.max(snapshot.cpu.totalPercent * coreCount - cpuShown, 0)
+    : cpuAll - cpuShown
+  const memRest = snapshot?.memory
+    ? Math.max(snapshot.memory.used - memShown, 0)
+    : memAll - memShown
 
   return (
     <div
@@ -87,12 +92,15 @@ export function ContainerBand({
         <PanelHeader
           title="Processor"
           actions={
-            measured.length > 0 && (
-              <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
+            coreCount > 0 && (
+              <span
+                className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground"
+                title="Summed over every running container. One core is 100%."
+              >
                 <span className="font-medium text-foreground">
-                  <LiveFigure value={allCPU / 100} decimals={allCPU >= 995 ? 1 : 2} />
+                  <LiveFigure value={cpuAll / 100} decimals={cpuAll >= 995 ? 1 : 2} />
                 </span>
-                {coreCount > 0 ? `of ${plural(coreCount, "core")}` : "cores"}
+                of {plural(coreCount, "core")} in containers
               </span>
             )
           }
@@ -100,19 +108,19 @@ export function ContainerBand({
         <PanelBody className="space-y-3 pt-4">
           <ShareBar
             label="Processor"
-            capacity={coreCount > 0 ? coreCount * 100 : cpuSum}
-            rest={busy !== undefined ? Math.max(busy * 100 - cpuSum, 0) : 0}
-            parts={byCPU.map(({ container, stat }, rank) => ({
-              key: container.id,
-              value: stat.cpuPercent,
+            capacity={coreCount > 0 ? coreCount * 100 : cpuAll}
+            rest={cpuRest}
+            parts={byCPU.map((c, rank) => ({
+              key: c.id,
+              value: stats[c.id].cpuPercent,
               color: shade(HUE.cpu, rank),
-              label: `${container.name} ${cores(stat.cpuPercent)}`,
+              label: `${c.name} ${cores(stats[c.id].cpuPercent)}`,
             }))}
             format={cores}
           />
-          {measured.length === 0 ? (
+          {up === 0 ? (
             <p className="py-2 text-body text-muted-foreground">Nothing is running.</p>
-          ) : waiting ? (
+          ) : measured.length === 0 ? (
             <p className="py-2 text-body">
               <TextShimmer>Measuring the first interval…</TextShimmer>
             </p>
@@ -122,33 +130,30 @@ export function ContainerBand({
             </p>
           ) : (
             <ul className="-mx-2">
-              {byCPU.map(({ container, stat }, rank) => (
-                <ContainerLine
-                  key={container.id}
-                  container={container}
-                  onOpen={onOpen}
-                  lead={<RankKey color={shade(HUE.cpu, rank)} />}
-                  detail={
-                    container.cpuLimit
-                      ? `of ${plural(container.cpuLimit, "core")}`
-                      : stat.pids > 0
-                        ? plural(stat.pids, "process", "processes")
-                        : undefined
-                  }
-                  title={`${percent(stat.cpuPercent)} of one core`}
-                  figure={
-                    stat.cpuPercent / 100 >= 0.005 ? (
-                      <LiveFigure
-                        value={stat.cpuPercent / 100}
-                        decimals={stat.cpuPercent >= 99.5 ? 1 : 2}
-                        unit=" cores"
-                      />
-                    ) : (
-                      "idle"
-                    )
-                  }
-                />
-              ))}
+              {byCPU.map((c, rank) => {
+                const value = stats[c.id].cpuPercent
+                return (
+                  <ContainerLine
+                    key={c.id}
+                    container={c}
+                    product={containerProduct(c)}
+                    onOpen={onOpen}
+                    lead={<RankKey color={shade(HUE.cpu, rank)} />}
+                    title={`${percent(value)} of one core`}
+                    figure={
+                      value / 100 >= 0.005 ? (
+                        <LiveFigure
+                          value={value / 100}
+                          decimals={value >= 99.5 ? 1 : 2}
+                          unit=" cores"
+                        />
+                      ) : (
+                        "idle"
+                      )
+                    }
+                  />
+                )
+              })}
             </ul>
           )}
         </PanelBody>
@@ -158,12 +163,12 @@ export function ContainerBand({
         <PanelHeader
           title="Memory"
           actions={
-            measured.length > 0 && (
+            memTotal > 0 && (
               <span className="numeric flex h-7 items-center gap-1 text-hint text-muted-foreground">
                 <span className="font-medium text-foreground">
-                  <LiveBytes value={allMemory} />
+                  <LiveBytes value={memAll} />
                 </span>
-                {memTotal > 0 ? `of ${bytes(memTotal, 0)}` : "in use"}
+                of {bytes(memTotal, 0)} in containers
               </span>
             )
           }
@@ -171,44 +176,48 @@ export function ContainerBand({
         <PanelBody className="space-y-3 pt-4">
           <ShareBar
             label="Memory"
-            capacity={memTotal > 0 ? memTotal : memSum}
-            rest={Math.max(memUsed - memSum, 0)}
-            parts={byMemory.map(({ container, stat }, rank) => ({
-              key: container.id,
-              value: stat.memUsage,
+            capacity={memTotal > 0 ? memTotal : memAll}
+            rest={memRest}
+            parts={byMemory.map((c, rank) => ({
+              key: c.id,
+              value: stats[c.id].memUsage,
               color: shade(HUE.mem, rank),
-              label: `${container.name} ${bytes(stat.memUsage)}`,
+              label: `${c.name} ${bytes(stats[c.id].memUsage)}`,
             }))}
             format={(v) => bytes(v)}
           />
-          {byMemory.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">
-              {measured.length === 0 ? "Nothing is running." : "No memory is reported."}
+          {up === 0 ? (
+            <p className="py-2 text-body text-muted-foreground">Nothing is running.</p>
+          ) : byMemory.length === 0 ? (
+            <p className="py-2 text-body">
+              <TextShimmer>Waiting for the first reading…</TextShimmer>
             </p>
           ) : (
             <ul className="-mx-2">
-              {byMemory.map(({ container, stat }, rank) => {
-                const limited = stat.memLimited || (container.memoryLimit ?? 0) > 0
-                const limit = container.memoryLimit || stat.memLimit
+              {byMemory.map((c, rank) => {
+                const stat = stats[c.id]
+                const limited = stat.memLimited || (c.memoryLimit ?? 0) > 0
                 return (
                   <ContainerLine
-                    key={container.id}
-                    container={container}
+                    key={c.id}
+                    container={c}
+                    product={containerProduct(c)}
                     onOpen={onOpen}
                     lead={<RankKey color={shade(HUE.mem, rank)} />}
-                    // The limit where there is one; "no limit" is the table's to say.
                     detail={
-                      limited && (
+                      limited ? (
                         <span className={cn(stat.memPercent >= 85 && "text-warning")}>
-                          of {bytes(limit, 0)}
+                          {percent(stat.memPercent)} of its limit
                         </span>
-                      )
+                      ) : undefined
                     }
                     title={
-                      `${bytes(stat.memUsage)} in use${limited ? "" : ", no limit"}` +
-                      (memTotal > 0
-                        ? ` — ${percent((stat.memUsage / memTotal) * 100)} of the host`
-                        : "")
+                      limited
+                        ? `${bytes(stat.memUsage)} of ${bytes(c.memoryLimit || stat.memLimit)}`
+                        : `${bytes(stat.memUsage)}, no limit` +
+                          (memTotal > 0
+                            ? ` — ${percent((stat.memUsage / memTotal) * 100)} of the host`
+                            : "")
                     }
                     figure={<LiveBytes value={stat.memUsage} />}
                   />
@@ -219,36 +228,64 @@ export function ContainerBand({
         </PanelBody>
       </Panel>
 
-      <Panel plain aria-label="Recent container events" className="lg:col-span-2 xl:col-span-1">
+      <Panel plain aria-label="Recent changes" className="lg:col-span-2 xl:col-span-1">
         <PanelHeader
           title="Recent"
           actions={
-            <span className="flex h-7 items-center">
-              {listening ? (
-                <Status live tone="running" label="Live" />
-              ) : (
-                <Status tone="notice" label="Connecting…" />
-              )}
-            </span>
+            <Link
+              href="/docker/events"
+              className="flex h-7 items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+            >
+              {changes.length > 0
+                ? `${plural(changes.length, "change")} in the last day`
+                : "Events"}
+              <ArrowRight className="size-3" />
+            </Link>
           }
         />
         <PanelBody className="pt-3">
-          {entries.length === 0 ? (
-            <p className="py-2 text-body text-muted-foreground">
-              {listening
-                ? "Nothing has started, stopped or failed since the dashboard began listening."
-                : "Waiting for Docker's event log."}
-            </p>
-          ) : (
-            <ul className="-mx-2">
-              {entries.slice(0, SHOWN + 1).map((entry) => (
-                <EventLine key={entry.key} entry={entry} byId={byId} now={now} onOpen={onOpen} />
-              ))}
-            </ul>
-          )}
+          <RecentLines changes={changes} now={now} listening={listening} onOpen={onOpen} />
         </PanelBody>
       </Panel>
     </div>
+  )
+}
+
+function RecentLines({
+  changes,
+  now,
+  listening,
+  onOpen,
+}: {
+  changes: ContainerChange[]
+  now: number
+  listening: boolean
+  onOpen: (container: { id?: string; name: string }) => void
+}) {
+  const shown = changes.slice(0, SHOWN + 1)
+  // A change that lands while the page is open rises into the list.
+  const arrived = useArrivals(shown.map((c) => `${c.name}@${c.at}`))
+  if (shown.length === 0) {
+    return (
+      <p className="py-2 text-body text-muted-foreground">
+        {listening
+          ? "Nothing has started, stopped or failed in the last day."
+          : "The dashboard is not listening to Docker's events."}
+      </p>
+    )
+  }
+  return (
+    <ul className="-mx-2">
+      {shown.map((change) => (
+        <ChangeLine
+          key={change.name}
+          change={change}
+          now={now}
+          onOpen={onOpen}
+          arrived={arrived.has(`${change.name}@${change.at}`)}
+        />
+      ))}
+    </ul>
   )
 }
 
@@ -263,79 +300,50 @@ function RankKey({ color }: { color: string }) {
   )
 }
 
-/** The container as its image's product, at the line's height. */
-function Mark({ product }: { product: string }) {
-  return (
-    <span className="flex size-4 shrink-0 items-center justify-center">
-      {product !== "docker" ? (
-        <ProductGlyph id={product} className="size-3.5" />
-      ) : (
-        <Box aria-hidden className="size-3.5 text-muted-foreground" />
-      )}
-    </span>
-  )
-}
-
 /**
- * One container on a line: what finds it on the bar or in time, its mark and
- * name, a detail, and its figure. A press opens the container; the arrow is
- * what says so, revealed under the pointer and always drawn on a touch screen.
- * A line about a container that no longer exists opens nothing and has no
- * arrow.
+ * One container on a line: what finds it on the bar or in time, its mark
+ * and name, a detail, and its figure. A press opens the container; the arrow
+ * is what says so, revealed under the pointer and always drawn on a touch
+ * screen.
  */
 function ContainerLine({
   container,
-  name,
   product,
   lead,
   detail,
   figure,
   title,
   onOpen,
+  className,
 }: {
-  container?: Container
-  name?: string
-  product?: string
+  container: { id?: string; name: string }
+  product: string
   lead: React.ReactNode
   detail?: React.ReactNode
   figure: React.ReactNode
   title?: string
-  onOpen: (id: string) => void
+  onOpen: (container: { id?: string; name: string }) => void
+  className?: string
 }) {
-  const label = container?.name ?? name ?? ""
-  const body = (
-    <>
-      {lead}
-      <Mark product={product ?? (container ? containerProduct(container) : "docker")} />
-      {/* The name keeps its width before the detail gives up any of its own. */}
-      <span className="max-w-[70%] shrink-0 truncate font-medium">{label}</span>
-      {detail && (
-        <span className="numeric min-w-0 shrink truncate text-hint text-muted-foreground">
-          {detail}
-        </span>
-      )}
-      <span className="numeric ml-auto shrink-0 font-medium text-foreground">{figure}</span>
-    </>
-  )
-  const line = "flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body"
-  if (!container) {
-    return (
-      <li className={line} title={title}>
-        {body}
-        <span aria-hidden className="size-3.5 shrink-0" />
-      </li>
-    )
-  }
   return (
-    <li>
+    <li className={className}>
       <button
         type="button"
-        aria-label={`Open ${label}`}
+        aria-label={`Open ${container.name}`}
         title={title}
-        onClick={() => onOpen(container.id)}
-        className={cn("group focus-ring-inset transition-colors hover:bg-row-hover", line)}
+        onClick={() => onOpen(container)}
+        className="group flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
       >
-        {body}
+        {lead}
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          <ProductGlyph id={product} className="size-3.5" />
+        </span>
+        {/* The name gives way last: a long detail truncates before it does. */}
+        <span className="min-w-0 shrink-[0.25] truncate font-medium">{container.name}</span>
+        {detail && (
+          <span className="numeric min-w-0 truncate text-hint text-muted-foreground">{detail}</span>
+        )}
+        <span className="numeric ml-auto shrink-0 font-medium text-foreground">{figure}</span>
         <ArrowRight
           aria-hidden
           className={cn("size-3.5 shrink-0 text-muted-foreground", rowReveal())}
@@ -345,77 +353,32 @@ function ContainerLine({
   )
 }
 
-/** What one entry says happened, in the tone it is read in. */
-function describe(entry: EventEntry): { words: string; tone: DotTone } {
-  if (entry.kind === "loop") {
-    const span = spanWords(Date.parse(entry.until) - Date.parse(entry.since))
-    const why = exitWords(entry.exitCode ? Number(entry.exitCode) : undefined, entry.oom)
-    return {
-      words: `restarted ×${entry.times} in ${span}${why ? ` · ${why}` : ""}`,
-      tone: "danger",
-    }
-  }
-  const { event, oom } = entry
-  switch (event.action) {
-    case "start":
-      return { words: "started", tone: "running" }
-    case "restart":
-      return { words: "restarted", tone: "warning" }
-    case "die": {
-      const code = event.exitCode ? Number(event.exitCode) : undefined
-      const failed = Boolean(oom) || (code !== undefined && ![0, 130, 137, 143].includes(code))
-      const words = exitWords(code, Boolean(oom)) ?? "exited"
-      return failed
-        ? { words: oom ? words : `crashed · ${words}`, tone: "danger" }
-        : { words, tone: "stopped" }
-    }
-    case "oom":
-      return { words: "a process was killed for memory", tone: "warning" }
-    case "pause":
-      return { words: "paused", tone: "notice" }
-    case "unpause":
-      return { words: "resumed", tone: "running" }
-    case "destroy":
-      return { words: "removed", tone: "stopped" }
-    case "create":
-      return { words: "created", tone: "notice" }
-    case "health_status: unhealthy":
-      return { words: "failing its health check", tone: "danger" }
-    case "health_status: healthy":
-      return { words: "health check passing again", tone: "running" }
-    default:
-      return { words: event.action, tone: "notice" }
-  }
-}
-
 /**
- * A recent event: the state's dot, the container, what happened and when. A
- * failure is drawn in its tone, and a loop says how many times and for how
- * long in the same line.
+ * A recent change: the state's dot, the container, what happened and when. A
+ * crash says its status in the same line; a container that came back after
+ * crashing says how often it did in the hour, because "started" alone over a
+ * restart loop reads as a recovery.
  */
-function EventLine({
-  entry,
-  byId,
+function ChangeLine({
+  change,
   now,
   onOpen,
+  arrived,
 }: {
-  entry: EventEntry
-  byId: Map<string, Container>
+  change: ContainerChange
   now: number
-  onOpen: (id: string) => void
+  onOpen: (container: { id?: string; name: string }) => void
+  arrived: boolean
 }) {
-  const event: DockerEvent = entry.kind === "loop" ? entry.exit : entry.event
-  const container = event.id ? byId.get(event.id) : undefined
-  const { words, tone } = describe(entry)
-  const time = entry.kind === "loop" ? entry.until : event.time
+  const { tone } = change
   return (
     <ContainerLine
-      container={container}
-      name={event.name}
-      product={container ? undefined : event.image ? imageProduct(event.image) : "docker"}
+      container={{ id: change.id, name: change.name }}
+      product={change.image ? imageProduct(change.image) : "docker"}
       onOpen={onOpen}
+      className={cn(arrived && "animate-rise")}
       lead={<StatusDot tone={tone} className="mx-px" />}
-      title={new Date(time).toLocaleString()}
+      title={new Date(change.at).toLocaleString()}
       detail={
         <span
           className={cn(
@@ -423,12 +386,15 @@ function EventLine({
             tone === "warning" && "text-warning",
           )}
         >
-          {words}
+          {change.verb}
+          {change.crashes > 1 && (
+            <span className="text-warning"> · {plural(change.crashes, "crash", "crashes")}</span>
+          )}
         </span>
       }
       figure={
         <span className="text-hint font-normal text-muted-foreground">
-          {ago(Date.parse(time) / 1000, now)}
+          {ago(change.at / 1000, now)}
         </span>
       }
     />

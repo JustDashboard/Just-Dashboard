@@ -517,23 +517,26 @@ async function mockDocker(page: Page) {
 
 /**
  * The contradiction this whole model exists to remove: runtime health and
- * attention are separate tiles, and neither claims to be the other.
+ * attention are separate verdicts, and neither claims to be the other. They
+ * were two of four tiles until the overview took §15's exit; they are the two
+ * verdicts at the end of its identity line now.
  */
 test("the overview separates runtime health from attention", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
 
-  await expect(page.getByText("Runtime health")).toBeVisible()
-  await expect(page.getByText("2 / 2 running")).toBeVisible()
-  await expect(page.getByText("2 running, 1 without a health check")).toBeVisible()
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("2 of 2 containers running")).toBeVisible()
+  await expect(identity.getByText("Nothing failing")).toBeVisible()
 
   // And, at the same time, that something needs attention.
-  await expect(page.getByText("Attention", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("2 issues").first()).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toBeVisible()
 
-  // The word that used to sit above a page of warnings must not appear.
+  // The word that used to sit above a page of warnings must not appear, and
+  // nor do the tiles.
   await expect(page.getByText("All good")).toHaveCount(0)
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
   await page.screenshot({
     path: "test-results/docker-docs.png",
     fullPage: true,
@@ -795,23 +798,15 @@ test("on a phone the containers are a list rather than a table with columns remo
 
 /**
  * The containers page was the only one that replaced its table on a phone; the
- * image, volume and network tables were still the remains of one: columns
- * dropped until a wide first cell and two stubs were left. The same test
- * applies to them as to the containers list — the table is replaced, not
- * squeezed, and nothing the table carried is lost on the way.
+ * volume and network tables were still the remains of one: columns dropped
+ * until a wide first cell and two stubs were left. The same test applies to
+ * them as to the containers list — the table is replaced, not squeezed, and
+ * nothing the table carried is lost on the way. The images are a table again,
+ * with their phone shape checked in `docker-images.spec.ts`.
  */
-test("the image, volume and network lists read down the row on a phone", async ({ page }) => {
+test("the volume and network lists read down the row on a phone", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 390, height: 844 })
-
-  await page.goto("/docker/images")
-  await expect(page.getByRole("columnheader")).toHaveCount(0)
-  const imageList = page.getByRole("list").filter({ hasText: "nginx:alpine" })
-  await expect(imageList.getByText("nginx:alpine")).toBeVisible()
-  // The dangling image has no name and is reachable by its id — "untagged" is
-  // the only honest thing the row can say, so that is what it says.
-  await expect(imageList.getByText("untagged")).toBeVisible()
-  await expect(imageList.getByRole("button", { name: "Remove image" })).toBeVisible()
 
   await page.goto("/docker/volumes")
   await expect(page.getByRole("columnheader")).toHaveCount(0)

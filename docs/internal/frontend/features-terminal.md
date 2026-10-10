@@ -71,6 +71,14 @@
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
+- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
+  table read the containers socket, so the overview's figures move with every frame where the four
+  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
+  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
+  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
+  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
+  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
+  row below the fold read 0.0% until it was.
 - `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
   volumes, stated whether or not any are affected. The preview's services are a flat list, not
@@ -91,6 +99,17 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
+  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
+  and a history line read as its instruction — in `images.ts` (unit-tested). Its disk lines reclaim
+  their own kind: unused images through `POST /docker/images/prune?all=true`, the build cache through
+  `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
+  only Reclaim beside the total runs the sweep, and says it reaches stopped containers and networks.
+  The pull socket is enabled only while a pull is in flight: the server closes it when the pull
+  ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
+  one about once a second until the page was left. Tag names the same image again, so the copy a
+  container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the stack list, as rows in one plain panel rather than a grid of bordered cards:
   each row carries the stack's state, its services (dot, name, ports, health) and the one action that
   belongs there — deploy when the application is down. It opens with the same search box and state

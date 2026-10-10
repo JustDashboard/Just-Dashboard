@@ -15,13 +15,11 @@ import (
 
 func (s *Server) mountSystemRoutes(r chi.Router) {
 	r.Route("/system", func(r chi.Router) {
-		s.mountAdvisorRoutes(r)
 		r.Method(http.MethodGet, "/host", s.handle(s.handleSystemHost))
 		r.Method(http.MethodGet, "/metrics", s.handle(s.handleSystemMetrics))
 		r.Method(http.MethodGet, "/metrics/history", s.handle(s.handleMetricsHistory))
 		r.Method(http.MethodGet, "/metrics/storage", s.handle(s.handleStorageHistory))
 		r.Method(http.MethodGet, "/metrics/events", s.handle(s.handleMetricsEvents))
-		r.Method(http.MethodGet, "/health", s.handle(s.handleSystemHealth))
 		r.Method(http.MethodGet, "/disk-usage", s.handle(s.handleDiskBreakdown))
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
 	})
@@ -111,22 +109,6 @@ func (s *Server) handleMetricsEvents(w http.ResponseWriter, r *http.Request) err
 		return httpx.Internal(err)
 	}
 	httpx.JSON(w, http.StatusOK, events)
-	return nil
-}
-
-// handleSystemHealth turns the numbers into a verdict.
-//
-// Evaluated on the server rather than in the browser for two reasons: the
-// thresholds are a claim the product is making and belong with the code that
-// records the data, and the checks that look at an hour of history would
-// otherwise mean shipping an hour of history to every client that wants a
-// badge in the top bar.
-func (s *Server) handleSystemHealth(w http.ResponseWriter, r *http.Request) error {
-	snap, err := s.modules.sys.Collect(r.Context())
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	httpx.JSON(w, http.StatusOK, s.runtimeHealth(r.Context(), s.modules.metrics.Assess(r.Context(), snap), snap))
 	return nil
 }
 

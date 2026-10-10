@@ -36,8 +36,8 @@ import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { useDockerFindingActions } from "@/components/docker/finding-actions"
 import { AttentionPanel } from "@/components/docker/attention"
 import { ExplainIcon } from "@/components/docker/explain"
-import { ContainerBand } from "@/components/docker/container-band"
-import { ContainerRows } from "@/components/docker/container-table"
+import { ContainerBand } from "@/components/docker/containers-band"
+import { ContainerRows } from "@/components/docker/containers-table"
 import { useContainerControl } from "@/components/docker/container-actions"
 import {
   containerBucket,
