@@ -1216,6 +1216,14 @@ def phase_c002_cancel(c, args):
     summary = drift_summary(api.drift())
     c.note("drift", summary)
     c.expect(not summary["notMatching"], f"drift after a canceled request: {summary['notMatching']}")
+    # Every mutation is audited, the disconnected one included.
+    import sqlite3
+    db = sqlite3.connect("file:/var/lib/just-dashboard/" + next(f for f in os.listdir("/var/lib/just-dashboard") if f.endswith(".db")) + "?mode=ro", uri=True)
+    rows = db.execute("SELECT action, target, status, success FROM audit_log WHERE action = 'network.route.add' AND target = ?",
+                      (f4_change(int(args[0]))["destination"],)).fetchall()
+    db.close()
+    c.note("auditRows", rows)
+    c.expect(len(rows) == 1, f"audit rows for the disconnected mutation: {rows}")
     if in_spec:
         rid = next(r["id"] for r in sp["routes"] if r["destination"] == f4_change(int(args[0]))["destination"])
         api.ok("DELETE", f"/network/routing/routes/{rid}")
