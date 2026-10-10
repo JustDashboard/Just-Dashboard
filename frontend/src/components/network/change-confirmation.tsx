@@ -6,11 +6,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { setNetworkPendingApply } from "@/lib/network-pending"
-import type {
-  BoundaryAfterVerify,
-  NetworkChangeStatus,
-  NetworkConfirmationView,
-} from "@/lib/types"
+import type { BoundaryAfterVerify, NetworkChangeStatus, NetworkConfirmationView } from "@/lib/types"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
