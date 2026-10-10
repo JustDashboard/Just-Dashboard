@@ -1085,6 +1085,18 @@ ellipsing. `RowLink` carries `max-w-full min-w-0` for that reason — the first 
 title is laid out with flex beside a tag. Anything else that sizes to its content in a capped cell
 needs the same pair.
 
+**A stack's services went back to a table on 2026-10-08, and the argument above is why.** Each
+service on `/docker/stacks/<name>` opens its container, so it had been a lit card in a
+`ChoiceList`. But a stack is six things read against each other — which one is restarting, which
+one holds the memory — and six cards put each reading in a different place and offered nothing to
+read down. So the services are one framed table (`docker/stack-services-table.tsx`): fixed columns
+for state, CPU (the last hour beside this second's share), memory (against the limit, amber past
+85%), network from 1536 and ports, the service taking what is left, and the compose verbs in a
+`DimActions` column. The row still opens its container through `onActivate` and the name's
+`RowLink`; what it gave up is the lit edge, because a table of readings answers the pointer with
+the row wash (§16). Below 1280 the same row is drawn down instead of across with nothing dropped,
+chosen once by `useMediaQuery`.
+
 ## 13. A verb is a word
 
 An icon-only control is legible when its shape is universal and it is pressed constantly — play,
@@ -2367,6 +2379,63 @@ needs), because a control that disappears says nothing and one greyed out with n
 Each page that reads a tool this host may not have opens on its install where it is missing
 (`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
 Packages page's install job streaming under the button).
+
+**A stack's own page took the Services page's shape on 2026-10-08**, at the operator's request,
+because it had no life: a `MetricStrip` of three facts over a filled tab list and a column of grey
+cards that each said a state word, so a worker in a restart loop read "restarting" beside a
+database a step from its memory limit reading "running", and nothing on the page moved. Where the
+strip's figures went, and what took their place (`docker/stack-detail.tsx`):
+
+- **The identity line.** `HostIdentity` with the stack's services' products overlapping as its
+  mark, the compose file, the directory, the checkout (branch, uncommitted changes in
+  `--git-modified`, how far behind), how many services run and how many ports it publishes; at its
+  end the verdict (`stackVerdict` in `docker/stack-service-readings.ts`, unit-tested): the worst
+  thing true of it, counted — *1 service failing* before *1 not created* before *All 5 running* —
+  which narrows the table to those services when pressed, and the compose verb's participle
+  shimmering while one runs. The deploy verbs stay beside the way back. The views are the
+  underlined strip (`tabClasses`) over Radix's tabs, the identity line's own rule giving way to it.
+- **The services as a table of live readings** (§12), from the containers socket the containers
+  page reads rather than the ten-second stack poll, so a state changes when Docker's does. A state
+  is read with the event log beside it: an exit the OOM killer caused is *Out of memory*, a
+  non-signal exit *Crashed*, a deliberate 0/130/137/143 *Stopped*, and a restart loop says how
+  many times in how long. State chips count and narrow, the toned ones drawn only while something
+  is in them. Each service keeps its lane (`hueFor(name, LANES)`, the hue its lines take in the
+  stack's log) as a stripe down its row, and its compose verbs are declared once per service —
+  Restart and Stop inline, Recreate service and Pull & redeploy in its menu with Logs and Open a
+  shell, each confirmation carrying the command as compose runs it.
+- **The band** (`docker/stack-usage-band.tsx`): Processor and Memory as the Services page's
+  `ShareBar`, the stack's services as spans of one bar the size of the server beside everything
+  else in use, figures gliding to each frame; and Recent, the stack's events with a restart loop on
+  one line, an OOM kill on the exit it caused and a passing health check only after a failing one,
+  each service named in its lane.
+- **A picture of how it is reached** (`docker/stack-map.tsx`), the deployment Runtime map's shape
+  under a plain head: the ports it publishes on this server, its services as their products with
+  their state in the tile's corner, and the Docker networks they are on. A wire pulses while its
+  service moves more than a kilobyte a second, at the Network section's `pulseDuration`; it is
+  dashed and red where a port leads to a service that is not running, and amber where a database
+  answers on every interface.
+- **The other views took the same vocabulary**, borrowed from the pages that did each job first:
+  every service anywhere on the page is its lane, its product and its name (`ServiceLabel` in
+  `docker/stack-diff.tsx`), and every diff of the compose file is one view grouped by the service
+  each hunk changes, `+N −M` in the colours its lines are drawn in.
+  - *Deploy preview* (`docker/stack-preview.tsx`) opens on Deploy's decision as one sentence over a
+    bar of the services in the colour of what happens to each — amber recreate, blue create, green
+    start, red remove, the quiet rest — then a framed table of them with why, the tag the image moves
+    to and what the service is doing now, then the diff beside the volumes. Its Group-tinted verdict
+    fence and its eyebrow sections are gone.
+  - *Compose file* (`docker/stack-compose.tsx`) is the Files editor's shape: a pane with the path
+    and the file's state (*Saved*, *Unsaved changes*, *Valid · 6 services*, *Compose rejects this*)
+    across the top, an outline beside the editor where each service carries its live state, and a
+    status line naming where the cursor is in the stack's terms.
+  - *Files* (`docker/stack-files.tsx`) puts what compose reads from the directory over the browser
+    as a table, with git's word for each change and a missing path's cost, and lets the browser take
+    the tab's height (`fill`); the browser's rows carry the same words after their names.
+  - *History* (`docker/stack-history.tsx`) is a backup job's shape: a strip of time in the colour of
+    each compose file — the lanes in order of first appearance, so the versions a history holds never
+    share one — over a rail of the records and the one picked read whole.
+  - *Logs* (`docker/stack-logs.tsx`) keeps the log page's workspace and puts the services that write
+    into it over it, the way that page's rail lists its sources: lines and errors in the last hour,
+    their shape in the service's lane, a press narrowing the log to one.
 
 ## 16. Two registers
 

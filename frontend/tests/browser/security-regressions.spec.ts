@@ -60,13 +60,17 @@ for (const admin of [false, true]) {
     await page.getByRole("button", { name: "permission-test", exact: true }).click()
     await page.waitForURL(/\/docker\/stacks\/permission-test$/)
     const panel = page.getByRole("main")
-    await expect(panel.getByText("worker", { exact: true })).toBeVisible()
+    await expect(panel.locator("[data-workspace-item='worker']")).toBeVisible()
     await expect(panel.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
-    await expect(panel.getByRole("button", { name: "Recreate service", exact: true })).toHaveCount(
+    // A service's compose verbs are in its row's menu, and only for administrators.
+    await panel.getByRole("button", { name: "More actions for web", exact: true }).click()
+    await expect(page.getByRole("menuitem", { name: "Logs", exact: true })).toBeVisible()
+    await expect(page.getByRole("menuitem", { name: "Recreate service", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
+    await page.keyboard.press("Escape")
     await expect(panel.getByRole("button", { name: "Create it", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
