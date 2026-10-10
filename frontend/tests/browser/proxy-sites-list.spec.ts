@@ -1435,23 +1435,20 @@ test("the distribution's untouched default site waits on nobody", async ({ page 
   await expect(page.getByRole("list", { name: "Serving" })).not.toContainText("default")
   await expect(page.getByRole("list", { name: "Serving" })).toContainText("app.example.com")
 
-  // The Overview's tile counts the site someone has to decide about, and
-  // not the stock default.
+  // The Overview's engine line counts the site someone has to decide about,
+  // and not the stock default.
   await page.goto("/proxy")
   await expect(page.getByText("off.example.com is on disk but not serving")).toBeVisible()
   await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
-  const tile = page
-    .getByRole("link", { name: "Sites", exact: true })
-    .filter({ has: page.locator("[data-slot='stat-tile']") })
-  await expect(tile).toContainText("1 disabled")
-  await expect(tile.locator(".text-warning")).toHaveCount(1)
+  const identity = page.locator("[data-slot='host-identity']")
+  const disabled = identity.getByRole("link", { name: "1 disabled" })
+  await expect(disabled).toHaveClass(/text-warning/)
 
-  // With only the stock default off, nothing on the tile warns.
+  // With only the stock default off, nothing in the line warns about sites.
   await serveSites(page, [app, stock])
   await page.goto("/proxy")
-  await expect(tile).toContainText("on TLS")
-  await expect(tile).not.toContainText("disabled")
-  await expect(tile.locator(".text-warning")).toHaveCount(0)
+  await expect(identity.getByRole("link", { name: /^\d+ sites?, \d+ on TLS$/ })).toBeVisible()
+  await expect(identity.getByRole("link", { name: /disabled/ })).toHaveCount(0)
 
   // And on Sites, nothing needs attention: what serves, and what is not in use.
   await page.goto("/proxy/sites")

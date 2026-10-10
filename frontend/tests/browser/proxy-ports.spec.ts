@@ -148,11 +148,14 @@ test("the overview counts services and names a public database critical", async 
   await mockHost(page)
   await page.goto("/proxy")
 
-  // The ports page's own split: Internet-facing, with the private networks
-  // in the hint, both figures the page it links to shows.
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("3", { exact: true })).toBeVisible()
-  await expect(internet.getByText("2 on private networks")).toBeVisible()
+  // The ports page's own split: Internet-facing, a fact in the engine line,
+  // with the private networks as its tooltip, both figures the page it
+  // links to shows.
+  const internet = page
+    .locator("[data-slot='host-identity']")
+    .getByRole("link", { name: "3 ports internet-facing" })
+  await expect(internet).toBeVisible()
+  await expect(internet).toHaveAttribute("title", "2 on private networks")
 
   const finding = page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ })
   await expect(finding.locator(".bg-destructive")).toHaveCount(1)
@@ -162,7 +165,7 @@ test("the overview counts services and names a public database critical", async 
   ).toBeVisible()
   await expect(page.getByText(/answers on every interface/)).toHaveCount(0)
 
-  // The tile opens on the rows it counts.
+  // The fact opens on the rows it counts.
   await internet.click()
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
   await expect(rowsOf(page)).toHaveCount(3)
@@ -185,8 +188,11 @@ test("a port Docker publishes in both families is one row and one count", async 
   await expect(page.getByRole("button", { name: "Internet-facing 5" })).toBeVisible()
 
   await page.goto("/proxy")
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("5", { exact: true })).toBeVisible()
+  await expect(
+    page
+      .locator("[data-slot='host-identity']")
+      .getByRole("link", { name: "5 ports internet-facing" }),
+  ).toBeVisible()
 })
 
 test("a database behind a firewall denying inbound is the posture's warning everywhere", async ({
@@ -814,7 +820,7 @@ test("the attention finding opens the ports page on its ports alone", async ({ p
   await expect(rowsOf(page).first()).toContainText("redis-server")
 })
 
-test("the Internet-facing tile opens on what it counts, not the ports a finding opened", async ({
+test("the internet-facing fact opens on what it counts, not the ports a finding opened", async ({
   page,
 }) => {
   await mockHost(page)
@@ -824,10 +830,12 @@ test("the Internet-facing tile opens on what it counts, not the ports a finding 
   await expect(page).toHaveURL(/\/proxy\/ports\?q=port:6379$/)
   await expect(rowsOf(page)).toHaveCount(1)
 
-  // The tab now remembers `port:6379`; the tile asks for its own rows anyway.
+  // The tab now remembers `port:6379`; the fact asks for its own rows anyway.
   await page.goBack()
-  const internet = page.getByRole("link", { name: "Internet-facing ports" })
-  await expect(internet.getByText("3", { exact: true })).toBeVisible()
+  const internet = page
+    .locator("[data-slot='host-identity']")
+    .getByRole("link", { name: "3 ports internet-facing" })
+  await expect(internet).toBeVisible()
   await internet.click()
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=internet$/)
   await expect(page.getByLabel("Search sockets")).toHaveValue("")

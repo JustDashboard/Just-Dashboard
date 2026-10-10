@@ -681,7 +681,7 @@ test("with certbot not installed, the overview's test-certificate finding points
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
 })
 
-test("the overview's certificate tile and expiry list count a test certificate as refused", async ({
+test("the overview's certificate fact and block count a test certificate as refused", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
@@ -692,13 +692,16 @@ test("the overview's certificate tile and expiry list count a test certificate a
   await expect(
     page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }),
   ).toBeVisible()
-  const tile = page.locator("a[href='/proxy/certificates'][aria-label='Certificates']")
-  await expect(tile).toContainText("1 need attention")
-  await expect(tile).not.toContainText("all valid")
-  await expect(tile.locator(".text-destructive")).toHaveCount(1)
-  const expiry = page.locator("[data-slot='panel']").filter({ hasText: "Certificate expiry" })
-  await expect(expiry.getByText("test", { exact: true })).toBeVisible()
-  await expect(expiry.getByText("80d", { exact: true })).toHaveCount(0)
+  const fact = page
+    .locator("[data-slot='host-identity']")
+    .getByRole("link", { name: "1 certificate, 1 needs attention" })
+  await expect(fact).toHaveAttribute("href", "/proxy/certificates")
+  await expect(fact).toHaveClass(/text-destructive/)
+  const block = page.getByRole("region", { name: "Certificates", exact: true })
+  await expect(block.getByText("1 of 1 needs attention")).toHaveClass(/text-destructive/)
+  await expect(block.getByText("valid", { exact: false })).toHaveCount(0)
+  await expect(block.getByText("test", { exact: true })).toBeVisible()
+  await expect(block.getByText("80d", { exact: true })).toHaveCount(0)
 })
 
 test("a test certificate's card fits a phone with its verb", async ({ page }) => {

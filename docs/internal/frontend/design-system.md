@@ -68,7 +68,8 @@ taking a frame:
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
-  facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
+  facts, route picture, traffic, certificate and error band, attention list, sites and Engine log;
+  the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
   its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
@@ -1368,17 +1369,21 @@ for ufw, sshd or an unknown interface. Source choices in the firewall dialog use
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
 **The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
-register and begin with four `StatTile` readings, two per row on phones; on Sites, what the reader
-has to act on first — a failed read, nginx not running, changes on disk nginx has not loaded, with
-Test config and Reload nginx — stands above them as a `Notice`. On the overview the engine
-identity and service commands sit below them, with the routes in the main column and attention and
-expiry in a narrower column. On an nginx host Live traffic sits between the engine line and the routes: two readings
+register, and every one but the overview begins with four `StatTile` readings, two per row on
+phones; on Sites, what the reader has to act on first — a failed read, nginx not running, changes on
+disk nginx has not loaded, with Test config and Reload nginx — stands above them as a `Notice`. The
+overview took §15's exit in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its
+facts ending on the sites, certificates, streams and internet-facing ports, each a link, and its
+right end on the routes' verdict beside the service commands; then the route picture, the band of
+traffic, certificates and nginx errors, Live traffic, and the routes in the main column with
+attention in a narrower one. On an nginx host Live traffic sits between the band and the routes: two readings
 (requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
 where the counters come from. Its switch is a `Switch` beside a `Status` in the panel header rather
 than a button, because whether nginx is counting is a state of the engine; a switch in flight reads
 "Switching on…", readings that stop keep their hour and lose their figures, and nothing on it breathes
 as live, since it is a poll. A source the overview could not read is never drawn as an empty or
-healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
+healthy one: its fact in the engine line reads "couldn't read sites" with the reason as its tooltip,
+its panel shows the `ErrorState`, the picture is not drawn from sites it cannot read, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
 overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
 the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
@@ -2035,6 +2040,37 @@ The passes, in order. Each one is a diff you can review on its own.
    service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
+
+   The proxy overview took the exit in 0.7.1, at the operator's request, because it had no life:
+   four grey tiles (sites, certificates, streams, internet-facing ports) over a column of route cards
+   that each drew the engine's own logo, so a host fronting Grafana, n8n and Gitea was nine nginx
+   marks, and nothing on the page moved but the Live traffic sparklines. Each figure went where it
+   is said better. All four are facts at the end of the engine's identity line — *9 sites, 8 on
+   TLS*, *9 certificates, 1 needs attention* in its tone, *3 streams*, *3 ports internet-facing* —
+   each a link to its page, and each "couldn't read …" with the reason as its tooltip when its
+   source fails; the sites are also the picture's Domains lane and the Routes head's *Showing 8 of
+   9*, the certificates the Certificates block, and the front door under the engine in the picture.
+   The line's right end carries a verdict beside the service commands: how many routes are down,
+   or partly down, or that all of them answer, from the upstream check (`routeVerdict`), and nothing
+   until that check has answered. Under it the proxy is drawn as what it does
+   (`components/proxy/route-picture.tsx`, over the pure, unit-tested `route-map.ts`): the domains
+   on the left, each a lock in green for TLS or amber for plain HTTP with its hour and 5xx share,
+   wired through the engine in the middle — its front door under it — to the applications on the
+   right, each the product that answers on its address (`backendOf`: a loopback port read against
+   the sockets this host holds, a container as its image, a program as itself, a name on Docker's
+   network as its container, a socket as its program, and a glyph where nothing names it), with
+   the upstream check's state in the tile's corner. Down routes lead, then the busiest, up to
+   eight. A wire is the route's last hour from its access log: it pulses while the route served
+   more than a request a minute, quicker the busier (`requestPulse`, the Network section's curve
+   over requests), red where it fails or the upstream refuses (dashed then), amber in plain HTTP
+   or where the upstream times out; pointing at a domain lights the application it reaches and the
+   other way round. The band under it (`overview-band.tsx`) is three blocks: Traffic, the hour's
+   requests as one `ShareBar` of the busiest five, each rank a `LANES` hue, over rows with what
+   each reaches and its 5xx share, each opening the site's traffic; Certificates, every
+   certificate as a dot on one ninety-day runway in the colour of its state with certbot's renewal
+   stretch marked, over the five soonest as the expiry `BarList`; and nginx's recent errors. The
+   route cards lead with the application's own mark and the engine in the tile's corner
+   (`RouteMark`), their route one line (names → upstream) rather than two labelled columns.
 
    Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
    still page of the section: a column of grey cards, each a name, a subnet and a count, with the
