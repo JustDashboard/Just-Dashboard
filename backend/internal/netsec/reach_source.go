@@ -106,7 +106,13 @@ func ruleCoversFrom(r Rule, backend Backend, l ExposedPort, network HostNetwork,
 		return iptablesCoversFrom(r, l, network, port, source)
 	case BackendUFW:
 		to := strings.TrimSpace(r.To)
-		if target, iface, limited := strings.Cut(to, " on "); limited {
+		// The parser keeps "on tailscale0" in Interface; a listing read
+		// elsewhere may still carry it in the destination column.
+		target, iface, limited := strings.Cut(to, " on ")
+		if !limited && r.Interface != "" {
+			target, iface, limited = to, r.Interface, true
+		}
+		if limited {
 			// "443/tcp on tailscale0": ufw prints the interface in the
 			// destination column, and which interface a packet from an
 			// address arrives on is the routing's to say, not the rule's.
