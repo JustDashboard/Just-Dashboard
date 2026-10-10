@@ -105,6 +105,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
 - **`cleanup.go` replaces one word covering five sweeps.** Each category reports what it holds, what
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
   Volumes are always listed and never recommended; selecting them still uses ordinary confirmation.
+- **A volume's standing follows the daemon's own rule.** `ListVolumesWithUsers` joins every
+  container's mounts, running or stopped, and each listed volume says what its driver options mount
+  (`mountType`: nfs, cifs, bind, or custom) without carrying the options — a CIFS `o=` holds the
+  share's password, so the options stay on the inspect route. Docker's prune removes only local
+  volumes without options that nothing references: a stopped container's volume is kept, and what a
+  prune takes is what `docker compose down` or a container removed without `-v` left behind. The
+  Volumes page reads the list again before it names that set, and compares the prune's report with
+  it afterwards, because the reference count it would otherwise trust is cached.
 - **Authorization uses effective container resources.** Creation and recreation validate the selected
   spec, including a spec reused from an existing container. Limited accounts may use plain local
   volumes; references to existing named volumes are inspected first. Custom drivers or driver options
@@ -795,7 +803,7 @@ failures report the retained original's parking name.
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
 
-## Actionable findings and storage investigation
+## Actionable Docker findings
 
 Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
 Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
@@ -811,8 +819,7 @@ allowance. Explicit combined limits are kept. Empty, negative and overflowing up
 Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
 keep the running PID and start timestamp.
 
-Host storage investigation and selected cleanup are documented in [server advisor](server-advisor.md).
-An advisor file link opens `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
+A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
 entry already returned by that validated directory listing. An explicit click or deselection overrides
 the URL's initial selection. Paths still pass through the existing file service boundary.
 

@@ -192,6 +192,27 @@ type Volume struct {
 	Size       int64             `json:"size"`
 	RefCount   int64             `json:"refCount"`
 	InUse      bool              `json:"inUse"`
+	// MountType names what a local volume's driver options mount — nfs, cifs,
+	// bind — and is empty for a plain one. Docker's prune never touches a
+	// volume that has options, so the list says which have them for the page
+	// to name exactly what a prune would take. The options themselves stay on
+	// the inspect route: a CIFS `o=` carries the share's password.
+	MountType string `json:"mountType,omitempty"`
+}
+
+// optionMount reads a local volume's driver options as the kind of thing they
+// mount, or "" when there are none.
+func optionMount(options map[string]string) string {
+	if len(options) == 0 {
+		return ""
+	}
+	if strings.Contains(","+options["o"]+",", ",bind,") {
+		return "bind"
+	}
+	if t := options["type"]; t != "" && t != "none" {
+		return t
+	}
+	return "custom"
 }
 
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
@@ -224,6 +245,7 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		vol := Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			MountType: optionMount(v.Options),
 		}
 		if vol.Labels == nil {
 			vol.Labels = map[string]string{}

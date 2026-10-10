@@ -59,6 +59,7 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) (*Volume, er
 	return &Volume{
 		Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: 0,
+		MountType: optionMount(v.Options),
 	}, nil
 }
 
@@ -77,9 +78,9 @@ func labelsOrEmpty(labels map[string]string) map[string]string {
 type VolumeDetail struct {
 	Volume
 	// UsedBy names the containers mounting it, running or not, with the path
-	// each one sees it at. Docker's own RefCount counts running containers
-	// only, so a volume belonging to a stopped stack reads as unused and is
-	// exactly the one an operator prunes by accident.
+	// each one sees it at. Docker's RefCount says how many and not which, and
+	// it is read from a disk-usage walk that can be missing or cached, while
+	// "which container, at which path" is what decides whether to delete.
 	UsedBy []VolumeUser `json:"usedBy"`
 	// Options and the driver, for the volumes that are not plain local ones.
 	Options map[string]string `json:"options,omitempty"`
@@ -107,6 +108,7 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 		Volume: Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			MountType: optionMount(v.Options),
 		},
 		UsedBy:  []VolumeUser{},
 		Options: v.Options,
@@ -126,8 +128,8 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 		if d.UsedBy == nil {
 			d.UsedBy = []VolumeUser{}
 		}
-		// A stopped container still counts as a user for the purpose of "is
-		// this safe to delete", which is the only question being asked.
+		// A stopped container is a user: Docker refuses to remove the volume
+		// under it and its prune leaves it alone.
 		d.InUse = d.InUse || len(d.UsedBy) > 0
 	}
 	return d, nil

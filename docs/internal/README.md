@@ -27,7 +27,6 @@ strategy, and feature ownership behind those rules.
 - [`backend/network.md`](backend/network.md) — the network module: the spec restored at boot, the
   client-path guard, devices and namespaces, routing and forwarding, the gateway table and forward
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.
-- [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.
 - [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
   posture, login history, sshd, firewall/fail2ban, and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
@@ -77,6 +76,8 @@ strategy, and feature ownership behind those rules.
 - [`../audits/2026-10-08-docker-networks-overhaul/README.md`](../audits/2026-10-08-docker-networks-overhaul/README.md)
   — the Docker Networks page's band, address pool, two tables and live sheet, with before/after
   screenshots.
+- [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
+  — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
 
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
@@ -89,6 +90,10 @@ strategy, and feature ownership behind those rules.
 
 - [`../audits/2026-10-07-packages-overhaul/README.md`](../audits/2026-10-07-packages-overhaul/README.md)
   — Packages' software-size band, update queue, catalogue and single-scroll inspector, with screenshots.
+
+- [`../audits/2026-10-08-docker-images-overhaul/README.md`](../audits/2026-10-08-docker-images-overhaul/README.md)
+  — Docker Images' disk and registry band, the image table and sheet, two reclaim and pull defects
+  fixed, with before/after screenshots.
 
 - [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
   select/menu inventory, single-column option layout, opening behavior and verification coverage.

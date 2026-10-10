@@ -175,7 +175,6 @@ function StandaloneRemedy({
           })
         else notify.success("Replacement started; check its health and logs")
         onChanged()
-        window.dispatchEvent(new Event("jd:health-changed"))
         router.push(`/docker/containers/${encodeURIComponent(result.id)}`)
         return "reported"
       },

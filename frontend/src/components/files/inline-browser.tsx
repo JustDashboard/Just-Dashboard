@@ -80,6 +80,13 @@ type BrowserProps = {
    * down the screen and scrolls a short box above empty ground.
    */
   fill?: boolean
+  /**
+   * A directory inside the root the page sends the browser to — a row of its
+   * own that names a folder — each time `key` changes.
+   */
+  goTo?: { path: string; key: number }
+  /** What the page knows about a path that the listing cannot: drawn after its name. */
+  notes?: Record<string, React.ReactNode>
 }
 
 function Browser({
@@ -88,10 +95,17 @@ function Browser({
   className,
   emptyNote = "This directory is empty.",
   fill,
+  goTo,
+  notes,
 }: BrowserProps) {
   const { can } = useAuth()
   const base = cleanPath(root)
   const [dir, setDir] = useState(base)
+  const [sent, setSent] = useState(goTo?.key)
+  if (goTo && goTo.key !== sent) {
+    setSent(goTo.key)
+    if (isWithin(cleanPath(goTo.path), base)) setDir(cleanPath(goTo.path))
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [editingImage, setEditingImage] = useState<string | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
@@ -234,6 +248,7 @@ function Browser({
           onUp={upReachable ? () => setDir(parent) : undefined}
           onOpen={open}
           onEdit={setEditing}
+          notes={notes}
         />
       </div>
 
@@ -304,6 +319,7 @@ function Contents({
   onUp,
   onOpen,
   onEdit,
+  notes,
 }: {
   loading: boolean
   entries: FileEntry[] | undefined
@@ -316,6 +332,7 @@ function Contents({
   onUp?: () => void
   onOpen: (entry: FileEntry) => void
   onEdit: (path: string) => void
+  notes?: Record<string, React.ReactNode>
 }) {
   if (single) {
     if (single.data) {
@@ -331,7 +348,7 @@ function Contents({
     return <EmptyNote className="px-3 py-6 text-center">{emptyNote}</EmptyNote>
   }
   if (view === "grid") return <Tiles entries={entries} onUp={onUp} onOpen={onOpen} />
-  return <Listing entries={entries} onUp={onUp} onOpen={onOpen} empty={emptyNote} />
+  return <Listing entries={entries} onUp={onUp} onOpen={onOpen} empty={emptyNote} notes={notes} />
 }
 
 /**
@@ -349,11 +366,13 @@ function Listing({
   onUp,
   onOpen,
   empty,
+  notes,
 }: {
   entries: FileEntry[]
   onUp?: () => void
   onOpen: (entry: FileEntry) => void
   empty?: React.ReactNode
+  notes?: Record<string, React.ReactNode>
 }) {
   return (
     <Table>
@@ -384,14 +403,17 @@ function Listing({
               <span className="flex min-w-0 items-center gap-2.5">
                 <Thumbnail entry={entry} size="row" />
                 <span className="min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => onOpen(entry)}
-                    title={entry.name}
-                    className="block max-w-full truncate rounded-sm text-left text-body focus-ring hover:underline"
-                  >
-                    {entry.name}
-                  </button>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(entry)}
+                      title={entry.name}
+                      className="block max-w-full truncate rounded-sm text-left text-body focus-ring hover:underline"
+                    >
+                      {entry.name}
+                    </button>
+                    {notes?.[cleanPath(entry.path)]}
+                  </span>
                   {entry.isSymlink && (
                     <span className="block truncate font-mono text-hint text-muted-foreground">
                       → {entry.linkTarget}

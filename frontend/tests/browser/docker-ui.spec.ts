@@ -517,23 +517,26 @@ async function mockDocker(page: Page) {
 
 /**
  * The contradiction this whole model exists to remove: runtime health and
- * attention are separate tiles, and neither claims to be the other.
+ * attention are separate verdicts, and neither claims to be the other. They
+ * were two of four tiles until the overview took §15's exit; they are the two
+ * verdicts at the end of its identity line now.
  */
 test("the overview separates runtime health from attention", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
 
-  await expect(page.getByText("Runtime health")).toBeVisible()
-  await expect(page.getByText("2 / 2 running")).toBeVisible()
-  await expect(page.getByText("2 running, 1 without a health check")).toBeVisible()
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("2 of 2 containers running")).toBeVisible()
+  await expect(identity.getByText("Nothing failing")).toBeVisible()
 
   // And, at the same time, that something needs attention.
-  await expect(page.getByText("Attention", { exact: true }).first()).toBeVisible()
-  await expect(page.getByText("2 issues").first()).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toBeVisible()
 
-  // The word that used to sit above a page of warnings must not appear.
+  // The word that used to sit above a page of warnings must not appear, and
+  // nor do the tiles.
   await expect(page.getByText("All good")).toHaveCount(0)
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
   await page.screenshot({
     path: "test-results/docker-docs.png",
     fullPage: true,
@@ -574,8 +577,12 @@ test("a stack that was never deployed says so", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/stacks")
 
-  await expect(page.getByText("Not deployed · 3 services defined").first()).toBeVisible()
-  await expect(page.getByText("Running · 2/2 services").first()).toBeVisible()
+  const never = page.locator('[data-stack-row="never-deployed"]')
+  await expect(never).toContainText("Not deployed")
+  await expect(never).toContainText("3 services defined")
+  const running = page.locator('[data-stack-row="running-app"]')
+  await expect(running).toContainText("Running")
+  await expect(running).toContainText("2 of 2 services up")
   await expect(page.getByText("0/0")).toHaveCount(0)
 })
 
@@ -607,19 +614,24 @@ test("a link to the old stack query lands on the stack", async ({ page }) => {
   await expect(page).toHaveURL(/\/docker\/stacks\/running-app$/)
 })
 
-test("a volume in use offers no delete button", async ({ page }) => {
+test("a volume in use cannot be removed, and says what mounts it", async ({ page }) => {
   await mockDocker(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/docker/volumes")
 
-  const inUse = page.getByRole("listitem").filter({ hasText: "app-data" })
-  await expect(inUse.getByText("1 container")).toBeVisible()
-  await expect(inUse.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+  // Drawn and disabled, with the reason as its name: Docker refuses it.
+  const inUse = page.getByRole("row", { name: /app-data/ })
+  await expect(inUse.getByRole("link", { name: "db" })).toBeVisible()
+  await expect(inUse.getByText("/var/lib/postgresql/data")).toBeVisible()
+  await expect(
+    inUse.getByRole("button", { name: "Remove — mounted by 1 container", exact: true }),
+  ).toBeDisabled()
 
   // The unattached one still can be removed — the gate is usage, not caution.
-  const free = page.getByRole("listitem").filter({ hasText: "orphaned" })
-  await expect(free.getByRole("button", { name: "Remove", exact: true })).toHaveCount(1)
-  // And an unmeasured size says which of the three things a dash used to mean.
-  await expect(free.getByText("not measured")).toBeVisible()
+  const free = page.getByRole("row", { name: /orphaned/ })
+  await expect(free.getByRole("button", { name: "Remove", exact: true })).toBeEnabled()
+  // Measured and empty says so, rather than the dash it shared with "not measured".
+  await expect(free.getByText("empty", { exact: true })).toBeVisible()
 })
 
 /**
@@ -630,8 +642,8 @@ test("published ports say what their binding means", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
-  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
+  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
   await expect(web.getByText("443 → 443")).toBeVisible()
   await expect(db.getByText("5432 → 5432")).toBeVisible()
 
@@ -645,13 +657,14 @@ test("the containers table keeps status runtime-only and counts issues apart", a
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
+  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
   // Status carries the runtime state and the health check's absence, and not
   // the security finding — that is a count in its own column.
   await expect(db.getByText("no health check")).toBeVisible()
   await expect(db.getByText("db publishes PostgreSQL on every interface")).toHaveCount(0)
-  // The finding is a count of its own, held apart from the status.
-  await expect(db.getByText("1", { exact: true })).toBeVisible()
+  // The finding is a count of its own beside the name, held apart from the status.
+  await expect(db.getByRole("cell").nth(1).getByText("1", { exact: true })).toHaveCount(0)
+  await expect(db.getByRole("cell").first().getByText("1", { exact: true })).toBeVisible()
 })
 
 /**
@@ -663,11 +676,11 @@ test("memory says no limit rather than inventing one", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const db = page.getByRole("listitem").filter({ hasText: "postgres:16" })
+  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
   await expect(db.getByText(/no limit/)).toBeVisible({ timeout: 15_000 })
 
   // A container that really is limited still shows the fraction.
-  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await expect(web.getByText(/512\.0 MB/)).toBeVisible()
 })
 
@@ -772,8 +785,7 @@ test("on a phone the containers are a list rather than a table with columns remo
   await expect(page.getByRole("columnheader")).toHaveCount(0)
 
   // And every fact the columns carried is still readable. Scoped to the list,
-  // because the wide table is still in the document with `display: none` and
-  // a bare text query would match its cells too.
+  // because the band above it names the same containers.
   const list = page.getByRole("list").filter({ hasText: "nginx:alpine" })
   await expect(list.getByText("nginx:alpine")).toBeVisible()
   await expect(list.getByText("postgres:16")).toBeVisible()
@@ -783,7 +795,9 @@ test("on a phone the containers are a list rather than a table with columns remo
   // the readings shared the row with the action cluster.
   await expect(list.getByText("512.0 MB")).toBeVisible()
   await expect(list.getByText(/no limit/)).toBeVisible()
-  await expect(list.getByText("1 issue").first()).toBeVisible()
+  // Each container's findings are a count beside its name.
+  const db = list.getByRole("listitem").filter({ hasText: "postgres:16" })
+  await expect(db.getByText("1", { exact: true })).toBeVisible()
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -793,31 +807,15 @@ test("on a phone the containers are a list rather than a table with columns remo
 
 /**
  * The containers page was the only one that replaced its table on a phone; the
- * image, volume and network tables were still the remains of one: columns
- * dropped until a wide first cell and two stubs were left. The same test
- * applies to them as to the containers list — the table is replaced, not
- * squeezed, and nothing the table carried is lost on the way.
+ * network table was still the remains of one: columns dropped until a wide first cell
+ * and a stub were left. The same test applies to it as to the containers list — the table is
+ * replaced, not squeezed, and nothing the table carried is lost on the way. The images and
+ * volumes are tables again, with their phone shapes checked in `docker-images.spec.ts` and
+ * `docker-volumes.spec.ts`.
  */
-test("the image, volume and network lists read down the row on a phone", async ({ page }) => {
+test("the network list reads down the row on a phone", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 390, height: 844 })
-
-  await page.goto("/docker/images")
-  await expect(page.getByRole("columnheader")).toHaveCount(0)
-  const imageList = page.getByRole("list").filter({ hasText: "nginx:alpine" })
-  await expect(imageList.getByText("nginx:alpine")).toBeVisible()
-  // The dangling image has no name and is reachable by its id — "untagged" is
-  // the only honest thing the row can say, so that is what it says.
-  await expect(imageList.getByText("untagged")).toBeVisible()
-  await expect(imageList.getByRole("button", { name: "Remove image" })).toBeVisible()
-
-  await page.goto("/docker/volumes")
-  await expect(page.getByRole("columnheader")).toHaveCount(0)
-  const volumeList = page.getByRole("list").filter({ hasText: "app-data" })
-  await expect(volumeList.getByRole("button", { name: "app-data" })).toBeVisible()
-  await expect(volumeList.getByText("not measured")).toBeVisible()
-  // The volume Docker's own prune would delete while calling it unused.
-  await expect(volumeList.getByText("unused")).toBeVisible()
 
   await page.goto("/docker/networks")
   await expect(page.getByRole("columnheader")).toHaveCount(0)
@@ -862,7 +860,7 @@ test("the destructive verbs are words, not glyphs", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await row.hover()
 
   // The constantly-pressed ones stay on the row itself, and are asserted first:
@@ -888,33 +886,44 @@ test("the state filters narrow the list and carry their own counts", async ({ pa
   await expect(running).toContainText("2")
   await running.click()
   await expect(running).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByRole("listitem").filter({ hasText: "nginx:alpine" })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
 
-  // Nothing is stopped on this host, so that chip is not offered at all —
-  // a filter that can only ever return nothing is furniture.
-  await expect(page.getByRole("button", { name: /^Not running/ })).toHaveCount(0)
+  // Nothing is stopped or failing on this host, so those chips are not
+  // offered at all — a filter that can only ever return nothing is furniture.
+  await expect(page.getByRole("button", { name: /^Stopped/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Failing/ })).toHaveCount(0)
 
   await page.getByRole("button", { name: /^Needs attention/ }).click()
-  await expect(page.getByRole("listitem").filter({ hasText: "nginx:alpine" })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "postgres:16" })).toBeVisible()
+
+  // Pressing it again lets it go.
+  await page.getByRole("button", { name: /^Needs attention/ }).click()
+  await expect(page.getByRole("button", { name: /^Needs attention/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
 })
 
 /**
- * Runtime health states four numbers and the relationship between them.
+ * Whether anything is checking a container is said on every running row.
  *
- * It was a 2×4 grid of figures, which cannot show that half the estate is
- * unwatched. The bar can, and every count — including the zeroes — is still
- * printed, because a category that stops being mentioned the moment it goes
- * right is a category nobody learns to check.
+ * The runtime health bar this page opened on printed every count, the zeroes
+ * included, because a category that stops being mentioned the moment it goes
+ * right is one nobody learns to check. The bar went to the identity line and
+ * the rows: the line says how many running containers a health check vouches
+ * for, and each row says its own verdict — or that it has none.
  */
-test("runtime health keeps every count, including the zeroes", async ({ page }) => {
+test("every running container says whether a health check vouches for it", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  await expect(page.getByText("passing a health check")).toBeVisible()
-  await expect(page.getByText("failing one")).toBeVisible()
-  await expect(page.getByText("without one")).toBeVisible()
-  await expect(page.getByText("2 of 2 running")).toBeVisible()
-  await expect(page.getByText("still starting")).toBeVisible()
+  await expect(page.getByText("1 of 2 pass a health check")).toBeVisible()
+  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
+  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
+  await expect(web.getByText("healthy", { exact: true })).toBeVisible()
+  await expect(db.getByText("no health check")).toBeVisible()
+  await expect(page.getByText("Nothing failing")).toBeVisible()
 })
 
 /**
@@ -963,7 +972,7 @@ test("asking for a container's logs opens the logs", async ({ page }) => {
   await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await row.hover()
   await row.getByRole("button", { name: "More actions" }).click()
   await page.getByRole("menuitem", { name: /^Logs/ }).click()
@@ -1552,7 +1561,7 @@ test("a running container's dot says the reading is live", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
-  const row = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  const row = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await expect(row.getByText("Running")).toBeVisible()
 
   const breathing = await row.evaluate((el) =>
@@ -1564,30 +1573,136 @@ test("a running container's dot says the reading is live", async ({ page }) => {
 /**
  * Every reading, on a screen with room for them.
  *
- * The nine-column table became cards; what it has to keep is what its columns
- * said. Each reading names itself on the card now, because there is no header
- * over the column to name it.
+ * The containers are a table again, as Live, PM2 and Services are: each
+ * column says what it is once, in its heading, and sorts by it.
  */
-test("a container's card keeps every reading on a wide desktop", async ({ page }) => {
+test("a container's row keeps every reading on a wide desktop", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto("/docker/containers")
 
-  const web = page.getByRole("listitem").filter({ hasText: "nginx:alpine" })
+  for (const name of ["Container", "State", "CPU", "Memory", "Network", "Ports"]) {
+    await expect(page.getByRole("columnheader", { name })).toBeVisible()
+  }
+  const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await expect(web.getByRole("button", { name: "web", exact: true })).toBeVisible()
   await expect(web.getByText("nginx:alpine")).toBeVisible()
-  await expect(web.getByText("111111111111")).toBeVisible()
   await expect(web.getByText("Running")).toBeVisible()
-  await expect(web.getByText("for 2h · healthy")).toBeVisible()
-  await expect(web.getByText("CPU", { exact: true })).toBeVisible()
+  await expect(web.getByText(/^up 2h/)).toBeVisible()
   await expect(web.getByText("12.0%")).toBeVisible()
-  await expect(web.getByText("Memory", { exact: true })).toBeVisible()
   await expect(web.getByText(/100\.0 MB/)).toBeVisible()
   await expect(web.getByText("443 → 443")).toBeVisible()
   await expect(web.getByRole("button", { name: "Stop" })).toBeVisible()
 
   // The mark is the image's product, served from this origin.
-  await expect(web.locator("img")).toHaveAttribute("src", "/logos/nginx.svg")
+  await expect(web.locator("img").first()).toHaveAttribute("src", "/logos/nginx.svg")
+})
+
+/**
+ * The table sorts by its headings, failing first until one is pressed, and a
+ * figure's column puts the heaviest first.
+ */
+test("the containers sort by a heading and say so", async ({ page }) => {
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+
+  const names = () =>
+    page
+      .locator("tbody tr")
+      .evaluateAll((rows) => rows.map((r) => r.getAttribute("data-workspace-name")))
+  await expect(page.getByRole("columnheader", { name: "State" })).toHaveAttribute(
+    "aria-sort",
+    "ascending",
+  )
+  await expect.poll(names).toEqual(["db", "web"])
+
+  await page.getByRole("button", { name: "CPU", exact: true }).click()
+  await expect(page.getByRole("columnheader", { name: "CPU" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  )
+  await expect.poll(names).toEqual(["web", "db"])
+  await expect(page.getByText("by processor")).toBeVisible()
+})
+
+/**
+ * A compose project is a filter, from its chip or from any of its rows.
+ */
+test("a stack narrows the table from its chip or its row", async ({ page }) => {
+  await mockDocker(page)
+  const stacked = containers.map((c, i) => ({
+    ...c,
+    composeStack: i === 0 ? "shop" : undefined,
+    composeService: i === 0 ? "web" : undefined,
+  }))
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, (socket) =>
+    socket.send(JSON.stringify({ type: "containers", data: stacked })),
+  )
+  await page.goto("/docker/containers")
+
+  await page.getByRole("button", { name: "Only the shop stack" }).click()
+  await expect(page.getByRole("button", { name: /^shop/ })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.locator("tbody tr")).toHaveCount(1)
+
+  await page.getByRole("button", { name: /^Standalone/ }).click()
+  await expect(page.locator("tbody tr")).toHaveCount(1)
+  await expect(page.getByRole("row").filter({ hasText: "postgres:16" })).toBeVisible()
+
+  await page.keyboard.press("Escape")
+  await expect(page.locator("tbody tr")).toHaveCount(2)
+})
+
+/**
+ * What happened lately is Docker's own event log, with a restart loop as one
+ * line and a kill for memory said on the exit it caused — which also turns
+ * that container's row from "stopped" into what it is.
+ */
+test("recent events fold a restart loop and name a kill for memory", async ({ page }) => {
+  await mockDocker(page)
+  const killed = {
+    ...containers[1],
+    state: "exited",
+    status: "Exited (137) 2 minutes ago",
+    exposure: [],
+  }
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, (socket) =>
+    socket.send(JSON.stringify({ type: "containers", data: [containers[0], killed] })),
+  )
+  const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString()
+  const ev = (secondsAgo: number, action: string, id: string, name: string, exitCode?: string) => ({
+    time: at(secondsAgo),
+    type: "container",
+    action,
+    id,
+    name,
+    exitCode,
+    message: "",
+    level: "notice",
+    source: "docker",
+  })
+  await page.routeWebSocket(/\/api\/v1\/docker\/events\/stream/, (socket) =>
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          ...[0, 1, 2, 3].flatMap((i) => [
+            ev(300 - i * 30, "die", "1111111111111111", "web", "1"),
+            ev(299 - i * 30, "start", "1111111111111111", "web"),
+          ]),
+          ev(120, "oom", "2222222222222222", "db"),
+          ev(120, "die", "2222222222222222", "db", "137"),
+        ],
+      }),
+    ),
+  )
+  await page.goto("/docker/containers")
+
+  const recent = page.getByRole("region", { name: "Recent container events" })
+  await expect(recent.getByText(/restarted ×4 in \d+ min · exit 1/)).toBeVisible()
+  await expect(recent.getByText("killed for memory")).toBeVisible()
+  const db = page.getByRole("row").filter({ hasText: "postgres:16" })
+  await expect(db.getByText("Out of memory")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Failing/ })).toContainText("1")
 })
 
 test("the inspect tab does not undo the masking the environment tab applies", async ({ page }) => {
@@ -1680,7 +1795,8 @@ test("the storage browser draws a directory the way the file manager does", asyn
   await page.goto("/docker/volumes")
   await page.getByRole("button", { name: "app-data", exact: true }).first().click()
 
-  const panel = page.getByRole("dialog")
+  // The sheet has a table of its own, of the containers mounting the volume.
+  const panel = page.getByRole("dialog").locator("[data-slot=pane]")
   await expect(panel.getByRole("columnheader", { name: "Name" })).toBeVisible()
   await expect(panel.getByRole("columnheader", { name: "Size" })).toBeVisible()
   await expect(panel.getByText("1 folder, 1 file · 28.0 KB")).toBeVisible()
@@ -1988,19 +2104,23 @@ test("workspace: container name typing, adjacent details and Back retain list fo
   await page.goto("/docker/containers")
   await expect(page.locator("[data-workspace-item]").first()).toBeVisible()
   await page.locator("[data-workspace-item]").first().focus()
+  // A table's row is what the keyboard moves between, as on Live and Services.
+  const web = page.locator('tr[data-workspace-item="1111111111111111"]')
   await page.keyboard.press("w")
-  await expect(page.getByRole("button", { name: "web", exact: true }).first()).toBeFocused()
+  await expect(web).toBeFocused()
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/1111111111111111$/)
-  const next = page.getByRole("button", { name: "Next container" })
-  await expect(next).toBeEnabled()
-  await next.click()
+  // Both are running, so the table lists them by name: db, then web.
+  await expect(page.getByRole("button", { name: "Next container" })).toBeDisabled()
+  const previous = page.getByRole("button", { name: "Previous container" })
+  await expect(previous).toBeEnabled()
+  await previous.click()
   await expect(page).toHaveURL(/2222222222222222/)
   await page.goBack()
   await expect(page).toHaveURL(/1111111111111111$/)
   await page.goBack()
   await expect(page).toHaveURL(/\/docker\/containers$/)
-  await expect(page.getByRole("button", { name: "web", exact: true }).first()).toBeFocused()
+  await expect(web).toBeFocused()
 })
 
 test("workspace: Back restores a long container list's scroll and focused row", async ({
@@ -2022,16 +2142,18 @@ test("workspace: Back restores a long container list's scroll and focused row", 
   const row = page.getByRole("button", { name: "web-50", exact: true })
   await row.scrollIntoViewIfNeeded()
   await row.focus()
-  const shell = page.locator("[data-workspace-shell-scroll]")
+  // The table is a scroll region of its own (§2), so that is where the place is kept.
+  const shell = page.locator("[data-slot=table-container]:visible")
   const before = await shell.evaluate((element) => element.scrollTop)
   expect(before).toBeGreaterThan(1000)
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/0000000000000051$/)
   await page.goBack()
   await expect(page).toHaveURL(/\/docker\/containers$/)
-  await expect(row).toBeFocused()
+  const item = page.locator('tr[data-workspace-item="0000000000000051"]')
+  await expect(item).toBeFocused()
   await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
   await page.reload()
-  await expect(row).toBeFocused()
+  await expect(item).toBeFocused()
   await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
 })

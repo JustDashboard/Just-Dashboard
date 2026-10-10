@@ -838,8 +838,8 @@ function verbOf({ key, label, icon, run, progressive, danger }: ContainerVerb): 
 
 /**
  * One container of the release, as a card that opens it in Docker — drawn as
- * the product its image is, with the same live readings the Containers page
- * gives it (`container-card.tsx`), and the release it belongs to at its edge.
+ * the product its image is, with the live readings `container-cells.tsx`
+ * draws, and the release it belongs to at its edge.
  *
  * One line from `xl`, so the menu stands on the card's middle: what it runs
  * under the name, and at its other end the release, the state with how long

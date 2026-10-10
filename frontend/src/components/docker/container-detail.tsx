@@ -362,7 +362,6 @@ function ContainerDetailPanel({
                 onSaved={() => {
                   health.refresh()
                   setReloads((n) => n + 1)
-                  window.dispatchEvent(new Event("jd:health-changed"))
                 }}
               />
               <ContainerUsage containerId={detail.id} name={detail.name} plain />
