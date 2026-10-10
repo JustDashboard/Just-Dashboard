@@ -131,6 +131,12 @@ backend in the production layout, the seven defects it found and fixed, the harn
 of this host before and after (its raw readings are not published) and the integration rerun of
 the live shaping, SQM, boot and egress tests.
 
+[SSH, intrusion, metrics and ingress acceptance](network-security-ingress-maturity-acceptance.md)
+(C130–C135) records journaled SSH applies, jail policy, merged refused addresses, CrowdSec
+enforcement, Suricata setup, TCP health metrics and the access boundary, with real tool output from
+owned containers and namespaces, four gates and their flake checks. A real sshd timer and a live
+Suricata/CrowdSec engine remain unexercised here.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
