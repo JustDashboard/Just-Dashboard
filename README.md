@@ -185,11 +185,13 @@ open its surrounding logs.
 
 ### Docker
 
-![The Docker overview, with what needs attention above the stacks](docs/docker.png)
+![The Docker overview: what the containers use, what just happened to them, and every container with its live readings](docs/docker.png)
 
 Create containers from a template, a pasted `docker run` or a form, with the command rendered
 before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
 memory limits, security posture — each with an explanation and, where possible, a button.
+The overview shows which containers use the most processor and memory, the last thing that
+happened to each, and every container's live readings in one table, failing ones first.
 Stacks deploy, rebuild and roll back with the compose diff shown first.
 Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
 history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU

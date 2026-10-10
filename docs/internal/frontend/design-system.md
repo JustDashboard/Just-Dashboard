@@ -59,8 +59,8 @@ taking a frame:
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
-  metrics page, every block on the Docker pages (the
-  overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
+  metrics page, every block on the Docker pages but the overview's container table (the
+  overview's band, attention, compose projects, cleanup and disk; the containers, images,
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
   images; the attention and storage blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
@@ -1925,6 +1925,35 @@ The passes, in order. Each one is a diff you can review on its own.
    and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
    their frame and gain fixed responsive columns and a measured size bar per installed row.
 
+   The Docker overview took the same exit on 2026-10-08, at the operator's request, because it was
+   the still page of its section: four grey tiles — running, runtime health, attention, compose
+   stacks — over a list of what was not running and a list of projects, and no figure on it that
+   moved. Each went where it is said better. Running is a fact in the identity line and the
+   containers table's state chips — Failing in its tone and Starting in amber, drawn only while
+   there is one — which count and narrow, and the separate list of what was not running became the
+   table's order, failing first. Runtime health is the verdict at the line's end (*N containers
+   failing*, a press narrowing the table to them) and each container's State cell: up for how long
+   and whether a check passes, fails or does not exist, or how it stopped and when — *killed for
+   memory* where the runtime finding says so rather than a bare 137, and a container stopped
+   cleanly quiet. Attention is the second verdict, which goes to the Attention list, unchanged and
+   still never called health, and a container's issues are counted beside its name. Compose stacks
+   is the line's *3 of 4 projects up* and the projects' head, where each project's card now draws its
+   services as one strip of their states. The line opens on Docker drawn as itself, its version,
+   the host, the storage driver and cgroup version, and the images with what their layers hold
+   (`GET /docker/info` and the disk read). Under it `components/docker/container-band.tsx` answers
+   what the tiles never did, in Services' shape: the five containers using the most processor and
+   memory on Live's bar the size of the machine (`ShareBar`), fed by the containers socket so every
+   span eases and every figure glides with each frame, and a Recent block of the last thing that
+   happened to each container, live off the daemon's events (`components/docker/overview.ts`: an
+   OOM kill and its exit read as one line, a stop's kill, die and stop as one, and a container that
+   came back after crashing says how many times it did in the hour). Then every container as a
+   framed table rather than `/docker/containers`' cards (§16 says why): fixed columns from `xl`, each
+   row the container as its product, its compose project in the project's lane hue (`hueFor(name,
+   LANES)`, the same hue on the project chips and the project cards), its state, its last hour of
+   processor as a sparkline beside the live figure, memory against its limit or the heaviest, its
+   published ports and its verbs. Below `xl` the same row is drawn down. Project chips narrow it;
+   a container that appears rises (`useArrivals`), and one that changes state changes in place.
+
    Scheduled took the same exit in 0.7.1 and for the same reason: five grey figures over three
    tables, and nothing on the page that showed *when* anything ran without reading row by row.
    Each figure went where it is said better. Next run is the countdown at the end of the
@@ -2403,7 +2432,12 @@ reading page is revamped:
   density and its wash. Twelve columns of readings do not become cards. The containers table was the
   example here until 2026-09-23 and is the case that shows where the line is: its cells were live
   readings, but every row opened the container's own page, so the row was a destination with
-  readings on it — which is the Git card's shape, not a table's (§12);
+  readings on it — which is the Git card's shape, not a table's (§12). The Docker overview drew
+  its containers as a table again on 2026-10-08, at the operator's request, and that is the other
+  side of the same line: there the containers are read down their columns — which is busy, which
+  is near its limit, which is published on every interface — before any one is taken, which is the
+  Services and PM2 tables' shape, so it keeps hairlines and a wash and its rows open by a press
+  anywhere on them, while `/docker/containers` keeps its cards;
 - a **figure** is still a `StatTile` (§15 pass 2) in either register.
 
 A page that is mostly readings with one run of choices in it takes the edge on that one run. That is
