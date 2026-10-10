@@ -1,0 +1,79 @@
+# 2026-10-09T18:52:23Z 863690fc nginx: nginx version: nginx/1.26.3 (Ubuntu) certbot: certbot 2.11.0
+=== RUN   TestLiveAccessExplanationAgreesWithNginx
+--- PASS: TestLiveAccessExplanationAgreesWithNginx (0.02s)
+=== RUN   TestLiveCertbotFailureIsReadByStage
+=== RUN   TestLiveCertbotFailureIsReadByStage/connection
+    issue_diagnosis_live_test.go:130: certbot said:
+        Saving debug log to /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStageconnection652945276/001/logs/letsencrypt.log
+        Account registered.
+        Requesting a certificate for app.example.com
+        
+        Certbot failed to authenticate some domains (authenticator: webroot). The Certificate Authority reported these problems:
+          Domain: app.example.com
+          Type:   connection
+          Detail: 203.0.113.5: Fetching http://app.example.com/.well-known/acme-challenge/tok123tok123tok123tok123tok123AB: Timeout during connect (likely firewall problem)
+        
+        Hint: The Certificate Authority failed to download the temporary challenge files created by Certbot. Ensure that the listed domains serve their content from the provided --webroot-path/-w and that files created there can be downloaded from the internet.
+        
+        Some challenges have failed.
+        Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStageconnection652945276/001/logs/letsencrypt.log or re-run Certbot with -v for more details.
+=== RUN   TestLiveCertbotFailureIsReadByStage/dns
+    issue_diagnosis_live_test.go:130: certbot said:
+        Saving debug log to /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStagedns967492156/001/logs/letsencrypt.log
+        Account registered.
+        Requesting a certificate for app.example.com
+        
+        Certbot failed to authenticate some domains (authenticator: webroot). The Certificate Authority reported these problems:
+          Domain: app.example.com
+          Type:   dns
+          Detail: DNS problem: NXDOMAIN looking up A for app.example.com - check that a DNS record exists for this domain
+        
+        Hint: The Certificate Authority failed to download the temporary challenge files created by Certbot. Ensure that the listed domains serve their content from the provided --webroot-path/-w and that files created there can be downloaded from the internet.
+        
+        Some challenges have failed.
+        Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStagedns967492156/001/logs/letsencrypt.log or re-run Certbot with -v for more details.
+=== RUN   TestLiveCertbotFailureIsReadByStage/unauthorized
+    issue_diagnosis_live_test.go:130: certbot said:
+        Saving debug log to /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStageunauthorized1266434853/001/logs/letsencrypt.log
+        Account registered.
+        Requesting a certificate for app.example.com
+        
+        Certbot failed to authenticate some domains (authenticator: webroot). The Certificate Authority reported these problems:
+          Domain: app.example.com
+          Type:   unauthorized
+          Detail: 203.0.113.5: Invalid response from http://app.example.com/.well-known/acme-challenge/tok123tok123tok123tok123tok123AB: 404
+        
+        Hint: The Certificate Authority failed to download the temporary challenge files created by Certbot. Ensure that the listed domains serve their content from the provided --webroot-path/-w and that files created there can be downloaded from the internet.
+        
+        Some challenges have failed.
+        Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStageunauthorized1266434853/001/logs/letsencrypt.log or re-run Certbot with -v for more details.
+=== RUN   TestLiveCertbotFailureIsReadByStage/caa
+    issue_diagnosis_live_test.go:130: certbot said:
+        Saving debug log to /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStagecaa3206573177/001/logs/letsencrypt.log
+        Account registered.
+        Requesting a certificate for app.example.com
+        
+        Certbot failed to authenticate some domains (authenticator: webroot). The Certificate Authority reported these problems:
+          Domain: app.example.com
+          Type:   caa
+          Detail: CAA record for app.example.com prevents issuance
+        
+        Hint: The Certificate Authority failed to download the temporary challenge files created by Certbot. Ensure that the listed domains serve their content from the provided --webroot-path/-w and that files created there can be downloaded from the internet.
+        
+        Some challenges have failed.
+        Ask for help or search for solutions at https://community.letsencrypt.org. See the logfile /home/ubuntu/Just-Dashboard-net-proxy-artifacts/tmp/TestLiveCertbotFailureIsReadByStagecaa3206573177/001/logs/letsencrypt.log or re-run Certbot with -v for more details.
+--- PASS: TestLiveCertbotFailureIsReadByStage (6.33s)
+    --- PASS: TestLiveCertbotFailureIsReadByStage/connection (1.60s)
+    --- PASS: TestLiveCertbotFailureIsReadByStage/dns (1.60s)
+    --- PASS: TestLiveCertbotFailureIsReadByStage/unauthorized (1.56s)
+    --- PASS: TestLiveCertbotFailureIsReadByStage/caa (1.57s)
+=== RUN   TestLiveReloadIsProvenFromTheMaster
+--- PASS: TestLiveReloadIsProvenFromTheMaster (3.08s)
+=== RUN   TestLiveSiteControlsAreMeasured
+--- PASS: TestLiveSiteControlsAreMeasured (0.12s)
+=== RUN   TestLiveStreamPathReadsNginxsBackendLeg
+--- PASS: TestLiveStreamPathReadsNginxsBackendLeg (0.25s)
+=== RUN   TestLivePoolOutcomesComeFromNginxItself
+--- PASS: TestLivePoolOutcomesComeFromNginxItself (0.13s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	10.006s

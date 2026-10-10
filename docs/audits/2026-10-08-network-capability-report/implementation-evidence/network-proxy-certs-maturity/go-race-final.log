@@ -1,0 +1,61 @@
+# 2026-10-10T01:21:32Z ea2e7b14 go test -race on the package's tests
+--- PASS: TestJudgeFirewallFromOneSource (0.00s)
+--- PASS: TestJudgeFirewallFromReadsUFWProfiles (0.00s)
+--- PASS: TestJudgeFirewallFromReadsIPTablesListing (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	1.037s
+--- PASS: TestWatchedEndpointsKeepTheOldListAndAllowSeveralPorts (5.02s)
+--- PASS: TestWatchedEndpointsGainProbeColumns (3.23s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	9.478s
+--- PASS: TestCertJobDiagnosisReadsTheFailedRun (3.61s)
+--- PASS: TestRouteAccessExplainsLayersForAdmins (0.40s)
+--- PASS: TestStreamPathIsReadByEveryAccount (0.28s)
+--- PASS: TestNetworkProbesAreWatchedEndpoints (0.31s)
+--- PASS: TestAProbeResultDoesNotLandOnARowATLSWatchTookOver (0.24s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	6.154s
+--- PASS: TestLiveAccessExplanationAgreesWithNginx (0.53s)
+--- PASS: TestExplainAccessFollowsNginxsOrderAndInheritance (0.00s)
+--- PASS: TestExplainAccessJudgesTheFormsOwnChecks (0.01s)
+--- PASS: TestExplainAccessEdges (0.00s)
+--- PASS: TestExplainAccessDoesNotGuessAnIf (0.00s)
+--- PASS: TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows (0.00s)
+--- PASS: TestLimitIdentStripsOnlyTheZonesSuffix (0.00s)
+--- PASS: TestLiveCertbotFailureIsReadByStage (6.82s)
+--- PASS: TestDiagnoseIssuanceReadsEachDomainsStageAndOwner (0.00s)
+--- PASS: TestDiagnoseIssuanceReadsRunFailures (0.00s)
+--- PASS: TestFailedRenewalRunCarriesItsProblems (0.00s)
+--- PASS: TestRecoveredRenewalCarriesNoProblems (0.01s)
+--- PASS: TestLiveReloadIsProvenFromTheMaster (3.21s)
+--- PASS: TestSaveSiteProvesNginxLoadedIt (0.06s)
+--- PASS: TestSaveSitePutsBackASiteNginxCouldNotBind (0.48s)
+--- PASS: TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt (1.01s)
+--- PASS: TestSaveSiteReportsAReloadNginxRefusedForSomethingElse (0.19s)
+--- PASS: TestSaveSiteDoesNotCallAnUnprovenReloadLoaded (0.80s)
+--- PASS: TestSaveSiteSaysWhenItCouldNotProveTheLoad (0.03s)
+--- PASS: TestEngineReloadIsProvenFromTheMaster (0.17s)
+--- PASS: TestSiteBindsReadEveryServerBlock (0.00s)
+--- PASS: TestLiveSiteControlsAreMeasured (0.20s)
+--- PASS: TestSitePolicyReadsTheFormsControlsAndTheBuild (0.02s)
+--- PASS: TestVerifySiteControlsRefusesBeforeSending (0.01s)
+--- PASS: TestControlHelpers (0.00s)
+--- PASS: TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName (0.01s)
+--- PASS: TestLiveStreamPathReadsNginxsBackendLeg (0.19s)
+--- PASS: TestStreamPathJoinsConfigurationSocketsAndLog (0.01s)
+--- PASS: TestStreamPathSaysWhatItCannotCount (0.01s)
+--- PASS: TestAwaitStreamSessionFindsTheMeasuredConnection (0.20s)
+--- PASS: TestTheWatchMonitorProbesNetworkEndpoints (0.00s)
+--- PASS: TestCheckTCPConnectsOrSaysWhyNot (0.00s)
+--- PASS: TestLivePoolOutcomesComeFromNginxItself (0.12s)
+--- PASS: TestUpstreamPoolsSayWhoBalances (0.00s)
+--- PASS: TestUpstreamPoolVerdicts (0.00s)
+--- PASS: TestUpstreamPoolsCountWhatNginxLogged (0.00s)
+--- PASS: TestRequestErrorLogsStayInsideTheLogDirectory (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	15.226s
+--- PASS: TestStreamListenerJoinsTheStreamAndItsBackendLeg (0.00s)
+--- PASS: TestStreamBackendLegIsOnlyClaimedFromTheLog (0.00s)
+--- PASS: TestProxyLayerCarriesTheSitesServicePolicy (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netpath	1.111s
