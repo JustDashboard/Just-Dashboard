@@ -19,6 +19,11 @@ func TestShapingHealthDistinguishesRateDriftFromUnreadableKernel(t *testing.T) {
 		// iproute2 6.1 (Ubuntu 24.04) ignores -j for classes and prints text.
 		{"iproute2 6.1 text classes", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root leaf 10: prio 0 rate 50Mbit ceil 50Mbit burst 1600b cburst 1600b \n", "verified", false},
 		{"iproute2 6.1 text rate change", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root leaf 10: prio 0 rate 10Mbit ceil 50Mbit burst 1600b cburst 1600b \n", "drift", false},
+		// A queued flow appears as a class of the fq_codel leaf, as a
+		// rebooted guest's ND traffic showed; it is not a foreign HTB class.
+		{"iproute2 6.1 text with a leaf flow", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root leaf 10: prio 0 rate 50Mbit ceil 50Mbit burst 1600b cburst 1600b \nclass fq_codel 10:3a6 parent 10: \n", "verified", false},
+		{"json with a leaf flow", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, `[{"class":"htb","handle":"1:10","root":true,"rate":6250000,"ceil":6250000},{"class":"fq_codel","handle":"10:3a6","parent":"10:"}]`, "verified", false},
+		{"foreign htb class", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, `[{"class":"htb","handle":"1:10","root":true,"rate":6250000,"ceil":6250000},{"class":"htb","handle":"1:20","parent":"1:","rate":1,"ceil":1}]`, "drift", false},
 		{"unreadable text class", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"}]`, "class htb 1:10 root rate fast\n", "unknown", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -844,9 +844,19 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 			if err != nil {
 				return fmt.Errorf("reading shaping classes: %w", err)
 			}
-			classes, err := parseTCClasses(out)
+			listed, err := parseTCClasses(out)
 			if err != nil {
 				return errors.New("tc printed unreadable shaping classes")
+			}
+			// fq_codel lists each flow holding packets as a class beneath the
+			// leaf. They belong to the leaf queue, not to the HTB hierarchy,
+			// and come and go with traffic.
+			var classes []tcClass
+			for _, class := range listed {
+				if class.Kind != "htb" && class.Parent == "10:" {
+					continue
+				}
+				classes = append(classes, class)
 			}
 			if len(classes) != 1 || classes[0].Kind != "htb" || classes[0].Handle != "1:10" || (!classes[0].Root && classes[0].Parent != "1:") || classes[0].Rate != shapeBytes(sh.EgressKbit) || classes[0].Ceil != shapeBytes(sh.EgressKbit) {
 				return shapingDrift("%s HTB class rate/ceil does not match %d kbit/s", sh.Device, sh.EgressKbit)
