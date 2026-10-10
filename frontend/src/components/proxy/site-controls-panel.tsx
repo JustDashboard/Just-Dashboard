@@ -10,14 +10,17 @@ import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Warning } from "@/components/icons"
+import { ProductGlyph } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
 import {
   checkState,
   controlSetting,
   supportWord,
   validPath,
 } from "@/components/proxy/site-controls"
+import { controlHue, controlState } from "@/components/proxy/site-overview"
 
 /**
  * A site's request limits, caching and HTTP versions — its service policy —
@@ -66,24 +69,35 @@ export function SiteControls({ name, admin }: { name: string; admin: boolean }) 
         title="Controls"
         actions={
           policy.data.engine && (
-            <span className="text-hint text-muted-foreground">{policy.data.engine}</span>
+            <span className="inline-flex items-center gap-1.5 font-mono text-hint text-muted-foreground">
+              <ProductGlyph id="nginx-static" className="size-3" />
+              {policy.data.engine}
+            </span>
           )
         }
       />
-      <PanelBody className="space-y-4">
-        <ul className="divide-y divide-hairline">
+      <PanelBody className="space-y-5">
+        {/* Three to a row from xl, as the readings a page opens on are: six
+            controls read down one column were a screen of grey for six
+            words. Each row's hairline is the rule, so a column has none. */}
+        <ul className="grid min-w-0 gap-x-8 sm:grid-cols-2 xl:grid-cols-3">
           {policy.data.controls.map((control) => {
             const check = checks.get(control.id)
-            const state = check && checkState(check)
+            const state = check ? checkState(check) : controlState(control)
             const lacks = supportWord(control)
             return (
-              <li key={control.id} className="min-w-0 space-y-1 py-2.5">
+              <li key={control.id} className="min-w-0 space-y-1.5 border-t border-hairline py-3.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-body font-medium">{control.title}</span>
-                  {state && <Status tone={state.tone} label={state.label} />}
+                  <Status tone={state.tone} label={state.label} />
                 </div>
-                <p className="flex flex-wrap items-center gap-2 font-mono text-hint break-all text-muted-foreground">
-                  {controlSetting(control)}
+                <p className="flex flex-wrap items-center gap-2 font-mono text-hint break-all">
+                  <span
+                    className={cn(!control.configured && "text-muted-foreground")}
+                    style={control.configured ? { color: controlHue(control.id) } : undefined}
+                  >
+                    {controlSetting(control)}
+                  </span>
                   {control.configured && lacks && <Tag tone="warning">{lacks}</Tag>}
                 </p>
                 {control.paths?.map((p) => (
@@ -112,7 +126,7 @@ export function SiteControls({ name, admin }: { name: string; admin: boolean }) 
                 aria-label="Path to measure"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                className="font-mono sm:flex-1"
+                className="font-mono sm:w-48"
                 spellCheck={false}
                 autoCapitalize="off"
               />
