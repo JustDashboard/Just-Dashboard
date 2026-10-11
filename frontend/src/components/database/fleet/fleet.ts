@@ -3,12 +3,12 @@ import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet
 
 /**
  * The control center's decisions, kept apart from its drawing so they can be
- * tested in a millisecond: which database needs a hand and what the fix is,
- * how the cards are searched and shelved, and how a map of databases and the
- * things they feed is split into its two lanes.
+ * tested in a millisecond: what is wrong with each database, how the cards
+ * are searched and shelved, and how a map of databases and the things they
+ * feed is split into its two lanes.
  */
 
-/** A backup older than this is worth a line in the attention list. */
+/** A backup older than this is stale: amber on the runway, the card and the table. */
 export const STALE_BACKUP_MS = 7 * 24 * 60 * 60 * 1000
 
 /** "Backed up" on the readings means a dump taken inside this window. */
@@ -120,69 +120,14 @@ export function sortFleet(
 
 /**
  * How loudly a fact on a card or in a table cell is said: the level of the
- * concern it is about, so the list of findings, the card and the table never
- * give one fact three weights.
+ * concern it is about, so the card and the table never give one fact two
+ * weights.
  */
 export function concernLevel(
   concerns: readonly Concern[],
   ...kinds: ConcernKind[]
 ): Concern["level"] | undefined {
   return concerns.find((concern) => kinds.includes(concern.kind))?.level
-}
-
-/** The order the kinds of concern are listed in, inside one level. */
-const KIND_ORDER: readonly ConcernKind[] = [
-  "broken",
-  "unreachable",
-  "stopped",
-  "paused",
-  "public",
-  "never-backed-up",
-  "stale-backup",
-]
-
-/** Past this many databases with the same concern, they are one finding that names them. */
-export const GROUP_ABOVE = 2
-
-export type ConcernGroup = {
-  kind: ConcernKind
-  level: Concern["level"]
-  entries: DbFleetEntry[]
-  /** One finding for all of them, rather than one each. */
-  grouped: boolean
-}
-
-/**
- * The fleet's concerns as the attention list draws them: by what is wrong,
- * worst first. Two databases with the same thing wrong are two findings; more
- * than that are one finding naming them, because forty databases with seven
- * open ports are one fact about the server, not seven rows that push the
- * fleet off the screen.
- */
-export function concernGroups(
-  entries: readonly DbFleetEntry[],
-  concernsOf: (entry: DbFleetEntry) => Concern[],
-): ConcernGroup[] {
-  const groups = new Map<ConcernKind, ConcernGroup>()
-  for (const entry of entries) {
-    for (const concern of concernsOf(entry)) {
-      const held = groups.get(concern.kind) ?? {
-        kind: concern.kind,
-        level: concern.level,
-        entries: [],
-        grouped: false,
-      }
-      held.entries.push(entry)
-      groups.set(concern.kind, held)
-    }
-  }
-  return [...groups.values()]
-    .map((group) => ({ ...group, grouped: group.entries.length > GROUP_ABOVE }))
-    .sort(
-      (a, b) =>
-        LEVEL_RANK[a.level] - LEVEL_RANK[b.level] ||
-        KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind),
-    )
 }
 
 /**
@@ -382,7 +327,7 @@ export function powerOffers(entry: DbFleetEntry): Record<DbPowerAction, boolean>
   return { start: false, stop: true, restart: true }
 }
 
-/** The figures across the top of the page. */
+/** The figures the identity line says about the whole fleet. */
 export function fleetReadings(
   fleet: DbFleet | undefined,
   options: {

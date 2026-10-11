@@ -251,11 +251,110 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
-  test("what needs attention lists every concern of a database, each with its fix", async ({
+  test("the server's databases are one line, with the verdict and the commands at its end", async ({
     page,
   }) => {
+    await mockFleet(page, {
+      dumps: { 4: null, 5: 200 },
+      fleet: { 2: { ok: false, state: "stopped" } },
+    })
+    await page.goto("/databases")
+    const identity = page.locator("[data-slot=host-identity]")
+
+    // The list that stood here is gone; nothing it said is.
+    await expect(page.getByRole("heading", { name: "Needs attention" })).toHaveCount(0)
+    await expect(identity).toContainText("5 databases")
+    // The file nobody's engine sizes is weighed by discovery, as on its card.
+    await expect(identity).toContainText("33.6 MB stored")
+    // A stopped server has no sessions to count, which is not zero of them.
+    await expect(identity).toContainText("13 sessions open")
+    await expect(identity.getByRole("link", { name: "read by 4" })).toHaveAttribute(
+      "href",
+      "/databases/map",
+    )
+    await expect(identity).toContainText("3 of 5 backed up in the last day")
+    await expect(identity.getByText("1 never backed up")).toHaveClass(/text-warning/)
+    await expect(identity).toContainText("1 database stopped")
+    // The largest database's engine leads the mark.
+    await expect(identity.locator("img").first()).toHaveAttribute("src", /postgresql/)
+    // The commands stand beside the verdict, and the page draws no row of its own for them.
+    await expect(identity.getByRole("link", { name: "Add a database" })).toBeVisible()
+    await expect(identity.getByRole("button", { name: "Scan this server again" })).toBeVisible()
+    await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  })
+
+  test("the band reads where the bytes are, who is connected and how old each dump is, each database in its card's hue", async ({
+    page,
+  }) => {
+    await mockFleet(page, {
+      dumps: { 4: null, 5: 200 },
+      fleet: { 2: { ok: false, state: "stopped" } },
+    })
+    await page.goto("/databases")
+    const band = page.locator("[data-slot=fleet-band]")
+    const names = (list: string) =>
+      band
+        .getByRole("list", { name: list })
+        .getByRole("link")
+        .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))
+
+    // Largest first, the file weighed on disk among them.
+    await expect(band.getByRole("region", { name: "Storage" })).toContainText(/33\.6 MB\s*stored/)
+    expect(await names("Largest databases")).toEqual([
+      "Open shop",
+      "Open cache",
+      "Open blog",
+      "Open app",
+      "Open notes",
+    ])
+
+    // Busiest first, in the engine's own word, and a server that did not answer is
+    // counted apart rather than drawn as an empty span.
+    const sessions = band.getByRole("region", { name: "Sessions" })
+    expect(await names("Busiest databases")).toEqual(["Open app", "Open shop", "Open cache"])
+    await expect(sessions).toContainText(/3\s*clients/)
+    await expect(sessions).toContainText("1 server not answering")
+
+    // Never dumped first, then the oldest; a row opens the database's dumps.
+    const backups = band.getByRole("region", { name: "Backups" })
+    await expect(backups).toContainText(/3\s*of 5 in the last day/)
+    expect(await names("Backup runway")).toEqual([
+      "Backups of cache",
+      "Backups of app",
+      "Backups of blog",
+      "Backups of notes",
+      "Backups of shop",
+    ])
+    const never = backups.getByRole("link", { name: "Backups of cache" })
+    await expect(never).toHaveAttribute("href", "/databases/4/backups")
+    await expect(never.getByText("never backed up")).toHaveClass(/text-warning/)
+
+    // One database, one hue: its span's key in the band is its card's edge.
+    const hue = (el: Element) => getComputedStyle(el).backgroundColor
+    const edge = async (name: string) =>
+      card(page, name).locator("[data-slot=fleet-hue]").evaluate(hue)
+    const key = (name: string) =>
+      band
+        .getByRole("list", { name: "Largest databases" })
+        .getByRole("link", { name: `Open ${name}` })
+        .locator("[data-slot=hue-key]")
+        .evaluate(hue)
+    expect(await key("shop")).toBe(await edge("shop"))
+    expect(await key("cache")).toBe(await edge("cache"))
+    // Five databases are five hues.
+    const edges = await page
+      .locator("[data-slot=fleet-hue]")
+      .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
+    expect(new Set(edges).size).toBe(5)
+
+    await band.getByRole("list", { name: "Largest databases" }).getByRole("link").first().click()
+    await expect(page).toHaveURL(/\/databases\/1$/)
+  })
+
+  test("what the attention list fixed is fixed from the database's own card", async ({ page }) => {
     const server = await mockFleet(page, {
-      dumps: { 1: null, 4: null, 5: 400 },
+      dumps: { 1: null },
       fleet: {
         1: { exposure: "public" },
         2: { ok: false, state: "stopped", consumers: 2 },
@@ -263,51 +362,42 @@ test.describe("the control center", () => {
       },
     })
     await page.goto("/databases")
-    const attention = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Needs attention" }),
-    })
-    const finding = (title: RegExp) => attention.getByRole("button", { name: title })
+    const identity = page.locator("[data-slot=host-identity]")
 
-    // The worst stands first, and a public port does not hide the missing dump.
-    await expect(attention.getByRole("button").first()).toContainText("cache cannot be reached")
-    await expect(finding(/shop is reachable from the internet/)).toBeVisible()
-    await expect(finding(/shop has never been backed up/)).toBeVisible()
-    await expect(finding(/cache has never been backed up/)).toBeVisible()
-    await expect(finding(/app was last backed up/)).toBeVisible()
-    // Eight findings are short of a fold: nothing is hidden to save one line.
-    await expect(attention.getByRole("button", { name: /^Show \d+ more$/ })).toHaveCount(0)
-    await expect(finding(/postgresql@17-main is running here and needs a password/)).toBeVisible()
+    // The server that does not answer is the verdict, and the first card on its shelf.
+    await expect(identity).toContainText("1 database not answering")
+    await expect(
+      page.getByRole("list", { name: "Containers" }).locator("[data-card=database]").first(),
+    ).toContainText("cache")
+    await expect(card(page, "cache")).toContainText("NOAUTH Authentication required")
 
-    // Stopped while two deployments use it: the fix is Start, and it runs.
-    await finding(/blog is stopped and 2 deployment environments use it/).click()
-    await attention.getByRole("button", { name: "Start", exact: true }).click()
-    await expect.poll(() => server.bodies("POST /databases/2/power")).toEqual([{ action: "start" }])
-
-    // Public, in a container of its own: the fix asks first and names it.
-    await finding(/shop is reachable from the internet/).click()
-    await attention.getByRole("button", { name: "Restrict to this server" }).click()
+    // Public, in a container of its own: restricted from its menu, asked first.
+    await expect(card(page, "shop").getByText("open to the internet")).toHaveClass(/text-warning/)
+    await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
+    await page.getByRole("menuitem", { name: "Restrict to this server" }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toContainText("Recreates shop-db")
-    await expect(dialog).toContainText("PostgreSQL 16.4")
     await dialog.getByRole("button", { name: "Restrict" }).click()
     await expect
       .poll(() => server.bodies("PUT /databases/1/access"))
       .toEqual([{ exposure: "local" }])
 
-    // Never dumped: it can be dumped from the finding, and the job is watched.
-    await finding(/shop has never been backed up/).click()
-    await attention.getByRole("button", { name: "Back up now" }).click()
+    // Never dumped: dumped from its menu, and the job is watched.
+    await expect(card(page, "shop").getByText("never backed up")).toBeVisible()
+    await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
+    await page.getByRole("menuitem", { name: "Back up now" }).click()
     await expect(page.getByText("shop backed up")).toBeVisible()
     expect(server.bodies("POST /databases/1/backup")).toEqual([{}])
-    // One that does not answer cannot be dumped, and is offered no dump.
-    await finding(/cache has never been backed up/).click()
-    await expect(attention.getByRole("button", { name: "Open backups" })).toBeVisible()
-    await expect(attention.getByRole("button", { name: "Back up now" })).toHaveCount(1)
+
+    // Stopped while deployments use it: Start is on the card.
+    await card(page, "blog").getByRole("button", { name: "Start blog" }).click()
+    await expect.poll(() => server.bodies("POST /databases/2/power")).toEqual([{ action: "start" }])
+
+    // A server found running that waits for a password is where found servers are.
+    await expect(foundRow(page, "postgresql@17-main")).toBeVisible()
   })
 
-  test("forty databases are a handful of findings, each naming its databases with their fix", async ({
-    page,
-  }) => {
+  test("forty databases fit the page, as cards and as a table", async ({ page }) => {
     const server = await mockFleet(page)
     server.answer("GET /databases/fleet", () => ({
       body: {
@@ -319,38 +409,13 @@ test.describe("the control center", () => {
     }))
     server.answer("GET /databases/backups/summary", () => ({ body: { connections: [] } }))
     await page.goto("/databases")
-    const attention = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Needs attention" }),
-    })
-    const rows = attention.locator("[data-slot=accordion-item]")
-
+    await expect(page.locator("[data-card=database]")).toHaveCount(40)
+    // The band names five of each and counts the rest.
+    const band = page.locator("[data-slot=fleet-band]")
     await expect(
-      attention.getByRole("button", { name: /^4 databases cannot be reached/ }),
-    ).toBeVisible()
-    await expect(
-      attention.getByRole("button", { name: /^7 databases are reachable from the internet/ }),
-    ).toBeVisible()
-    await expect(
-      attention.getByRole("button", { name: /^20 databases have never been backed up/ }),
-    ).toBeVisible()
-    // What is wrong, not what it is wrong with: four rows, not thirty-two.
-    await expect(rows).toHaveCount(4)
-    // The fleet starts on the first screen.
-    const fleetTop = await page.getByRole("heading", { name: "All databases" }).boundingBox()
-    expect(fleetTop?.y ?? 9999).toBeLessThan(600)
-
-    // Each database keeps its own fix inside the finding that names it.
-    await attention.getByRole("button", { name: /^7 databases are reachable/ }).click()
-    const targets = attention.getByRole("list", {
-      name: "7 databases are reachable from the internet",
-    })
-    await expect(targets.getByRole("listitem")).toHaveCount(7)
-    // One in a container of its own can be restricted from here; one installed on the
-    // machine is changed where it is declared.
-    await expect(targets.getByRole("button", { name: "Open settings: db-12" })).toBeVisible()
-    await targets.getByRole("button", { name: "Restrict to this server: db-18" }).click()
-    await expect(page.getByRole("dialog")).toContainText("Restrict db-18 to this server")
-    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
+      band.getByRole("list", { name: "Largest databases" }).getByRole("link"),
+    ).toHaveCount(5)
+    await expect(band.getByRole("region", { name: "Storage" })).toContainText("35 more databases")
 
     // Nothing spills out of a card or the page, whatever the names and figures are.
     expect(
@@ -363,30 +428,6 @@ test.describe("the control center", () => {
         .evaluate((el) => el.scrollWidth - el.clientWidth),
     ).toBeLessThanOrEqual(1)
     await page.getByRole("radio", { name: "Cards" }).click()
-  })
-
-  test("past eight findings the rest wait behind a count", async ({ page }) => {
-    await mockFleet(page, {
-      dumps: { 1: null, 2: null, 4: 400, 5: 400 },
-      fleet: {
-        1: { exposure: "public" },
-        2: { exposure: "public", ok: false, state: "stopped", consumers: 1 },
-        4: { ok: false, state: "unreachable", error: "connection refused" },
-        5: { ok: false, state: "unreachable", error: "connection refused" },
-        7: { ok: false, state: "paused", container: "notes-box", source: "docker" },
-      },
-    })
-    await page.goto("/databases")
-    const attention = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Needs attention" }),
-    })
-    const rows = attention.locator("[data-slot=accordion-item]")
-    await expect(rows).toHaveCount(6)
-    const more = attention.getByRole("button", { name: /^Show \d+ more$/ })
-    await expect(more).toHaveAttribute("aria-expanded", "false")
-    await more.click()
-    await expect(attention.getByRole("button", { name: "Show fewer" })).toBeVisible()
-    expect(await rows.count()).toBeGreaterThan(8)
   })
 
   test("a card says what is wrong in one weight, keeps its labels out of its readings, and cuts nothing it prints", async ({
@@ -438,7 +479,7 @@ test.describe("the control center", () => {
     const facts = card(page, "app").locator("[data-slot=fleet-facts]")
     expect((await facts.boundingBox())?.height ?? 99).toBeLessThan(24)
 
-    // A dump over a week old weighs the same on the card as in the list of findings.
+    // A dump over a week old weighs the same on the card as none at all.
     const hue = (el: Element) => getComputedStyle(el).color
     const stale = await facts.getByText(/^backed up/).evaluate(hue)
     const never = await card(page, "cache").getByText("never backed up").evaluate(hue)
@@ -817,14 +858,6 @@ test.describe("found on this server", () => {
     await expect(found.getByRole("button", { name: "Try again" })).toBeVisible()
     await expect(found.getByText("Reported with the fleet")).toBeVisible()
     await expect(foundRow(page, "orders-db")).toContainText("Its container states no password")
-    // Both are in the list of what needs a hand, too.
-    const attention = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Needs attention" }),
-    })
-    await expect(
-      attention.getByRole("button", { name: /postgres 17 main on this host is running here/ }),
-    ).toBeVisible()
-
     await found.getByRole("button", { name: "Connect postgres 17 main on this host" }).click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: "I know a password" }).click()
@@ -1525,9 +1558,6 @@ for (const [label, viewport] of [
     await page.goto("/databases")
     await expect(card(page, "shop")).toBeVisible()
     await keepsTheRules(page, "/databases", "reading")
-    await page
-      .getByRole("button", { name: /have never been backed up|has never been backed up/ })
-      .click()
     await page.getByText("Ignored", { exact: true }).click()
     await page.getByText("Kept by other programs").click()
     await keepsTheRules(page, "/databases with its folds open", "reading")

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   backupReadings,
-  concernGroups,
   concernLevel,
   describeEdge,
   feedsByConnection,
@@ -60,7 +59,7 @@ function entry(overrides = {}) {
 
 const kinds = (concerns) => concerns.map((concern) => concern.kind)
 
-describe("what needs attention", () => {
+describe("what is wrong with a database", () => {
   test("a healthy database with a fresh dump has no concern", () => {
     expect(fleetConcerns(entry(), { now: NOW })).toEqual([])
   })
@@ -131,42 +130,6 @@ describe("what needs attention", () => {
     expect(concernLevel(concerns, "stale-backup", "never-backed-up")).toBe("warning")
     expect(concernLevel(concerns, "unreachable")).toBeUndefined()
     expect(concernLevel([], "public")).toBeUndefined()
-  })
-})
-
-describe("the attention list's findings", () => {
-  const concernsOf = (one) => fleetConcerns(one, { now: NOW })
-  const open = (id) => entry({ id, name: `db${id}`, exposure: "public" })
-
-  test("two databases with one concern are two findings; more are one that names them", () => {
-    const two = concernGroups([open(1), open(2)], concernsOf)
-    expect(two).toHaveLength(1)
-    expect(two[0]).toMatchObject({ kind: "public", grouped: false })
-    const many = concernGroups([open(1), open(2), open(3), open(4)], concernsOf)
-    expect(many[0].grouped).toBe(true)
-    expect(many[0].entries.map((one) => one.name)).toEqual(["db1", "db2", "db3", "db4"])
-  })
-
-  test("forty databases are a handful of findings, worst first", () => {
-    const fleet = Array.from({ length: 40 }, (_, index) =>
-      entry({
-        id: index + 1,
-        name: `db${index + 1}`,
-        ok: index % 10 !== 0,
-        state: index % 10 === 0 ? "unreachable" : "running",
-        exposure: index % 5 === 1 ? "public" : "local",
-        lastBackup: index % 2 ? undefined : "2026-09-25T00:00:00Z",
-      }),
-    )
-    const groups = concernGroups(fleet, concernsOf)
-    expect(groups.map((group) => group.kind)).toEqual(["unreachable", "public", "never-backed-up"])
-    expect(groups.every((group) => group.grouped)).toBe(true)
-    expect(groups.map((group) => group.entries.length)).toEqual([4, 8, 20])
-  })
-
-  test("a database with two concerns stands in both", () => {
-    const groups = concernGroups([entry({ exposure: "public", lastBackup: undefined })], concernsOf)
-    expect(groups.map((group) => group.kind)).toEqual(["public", "never-backed-up"])
   })
 })
 

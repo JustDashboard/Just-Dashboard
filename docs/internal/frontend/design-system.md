@@ -130,8 +130,9 @@ taking a frame:
   four red cards said it four times. The release path on a deployment page is not a wiring
   picture but a timeline: one bar in seven segments, each as long as its stage took,
   `components/deploy/run-pipeline.tsx`), and so are the
-  Databases section's reading pages — the control center's readings, attention list, fleet and found
-  servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
+  Databases section's reading pages — the control center's identity line, band of storage, sessions
+  and backups, fleet, picture and found servers, a database's home, its Performance, Advisor, Search
+  and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
   and every block on the four Processes pages — the live table under its band of workloads, the
   PM2 applications under their band of what PM2 takes of the machine, the systemd units
@@ -2327,6 +2328,34 @@ The passes, in order. Each one is a diff you can review on its own.
    Chips that name something wrong carry its tone in their word, and a site new since the last
    read rises (`useArrivals`).
 
+   The Databases control center took it in 0.7.1, at the operator's request, because it had no
+   life: a list of what needed attention over shelves of grey cards, every one the same weight, and
+   nothing on the page told one database from another but its words. It had no tiles to give up;
+   what it gave up was the attention list, which the operator asked to go, and nothing it said was
+   lost — each concern is said, in its tone, where the thing is: the verdict and the first card on
+   its shelf for a server that does not answer, the runway and the card's foot for a dump that is
+   old or missing, the card's foot for a port open to the internet, *Found on this server* for a
+   server that waits for a password, and every fix it carried (Start, Back up now, Restrict to this
+   server, Settings) a verb on the card. The page opens on `HostIdentity`: the server's engines as
+   a stack of their own logos, the commonest and then the largest first, the host's name, how many
+   databases, what they store, the sessions open, how many things read them (a link to the map),
+   how many were dumped in the last day and, in amber, how many never were; at its right end the
+   verdict — how many do not answer, else how many are stopped, else *All N answering* — beside
+   Scan and Add a database, which left the page's own row. Under it
+   `components/database/fleet/fleet-band.tsx`, over the unit-tested `fleet/band.ts`, reads the fleet
+   three ways the cards cannot: **Storage**, what each database holds as spans of one bar with the
+   five largest as rows; **Sessions**, the open sessions — a key–value store's clients — as one
+   bar, a server that did not answer counted apart rather than drawn as zero, the busiest beside
+   the products that read them; and **Backups**, every database the dashboard can dump on a
+   fortnight's runway, never-dumped first as a hollow amber ring at its far end, the stretch past a
+   week washed amber because a week is where every other reading of the section calls a dump stale.
+   A row opens the database, or on the runway its Backups page. Each database keeps one hue
+   (`fleetHues`, a lane hue without slate dealt in the order the connections were saved, so five
+   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row,
+   its card's left edge and its table row; the card's Stored figure carries a short bar in that hue
+   against the largest database, as the table's Size cell does. The picture of what the databases
+   feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
+
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project
    card went beside the control that sets it, and the page's doc comment names where. Variables took the
@@ -2448,9 +2477,11 @@ and their resource name in the first facts or identity row. The deployment fleet
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
 The Databases section omits the top metric-card sections on every page. The control center starts
-with attention findings carrying their fix, then the saved databases with search, engine chips and
-layout controls. The former metric-card `?show=` filters no longer narrow the inventory. Individual
-database cards retain the facts needed to compare connections. A database home starts with its
+with the server's databases as an identity line — its commands at the line's end beside the verdict —
+then a band of storage, sessions and backups, then the saved databases with search, engine chips and
+layout controls. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
+verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
+Individual database cards retain the facts needed to compare connections. A database home starts with its
 identity line and a `ChartPanel` of recorded activity, with 1-hour, 6-hour, 24-hour and 7-day windows,
 then attention, rankings and reference blocks. Activity is recorded by the backend every 30 seconds
 while the dashboard runs, including when no database page is open. Performance opens on its view
