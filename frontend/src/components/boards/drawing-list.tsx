@@ -326,7 +326,7 @@ function DrawingCard({
   return (
     <li className="min-w-0">
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
-        <SpotlightBorder radius={320} className="h-full">
+        <SpotlightBorder className="h-full">
           <div
             onClick={(event) => {
               const target = event.target as HTMLElement

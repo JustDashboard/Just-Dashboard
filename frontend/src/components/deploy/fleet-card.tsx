@@ -613,7 +613,7 @@ export function ProjectCard({
       {/* Each card lands a beat after the one before it, capped so a fleet
           of forty does not take three seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.045} className="h-full">
-        <SpotlightBorder radius={360} className="h-full">
+        <SpotlightBorder className="h-full">
           {active && (
             <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
               <BorderBeam size={80} duration={4} />

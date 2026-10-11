@@ -2925,9 +2925,12 @@ Each of these is bought against a specific failure, and each is the smallest thi
   verb in its accessible name, the surrounding press is a convenience for the pointer — and add the
   two things a reading row does not have: an arrow that is always drawn, and an edge that answers the
   pointer.
-- **The lit edge.** `ui/spotlight-border.tsx` paints a card's one-pixel border with a radial gradient
-  centred on the pointer, brand at the centre and the card's own `--border` a couple of hundred pixels
-  out. It is Magic UI's `magic-card` with the glow taken out of it. Depth and response; no decoration.
+- **The lit edge.** `ui/spotlight-border.tsx` turns a card's whole one-pixel border from its own
+  `--border` to `--flow-lit` while the pointer is on the card, with `transition-colors` and nothing
+  else; a selected card keeps its full `--brand` edge. It began as Magic UI's `magic-card` with the
+  glow taken out, a radial gradient centred on the pointer — until 0.7.1, when that lit one side of a
+  wide card and left the rest dark, so the edge that says the *card* is takeable said it about a
+  corner. Depth and response; no decoration.
 
 ### Three grounds, one ladder
 
