@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -17,9 +18,12 @@ import (
 //	read            anyone authenticated
 //	service.control fetch, pull, push, checkout, branch, tag, stash, stage,
 //	                commit, merge, revert, cherry-pick, identity, remotes,
-//	                clone, init — every one of them recoverable
-//	destructive     discard, reset, stash drop, and deleting a branch, tag,
-//	                or remote (all use ordinary confirmation)
+//	                clone, init — every one of them recoverable — and
+//	                stash-and-pull; giving a blocked pull's folders back to
+//	                the checkout's owner also needs file.write
+//	destructive     discard, reset, stash drop, discard-and-pull, and
+//	                deleting a branch, tag, or remote (all use ordinary
+//	                confirmation)
 func (s *Server) mountGitRoutes(r chi.Router) {
 	r.Route("/git", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitRepos))
@@ -67,6 +71,8 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/init", s.handle(s.handleGitInit))
 			r.Method(http.MethodPost, "/fetch", s.handle(s.handleGitFetch))
 			r.Method(http.MethodPost, "/pull", s.handle(s.handleGitPull))
+			r.Method(http.MethodPost, "/pull/stash", s.handle(s.handleGitPullStash))
+			r.With(httpx.RequireCapability(auth.CapFileWrite)).Method(http.MethodPost, "/pull/own", s.handle(s.handleGitPullOwn))
 			r.Method(http.MethodPost, "/push", s.handle(s.handleGitPush))
 			r.Method(http.MethodPost, "/push/tags", s.handle(s.handleGitPushTags))
 			r.Method(http.MethodPost, "/checkout", s.handle(s.handleGitCheckout))
@@ -112,6 +118,7 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/operation/abort", s.handle(s.handleGitOperationAbort))
 			r.Method(http.MethodPost, "/conflict/choose", s.handle(s.handleGitConflictChoose))
 			r.Method(http.MethodPost, "/discard", s.handle(s.handleGitDiscard))
+			r.Method(http.MethodPost, "/pull/discard", s.handle(s.handleGitPullDiscard))
 			r.Method(http.MethodPost, "/reset", s.handle(s.handleGitReset))
 			r.Method(http.MethodPost, "/stash/drop", s.handle(s.handleGitStashDrop))
 			// Deleting a branch, a tag or a remote is destructive but not typed
@@ -408,6 +415,10 @@ func (s *Server) gitActionAt(w http.ResponseWriter, r *http.Request, action, pat
 	res, err := fn(path)
 	httpx.SetAudit(r, "git."+action, path, map[string]any{"ok": err == nil})
 	if err != nil {
+		var blocked *gitx.PullBlocked
+		if errors.As(err, &blocked) {
+			return refusePull(w, r, blocked)
+		}
 		// git's own message is the useful part; a failed pull or checkout is
 		// an ordinary outcome, not a server fault.
 		if res != nil {
@@ -489,6 +500,52 @@ func (s *Server) handleGitPull(w http.ResponseWriter, r *http.Request) error {
 	return s.gitAction(w, r, "pull", func(p string) (*gitx.Result, error) {
 		return s.modules.git.Pull(r.Context(), p)
 	})
+}
+
+func (s *Server) handleGitPullStash(w http.ResponseWriter, r *http.Request) error {
+	return s.gitAction(w, r, "pull.stash", func(p string) (*gitx.Result, error) {
+		return s.modules.git.StashAndPull(r.Context(), p)
+	})
+}
+
+// handleGitPullDiscard throws away the files a pull is blocked on, which
+// exist nowhere else — hence the destructive tier, like discard itself.
+func (s *Server) handleGitPullDiscard(w http.ResponseWriter, r *http.Request) error {
+	return s.gitAction(w, r, "pull.discard", func(p string) (*gitx.Result, error) {
+		return s.modules.git.DiscardAndPull(r.Context(), p)
+	})
+}
+
+// handleGitPullOwn chowns folders inside the checkout, so beside the git
+// tier it takes file.write, the way resolving a conflict does. The folders
+// and who held them go into the audit detail: nothing else records the
+// owner a folder had before.
+func (s *Server) handleGitPullOwn(w http.ResponseWriter, r *http.Request) error {
+	var at string
+	var given []hostexec.Foreign
+	var pulled bool
+	err := s.gitAction(w, r, "pull.own", func(p string) (*gitx.Result, error) {
+		res, dirs, err := s.modules.git.OwnAndPull(r.Context(), p)
+		at, given, pulled = p, dirs, err == nil
+		return res, err
+	})
+	if len(given) > 0 {
+		httpx.SetAudit(r, "git.pull.own", at, map[string]any{"ok": pulled, "given": given})
+	}
+	return err
+}
+
+// refusePull answers a pull that did not start with what is in its way, the
+// error every client reads and beside it the files, so the page can offer the
+// ways past them. The message is kept for the audit trail the way the
+// central error writer keeps it.
+func refusePull(w http.ResponseWriter, r *http.Request, blocked *gitx.PullBlocked) error {
+	refusal := httpx.Err(http.StatusConflict, "pull_blocked", blocked.Error())
+	if p, ok := httpx.PrincipalFrom(r.Context()); ok {
+		p.FailureReason = refusal.Message
+	}
+	httpx.JSON(w, refusal.Status, map[string]any{"error": refusal, "blocked": blocked})
+	return nil
 }
 
 func (s *Server) handleGitPush(w http.ResponseWriter, r *http.Request) error {
