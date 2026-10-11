@@ -13,6 +13,7 @@ import {
 } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { duration, plural } from "@/lib/format"
 import type {
   EngineAction,
@@ -32,6 +33,7 @@ import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-ident
 import { engineProduct } from "@/components/proxy/marks"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { engineKind, engineUnit, type ProxyStatus } from "@/components/proxy/proxy-context"
 import type { EngineControl } from "@/components/proxy/engine-control"
@@ -577,12 +579,6 @@ export function EngineExtras({
   const noEngine = !status.nginx && !status.caddy
   // certbot's nginx plugin is for nginx; Caddy issues its own certificates.
   const wantsCertbot = !status.certbot && !status.caddy
-  const modules = usePoll(
-    (signal) => get<ModuleReport>("/proxy/modules/", undefined, signal),
-    0,
-    [],
-    { enabled: nginx },
-  )
   const updates = usePoll(
     (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
     0,
@@ -592,7 +588,6 @@ export function EngineExtras({
   const console_ = useJobConsole({
     onSuccess: () => {
       onChanged()
-      modules.refresh()
       updates.refresh()
     },
   })
@@ -635,25 +630,15 @@ export function EngineExtras({
       action: () => install("upgrade", [pkg.name], pkg.name),
     })
 
-  const chips = modules.error ? [] : moduleChips(modules.data)
   const offersNginx = admin && noEngine && Boolean(manager)
   const offersCertbot = admin && wantsCertbot && Boolean(certbotPackages)
-  if (chips.length === 0 && !upgrade && !offersNginx && !offersCertbot && !console_.job) {
+  if (!upgrade && !offersNginx && !offersCertbot && !console_.job) {
     return null
   }
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-        {chips.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            {chips.map((chip) => (
-              <span key={chip.key} title={chip.detail}>
-                <Status tone={chip.tone} label={`${chip.label} ${chip.state}`} />
-              </span>
-            ))}
-          </div>
-        )}
         {upgrade && (
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>
@@ -708,6 +693,55 @@ export function EngineExtras({
       />
       {dialog}
     </div>
+  )
+}
+
+/**
+ * The modules a reverse proxy is asked for, as one fact in the engine's line:
+ * "6 modules" when every one is there, the count missing in warning when one
+ * is not, and each module's state a press away. They were a row of six status
+ * dots of their own between the engine and the picture, which read as six
+ * findings about a build that had nothing wrong with it.
+ */
+export function ModulesFact() {
+  const modules = usePoll(
+    (signal) => get<ModuleReport>("/proxy/modules/", undefined, signal),
+    300_000,
+  )
+  const chips = modules.error ? [] : moduleChips(modules.data)
+  if (chips.length === 0) return null
+  const missing = chips.filter((c) => c.tone !== "running").length
+  return (
+    <>
+      <FactDot />
+      <Popover>
+        <PopoverTrigger
+          className={cn(
+            "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+            missing > 0 && "font-medium text-warning",
+          )}
+        >
+          {missing > 0
+            ? `${missing} of ${plural(chips.length, "module")} missing`
+            : plural(chips.length, "module")}
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-3">
+          <p className="eyebrow mb-2">nginx modules</p>
+          <ul aria-label="nginx modules" className="space-y-1.5 text-xs">
+            {chips.map((chip) => (
+              <li
+                key={chip.key}
+                title={chip.detail}
+                className="flex min-w-0 items-center justify-between gap-3"
+              >
+                <span className="truncate font-mono">{chip.label}</span>
+                <Status tone={chip.tone} label={chip.state} />
+              </li>
+            ))}
+          </ul>
+        </PopoverContent>
+      </Popover>
+    </>
   )
 }
 

@@ -4170,7 +4170,10 @@ containers/volumes/networks.
   `parseCombined` also reads trailing `rt=` (latency) and `host=` when a `log_format` appends them; the
   stock `combined` the site form writes has no timing, so p95 shows only for such formats. All reads,
   open to every signed-in account like a deployment's request record: `GET /proxy/traffic` (each site's
-  last hour, each record refreshed at most once a minute), `GET /proxy/traffic/{name}?window=15m|1h|6h|24h|7d`
+  last hour with its minutes as `points` — every nginx site from the log its file names, then every
+  route on the Docker Caddy ingress, `engine: "caddy-ingress"`, from the shared request record its
+  deployment's Logs page reads, listed by `IngressRouteNames` in one `find` inside the container;
+  each record refreshed at most every fifteen seconds, which costs only the bytes appended since), `GET /proxy/traffic/{name}?window=15m|1h|6h|24h|7d`
   plus the deployment filter params (a `RequestWindow` with `logs`), `GET /proxy/traffic/{name}/tail?after=`
   (polled tail from the window's cursor), `GET /proxy/traffic/{name}/export` (CSV), and
   `GET /proxy/errors?site=&window=`: the last 8 MB of the site's error log, or of nginx's (the http

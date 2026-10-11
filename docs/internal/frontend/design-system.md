@@ -1375,14 +1375,20 @@ loaded, with Test config and Reload nginx — stands under the line as a `Notice
 the overview begin with four `StatTile` readings, two per row on phones. The overview took §15's exit
 in 0.7.1 (pass 2 has the paragraph): it opens on the engine identity, its facts ending on the sites,
 certificates, streams and internet-facing ports, each a link, and its right end on the routes' verdict
-beside the service commands; then the route picture, the band of traffic, certificates and nginx
-errors, Live traffic, and the routes in the main column with attention in a narrower one. On an nginx
-host Live traffic sits between the band and the routes: two readings
-(requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
-where the counters come from. Its switch is a `Switch` beside a `Status` in the panel header rather
-than a button, because whether nginx is counting is a state of the engine; a switch in flight reads
-"Switching on…", readings that stop keep their hour and lose their figures, and nothing on it breathes
-as live, since it is a poll. A source the overview could not read is never drawn as an empty or
+beside the service commands; then the route picture, Live traffic, the band of traffic, certificates
+and recent errors, and the routes in the main column with attention in a narrower one. Live traffic
+is the edge's hour added up from every site's access record — nginx's files and the Docker Caddy
+ingress's routes alike, so a host where the ingress holds 80 and 443 is not drawn as idle — as four
+`StatTile`s in a framed `StatGrid` (the last whole minute, the hour, the 5xx share, bytes served,
+each with its `TileTrend`) over a `ChartPanel` of requests a minute with 4xx and 5xx lines. nginx's
+own stub_status counters are a one-line strip under the chart, because they count only what nginx
+answers: its switch is a `Switch` beside a `Status` rather than a button, because whether nginx is
+counting is a state of the engine; a switch in flight reads "Switching on…", readings that stop lose
+their figures and say why, and nothing on it breathes as live, since it is a poll. The nginx modules
+a reverse proxy is asked for are one fact at the end of the engine line ("6 modules", or how many
+are missing in warning) whose popover lists each; they were a row of six status dots that read as
+findings. Recent changes in the rail is five two-line rows, so the rail ends near the routes it
+stands beside. A source the overview could not read is never drawn as an empty or
 healthy one: its fact in the engine line reads "couldn't read sites" with the reason as its tooltip,
 its panel shows the `ErrorState`, the picture is not drawn from sites it cannot read, and attention
 carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
@@ -1478,7 +1484,7 @@ boundary; forms and sections remain plain.
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
 overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
 including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
-the config test panel; `proxy-insights.spec.ts` covers Live traffic, its switch and a phone.
+the config test panel; `proxy-insights.spec.ts` covers Live traffic, the ingress's routes in it, Recent errors, the nginx counters' switch and a phone.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:
@@ -2069,7 +2075,11 @@ The passes, in order. Each one is a diff you can review on its own.
    requests as one `ShareBar` of the busiest five, each rank a `LANES` hue, over rows with what
    each reaches and its 5xx share, each opening the site's traffic; Certificates, every
    certificate as a dot on one ninety-day runway in the colour of its state with certbot's renewal
-   stretch marked, over the five soonest as the expiry `BarList`; and nginx's recent errors. The
+   stretch marked, over the five soonest as the expiry `BarList`; and Recent errors, the hour's 5xx by site from the
+   same access records over nginx's error-log groups where nginx is on the host. Each block opens on
+   its one figure at the 24px reading size (requests this hour, days to the next expiry or how many
+   need attention, server errors this hour), and a site's row opens its traffic, or for an ingress
+   route, its site page, which reads the deployment's record. The
    route cards lead with the application's own mark and the engine in the tile's corner
    (`RouteMark`), their route one line (names → upstream) rather than two labelled columns.
 

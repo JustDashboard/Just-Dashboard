@@ -160,8 +160,11 @@ func (s *Server) handleSiteTrafficExport(w http.ResponseWriter, r *http.Request)
 
 // siteTrafficReading is one site's last hour, for the overview.
 type siteTrafficReading struct {
-	Site   string `json:"site"`
-	File   string `json:"file"`
+	Site string `json:"site"`
+	File string `json:"file"`
+	// Engine is what answered the site's requests: nginx, or the Docker
+	// Caddy ingress that holds deployments' routes on ports 80 and 443.
+	Engine string `json:"engine"`
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
 	// Requests is the hour's count, which is the rate per hour.
@@ -170,11 +173,30 @@ type siteTrafficReading struct {
 	Bytes     int64    `json:"bytes"`
 	P95       *float64 `json:"p95,omitempty"`
 	Complete  bool     `json:"complete"`
+	// Points are the hour minute by minute, so the overview can draw the
+	// edge's traffic as one series without a request per site.
+	Points []trafficPoint `json:"points"`
 }
 
-// handleSiteTrafficSummary is every nginx site's last hour at once. Each
-// record is refreshed at most once a minute however often this is polled, so
-// the overview's figures cost one read per site per minute.
+// trafficPoint is one minute of a site's hour, by what went wrong in it.
+type trafficPoint struct {
+	Start   string `json:"start"`
+	Total   int    `json:"total"`
+	Refused int    `json:"refused"`
+	Failed  int    `json:"failed"`
+	Bytes   int64  `json:"bytes"`
+}
+
+// trafficSummaryAge is how stale a site's figures may be. The store reads
+// only what was appended since the last read, so a short age costs the
+// bytes that arrived and nothing more.
+const trafficSummaryAge = 15 * time.Second
+
+// handleSiteTrafficSummary is every site's last hour at once: each nginx
+// site from the log its file names, and each route on the Docker Caddy
+// ingress from the record its deployment's Logs page reads. On a host where
+// the ingress holds 80 and 443, nginx answers nothing, and reading nginx
+// alone left the overview's traffic empty however busy the host was.
 func (s *Server) handleSiteTrafficSummary(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
@@ -182,30 +204,53 @@ func (s *Server) handleSiteTrafficSummary(w http.ResponseWriter, r *http.Request
 	filter := accesslog.Filter{Since: now.Add(-time.Hour), Until: now, Limit: 1}
 	out := []siteTrafficReading{}
 	for _, logs := range s.modules.proxy.AllSiteLogs() {
-		reading := siteTrafficReading{Site: logs.Site, File: logs.File, Status: "unavailable", Reason: logs.AccessNote}
+		reading := siteTrafficReading{Site: logs.Site, File: logs.File, Engine: "nginx", Status: "unavailable", Reason: logs.AccessNote, Points: []trafficPoint{}}
 		if logs.Access != "" && ctx.Err() == nil {
-			window, err := s.modules.proxyExtras.siteTraffic.Cached(ctx, logs.Access, filter, time.Minute)
-			switch {
-			case err != nil:
-				reading.Reason = "The site's access log could not be read."
-			case !window.Coverage.Exists:
-				reading.Reason = "Nothing logged yet."
-			default:
-				summary := window.Result.Summary
-				reading.Status, reading.Reason = "available", ""
-				reading.Requests = summary.Total
-				reading.ErrorRate, reading.Bytes = summary.ErrorRate, summary.Bytes
-				reading.Complete = window.Coverage.Complete
-				if summary.Latency != nil {
-					p95 := summary.Latency.P95
-					reading.P95 = &p95
-				}
-			}
+			window, err := s.modules.proxyExtras.siteTraffic.Cached(ctx, logs.Access, filter, trafficSummaryAge)
+			readTrafficWindow(&reading, window, err)
+		}
+		out = append(out, reading)
+	}
+	routes, err := s.modules.proxy.IngressRouteNames(ctx)
+	if err != nil {
+		s.Log.Warn("ingress routes unreadable for the traffic summary", "err", err)
+	}
+	for _, route := range routes {
+		reading := siteTrafficReading{Site: route, Engine: "caddy-ingress", Status: "unavailable", Points: []trafficPoint{}}
+		if s.modules.requests != nil && ctx.Err() == nil {
+			window, err := s.modules.requests.Cached(ctx, route, filter, trafficSummaryAge)
+			readTrafficWindow(&reading, window, err)
 		}
 		out = append(out, reading)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"observedAt": now, "sites": out})
 	return nil
+}
+
+// readTrafficWindow fills a reading from its record's last hour.
+func readTrafficWindow(reading *siteTrafficReading, window accesslog.Window, err error) {
+	switch {
+	case err != nil:
+		reading.Reason = "The site's access log could not be read."
+		return
+	case !window.Coverage.Exists:
+		reading.Reason = "Nothing logged yet."
+		return
+	}
+	summary := window.Result.Summary
+	reading.Status, reading.Reason = "available", ""
+	reading.Requests = summary.Total
+	reading.ErrorRate, reading.Bytes = summary.ErrorRate, summary.Bytes
+	reading.Complete = window.Coverage.Complete
+	if summary.Latency != nil {
+		p95 := summary.Latency.P95
+		reading.P95 = &p95
+	}
+	for _, b := range summary.Buckets {
+		reading.Points = append(reading.Points, trafficPoint{
+			Start: b.Start, Total: b.Total, Refused: b.Counts["4xx"], Failed: b.Counts["5xx"], Bytes: b.Bytes,
+		})
+	}
 }
 
 func (s *Server) handleSiteErrors(w http.ResponseWriter, r *http.Request) error {

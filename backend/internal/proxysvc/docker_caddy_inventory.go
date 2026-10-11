@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -92,4 +93,28 @@ func firstName(names []string) string {
 		return ""
 	}
 	return names[0]
+}
+
+// IngressRouteNames lists the routes the Docker Caddy ingress holds for
+// deployments, by the name their request record is kept under, or none on a
+// host without the ingress. One listing of the routes directory rather than
+// the inventory's adapt per route, because the overview asks every poll.
+func (s *Service) IngressRouteNames(ctx context.Context) ([]string, error) {
+	edge, err := s.dockerCaddy(ctx)
+	if err != nil || edge == nil {
+		return nil, err
+	}
+	raw, err := edge.command(ctx, "", "sh", "-c", `if [ -d "$1" ]; then find "$1" -maxdepth 1 -type f -name 'just-dashboard-*.caddy'; fi`, "sh", dockerCaddyRoot+"/routes")
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, path := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		name := strings.TrimSuffix(filepath.Base(path), ".caddy")
+		if path != "" && deploymentRoute(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
