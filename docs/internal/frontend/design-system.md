@@ -1755,6 +1755,16 @@ the chosen one `bg-accent` like every selection. The Files page is a workbench a
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.
 
+A sticky note's colour is a label by the same argument, so Stickyboard's nine (`--note-*`) are fixed
+hues, and `[data-note-color]`, `[data-note-style]` and `[data-note-kind]` mix every ground, ink and edge
+a note draws from its one value, as `[data-folder]` does for a folder. A paper note is the product's one
+large light surface, so the values sit low enough to read as paper against the ground rather than as
+a wall of lamps, with graphite the dark note whose ink turns light. On the board a note being carried
+is the one thing above it and the only one with a shadow, the format bar over a selection floats and
+takes a popover's ground, selection is drawn in the brand and a find result in the signal, and a note's
+type is in board units the canvas scales rather than on the ladder ([`stickyboard.md`](../stickyboard.md)).
+The list is a reading page: its readings over the boards as lit cards, each drawn as the board.
+
 Files and `/files/editor` take the **reading** register: their frames contain independently scrolling
 workbench panes, while directory and selection readings live in the status strip. Tiles use fixed,
 compact columns (80/104/128px) and tight gaps rather than stretching to fill empty space. A tile

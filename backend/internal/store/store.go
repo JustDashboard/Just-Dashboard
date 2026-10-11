@@ -192,6 +192,23 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS idx_boards_updated ON boards(updated_at DESC, id DESC);
 
+-- Stickyboards: sticky notes, text, sections and the links between them, one
+-- validated document per board. The counts and the preview are derived from
+-- the document on every save, so the list never reads a whole board to draw
+-- its thumbnail. A new table is additive for existing installations.
+CREATE TABLE IF NOT EXISTS sticky_boards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  document   TEXT NOT NULL DEFAULT '{"version":1,"background":"dots","notes":[],"links":[]}',
+  notes      INTEGER NOT NULL DEFAULT 0,
+  links      INTEGER NOT NULL DEFAULT 0,
+  preview    TEXT NOT NULL DEFAULT '{"notes":[],"links":[]}',
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sticky_boards_updated ON sticky_boards(updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,

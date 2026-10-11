@@ -163,9 +163,10 @@ keeps resource selections, and uses `useMemoryState` per account. Filter and tab
 current place without displacing the previous page; switching a query-selected resource creates
 a distinct destination. Reload and sign-out discard it.
 
-`components/command-search/inventory.ts` projects explicitly selected metadata from ten existing
+`components/command-search/inventory.ts` projects explicitly selected metadata from eleven existing
 authenticated GET routes: the deployment fleet, proxy vhosts, saved database connections, Docker
-containers and stacks, Git repositories, systemd services, PM2 applications, backup jobs and boards.
+containers and stacks, Git repositories, systemd services, PM2 applications, backup jobs, boards and
+stickyboards.
 The dialog mounts its index only while open, with at most four concurrent inventory requests and
 an eight-second timeout per source. Closing aborts reads; reopening reads fresh inventory rather
 than retaining deleted resources. Reads settle independently; a failed source contributes no

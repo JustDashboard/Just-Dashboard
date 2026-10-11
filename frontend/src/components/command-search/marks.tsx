@@ -19,6 +19,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { hasProductLogo, ProductGlyph } from "@/components/product-logo"
+import { StickyGlyph } from "@/components/stickyboard/glyphs"
 import type { SearchKind } from "./model"
 
 /**
@@ -46,6 +47,7 @@ export const KINDS: Record<SearchKind, { icon: Icon; noun: string }> = {
   app: { icon: ChartActivity, noun: "PM2 app" },
   backup: { icon: Archive, noun: "Backup job" },
   board: { icon: Pencil, noun: "Board" },
+  stickyboard: { icon: StickyGlyph, noun: "Stickyboard" },
 }
 
 /** The pages that are one product's own, drawn as that product. */
