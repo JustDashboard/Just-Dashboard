@@ -73,8 +73,8 @@ strategy, and feature ownership behind those rules.
   and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
   mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
   rollback, Tailscale certificates).
-- [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
-  cards, and board route permissions.
+- [`boards.md`](boards.md) — the Excalidraw page: the embedded editor, server-side drawing storage,
+  the derived preview and the list, save conflicts, resource cards, and route permissions.
 - [`stickyboard.md`](stickyboard.md) — the sticky-note boards: the validated document, its routes and
   permissions, the list and templates, the canvas (notes, sections, links, formatting, clipboard,
   history, find) and saving with revision conflicts.

@@ -79,7 +79,10 @@ export type StickyDocument = {
 }
 
 export type StickyPreview = {
-  notes: Pick<StickyNote, "x" | "y" | "w" | "h" | "kind" | "color" | "style">[]
+  notes: (Pick<StickyNote, "x" | "y" | "w" | "h" | "kind" | "color" | "style"> & {
+    /** The note's words without their Markdown; absent on a board not saved since it was added. */
+    text?: string
+  })[]
   links: [number, number][]
 }
 
@@ -608,7 +611,7 @@ export function readClipboard(text: string): { notes: StickyNote[]; links: Stick
 export function previewOf(doc: StickyDocument): StickyPreview {
   const index = new Map(doc.notes.map((n, i) => [n.id, i]))
   return {
-    notes: doc.notes.map(({ x, y, w, h, kind, color, style }) => ({
+    notes: doc.notes.map(({ x, y, w, h, kind, color, style, text }) => ({
       x,
       y,
       w,
@@ -616,6 +619,7 @@ export function previewOf(doc: StickyDocument): StickyPreview {
       kind,
       color,
       style,
+      text: plainText(text),
     })),
     links: doc.links.flatMap((l) => {
       const from = index.get(l.from)
@@ -623,6 +627,59 @@ export function previewOf(doc: StickyDocument): StickyPreview {
       return from === undefined || to === undefined ? [] : [[from, to] as [number, number]]
     }),
   }
+}
+
+/**
+ * A note's Markdown reduced to the words a thumbnail shows: four lines, 120
+ * characters, the markers taken out. The server's `stickyPlainText` does the
+ * same for a stored board; this one draws a template before it is one.
+ */
+export function plainText(markdown: string) {
+  const lines = markdown
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^(?:[-*_]\s*){3,}$|^(?:```|~~~).*$/, "")
+        .replace(/^>\s?/, "")
+        .replace(/^#{1,6}\s+/, "")
+        .replace(/^(?:[-*+]|\d{1,9}[.)])\s+/, "")
+        .replace(/^\[[ xX]\]\s+/, "")
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/\*\*|__|~~|`/g, "")
+        .trim(),
+    )
+    .filter(Boolean)
+    .slice(0, 4)
+  return [...lines.join("\n")].slice(0, 120).join("")
+}
+
+/**
+ * Words broken into lines of about `width` characters, at most `max` of
+ * them, the last ending in an ellipsis when the words run on. Measured in
+ * characters because a thumbnail only has to look like the note, not set it.
+ */
+export function wrapWords(text: string, width: number, max: number): string[] {
+  const lines: string[] = []
+  const limit = Math.max(1, Math.floor(width))
+  for (const paragraph of text.split("\n")) {
+    let line = ""
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word
+      if (next.length <= limit || !line) {
+        line = next.length > limit ? `${next.slice(0, limit - 1)}…` : next
+        continue
+      }
+      lines.push(line)
+      line = word.length > limit ? `${word.slice(0, limit - 1)}…` : word
+    }
+    if (line) lines.push(line)
+  }
+  if (lines.length <= max) return lines
+  const kept = lines.slice(0, max)
+  const last = kept[max - 1]
+  kept[max - 1] = `${last.length >= limit ? last.slice(0, limit - 1) : last}…`
+  return kept
 }
 
 export type Template = {

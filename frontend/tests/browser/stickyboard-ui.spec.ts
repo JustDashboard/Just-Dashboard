@@ -68,7 +68,7 @@ async function mockStickyboards(
     notes: board.doc.notes.filter((n) => n.kind === "sticky").length,
     links: board.doc.links.length,
     preview: {
-      notes: board.doc.notes.map(({ x, y, w, h, kind, color, style }) => ({
+      notes: board.doc.notes.map(({ x, y, w, h, kind, color, style, text }) => ({
         x,
         y,
         w,
@@ -76,6 +76,7 @@ async function mockStickyboards(
         kind,
         color,
         style,
+        text,
       })),
       links: [],
     },
@@ -183,12 +184,16 @@ test("a board starts from a template, and the list draws it and counts what it h
   const board = await mockStickyboards(page)
   board.deleted = true
   await page.goto("/stickyboard")
-  await expect(page.getByText("No stickyboards yet")).toBeVisible()
+  await expect(page.getByText("Put up your first board")).toBeVisible()
 
-  await page.getByRole("button", { name: "New board" }).first().click()
+  // A template on the page is the way in to New board on that template.
+  await page.getByRole("button", { name: "New kanban board" }).click()
   const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("button", { name: /Kanban/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
   await dialog.getByLabel("Name").fill("Sprint 12")
-  await dialog.getByRole("button", { name: /Kanban/ }).click()
   await dialog.getByRole("button", { name: "Create board" }).click()
   await expect(page).toHaveURL(/\/stickyboard\/1$/)
   expect(board.creates).toHaveLength(1)
@@ -204,10 +209,18 @@ test("a board starts from a template, and the list draws it and counts what it h
   await expect(page.getByRole("status")).toContainText("Saved on this server")
 
   await page.goto("/stickyboard")
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: "Sticky notes" })).toContainText(
-    "4",
-  )
+  // What the boards hold is a line of facts under the product's name, not a
+  // row of stat tiles.
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("4 sticky notes")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Sprint 12", exact: true })).toBeVisible()
+  // The card's picture is the board: every note in its colour, and on a board
+  // whose notes are large enough to read, what they say.
+  const cards = page.getByRole("list", { name: "Stickyboards" })
+  await expect(cards.locator("svg [data-note-color]")).toHaveCount(4)
+  board.doc = { ...board.doc, notes: [note("a", "Renew the wildcard cert", 0, 0)], links: [] }
+  await page.reload()
+  await expect(cards.locator("svg text", { hasText: "Renew the wildcard" })).toHaveCount(1)
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })

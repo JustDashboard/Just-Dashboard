@@ -135,7 +135,7 @@ free.
 - A file manager with search, previews, Monaco and image editors
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs
-- Boards: Excalidraw sketches with live cards for the host, projects and databases
+- Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
 - Stickyboard: endless boards of sticky notes you colour, group into sections and link together
 
 </td>

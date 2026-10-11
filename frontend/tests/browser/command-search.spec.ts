@@ -132,7 +132,7 @@ test("scope chips count each kind's matches and the dialog holds still while res
   await open(page)
   await input(page).fill("shop-web")
   await expect(scope(page, "Containers")).toContainText("1")
-  await expect(scope(page, "Boards")).not.toContainText(/\d/)
+  await expect(scope(page, "Excalidraw drawings")).not.toContainText(/\d/)
   await expect(scope(page, "Everything")).toHaveAttribute("aria-pressed", "true")
   const before = (await input(page).boundingBox())!
   await input(page).fill("nothing-matches-this")

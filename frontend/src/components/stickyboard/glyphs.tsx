@@ -60,3 +60,52 @@ export const PathElbow: Icon = mdi(mdiVectorPolyline, "PathElbow")
 export const ArrowNone: Icon = mdi(mdiMinus, "ArrowNone")
 export const ArrowEnd: Icon = mdi(mdiArrowRight, "ArrowEnd")
 export const ArrowBoth: Icon = mdi(mdiArrowLeftRight, "ArrowBoth")
+
+/**
+ * Stickyboard as a product, for where the page names itself: three notes
+ * fanned out in the board's own paper colours, the front one written on.
+ * Stickyboard is this dashboard's own and has no logo to borrow, so it is
+ * drawn from the palette its notes are — the rail keeps the one-colour glyph.
+ */
+export function StickyboardMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true" className={className}>
+      <g data-note-color="blue" transform="rotate(-14 11 19)">
+        <rect
+          x="3.5"
+          y="10"
+          width="15"
+          height="15"
+          rx="1.5"
+          style={{ fill: "var(--note)", stroke: "var(--note-edge)" }}
+        />
+      </g>
+      <g data-note-color="pink" transform="rotate(12 21 17)">
+        <rect
+          x="13.5"
+          y="8.5"
+          width="15"
+          height="15"
+          rx="1.5"
+          style={{ fill: "var(--note)", stroke: "var(--note-edge)" }}
+        />
+      </g>
+      <g data-note-color="yellow">
+        <rect
+          x="8"
+          y="4"
+          width="16"
+          height="16"
+          rx="1.5"
+          style={{ fill: "var(--note)", stroke: "var(--note-edge)" }}
+        />
+        <path
+          d="M11 9h10M11 12.5h10M11 16h6"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          style={{ stroke: "var(--note-ink-soft)" }}
+        />
+      </g>
+    </svg>
+  )
+}

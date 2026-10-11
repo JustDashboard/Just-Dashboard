@@ -58,6 +58,9 @@ const nextConfig: NextConfig = {
       { source: "/security/connections", destination: "/network/connections", permanent: false },
       { source: "/security/network", destination: "/network/interfaces", permanent: false },
       { source: "/security/tools", destination: "/network/tools", permanent: false },
+      // Boards became Excalidraw, after the editor it is, in 0.7.1.
+      { source: "/boards", destination: "/excalidraw", permanent: false },
+      { source: "/boards/:id", destination: "/excalidraw/:id", permanent: false },
     ]
   },
 }

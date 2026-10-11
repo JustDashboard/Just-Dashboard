@@ -3,6 +3,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Served from the copy `scripts/sync-excalidraw.mjs` makes of the pinned
+ * package's fonts. Named apart from the editor's own "Virgil" face, which
+ * Excalidraw registers itself when a board opens. */
+@font-face {
+  font-family: "Excalidraw Virgil";
+  src: url("/excalidraw/fonts/Virgil/Virgil-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+
 /* The palette — "Just Dashboard".
  *
  * One mode. The light palette was removed rather than left unmaintained: this
@@ -502,6 +511,11 @@
   --font-mono:
     ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas,
     "Liberation Mono", monospace;
+  /* Excalidraw's own hand, for a drawing's words on its thumbnail: the list
+     is the drawing in small, and its text in the product's sans was a second
+     drawing. Virgil rather than Excalifont because Virgil is one file under a
+     fixed name, and Excalifont's are hashed per release of the package. */
+  --font-drawing: "Excalidraw Virgil", var(--font-source-sans-3), cursive;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

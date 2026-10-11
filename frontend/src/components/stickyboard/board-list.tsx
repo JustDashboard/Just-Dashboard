@@ -19,28 +19,34 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { CONTROL } from "@/components/flow"
 import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { Page, PageContext, SearchInput, Section } from "@/components/page"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Input } from "@/components/ui/input"
-import { NumberTicker } from "@/components/ui/number-ticker"
+import { Skeleton } from "@/components/ui/skeleton"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { BoardPreview } from "@/components/stickyboard/board-preview"
-import { StickyGlyph } from "@/components/stickyboard/glyphs"
+import { StickyboardMark } from "@/components/stickyboard/glyphs"
 
 /** As many columns as the width holds at twenty rems a card, one on a phone. */
 const GRID = "grid min-w-0 gap-3 grid-cols-[repeat(auto-fill,minmax(min(20rem,100%),1fr))]"
 
+/** A name filter earns its row once there are more boards than one screen shows. */
+const SEARCH_FROM = 7
+
 /**
  * Every stickyboard on this server, as cards drawn as the boards themselves.
  *
- * A reading page (§16): it opens on what the boards hold, as figures, and
- * every card is a board to enter, so each carries the lit edge of a thing you
- * take. New board asks for a name and a starting point — the templates are
- * choices between kinds, so they are cards, each drawn as the board it makes.
+ * A reading page (§16). It opens the way the Overview opens on the machine:
+ * the product as its own mark, with a line of facts where four stat tiles
+ * stood. Every card is a board to enter, so each carries the lit edge of a
+ * thing you take, and its picture is the board with what its notes say
+ * written on them. Under the boards are the ways to start another — the
+ * templates are choices between kinds, so they are cards, each drawn as the
+ * board it makes, and taking one opens New board on it.
  */
 export function BoardList() {
   const router = useRouter()
@@ -51,7 +57,7 @@ export function BoardList() {
   const [boards, setBoards] = useState<StickySummary[] | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [query, setQuery] = useState("")
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState<Template | null>(null)
   const [renaming, setRenaming] = useState<StickySummary | null>(null)
 
   useEffect(() => {
@@ -71,15 +77,6 @@ export function BoardList() {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     return (boards ?? []).filter((b) => words.every((w) => b.name.toLowerCase().includes(w)))
   }, [boards, query])
-
-  const totals = useMemo(
-    () =>
-      (boards ?? []).reduce(
-        (sum, b) => ({ notes: sum.notes + b.notes, links: sum.links + b.links }),
-        { notes: 0, links: 0 },
-      ),
-    [boards],
-  )
 
   async function duplicate(board: StickySummary) {
     try {
@@ -118,15 +115,13 @@ export function BoardList() {
     })
   }
 
-  const latest = boards?.[0]
-
   return (
     <Page>
       <PageContext
         title="Stickyboard"
         actions={
           canWrite && (
-            <Button onClick={() => setCreating(true)}>
+            <Button onClick={() => setCreating(TEMPLATES[0])}>
               <Plus /> New board
             </Button>
           )
@@ -135,101 +130,92 @@ export function BoardList() {
       {error && !boards ? (
         <ErrorState error={error} />
       ) : !boards ? (
-        <LoadingPanel />
-      ) : boards.length === 0 ? (
-        <EmptyState
-          mark={
-            <span
-              data-note-color="yellow"
-              className="flex size-10 items-center justify-center rounded-md border border-(--note-edge) bg-(--note) text-(--note-ink)"
-            >
-              <StickyGlyph className="size-5" />
-            </span>
-          }
-          title="No stickyboards yet"
-          description="A board is an endless wall for sticky notes: write, move, colour and link them, zoomed out to see everything or in to read one."
-          action={
-            canWrite ? <Button onClick={() => setCreating(true)}>New board</Button> : undefined
-          }
-        />
+        <ListSkeleton />
       ) : (
         <>
-          <StatGrid columns={4} dense>
-            <StatTile label="Boards" value={<NumberTicker value={boards.length} />} />
-            <StatTile label="Sticky notes" value={<NumberTicker value={totals.notes} />} />
-            <StatTile label="Links" value={<NumberTicker value={totals.links} />} />
-            <StatTile
-              label="Last edited"
-              value={latest ? relativeTime(latest.updatedAt) : "—"}
-              hint={latest?.name}
+          <Identity boards={boards} />
+          {boards.length === 0 ? (
+            <EmptyState
+              mark={<StickyboardMark className="size-12" />}
+              title="Put up your first board"
+              description="A board is an endless wall for sticky notes: write, move, colour and link them, zoomed out to see everything or in to read one."
+              action={
+                canWrite ? (
+                  <Button onClick={() => setCreating(TEMPLATES[0])}>New board</Button>
+                ) : undefined
+              }
             />
-          </StatGrid>
-          <div className="flex min-w-0 flex-col gap-4">
-            <Toolbar>
-              <SearchInput
-                value={query}
-                placeholder="Find a board"
-                aria-label="Find a board"
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <span className="ml-auto text-hint text-muted-foreground">
-                {query.trim()
-                  ? `${shown.length} of ${plural(boards.length, "board")}`
-                  : plural(boards.length, "board")}
-              </span>
-            </Toolbar>
-            {shown.length === 0 ? (
-              <EmptyState
-                title="No board matches"
-                description={`Nothing is called “${query.trim()}”.`}
-              />
-            ) : (
-              <ul className={GRID}>
-                {shown.map((board, index) => (
-                  <BoardCard
-                    key={board.id}
-                    board={board}
-                    index={index}
-                    onOpen={() => router.push(`/stickyboard/${board.id}`)}
-                    verbs={[
-                      ...(canWrite
-                        ? [
-                            {
-                              key: "rename",
-                              label: "Rename",
-                              icon: Pencil,
-                              run: () => setRenaming(board),
-                            },
-                            {
-                              key: "duplicate",
-                              label: "Duplicate",
-                              icon: Copy,
-                              run: () => void duplicate(board),
-                            },
-                          ]
-                        : []),
-                      ...(canDelete
-                        ? [
-                            {
-                              key: "delete",
-                              label: "Delete",
-                              icon: Trash,
-                              danger: true,
-                              run: () => remove(board),
-                            },
-                          ]
-                        : []),
-                    ]}
+          ) : (
+            <Section
+              title="Boards"
+              actions={
+                boards.length >= SEARCH_FROM && (
+                  <SearchInput
+                    dense
+                    value={query}
+                    placeholder="Find a board"
+                    aria-label="Find a board"
+                    onChange={(event) => setQuery(event.target.value)}
+                    containerClassName="w-full sm:w-64"
                   />
-                ))}
-              </ul>
-            )}
-          </div>
+                )
+              }
+            >
+              {shown.length === 0 ? (
+                <EmptyState
+                  title="No board matches"
+                  description={`Nothing is called “${query.trim()}”.`}
+                />
+              ) : (
+                <ul aria-label="Stickyboards" className={GRID}>
+                  {shown.map((board, index) => (
+                    <BoardCard
+                      key={board.id}
+                      board={board}
+                      index={index}
+                      onOpen={() => router.push(`/stickyboard/${board.id}`)}
+                      verbs={[
+                        ...(canWrite
+                          ? [
+                              {
+                                key: "rename",
+                                label: "Rename",
+                                icon: Pencil,
+                                run: () => setRenaming(board),
+                              },
+                              {
+                                key: "duplicate",
+                                label: "Duplicate",
+                                icon: Copy,
+                                run: () => void duplicate(board),
+                              },
+                            ]
+                          : []),
+                        ...(canDelete
+                          ? [
+                              {
+                                key: "delete",
+                                label: "Delete",
+                                icon: Trash,
+                                danger: true,
+                                run: () => remove(board),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  ))}
+                </ul>
+              )}
+            </Section>
+          )}
+          {canWrite && <StartFrom onPick={setCreating} />}
         </>
       )}
       {creating && (
         <CreateDialog
-          onClose={() => setCreating(false)}
+          initial={creating}
+          onClose={() => setCreating(null)}
           onCreated={(board) => router.push(`/stickyboard/${board.id}`)}
         />
       )}
@@ -247,6 +233,90 @@ export function BoardList() {
   )
 }
 
+/** The product the page is, and what it holds, in the line the Overview gives the machine. */
+function Identity({ boards }: { boards: StickySummary[] }) {
+  const totals = boards.reduce(
+    (sum, b) => ({ notes: sum.notes + b.notes, links: sum.links + b.links }),
+    { notes: 0, links: 0 },
+  )
+  const latest = boards[0]
+  return (
+    <HostIdentity
+      logo={
+        <span className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-background">
+          <StickyboardMark className="size-8" />
+        </span>
+      }
+      title="Stickyboard"
+      facts={
+        <>
+          <span className="numeric">{plural(boards.length, "board")}</span>
+          <FactDot />
+          <span className="numeric">{plural(totals.notes, "sticky note")}</span>
+          <FactDot />
+          <span className="numeric">{plural(totals.links, "link")}</span>
+          {latest && (
+            <>
+              <FactDot />
+              <span className="min-w-0 truncate">
+                <span className="font-medium text-foreground">{latest.name}</span> edited{" "}
+                {relativeTime(latest.updatedAt)}
+              </span>
+            </>
+          )}
+          <FactDot />
+          <span>Saved on this server</span>
+        </>
+      }
+    />
+  )
+}
+
+function ListSkeleton() {
+  return (
+    <>
+      <Skeleton aria-hidden className="h-18 w-full rounded-xl" />
+      <ul aria-hidden className={GRID}>
+        {[0, 1, 2].map((index) => (
+          <li key={index}>
+            <Skeleton className="h-62 rounded-xl" />
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+/**
+ * The four starting points, drawn as the boards they make. Built once, so a
+ * card's drawing is the board New board then creates from it.
+ */
+function StartFrom({ onPick }: { onPick: (template: Template) => void }) {
+  const previews = useMemo(() => TEMPLATES.map((t) => previewOf(t.build())), [])
+  return (
+    <Section title="Start from">
+      <ChoiceGrid columns="fill">
+        {TEMPLATES.map((template, index) => (
+          <ChoiceCard
+            key={template.id}
+            index={index}
+            onClick={() => onPick(template)}
+            aria-label={`New ${template.name.toLowerCase()} board`}
+            className="gap-2"
+          >
+            <BoardPreview
+              preview={previews[index]}
+              className="h-28 w-full rounded-md border border-hairline bg-background"
+            />
+            <ChoiceCardTitle>{template.name}</ChoiceCardTitle>
+            <ChoiceCardHint>{template.hint}</ChoiceCardHint>
+          </ChoiceCard>
+        ))}
+      </ChoiceGrid>
+    </Section>
+  )
+}
+
 function BoardCard({
   board,
   index,
@@ -258,6 +328,15 @@ function BoardCard({
   onOpen: () => void
   verbs: Verb[]
 }) {
+  // The colours the board is written in, most used first: a wall of pink
+  // questions and yellow tasks says which it is before its name does.
+  const colours = useMemo(() => {
+    const used = new Map<string, number>()
+    for (const note of board.preview.notes) {
+      if (note.kind === "sticky") used.set(note.color, (used.get(note.color) ?? 0) + 1)
+    }
+    return [...used.entries()].sort((a, b) => b[1] - a[1]).map(([colour]) => colour)
+  }, [board.preview])
   return (
     <li className="min-w-0">
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
@@ -272,7 +351,7 @@ function BoardCard({
           >
             <BoardPreview
               preview={board.preview}
-              className="h-40 w-full rounded-t-xl border-b border-hairline bg-background"
+              className="h-44 w-full rounded-t-xl border-b border-hairline bg-background"
             />
             <div className="flex min-w-0 items-start gap-2 px-3.5 py-3">
               <div className="min-w-0 flex-1">
@@ -288,12 +367,25 @@ function BoardCard({
                 >
                   {board.name}
                 </button>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  <span className="numeric">{plural(board.notes, "note")}</span>
-                  {" · "}
-                  <span className="numeric">{plural(board.links, "link")}</span>
-                  {" · edited "}
-                  {relativeTime(board.updatedAt)}
+                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                  {colours.length > 0 && (
+                    <span className="flex shrink-0 items-center -space-x-0.5">
+                      {colours.slice(0, 5).map((colour) => (
+                        <span
+                          key={colour}
+                          data-note-color={colour}
+                          className="size-2.5 rounded-sm border border-(--note-edge) bg-(--note)"
+                        />
+                      ))}
+                    </span>
+                  )}
+                  <span className="min-w-0 truncate">
+                    <span className="numeric">{plural(board.notes, "note")}</span>
+                    {" · "}
+                    <span className="numeric">{plural(board.links, "link")}</span>
+                    {" · edited "}
+                    {relativeTime(board.updatedAt)}
+                  </span>
                 </p>
               </div>
               <div className="-mt-1 -mr-1.5 flex shrink-0 items-center">
@@ -312,14 +404,16 @@ function BoardCard({
 }
 
 function CreateDialog({
+  initial,
   onClose,
   onCreated,
 }: {
+  initial: Template
   onClose: () => void
   onCreated: (board: StickyBoard) => void
 }) {
   const [name, setName] = useState("")
-  const [template, setTemplate] = useState<Template>(TEMPLATES[0])
+  const [template, setTemplate] = useState<Template>(initial)
   const [pending, setPending] = useState(false)
   // Built once while the dialog is open, so each card's drawing and the board
   // created from it are the same board.
