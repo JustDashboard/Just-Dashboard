@@ -177,13 +177,15 @@ export function FleetTable({
                 )}
                 <TableCell className="numeric text-right">
                   {stored !== undefined ? (
-                    // The figure beside a short bar against the largest, in
-                    // the database's hue, as Live's readings are drawn.
-                    <span className="inline-flex items-center justify-end gap-2">
+                    // The figure over a short bar against the largest, in the
+                    // database's hue. Under it rather than beside it: at 1280
+                    // the table fits the page with nothing to spare, and a bar
+                    // beside the figure pushed it into a sideways scroll.
+                    <span className="inline-flex min-w-8 flex-col items-stretch gap-1">
                       {bytes(stored)}
                       <span
                         aria-hidden
-                        className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-meter-track"
+                        className="h-1 w-full overflow-hidden rounded-full bg-meter-track"
                       >
                         <span
                           className="block h-full rounded-full transition-[width] duration-700 ease-out"
