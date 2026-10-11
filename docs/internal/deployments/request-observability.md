@@ -529,7 +529,10 @@ line"), and the page's tile took the same name — "Slowest tenth" named a stati
 waits for. The first list is **Visitors**: the devices, browsers and systems as coloured `BarList`s with
 their marks, and the most active people as rows — the browser over its system (`BadgedLogo`), the
 device, the address on its network, the site that sent them, the pages they opened as a trail, and how
-many — each narrowing the window to its address. The address list is **Addresses** now, keeping Block.
+many — each narrowing the window to its address. The address list is **Addresses** now, keeping Block. On Insights the readings and both charts scroll with
+the lists under them, in one scroller under the filter bar: pinned above the lists, they left a pane of
+fixed height a strip a few rows tall to scroll the lists in. On Requests the chart stays over the rows,
+which own their scroll.
 The response-time ladder is said in a sentence over it ("Half of the requests were answered within …").
 
 `TrafficFacets` (Insights) draws each reading as a `BarList` — Tremor's BarList pattern rewritten

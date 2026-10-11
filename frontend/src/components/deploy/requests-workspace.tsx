@@ -286,45 +286,45 @@ export function RequestsWorkspace({
   const threshold = alertLine(alerts)
   const narrowed = isNarrowed(query)
 
+  // On Insights the readings and the charts scroll with the lists under them:
+  // pinned above the lists they left a fixed-height pane a strip of the lists
+  // to scroll. On Requests the chart stays over the rows, which own their scroll.
+  const chart = data.summary.buckets.length > 0 && (
+    <RequestChart
+      key={`chart:${windowKey}`}
+      buckets={data.summary.buckets}
+      bucketSeconds={data.summary.bucketSeconds}
+      latencyKnown={data.latency}
+      showLatency={view === "insights"}
+      markers={markers}
+      alerts={alerts}
+      total={data.summary.total}
+      failed={counts["5xx"] ?? 0}
+      custom={query.range === "custom"}
+      onReset={onReset}
+      onZoom={(from, to) =>
+        onQueryChange({
+          ...query,
+          range: "custom" as RequestRange,
+          since: from.toISOString(),
+          until: to.toISOString(),
+        })
+      }
+    />
+  )
+
   return (
     <>
       {bar}
 
-      {view === "insights" && (
-        <AudienceReadings
-          key={`readings:${windowKey}`}
-          summary={data.summary}
-          pages={query.pages}
-          onPages={() => onQueryChange({ ...query, pages: !query.pages })}
-        />
-      )}
-
-      {data.summary.buckets.length > 0 && (
-        <RequestChart
-          key={`chart:${windowKey}`}
-          buckets={data.summary.buckets}
-          bucketSeconds={data.summary.bucketSeconds}
-          latencyKnown={data.latency}
-          showLatency={view === "insights"}
-          markers={markers}
-          alerts={alerts}
-          total={data.summary.total}
-          failed={counts["5xx"] ?? 0}
-          custom={query.range === "custom"}
-          onReset={onReset}
-          onZoom={(from, to) =>
-            onQueryChange({
-              ...query,
-              range: "custom" as RequestRange,
-              since: from.toISOString(),
-              until: to.toISOString(),
-            })
-          }
-        />
-      )}
-
       {view === "insights" ? (
         <div key={`insights:${windowKey}`} className="min-h-0 flex-1 animate-rise overflow-auto">
+          <AudienceReadings
+            summary={data.summary}
+            pages={query.pages}
+            onPages={() => onQueryChange({ ...query, pages: !query.pages })}
+          />
+          {chart}
           <TrafficFacets
             summary={data.summary}
             slowest={data.slowest}
@@ -347,52 +347,55 @@ export function RequestsWorkspace({
           <WindowNotes data={data} className="border-t border-hairline px-3 py-2" />
         </div>
       ) : (
-        <RequestConsole
-          entries={rows}
-          summary={data.summary}
-          latencyKnown={data.latency}
-          paused={live ? tail.paused : undefined}
-          onPausedChange={live ? tail.setPaused : undefined}
-          held={tail.held}
-          onFilterPath={(path) => onQueryChange({ ...query, path })}
-          onFilterClient={(client) => onQueryChange({ ...query, client })}
-          onBlock={onBlock}
-          blockState={blocks.state}
-          blockUnavailable={blocks.unavailable}
-          onEventsAround={onEventsAround}
-          outputFor={outputFor}
-          renderInline={renderInline && ((entry) => renderInline(entry, data))}
-          leading={
-            <ClassChips
-              selected={query.classes}
-              counts={counts}
-              onChange={(classes) => onQueryChange({ ...query, classes })}
-            />
-          }
-          // The window's total is the chart's head and the chips' sum, so
-          // the footer starts at what neither says: the stream's state, or
-          // how many of the window were page views.
-          status={
-            live ? (
-              <Status {...socketReading(tail.state)} className="text-hint" />
-            ) : !query.pages ? (
-              <span className="numeric whitespace-nowrap">
-                {plural(data.summary.pages, "page view")}
-              </span>
-            ) : undefined
-          }
-          footer={<WindowNotes data={data} percentiles />}
-          empty={
-            <EmptyState
-              title="No requests in this window"
-              description={
-                narrowed
-                  ? "Nothing matched. Widen the window or clear the filters."
-                  : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
-              }
-            />
-          }
-        />
+        <>
+          {chart}
+          <RequestConsole
+            entries={rows}
+            summary={data.summary}
+            latencyKnown={data.latency}
+            paused={live ? tail.paused : undefined}
+            onPausedChange={live ? tail.setPaused : undefined}
+            held={tail.held}
+            onFilterPath={(path) => onQueryChange({ ...query, path })}
+            onFilterClient={(client) => onQueryChange({ ...query, client })}
+            onBlock={onBlock}
+            blockState={blocks.state}
+            blockUnavailable={blocks.unavailable}
+            onEventsAround={onEventsAround}
+            outputFor={outputFor}
+            renderInline={renderInline && ((entry) => renderInline(entry, data))}
+            leading={
+              <ClassChips
+                selected={query.classes}
+                counts={counts}
+                onChange={(classes) => onQueryChange({ ...query, classes })}
+              />
+            }
+            // The window's total is the chart's head and the chips' sum, so
+            // the footer starts at what neither says: the stream's state, or
+            // how many of the window were page views.
+            status={
+              live ? (
+                <Status {...socketReading(tail.state)} className="text-hint" />
+              ) : !query.pages ? (
+                <span className="numeric whitespace-nowrap">
+                  {plural(data.summary.pages, "page view")}
+                </span>
+              ) : undefined
+            }
+            footer={<WindowNotes data={data} percentiles />}
+            empty={
+              <EmptyState
+                title="No requests in this window"
+                description={
+                  narrowed
+                    ? "Nothing matched. Widen the window or clear the filters."
+                    : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
+                }
+              />
+            }
+          />
+        </>
       )}
     </>
   )
