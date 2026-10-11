@@ -39,7 +39,8 @@ JD_BROWSER_BASE_URL=http://127.0.0.1:<port> bun docs/audits/2026-10-11-log-filte
 After only: [the time window](after-logs-window-1440.png), [Options](after-logs-options-1440.png),
 [errors narrowed](after-logs-errors-1440.png), [the visitors' breakdowns](after-deploy-visitors-1440.png),
 [the most active visitors](after-deploy-people-1440.png), [the lists under them](after-deploy-lists-1440.png)
-and [the DNS page's new log](after-network-dns-log-1440.png).
+[the DNS page's new log](after-network-dns-log-1440.png), and the scanners notice laid out as ranked
+lists ([wide](after-scanners-1440.png), [phone](after-scanners-390.png)).
 
 ## Per-page log sources
 
