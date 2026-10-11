@@ -11,7 +11,8 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * added, not the chart library: every block on the page is plain but the one
  * holding a table, the five moving readings are tiles carrying their window
  * as a trend, each resource is a section that reads what it is now beside
- * what it did, the moments list can zoom the charts, a zoom is a link, the
+ * what it did, the moments list groups what happened together and pins or
+ * zooms it, a zoom is a link, the
  * window exports as a file, and the live feed can be paused.
  * The screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
@@ -40,7 +41,7 @@ async function framedNonTables(page: Page) {
 test("the metrics page is readings on the page, not boxes", async ({ page }) => {
   await page.goto("/metrics")
   await expect(page.getByRole("heading", { name: "Metrics" })).toHaveClass(/sr-only/)
-  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
 
   // The five readings that move, as the Overview draws them: hairlines
   // between, nothing around, each over its line across the window on screen.
@@ -82,7 +83,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
 
 test("each resource reads what it is now beside what it did", async ({ page }) => {
   await page.goto("/metrics")
-  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
 
   // Every core is a column filled to its share.
   const cores = page.getByRole("list", { name: "Cores" }).getByRole("meter")
@@ -125,13 +126,42 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
   ).toBeVisible()
 })
 
-test("a moment zooms the charts and the zoom is a link", async ({ page }) => {
+test("an incident is the signals that came together, and pins or zooms the charts", async ({
+  page,
+}) => {
+  // Two cold loads of the page, one of them a zoomed link.
+  test.setTimeout(60_000)
   await page.goto("/metrics")
-  await page.getByRole("button", { name: /CPU peaked at 97%/ }).click({ timeout: 20_000 })
+  const panel = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Notable moments" }),
+  })
+  const incidents = panel.getByRole("list", { name: "Incidents" }).locator(":scope > li")
 
+  // The failed deploy and the spike it caused are one incident, led by the
+  // deploy, rather than five rows stamped with the same minute.
+  await expect(incidents).toHaveCount(1, { timeout: 20_000 })
+  await expect(panel.getByText("1 incident · 5 signals")).toBeVisible()
+  const incident = panel.getByRole("button", { name: /api deploy failed/ })
+  for (const signal of ["CPU 97%", "load 5.20", "disk 45 ms"]) {
+    await expect(incidents.first().getByText(signal, { exact: true })).toBeVisible()
+  }
+
+  // Pressing it pins its moment on every chart and leaves the window alone.
+  await incident.click()
+  await expect(incident).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toBeVisible()
+  await expect(page).not.toHaveURL(/[?&]from=/)
+  await incident.click()
+  await expect(incident).toHaveAttribute("aria-pressed", "false")
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toHaveCount(0)
+
+  // Zooming is the row's own verb, and the moment stays pinned through it.
+  await panel.getByRole("button", { name: "Zoom the charts to this incident" }).click()
   await expect(page).toHaveURL(/[?&]from=\d+&to=\d+/)
   await expect(page.getByText(/^\d+[smhd] window$/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Copy link to this window" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toBeVisible()
+  await expect(incident).toHaveAttribute("aria-pressed", "true")
 
   // Opening the link lands on the same span rather than the named range.
   const url = page.url()
@@ -144,7 +174,7 @@ test("a moment zooms the charts and the zoom is a link", async ({ page }) => {
 
 test("the window exports as a spreadsheet", async ({ page }) => {
   await page.goto("/metrics")
-  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
   // The tiles compare this window with the one before it.
   await expect(page.locator("[data-slot=stat-tile]", { hasText: "CPU" }).first()).toContainText("+")
 
@@ -188,7 +218,7 @@ for (const width of [1280, 1720]) {
   test(`looks right at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 3400 })
     await page.goto("/metrics")
-    await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
     await expect(page.locator(".recharts-cartesian-grid").first()).toBeAttached({
       timeout: 20_000,
     })
@@ -257,7 +287,7 @@ test("workspace: a pinned moment has readings, adjacent samples and a precise lo
 
 test("connections are charted by how they fared", async ({ page }) => {
   await page.goto("/metrics")
-  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
   const panel = (title: string) =>
     page.locator("[data-slot=panel]", { has: page.getByRole("heading", { name: title }) })
   for (const title of ["Resent segments", "Connection RTT", "Failed connections"]) {
