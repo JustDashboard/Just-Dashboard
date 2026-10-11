@@ -52,6 +52,7 @@ import {
   Plus,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
+import { StickyGlyph } from "@/components/stickyboard/glyphs"
 
 /**
  * Every destination in the product, once.
@@ -207,6 +208,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     label: "Workspace",
     items: [
       { title: "Boards", href: "/boards", icon: Pencil },
+      { title: "Stickyboard", href: "/stickyboard", icon: StickyGlyph },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
       { title: "Git", href: "/git", icon: GitHubMark },

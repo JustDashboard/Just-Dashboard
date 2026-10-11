@@ -1,5 +1,6 @@
 import { get } from "@/lib/api"
 import type { BoardSummary } from "@/lib/boards"
+import type { StickySummary } from "@/lib/stickyboard"
 import type {
   BackupJob,
   ComposeStack,
@@ -363,6 +364,26 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           label: "Edited",
           value: board.updatedAt ? relativeTime(board.updatedAt) : "",
         }),
+      })),
+  },
+  {
+    kind: "stickyboard",
+    label: "Stickyboards",
+    read: async (signal) =>
+      (await get<StickySummary[]>("/stickyboards/", undefined, signal)).map((board) => ({
+        ...resource(
+          "stickyboard",
+          board.id,
+          board.name,
+          `/stickyboard/${board.id}`,
+          `${plural(board.notes ?? 0, "note")} · ${plural(board.links ?? 0, "link")}`,
+          [String(board.id)],
+        ),
+        facts: facts(
+          { label: "Notes", value: String(board.notes ?? 0) },
+          { label: "Links", value: String(board.links ?? 0) },
+          { label: "Edited", value: board.updatedAt ? relativeTime(board.updatedAt) : "" },
+        ),
       })),
   },
 ]

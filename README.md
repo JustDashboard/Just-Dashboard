@@ -135,6 +135,7 @@ free.
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs
 - Boards: Excalidraw sketches with live cards for the host, projects and databases
+- Stickyboard: endless boards of sticky notes you colour, group into sections and link together
 
 </td>
 <td width="50%" valign="top">
