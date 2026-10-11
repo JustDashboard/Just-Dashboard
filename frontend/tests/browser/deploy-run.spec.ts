@@ -636,6 +636,64 @@ test("visit and the ready block appear only when this run's release is the live 
   await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
 })
 
+test("a preview's run is live by its own environment and visited at the preview's address", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const address = "https://host.tailnet.ts.net:21000"
+  const previewRun = { state: "succeeded" as const, environmentId: 40, releaseId: 61, endedAt: now }
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot(previewRun)))
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(previewRun), ts: Date.now() }))
+  })
+  await page.route("**/api/v1/deploy/7/environments/40/releases*", (route) =>
+    json(route, [
+      {
+        id: 61,
+        projectId: 7,
+        environmentId: 40,
+        number: 1,
+        runId: 84,
+        state: "live",
+        planRevision: 2,
+        sourceRevision: "b1f8547",
+        strategy: "blue_green",
+        expectedDowntime: false,
+        createdAt: now,
+        activatedAt: now,
+        pinned: false,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/deploy/7/previews", (route) =>
+    json(route, [
+      {
+        id: 3,
+        triggerId: 5,
+        providerRef: "4",
+        environmentId: 40,
+        environmentSlug: "pr-4",
+        state: "open",
+        updatedAt: now,
+        number: 4,
+        liveReleaseId: 61,
+        address: { kind: "tailnet", url: address, port: 21000, published: true },
+      },
+    ]),
+  )
+  await page.goto("/deploy/7/runs/84")
+  await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Superseded/)).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveAttribute(
+    "href",
+    address,
+  )
+  await expect(page.getByRole("link", { name: address })).toBeVisible()
+  // Redeploy would enqueue on production's terms; a preview is tested again from its pull request.
+  await expect(page.getByRole("button", { name: "Redeploy" })).toHaveCount(0)
+  await expect(page.locator('[data-slot="run-identity"]').getByText("PR 4")).toBeVisible()
+})
+
 test("a Stop that succeeded reads as stopped and offers Start, not as a deploy that went live", async ({
   page,
 }, testInfo) => {

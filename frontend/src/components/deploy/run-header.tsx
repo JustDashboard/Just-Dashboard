@@ -54,6 +54,7 @@ export function RunHeader({
   run,
   release,
   deployment,
+  environment,
   product,
   branch: configured,
   steps,
@@ -66,6 +67,8 @@ export function RunHeader({
   /** The release the run made, whose commit names a run that recorded none. */
   release?: DeploymentRelease
   deployment?: DeploymentSummary
+  /** The environment the run deployed to, when it is not the project's own — a preview's. */
+  environment?: string
   /** What the project is, as its own pages read it. */
   product?: string
   branch?: string
@@ -174,7 +177,7 @@ export function RunHeader({
           <span className="font-medium text-foreground/85">{operationLabel(run.operation)}</span>
           <span>{runTriggerLine(run)}</span>
         </span>
-        {deployment && <span>{deployment.environmentName}</span>}
+        {(environment || deployment) && <span>{environment ?? deployment?.environmentName}</span>}
         <time dateTime={run.requestedAt} title={relativeTime(run.requestedAt)}>
           {timestamp(run.requestedAt)}
         </time>

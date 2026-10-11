@@ -1819,8 +1819,13 @@ health checks as rows, a Dockerfile, a command and any record nested past two le
 `--tag-*` hues, and the record as it was kept in a fold. Runtime logs and Metrics around activation
 were views of this page until 2026-10-05; what a release does once it runs is the project's Logs and
 Runtime pages. A successful run shows Visit
-only when its recorded release is the project's current live release; the success block waits for the
-project read so it never flashes Superseded first.
+only when its recorded release is the current live release of the run's own environment; the success
+block waits for the project read so it never flashes Superseded first. A pull request preview is an
+environment of its own, so its run is judged against that preview's `liveReleaseId` and visited at its
+address while it is published (`previewURL`, `lib/pull-requests.ts`), its identity line names the
+environment `PR <n>`, and it offers no Redeploy or Start, which act on production's terms — the pull
+request is tested again instead. The Deployments list reads a preview run's Live state and Visit the same
+way.
 
 Archived deployments are searchable at `/deploy?view=archived`, each drawn as what it deployed. They
 offer Restore, which says that automatic deployments and schedules stay off, and a separate permanent
