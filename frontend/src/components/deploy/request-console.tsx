@@ -435,7 +435,7 @@ export function RequestConsole({
  * the window. The bar is behind rather than beside: a separate bar column
  * costs 60px of path, and what the reader wants from it is "is this one of
  * the slow ones", which a wash answers at a glance. Past a second both the
- * figure and its bar take amber — the same line the Slowest tenth tile draws.
+ * figure and its bar take amber — the same line the Response time tile draws.
  */
 function Took({
   entry,

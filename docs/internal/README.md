@@ -114,6 +114,10 @@ strategy, and feature ownership behind those rules.
 - [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
   — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
 
+- [`../audits/2026-10-11-log-filters-insights/README.md`](../audits/2026-10-11-log-filters-insights/README.md)
+  — the log panes' one filter row and time window, Insights' readings and request visitors, and the
+  logs each page's pane now offers, with before/after screenshots.
+
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
 

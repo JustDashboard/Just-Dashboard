@@ -8,6 +8,7 @@ import {
   liveStack,
   loopSpan,
   orderedServices,
+  proxyOutput,
   queryAround,
   queryFromParams,
   queryParams,
@@ -306,5 +307,42 @@ describe("a crash loop", () => {
     expect(loop.kind).toBe("loop")
     expect(loop.exitCode).toBeUndefined()
     expect(loop.clean).toBe(true)
+  })
+})
+
+describe("the proxy among the Output view's sources", () => {
+  test("the Caddy ingress is every route's, so it is read for this project's names", () => {
+    expect(proxyOutput({ ingress: "caddy", hosts: ["a.example.com", "b.example.com"] })).toEqual({
+      source: {
+        id: "docker:caddy",
+        label: "Proxy (Caddy)",
+        kind: "docker",
+        lens: "caddy",
+        product: "caddy",
+        detail: "The Caddy ingress, shared by every route on it",
+      },
+      ask: { fields: { host: ["a.example.com", "b.example.com"] } },
+    })
+    // A project with no domain yet has no name to narrow by, and is not narrowed to nothing.
+    expect(proxyOutput({ ingress: "caddy", hosts: [] })?.ask).toBeUndefined()
+  })
+
+  test("an nginx site's error file is its own and is read whole", () => {
+    const proxied = proxyOutput({
+      errorLog: "/var/log/nginx/just-dashboard-env-7.error.log",
+      hosts: ["a.example.com"],
+    })
+    expect(proxied.source).toMatchObject({
+      id: "file:/var/log/nginx/just-dashboard-env-7.error.log",
+      label: "Proxy (nginx)",
+      lens: "nginx-error",
+      product: "nginx",
+    })
+    expect(proxied.ask).toBeUndefined()
+  })
+
+  test("a record that names neither has no proxy to read", () => {
+    expect(proxyOutput({ hosts: ["a.example.com"] })).toBeUndefined()
+    expect(proxyOutput(undefined)).toBeUndefined()
   })
 })

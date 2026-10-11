@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { DeviceList, GROUPS } from "@/components/network/interfaces/device-list"
 import { DeviceSheet } from "@/components/network/interfaces/device-sheet"
 import { CreateDevice } from "@/components/network/interfaces/create-device"
+import { InterfacesLog } from "@/components/network/interfaces/interfaces-log"
 import { Namespaces } from "@/components/network/interfaces/namespaces"
 import {
   NamespaceSheet,
@@ -33,7 +34,8 @@ import { useLiveTraffic } from "@/components/network/use-live-traffic"
  * veths and the kernel's own fallback devices, which are most of a busy
  * host's list and none of what anybody comes here for. The command to make
  * a device sits with the list it adds to. Under the devices, the other
- * network stacks on the machine: the named namespaces, and each container's.
+ * network stacks on the machine: the named namespaces, and each container's;
+ * and last what the kernel and the network daemon logged about the links.
  *
  * Its old figures (devices, up, the default route, public addresses) each
  * went where they are said better: the counts are the filter chips', the
@@ -179,6 +181,7 @@ function Interfaces() {
         }}
         onOpen={(ns) => setInspecting({ kind: ns.kind, name: ns.name })}
       />
+      <InterfacesLog />
       <NamespaceSheet
         target={inspecting}
         links={withRates}

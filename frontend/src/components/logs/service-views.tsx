@@ -6,11 +6,10 @@ import { useSessionState } from "@/lib/view-state"
 import type { DbFleet, DbFleetEntry, DbLogSources, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import type { ServiceLogSource, ServiceLogsView } from "@/components/logs/service-logs"
-import { containerEventsView } from "@/components/docker/container-events"
-import { unitRunsView } from "@/components/procs/unit-runs"
 import { databaseQueriesView } from "@/components/database/ops/queries-view"
 import { EMPTY_REQUEST_QUERY, completeQuery } from "@/components/deploy/logs-model"
 import type { RequestQuery } from "@/components/deploy/requests-workspace"
+import { kindViews } from "@/components/logs/kind-views"
 import { RecordRequests, recordQueryKey, type OpenLog } from "@/components/logs/request-records"
 import {
   containerConnection,
@@ -45,12 +44,7 @@ export function serviceViews(
   finds: ServiceFinds,
   { openLog, onQuery }: { openLog: OpenLog; onQuery?: (conn: DbFleetEntry, sql: string) => void },
 ): ServiceLogsView[] {
-  const views: ServiceLogsView[] = []
-  const target = source.id.slice(source.id.indexOf(":") + 1)
-  if (source.kind === "docker") views.push(containerEventsView({ containerId: target }))
-  if (source.kind === "stack") views.push(containerEventsView({ stack: target }))
-  // The whole journal is every unit's, and runs are one unit's.
-  if (source.kind === "journal" && target) views.push(unitRunsView(target))
+  const views = kindViews(source)
   const database = finds.database
   if (database) {
     views.push(databaseQueriesView(database, onQuery && ((sql) => onQuery(database, sql))))

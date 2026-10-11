@@ -168,7 +168,9 @@ export function StatButton({
       onClick={onClick}
       aria-label={label}
       aria-pressed={pressed}
-      className="group relative block h-full w-full min-w-0 text-left focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
+      // A column, not a block: a button centres its content vertically, so a
+      // tile with no trend beside one with a trend sat half a line lower.
+      className="group relative flex h-full w-full min-w-0 flex-col text-left focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
     >
       {children}
       <Filter

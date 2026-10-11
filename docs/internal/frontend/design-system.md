@@ -552,7 +552,10 @@ never the first the reader hears of a rule; a run of them is `aria-live="polite"
 **A run of filter chips is a `ChipStrip`** (`tabs.tsx`). On a phone it scrolls sideways and bleeds
 to the page's gutter, so the chip cut off at the edge is the cue that there are more; wrapped, a
 strip of five broke into ragged lines with the last chip alone and pushed the list it filters a
-screen down. From `sm` it wraps as chips always have. A chip that is a legend — the request log's
+screen down. From `sm` it wraps as chips always have. **A chip has an edge at rest** — `--input`, the
+outline every field and outline button beside it has — and chosen, the accent ground under
+`--border-strong`. Bare text until chosen, a chip in the log pane's filter row beside bordered fields
+read as a caption: "Errors 238" was a word with a number, not a thing to press. A chip that is a legend — the request log's
 status families — may colour its count for the chosen state, so "5xx 13" says which thirteen.
 
 **A confirmation names its subject.** `ConfirmRequest.subject` draws the thing an act touches above
@@ -2540,6 +2543,43 @@ at every width. The same pass fixed every service page's pane (`ServiceLogs` —
 outlined box between the source's facts and the view tabs, splitting the strip and reading as one
 more tab. The strip is the name and facts, the views, then the page's commands as glyphs at its end,
 Export an `IconAction`.
+
+**The log panes' filters took one shape on 2026-10-11**, at the operator's request, everywhere a log
+is read — `/logs`, every service page's `ServiceLogs` and both request workspaces — because the bar
+over the lines was four kinds of control in a row: a brand Search standing alone, a filled select
+reading "Custom range" with its two date fields a row lower, a ghost More, bare chips, and two glyphs at
+the end of the field that read as the `/` shortcut and a letter "B". Now:
+
+- **One face for the bar.** The search field carries its `.*` and `Aa` switches and, where the words
+  wait for Enter, Search — the one command, on the brand face — inside its own edge (`InputGroup`); the
+  unit, the window, Options, and on a request record Took, Live and Export, are outline controls at the
+  field's height, a pressed one on the accent ground.
+- **The window is one control** (`logs/time-window.tsx`): its trigger always names what is on screen —
+  *Live* with the socket's dot, a preset, or the span — and its popover holds the tail, six presets one
+  press each, and a span typed as two times with one Apply. A preset picked on the stream opens History
+  over it.
+- **Every narrowing is in one row**, and stays in sight: Options' settings as chips that clear them, the
+  level chips (a dot in each level's swatch, an error count red and a warning amber), Fields, the quick
+  views and the readings, with **Clear filters** at the row's end. The levels had sat on the strip above
+  the lines, the chart between the two rows of narrowings.
+- **The strip over the lines says what is being read**: *Live* with the last minute's pace — thirty
+  two-second columns by the lines' own times, errors red at their tops, sliding while the socket is
+  open, so a quiet tail reads as quiet and alive rather than frozen (§11 *live*, nothing new) — or
+  History's matches. How the lines are drawn is one segmented group (Wrap, Time, Colour, Repeats), each
+  segment filled while on; Pause, Copy and Clear are glyphs.
+- **Colour that names a level**: info is the chart blue rather than ink, so a healthy day's histogram
+  is a blue field with amber and red where they happened, not a grey wall. The histogram is taller,
+  reads a column out by series under the pointer, and takes a drag as well as a press.
+- **Insights says the window in words first.** A log's opens on its lines, errors, warnings (each
+  narrowing to itself), busiest minute and its measure's p95 or distinct addresses, every figure with
+  its line across the window. A request record's opens on who came: **Visitors** (distinct people —
+  an address and a browser that opened a page; never a crawler, a script or a probe), page views, bots
+  and scripts, the site that sent them as itself and the devices as one bar in their colours, then
+  the people as a list — the browser on its system, the device, the address, their trail of pages —
+  above the address list (renamed **Addresses**) that keeps Block. `BarList` takes a `color` for a run
+  of kinds (devices in the `--tag-*` hues, browsers and systems by `hueFor(name, LANES)`), which then
+  reads as a legend instead of one grey column. The p95 chart and tile are **Response time**, captioned
+  in words.
 
 **Docker's Events page took the overhaul on 2026-10-08**, at the operator's request, because it
 was the greyest page in the section: one plain column of 13px sentences with a grey dot each, no

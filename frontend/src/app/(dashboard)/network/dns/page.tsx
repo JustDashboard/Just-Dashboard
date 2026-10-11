@@ -12,6 +12,7 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Adblock } from "@/components/network/dns/adblock"
+import { DNSLog } from "@/components/network/dns/dns-log"
 import { DNSSECChainCheck } from "@/components/network/dns/dnssec-chain"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
 import { LinkScopes } from "@/components/network/dns/link-scopes"
@@ -49,7 +50,8 @@ import { useAuth } from "@/hooks/use-auth"
  * certificates the DoT servers present, the ad-blocker the page found (handed
  * to its native connection) or the two ways to get one, the host's own
  * records, the race that asks one name of chosen resolvers, and the chain of
- * trust a name rests on.
+ * trust a name rests on, and last the log of whatever answers: resolved's
+ * unit, the resolver programs and the containers.
  *
  * The chain is read every ten seconds. A wire into the stub carries while the
  * resolver's transaction count rose over the last interval; the wire to the
@@ -196,6 +198,7 @@ export default function NetworkDNSPage() {
           <DNSSECChainCheck />
         </Section>
       )}
+      <DNSLog view={view} />
     </Page>
   )
 }

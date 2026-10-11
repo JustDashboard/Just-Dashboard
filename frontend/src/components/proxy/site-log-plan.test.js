@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { NGINX_ERROR_LOG, siteHosts, siteLogPlan } from "./site-log-plan"
+import { NGINX_ERROR_LOG, siteHosts, siteLogPlan, upstreamLogSources } from "./site-log-plan"
 
 const vhost = (over) => ({
   name: "shop",
@@ -110,4 +110,91 @@ test("a wildcard, a regex name and nginx's catch-all equal no host a line can ca
   expect(
     siteHosts({ serverNames: ["_", "*.example.com", "~^www\\d+", "app.example.com"] }),
   ).toEqual(["app.example.com"])
+})
+
+const socket = (over) => ({
+  protocol: "tcp",
+  family: "ipv4",
+  address: "127.0.0.1",
+  port: 3000,
+  pid: 2210,
+  process: "node",
+  ...over,
+})
+
+test("a site that writes to nginx's shared log is offered that file, narrowed to nothing", () => {
+  const shared = siteLogPlan(vhost({ accessLog: "/var/log/nginx/access.log" }), spec({}), undefined)
+  expect(shared.unrecorded).toBe("shared")
+  expect(shared.sources.map((s) => [s.id, s.lens])).toEqual([
+    [`file:${NGINX_ERROR_LOG}`, "nginx-error"],
+    ["file:/var/log/nginx/access.log", "http-access"],
+  ])
+  // The errors still lead: the pane opens on them, since no request record is its own.
+  expect(shared.errors.source).toBe(`file:${NGINX_ERROR_LOG}`)
+  // A site with its own file reads that, and one that logs nothing has none to offer.
+  const own = siteLogPlan(
+    vhost({ accessLog: "/var/log/nginx/shop.access.log" }),
+    spec({ accessLogPath: "/var/log/nginx/shop.access.log" }),
+    undefined,
+  )
+  expect(own.sources.map((s) => s.id)).not.toContain("file:/var/log/nginx/access.log")
+  const off = siteLogPlan(
+    vhost({ accessLog: "/var/log/nginx/access.log" }),
+    spec({ accessLog: false }),
+    undefined,
+  )
+  expect(off.unrecorded).toBe("off")
+  expect(off.sources.map((s) => s.id)).toEqual([`file:${NGINX_ERROR_LOG}`])
+  // Nothing openable to name, nothing offered.
+  expect(siteLogPlan(vhost(), spec({}), undefined).sources).toHaveLength(1)
+})
+
+test("the application behind a site is read in its container's output or its unit's journal", () => {
+  const container = socket({
+    pid: 0,
+    container: { id: "abc", name: "shop-web", image: "node:22" },
+  })
+  expect(upstreamLogSources(vhost(), [container])).toEqual([
+    {
+      id: "docker:shop-web",
+      label: "shop-web",
+      kind: "docker",
+      product: "nodejs",
+      detail: "The application this site proxies to",
+    },
+  ])
+  const unit = socket({ manager: "systemd", managerName: "shop.service" })
+  expect(upstreamLogSources(vhost(), [unit]).map((s) => [s.id, s.kind])).toEqual([
+    ["journal:shop.service", "journal"],
+  ])
+  // A socket unit starts the service whose journal it is.
+  const activated = socket({
+    manager: "systemd",
+    managerName: "shop.socket",
+    activates: "shop.service",
+  })
+  expect(upstreamLogSources(vhost(), [activated]).map((s) => s.id)).toEqual([
+    "journal:shop.service",
+  ])
+})
+
+test("a program started by hand, another machine's and two upstreams of one program", () => {
+  const byHand = socket({ manager: "session", managerName: "session-4.scope" })
+  expect(upstreamLogSources(vhost(), [byHand])).toEqual([])
+  expect(upstreamLogSources(vhost({ upstreams: ["http://10.0.0.3:3000"] }), [socket({})])).toEqual(
+    [],
+  )
+  expect(upstreamLogSources(vhost(), undefined)).toEqual([])
+  const twice = vhost({ upstreams: ["http://127.0.0.1:3000", "http://localhost:3000"] })
+  const unit = socket({ manager: "systemd", managerName: "shop.service" })
+  expect(upstreamLogSources(twice, [unit])).toHaveLength(1)
+})
+
+test("the application's log follows the proxy's in the plan, and a plan with nothing of its own stays empty", () => {
+  const unit = socket({ manager: "systemd", managerName: "shop.service" })
+  const plan = siteLogPlan(vhost(), spec({}), undefined, [unit])
+  expect(plan.sources.map((s) => s.id)).toEqual([`file:${NGINX_ERROR_LOG}`, "journal:shop.service"])
+  // The Caddy ingress that is not running leaves nothing to read, whatever the upstream is.
+  const route = vhost({ name: "just-dashboard-env-7", kind: "caddy", path: "" })
+  expect(siteLogPlan(route, undefined, undefined, [unit]).sources).toEqual([])
 })

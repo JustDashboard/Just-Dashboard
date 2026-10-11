@@ -13,8 +13,8 @@ import {
 import {
   Backspace,
   BlendMode,
-  Check,
   ChevronDoubleDown,
+  ChevronDown,
   ChevronRight,
   Clock,
   CodeWrap,
@@ -462,33 +462,43 @@ export function LogConsole({
           dedupe={collapseRepeats ? dedupe : undefined}
           className="@md:hidden"
         />
-        <ToolbarToggle
-          active={wrap}
-          onClick={() => setLogView({ wrap: !wrap })}
-          icon={CodeWrap}
-          label="Wrap"
-          hint="Wrap long lines instead of scrolling sideways"
-          className="@max-md:hidden"
-        />
-        <TimeMenu time={time} className="@max-md:hidden" />
-        <ToolbarToggle
-          active={highlight}
-          onClick={() => setLogView({ highlight: !highlight })}
-          icon={BlendMode}
-          label="Colour"
-          hint={COLOUR_HINT}
-          className="@max-md:hidden"
-        />
-        {collapseRepeats && (
+        {/* How the lines are drawn is one group with one edge, each switch a
+            segment that fills while it is on; the commands after it are
+            glyphs. A row of loose buttons where some had a ground and some
+            did not read as four different kinds of control. */}
+        <div
+          role="group"
+          aria-label="How the lines are drawn"
+          className="flex h-7 shrink-0 items-stretch divide-x divide-input overflow-hidden rounded-md border border-input @max-md:hidden"
+        >
           <ToolbarToggle
-            active={dedupe}
-            onClick={() => setLogView({ dedupe: !dedupe })}
-            icon={Layers}
-            label="Repeats"
-            hint={REPEATS_HINT}
-            className="@max-md:hidden"
+            grouped
+            active={wrap}
+            onClick={() => setLogView({ wrap: !wrap })}
+            icon={CodeWrap}
+            label="Wrap"
+            hint="Wrap long lines instead of scrolling sideways"
           />
-        )}
+          <TimeMenu time={time} />
+          <ToolbarToggle
+            grouped
+            active={highlight}
+            onClick={() => setLogView({ highlight: !highlight })}
+            icon={BlendMode}
+            label="Colour"
+            hint={COLOUR_HINT}
+          />
+          {collapseRepeats && (
+            <ToolbarToggle
+              grouped
+              active={dedupe}
+              onClick={() => setLogView({ dedupe: !dedupe })}
+              icon={Layers}
+              label="Repeats"
+              hint={REPEATS_HINT}
+            />
+          )}
+        </div>
         <ToolbarToggle
           onClick={copyAll}
           icon={Copy}
@@ -983,21 +993,21 @@ function ViewMenu({
  * The time column's reading, as the Time toggle's menu. The accessible name
  * stays "Time", the name the switch it replaced had.
  */
-function TimeMenu({ time, className }: { time: LogTime; className?: string }) {
+function TimeMenu({ time }: { time: LogTime }) {
   return (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant={time !== "off" ? "secondary" : "ghost"}
-              className={cn("h-7 shrink-0 gap-1.5 px-2 text-xs", className)}
+            <button
+              type="button"
               aria-label="Time"
+              className={cn(SEGMENT, time !== "off" ? SEGMENT_ON : SEGMENT_OFF)}
             >
               <Clock className="size-3" />
-              <span className="hidden 2xl:inline">Time</span>
-            </Button>
+              <span className="hidden @3xl:inline">Time</span>
+              <ChevronDown aria-hidden className="size-3 opacity-60" />
+            </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>How the time each line was written is shown</TooltipContent>
@@ -1019,47 +1029,67 @@ function TimeMenu({ time, className }: { time: LogTime; className?: string }) {
   )
 }
 
+const SEGMENT =
+  "inline-flex shrink-0 items-center gap-1.5 px-2 text-xs transition-colors focus-ring-inset"
+const SEGMENT_ON = "bg-accent text-foreground"
+const SEGMENT_OFF = "text-muted-foreground hover:bg-accent hover:text-foreground"
+
 /**
- * A view toggle on the strip above the lines. The word appears only on the
- * widest screens: beside six level chips there is no room for five words, and
- * the glyph, the tooltip and the accessible name carry it the rest of the way.
+ * A switch or a command on the strip above the lines. A switch is a segment
+ * of the view group (`grouped`), filled while on; a command — Copy, Clear,
+ * Pause — is a glyph with no ground of its own. The word appears once the
+ * pane is wide enough for all of them; below that the glyph, the tooltip and
+ * the accessible name carry it.
  */
 function ToolbarToggle({
   active,
+  grouped,
   onClick,
   icon: Icon,
   label,
   hint,
   extra,
-  className,
 }: {
   active?: boolean
+  grouped?: boolean
   onClick: () => void
   icon: React.ComponentType<{ className?: string }>
   label: string
   hint: string
   /** A reading that stays visible at every width — the held count. */
   extra?: React.ReactNode
-  className?: string
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant={active ? "secondary" : "ghost"}
-          className={cn("h-7 shrink-0 gap-1.5 px-2 text-xs", className)}
-          aria-label={label}
-          aria-pressed={active}
-          onClick={onClick}
-        >
-          <Icon className="size-3" />
-          <span className="hidden 2xl:inline">{label}</span>
-          {extra}
-          {/* In a narrow pane the ground says it is on, and the tick was
-              width the chips beside it needed. */}
-          {active && !extra && <Check className="size-3 2xl:hidden @max-lg:hidden" />}
-        </Button>
+        {grouped ? (
+          <button
+            type="button"
+            aria-label={label}
+            aria-pressed={active}
+            onClick={onClick}
+            className={cn(SEGMENT, active ? SEGMENT_ON : SEGMENT_OFF)}
+          >
+            <Icon className="size-3" />
+            <span className="hidden @3xl:inline">{label}</span>
+          </button>
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={cn(
+              "h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground",
+              active && "bg-accent text-foreground",
+            )}
+            aria-label={label}
+            aria-pressed={active}
+            onClick={onClick}
+          >
+            <Icon className="size-3" />
+            <span className="hidden @3xl:inline">{label}</span>
+            {extra}
+          </Button>
+        )}
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>
     </Tooltip>

@@ -114,7 +114,7 @@ function SiteBody({ name }: { name: string }) {
     [],
     { enabled: nginx },
   )
-  const plan = vhost && siteLogPlan(vhost, read.data?.spec, status?.ingressContainer)
+  const plan = vhost && siteLogPlan(vhost, read.data?.spec, status?.ingressContainer, ports.data)
   // The site's last hour, for the verdict and the route's first node: the
   // record the server holds in memory, which the Requests view reads too. A
   // limit of one caps the rows, not the hour's figures.

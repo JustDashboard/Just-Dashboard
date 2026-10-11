@@ -8,7 +8,14 @@ import type { DeploymentRuntimeServices, DeploymentSourceKind } from "@/lib/type
 import { ServiceLogs, type LogWindow, type ServiceLogSource } from "@/components/logs/service-logs"
 import { EmptyState } from "@/components/state"
 import { serviceProduct } from "@/components/deploy/service-product"
-import { liveStack, orderedServices, type Lead } from "@/components/deploy/logs-model"
+import {
+  PROXY_SERVICE,
+  liveStack,
+  orderedServices,
+  proxyOutput,
+  type Lead,
+  type ProxyLog,
+} from "@/components/deploy/logs-model"
 
 /** What `?service=` says for the live release's stack as a whole. */
 export const ALL_SERVICES = "all"
@@ -23,6 +30,11 @@ export const ALL_SERVICES = "all"
  * container is read through the lens its image calls for (an application's
  * exceptions and startup failures, a database's own events), detected by the
  * server, so the quick views above the lines are that service's.
+ *
+ * The proxy in front of the project is the last source, when the request
+ * record says which it is: the Caddy ingress, read for this project's
+ * hostnames since it writes for every route, or the site's nginx error file.
+ * It is where a 502 says why, beside what the application said at the time.
  *
  * Live and History only: the page has one Insights, the requests', and the
  * output's own ranking — its exceptions, its startup failures — is a section
@@ -39,6 +51,7 @@ export function ProjectOutput({
   kind,
   product,
   lead,
+  proxy,
   service,
   onServiceChange,
   moment,
@@ -50,7 +63,9 @@ export function ProjectOutput({
   product?: string
   /** Which container is the application, which leads the picker. */
   lead: Lead
-  /** A container id, `all`, or nothing: what the address asked for. */
+  /** The proxy that answers for the project, once the request record has said which. */
+  proxy?: ProxyLog
+  /** A container id, `all`, `proxy`, or nothing: what the address asked for. */
   service?: string
   onServiceChange: (service: string) => void
   moment?: string
@@ -61,6 +76,7 @@ export function ProjectOutput({
     [runtime, lead],
   )
   const stack = liveStack(services)
+  const proxied = useMemo(() => proxyOutput(proxy), [proxy])
   const sources = useMemo<(ServiceLogSource & { service: string })[]>(
     () => [
       ...services
@@ -96,14 +112,27 @@ export function ProjectOutput({
           product: serviceProduct(s.image, kind, product),
           service: s.containerId,
         })),
+      ...(proxied ? [{ ...proxied.source, service: PROXY_SERVICE }] : []),
     ],
-    [services, stack, kind, product],
+    [services, stack, kind, product, proxied],
   )
 
+  // The proxy is named before the request record has said which it is, or
+  // when the project is no longer routed: the pane shows what it can until it
+  // is among the sources, rather than a container called "proxy" that is not.
   const asked = service
     ? (sources.find((source) => source.service === service)?.id ??
-      (service === ALL_SERVICES ? undefined : dockerSource(service)))
+      (service === ALL_SERVICES || service === PROXY_SERVICE ? undefined : dockerSource(service)))
     : null
+  // Narrowed each time the proxy is opened, and left alone once it has been:
+  // the chip it leaves is the reader's to take off.
+  const ask = useMemo(
+    () =>
+      service === PROXY_SERVICE && proxied?.ask
+        ? { ...proxied.ask, key: `${proxied.source.id}|${JSON.stringify(proxied.ask.fields)}` }
+        : undefined,
+    [service, proxied],
+  )
   const window = useMemo<LogWindow | undefined>(() => {
     const at = moment ? Date.parse(moment) : NaN
     if (!Number.isFinite(at)) return undefined
@@ -114,7 +143,7 @@ export function ProjectOutput({
     }
   }, [moment])
 
-  if (sources.length === 0) {
+  if (services.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState
@@ -143,6 +172,7 @@ export function ProjectOutput({
       window={window}
       onLeaveWindow={onLeaveMoment}
       pickerLabel="Service"
+      ask={ask}
       flush
       className="min-h-0 flex-1"
     />

@@ -28,6 +28,7 @@ import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidenc
 import { TailscaleBlock } from "@/components/network/vpn/tailscale"
 import { TunnelAlerts, TunnelRecord } from "@/components/network/vpn/record"
 import { ArchivedTunnels } from "@/components/network/vpn/archive"
+import { VPNLog } from "@/components/network/vpn/vpn-log"
 import { Modal } from "@/components/modal"
 
 /**
@@ -40,7 +41,7 @@ import { Modal } from "@/components/modal"
  * server with no tunnel opens on the one-step setup; one without the tools
  * on their install. Then Tailscale: this server's place on the tailnet, what
  * it offers, and every other machine with how it is reached; Headscale's
- * nodes under it where Headscale runs.
+ * nodes under it where Headscale runs. The log of all of it ends the page.
  *
  * Every read here names who connects, so the page is an administrator's,
  * as the SSH configuration is.
@@ -271,6 +272,8 @@ function NetworkVPNContent() {
           <TailscaleBlock tailscale={tailscale} headscale={headscale} onChanged={vpn.refresh} />
         )}
       </Section>
+
+      <VPNLog vpn={vpn.data} />
 
       {addingTunnel && adding && (
         <AddPeer

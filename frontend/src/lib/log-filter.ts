@@ -84,7 +84,9 @@ export const LEVEL_DOT: Record<LogLevel, string> = {
   critical: "bg-destructive",
   error: "bg-destructive/70",
   warn: "bg-warning",
-  info: "bg-foreground/70",
+  // Blue rather than ink: a quiet log is nearly all info, and an ink
+  // histogram of a healthy day read as a grey wall with nothing on it.
+  info: "bg-chart-2",
   debug: "bg-muted-foreground/60",
   unknown: "bg-muted-foreground/30",
 }
@@ -508,14 +510,20 @@ export function withFieldTokens(
   return { ...filter, q: parsed.q, fields }
 }
 
-export const TIME_RANGES: { id: LogTimeRange; label: string; minutes: number | null }[] = [
-  { id: "15m", label: "Last 15 minutes", minutes: 15 },
-  { id: "1h", label: "Last hour", minutes: 60 },
-  { id: "6h", label: "Last 6 hours", minutes: 360 },
-  { id: "24h", label: "Last 24 hours", minutes: 1440 },
-  { id: "7d", label: "Last 7 days", minutes: 10080 },
-  { id: "all", label: "Everything on disk", minutes: null },
-  { id: "custom", label: "Custom range", minutes: null },
+export const TIME_RANGES: {
+  id: LogTimeRange
+  label: string
+  /** The preset's name on a button in a grid of six. */
+  short: string
+  minutes: number | null
+}[] = [
+  { id: "15m", label: "Last 15 minutes", short: "15 min", minutes: 15 },
+  { id: "1h", label: "Last hour", short: "1 hour", minutes: 60 },
+  { id: "6h", label: "Last 6 hours", short: "6 hours", minutes: 360 },
+  { id: "24h", label: "Last 24 hours", short: "24 hours", minutes: 1440 },
+  { id: "7d", label: "Last 7 days", short: "7 days", minutes: 10080 },
+  { id: "all", label: "Everything on disk", short: "Everything", minutes: null },
+  { id: "custom", label: "Custom range", short: "Custom", minutes: null },
 ]
 
 export function readLogWindow(params: Pick<URLSearchParams, "get">) {

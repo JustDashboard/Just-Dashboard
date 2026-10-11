@@ -71,6 +71,9 @@ func fileLens(p string) string {
 	case under("/var/log/postgresql/"):
 		return "postgres"
 	case under("/var/log/mysql/"), under("/var/log/mariadb/"):
+		if IsQueryLog(p) {
+			return "app"
+		}
 		return "mysql"
 	case under("/var/log/redis/"), under("/var/log/valkey/"):
 		return "redis"
@@ -121,6 +124,21 @@ func fileLens(p string) string {
 	return "app"
 }
 
+// IsQueryLog reports whether a file is a MySQL-family server's slow or general
+// query log rather than its error log. They are written beside the error log,
+// which is how a directory alone names them mysql's, but they are blocks of
+// comment lines and bare statements, not the lines the mysql lens reads.
+//
+// An `.err` file is always the error log: MySQL names it after the host by
+// default, and a host called general-db1 is not writing a general log there.
+func IsQueryLog(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	if strings.HasSuffix(base, ".err") {
+		return false
+	}
+	return strings.Contains(base, "slow") || strings.Contains(base, "general")
+}
+
 // ImageLens reads a container image reference: the repository's last path
 // segment, matched by prefix, so postgres:17, docker.io/library/postgres,
 // bitnami/postgresql and ghcr.io/x/timescaledb-ha all land on the same lens.
@@ -168,7 +186,9 @@ var imageRules = []struct {
 
 // unitLens reads a systemd unit's name. Only the service's own name is
 // consulted — a unit called "api.service" is an application whatever it
-// runs, and guessing from its description would be guessing.
+// runs, and guessing from its description would be guessing. The one thing
+// known without a guess is the host's own infrastructure, which is not an
+// application and would be offered HTTP statuses and exceptions to filter by.
 func unitLens(unit string) string {
 	name := strings.ToLower(strings.TrimSuffix(unit, ".service"))
 	switch name {
@@ -192,7 +212,46 @@ func unitLens(unit string) string {
 			}
 		}
 	}
+	if systemDaemon(name) {
+		return "systemd"
+	}
 	return "app"
+}
+
+// systemDaemons are the units of the host's own plumbing: its network and
+// name service, its container runtime, and the programs every distribution
+// starts at boot. Their journal is the manager's lines about them and the
+// daemon's own prose, which is what the systemd lens leaves alone. The list is
+// names a distribution or a vendor ships, never a shape such as "ends in d":
+// a unit that is not here is assumed to be somebody's application.
+var systemDaemons = map[string]bool{
+	"tailscaled": true, "networkmanager": true, "wpa_supplicant": true,
+	"networkd-dispatcher": true, "modemmanager": true, "dnsmasq": true, "unbound": true,
+	"named": true, "bind9": true, "avahi-daemon": true, "ufw": true, "zerotier-one": true,
+	"docker": true, "containerd": true, "snapd": true, "libvirtd": true,
+	"dbus": true, "polkit": true, "rsyslog": true, "chrony": true, "chronyd": true, "ntp": true,
+	"ntpd": true, "irqbalance": true, "multipathd": true, "udisks2": true,
+	"accounts-daemon": true, "apparmor": true, "fwupd": true, "thermald": true,
+	"cloud-init": true, "cloud-init-local": true, "cloud-config": true, "cloud-final": true,
+}
+
+// systemDaemonPrefixes are the families and instances of them: every
+// systemd-* manager, one wg-quick@ unit per tunnel, a getty per terminal.
+var systemDaemonPrefixes = []string{
+	"systemd-", "networkmanager-", "wg-quick@", "openvpn@", "getty@", "serial-getty@",
+	"user@", "user-runtime-dir@", "lvm2-",
+}
+
+func systemDaemon(name string) bool {
+	if systemDaemons[name] {
+		return true
+	}
+	for _, prefix := range systemDaemonPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 var unitRules = []struct {

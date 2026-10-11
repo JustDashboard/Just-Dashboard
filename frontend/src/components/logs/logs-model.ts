@@ -325,3 +325,51 @@ export function columnWidthFor(lines: readonly LogLine[], key: string): number {
   }
   return longest === 0 ? 0 : Math.min(Math.max(longest, COLUMN_MIN), COLUMN_MAX)
 }
+
+/** Thirty columns of two seconds: the last minute, at the pace a person reads it. */
+const PULSE_SLOTS = 30
+export const PULSE_SLOT_MS = 2000
+
+export type PulseSlot = { total: number; errors: number }
+
+/**
+ * The last minute's lines by when they were written, newest at the right.
+ * Read off the lines' own timestamps rather than when the socket delivered
+ * them, so the tail the server replays on connect lands where it happened
+ * instead of as one spike at the moment the pane opened. A line with no time
+ * is not counted, and a stream of nothing but those draws no pulse at all
+ * rather than a minute of silence. Every line is looked at, not only the
+ * newest run: a stack's services and Apache's request-start times arrive out
+ * of order. `now` is the host's clock, as the caller reckons it.
+ */
+export function pulseOf(lines: readonly LogLine[], now: number): PulseSlot[] | null {
+  const slots: PulseSlot[] = Array.from({ length: PULSE_SLOTS }, () => ({ total: 0, errors: 0 }))
+  const from = now - PULSE_SLOTS * PULSE_SLOT_MS
+  let stamped = false
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (line.cont || !line.timestamp) continue
+    const at = Date.parse(line.timestamp)
+    if (Number.isNaN(at)) continue
+    stamped = true
+    if (at < from) continue
+    const slot = Math.min(PULSE_SLOTS - 1, Math.floor((at - from) / PULSE_SLOT_MS))
+    slots[slot].total++
+    if (line.level === "error" || line.level === "critical") slots[slot].errors++
+  }
+  return stamped ? slots : null
+}
+
+/**
+ * How far the browser's clock runs ahead of the host's, from a line that
+ * arrived live: it was written a moment before it was delivered, so the gap
+ * is the clocks' difference plus that moment, and the smallest gap seen is the
+ * closest reading of it. A browser a minute fast drew a busy log as quiet,
+ * every line older than its last minute.
+ */
+export function clockSkew(previous: number | undefined, arrivedAt: number, stamp: string) {
+  const written = Date.parse(stamp)
+  if (Number.isNaN(written)) return previous
+  const gap = arrivedAt - written
+  return previous === undefined ? gap : Math.min(previous, gap)
+}
