@@ -8,8 +8,15 @@ import {
 } from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
 import { engineOf, type Engine } from "@/components/database/engine"
-import { Attention } from "@/components/database/fleet/attention"
 import {
+  fleetHues,
+  fleetMarks,
+  fleetVerdict,
+  readerCount,
+  shares,
+} from "@/components/database/fleet/band"
+import {
+  fleetReadings,
   groupFleet,
   matchesQuery,
   nextSort,
@@ -18,6 +25,7 @@ import {
   type FleetSort,
   type FleetSortKey,
 } from "@/components/database/fleet/fleet"
+import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { FleetTable } from "@/components/database/fleet/fleet-table"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
@@ -34,19 +42,23 @@ import { Segments } from "@/components/deploy/settings/segments"
 import { IconAction } from "@/components/icon-action"
 import {
   ArrowRight,
+  Database,
   GridSquare,
   Plus,
   RefreshClockwise,
   Table as TableGlyph,
 } from "@/components/icons"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext, SearchInput, Section } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
+import { Status } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { relativeTime } from "@/lib/format"
+import { useMetrics } from "@/hooks/use-metrics"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry, DbTopoNode } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
@@ -62,15 +74,28 @@ const GROUPINGS: { value: FleetGrouping; label: string }[] = [
 const OFFERED = ["postgres", "redis", "mongodb"]
 
 /**
- * The control center: every database on this server, and what each needs.
+ * The control center: every database on this server, drawn as what it is.
  *
- * A reading page (§15) built from the questions somebody arriving at
- * *Databases* has, in the order they are asked. What needs a hand,
- * with the fix as the action. Then the fleet itself: every saved connection
- * as a card you open, drawn as its engine with its own readings on it,
- * shelved by where it runs — or laid across as a table when there are many to
- * compare. Under it, what discovery found on this machine that is not
- * connected yet, and the picture of what the databases feed.
+ * A reading page (§15) that opens on the server's databases as one line —
+ * their engines as their own marks, how many there are, what they store,
+ * how many sessions are open, what reads them and how many were dumped in the
+ * last day — with the verdict at its right end beside the commands. Under it
+ * the band (`fleet-band.tsx`) reads the fleet three ways the cards cannot:
+ * who holds the bytes, who is connected, and how old every newest dump is,
+ * each database in its own hue (`fleetHues`) from the bar to its card's
+ * edge. Then the fleet itself: every saved connection as a card you open,
+ * drawn as its engine with its own readings on it, shelved by where it runs —
+ * or laid across as a table when there are many to compare. Under it the
+ * picture of what the databases feed, and what discovery found on this
+ * machine that is not connected yet.
+ *
+ * It opened on a "Needs attention" list until the operator asked for it to
+ * go. Nothing it said was lost: every concern is still said, in its weight,
+ * where the thing is — the verdict and the first card on a shelf for a server
+ * that does not answer, the runway and the card's foot for a dump that is old
+ * or missing, the card's foot for a port open to the internet, and *Found on
+ * this server* for a server that waits for a password. The cards are still
+ * ordered worst first, so what needed a hand is still what is met first.
  *
  * Everything on it hangs off one read, `/databases/fleet`, which dials every
  * connection; the dump directories, the inventory and the map decorate it.
@@ -84,6 +109,7 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
+  const { host } = useMetrics()
   const inventory = useInventory(admin)
   // What a file weighs, where the engine reports no size and discovery
   // measured the file: by the connection it was found to belong to.
@@ -111,7 +137,16 @@ export function ControlCenter() {
 
   const engineFilter = address.read("engine")
   const [query, setQuery] = useTypedParam("q")
-  const { fleet, entries, backups, feeds, concernsOf, storedOf, topology } = data
+  const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
+  // Each database's hue, dealt once for the whole fleet so a filter never
+  // repaints one: the band's spans, the runway's dots, the cards' edges.
+  const hues = useMemo(() => fleetHues(entries), [entries])
+  const hueOf = useCallback(
+    (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",
+    [hues],
+  )
+  const largest = useMemo(() => shares(entries, storedOf).largest, [entries, storedOf])
+  const newestOf = useCallback((entry: DbFleetEntry) => backups.get(entry.id)?.newest, [backups])
 
   const engines = useMemo(() => {
     const seen = new Map<string, { engine: Engine; count: number }>()
@@ -267,27 +302,98 @@ export function ControlCenter() {
   const onSort = (key: FleetSortKey) => setSort((held) => nextSort(held, key))
   const position = new Map(shown.map((entry, index) => [entry.id, index]))
 
+  // The server's databases as one line: their engines as the mark, then the
+  // figures the band breaks down, each said once here and never as a tile.
+  const readings = fleetReadings(fleet.data, { backups, dumps, storedOf })
+  const verdict = fleetVerdict(readings)
+  // Engines as common as each other are drawn largest first.
+  const bySize = [...entries].sort((a, b) => (storedOf(b) ?? 0) - (storedOf(a) ?? 0))
+  const marks = fleetMarks(bySize.map((entry) => engineFor(entry).logo))
+  const readers = readerCount(topology.data)
+  const facts = [
+    <span key="count" className="numeric">
+      {plural(readings.total, "database")}
+    </span>,
+    readings.sized > 0 && (
+      <span
+        key="stored"
+        className="numeric"
+        title={
+          readings.sized < readings.total
+            ? `${readings.sized} of ${readings.total} report their size`
+            : undefined
+        }
+      >
+        {bytes(readings.bytes)} stored
+      </span>
+    ),
+    readings.answering > 0 && (
+      <span key="sessions" className="numeric">
+        {plural(readings.sessions, "session")} open
+      </span>
+    ),
+    readers > 0 && (
+      <Link
+        key="readers"
+        href={DATABASES_MAP_HREF}
+        title="Deployments, containers and machines seen reading these databases"
+        className="numeric rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
+      >
+        read by {readers}
+      </Link>
+    ),
+    readings.dumpable > 0 && (
+      <span key="fresh" className="numeric">
+        {readings.fresh} of {readings.dumpable} backed up in the last day
+      </span>
+    ),
+    readings.never > 0 && (
+      <span key="never" className="numeric font-medium text-warning">
+        {readings.never} never backed up
+      </span>
+    ),
+  ]
+    .filter(Boolean)
+    .flatMap((fact, index) => (index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact]))
+
   return (
     <Page className="animate-rise">
-      <PageContext
-        eyebrow="Apps"
-        title="Databases"
-        className="justify-end"
-        actions={
-          admin && (
-            <>
-              {scan}
-              {add}
-            </>
-          )
+      {/* The commands are at the identity line's end, beside the verdict. */}
+      <PageContext eyebrow="Apps" title="Databases" />
+
+      <HostIdentity
+        className="animate-rise"
+        logo={
+          marks.length > 0 ? (
+            <span className="flex h-12 shrink-0 items-center">
+              <ProductLogos ids={marks} size="md" />
+            </span>
+          ) : undefined
+        }
+        fallback={Database}
+        title={host?.hostname ?? "This server"}
+        facts={facts}
+        aside={
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            {verdict && <Status tone={verdict.tone} label={verdict.label} />}
+            {admin && (
+              <span className="flex items-center gap-2">
+                {scan}
+                {add}
+              </span>
+            )}
+          </div>
         }
       />
 
-      <Attention
-        data={data}
-        control={control}
-        found={admin ? found : undefined}
-        waiting={waiting}
+      <FleetBand
+        entries={entries}
+        hueOf={hueOf}
+        engineOf={engineFor}
+        storedOf={storedOf}
+        newestOf={newestOf}
+        dumps={dumps}
+        feeds={feeds}
       />
 
       <Section
@@ -401,6 +507,8 @@ export function ControlCenter() {
             backups={backups}
             feeds={feeds}
             storedOf={storedOf}
+            hueOf={hueOf}
+            largest={largest}
             control={control}
             sort={sort}
             onSort={onSort}
@@ -422,6 +530,8 @@ export function ControlCenter() {
                 backup={backups.get(entry.id)}
                 feeds={feeds.get(entry.id)}
                 stored={storedOf(entry)}
+                hue={hueOf(entry)}
+                largest={largest}
                 control={control}
                 index={position.get(entry.id) ?? 0}
               />
@@ -429,8 +539,6 @@ export function ControlCenter() {
           />
         )}
       </Section>
-
-      {foundSection}
 
       <Section
         title="What they feed"
@@ -466,6 +574,8 @@ export function ControlCenter() {
           <Skeleton className="h-40 rounded-xl" />
         )}
       </Section>
+
+      {foundSection}
 
       {dialog}
       {found.dialog}

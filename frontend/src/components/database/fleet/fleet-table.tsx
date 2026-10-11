@@ -51,6 +51,8 @@ export function FleetTable({
   backups,
   feeds,
   storedOf,
+  hueOf,
+  largest,
   control,
   sort,
   onSort,
@@ -62,6 +64,10 @@ export function FleetTable({
   feeds: Map<number, { products: string[]; count: number }>
   /** What each database holds, where anybody knows: the same answer the cards give. */
   storedOf: (entry: DbFleetEntry) => number | undefined
+  /** Each database's hue: the band's span, the card's edge, the row's key. */
+  hueOf: (entry: DbFleetEntry) => string
+  /** The largest database's size, which every row's bar is drawn against. */
+  largest: number
   control: FleetControl
   sort: FleetSort
   onSort: (key: FleetSortKey) => void
@@ -122,6 +128,11 @@ export function FleetTable({
                       own can make a long name give way. */}
                   <span className={cn("flex min-w-0 flex-col gap-0.5", wide ? "w-64" : "w-60")}>
                     <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="h-4 w-0.75 shrink-0 rounded-full"
+                        style={{ background: hueOf(entry) }}
+                      />
                       <span className="flex shrink-0" title={product}>
                         <EngineGlyph engine={engine} className={cn(down && "opacity-60")} />
                       </span>
@@ -138,7 +149,7 @@ export function FleetTable({
                     </span>
                     {!wide && (
                       <span
-                        className="flex min-w-0 items-baseline gap-1.5 pl-[1.375rem] text-hint text-muted-foreground"
+                        className="flex min-w-0 items-baseline gap-1.5 pl-[1.875rem] text-hint text-muted-foreground"
                         title={`${product} · ${where.text}`}
                       >
                         <span className="shrink-0">{product}</span>
@@ -165,7 +176,27 @@ export function FleetTable({
                   </TableCell>
                 )}
                 <TableCell className="numeric text-right">
-                  {stored !== undefined ? bytes(stored) : "—"}
+                  {stored !== undefined ? (
+                    // The figure beside a short bar against the largest, in
+                    // the database's hue, as Live's readings are drawn.
+                    <span className="inline-flex items-center justify-end gap-2">
+                      {bytes(stored)}
+                      <span
+                        aria-hidden
+                        className="h-1 w-10 shrink-0 overflow-hidden rounded-full bg-meter-track"
+                      >
+                        <span
+                          className="block h-full rounded-full transition-[width] duration-700 ease-out"
+                          style={{
+                            width: `${largest > 0 ? (stored / largest) * 100 : 0}%`,
+                            background: hueOf(entry),
+                          }}
+                        />
+                      </span>
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </TableCell>
                 <TableCell className="numeric text-right">
                   {quiet ? (
