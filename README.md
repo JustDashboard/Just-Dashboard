@@ -94,6 +94,7 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Build logs, runtime, console, request logs and traffic alerts per project
+- Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
 
 </td>

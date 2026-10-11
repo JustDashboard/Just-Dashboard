@@ -348,6 +348,58 @@ func TestDBLogSourcesSayWhyThereAreNone(t *testing.T) {
 	})
 }
 
+// The engine's lens reads the server's own log, wherever the process is found
+// writing it. The slow and general logs MySQL holds open beside it are not in
+// that format: they keep the lens their name detects, and the error log stays
+// the primary one whichever the process opened first.
+func TestDBLogSourcesKeepADriversLensForItsServerLog(t *testing.T) {
+	port := freePort(t)
+	s, router := dbLogRouter(t, auth.RoleAdmin, dbx.DriverMySQL, "jd:pw@tcp(127.0.0.1:"+strconv.Itoa(port)+")/shop")
+	dbLogEngine(t, s)
+	root := s.Cfg.LogRoots[0]
+	errorLog := filepath.Join(root, "mysql", "error.log")
+	slowLog := filepath.Join(root, "mysql", "mysql-slow.log")
+	generalLog := filepath.Join(root, "mysql", "general.log")
+	// Another place the server was told to write its error log, which only
+	// the open file says: the engine's lens is what reads it.
+	custom := filepath.Join(root, "data", "mysqld-errors.log")
+	for _, path := range []string{errorLog, slowLog, generalLog, custom} {
+		writeFile(t, path, "x\n")
+	}
+	proc := filepath.Join(t.TempDir(), "proc")
+	holdOpen(t, proc, 77, 2, errorLog, appendWrite)
+	holdOpen(t, proc, 77, 5, slowLog, appendWrite)
+	holdOpen(t, proc, 77, 6, generalLog, appendWrite)
+	holdOpen(t, proc, 77, 7, custom, appendWrite)
+	useHostProbe(t, dbHostProbe{
+		listeners: func(context.Context) ([]proxysvc.Listener, error) {
+			return []proxysvc.Listener{{Protocol: "tcp", Port: uint32(port), PID: 77, Process: "mysqld"}}, nil
+		},
+		managerOf: func(int32, string) (string, string) { return "unmanaged", "" },
+		proc:      proc, logDir: root,
+	})
+	var got dbLogSources
+	getJSON(t, router, "/databases/1/logs/sources", &got)
+	lens := map[string]string{}
+	for _, src := range got.Sources {
+		lens[src.ID] = src.Lens
+	}
+	want := map[string]string{
+		"file:" + errorLog:   "mysql",
+		"file:" + slowLog:    "app",
+		"file:" + generalLog: "app",
+		"file:" + custom:     "mysql",
+	}
+	for id, wantLens := range want {
+		if lens[id] != wantLens {
+			t.Errorf("%s is read through %q, want %q (sources %+v)", id, lens[id], wantLens, got.Sources)
+		}
+	}
+	if len(got.Sources) == 0 || got.Sources[0].ID != "file:"+errorLog || !got.Sources[0].Primary {
+		t.Errorf("the error log should lead and be primary: %+v", got.Sources)
+	}
+}
+
 // Redis opens its logfile for each line and holds nothing between, so its
 // file is found where its package writes it.
 func TestDBLogSourcesFindAConventionalLog(t *testing.T) {

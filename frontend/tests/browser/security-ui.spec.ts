@@ -912,9 +912,9 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   expect(socket.get("source")).toBe("file:/var/log/auth.log")
   // auth.log is the auth lens's on the server too, and the page hands the
   // pane the server's own description of it: no lens of its own, nothing
-  // under More, and the file is not asked after a second time.
+  // under Options, and the file is not asked after a second time.
   expect(socket.has("lens")).toBe(false)
-  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Options", exact: true })).not.toContainText(/\d/)
   expect(socket.getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
   // Found by asking after the two files, not by listing everything the
   // logs page could open.
@@ -1088,14 +1088,19 @@ test("with no ufw.log the firewall's drops are read from kern.log, then the kern
   await expect(page.getByRole("button", { name: /^Blocked\b/ })).toBeVisible()
 
   // The page's lens is where the pane starts, not a setting the reader
-  // changed: More is not lit for it, and Auto under Read as lets it go.
-  const more = page.getByRole("button", { name: "More", exact: true })
-  await expect(more).toBeVisible()
-  await more.click()
+  // changed: Options counts nothing for it, and Auto under Read as lets it
+  // go — which the filter row then says, with its way back.
+  const options = page.getByRole("button", { name: "Options", exact: true })
+  await expect(options).not.toContainText(/\d/)
+  await options.click()
   await page.getByRole("combobox", { name: "Read as" }).click()
   await page.getByRole("option", { name: /^Auto/ }).click()
   await expect.poll(() => logs.sockets.at(-1)?.has("lens")).toBe(false)
-  await expect(page.getByRole("button", { name: /^More\s*1$/ })).toBeVisible()
+  await expect(options).toContainText("1")
+  await page.keyboard.press("Escape")
+  await expect(
+    page.getByRole("button", { name: "Stop reading the log as Auto", exact: true }),
+  ).toBeVisible()
 })
 
 test("a host with neither file reads the firewall's drops from the kernel ring", async ({

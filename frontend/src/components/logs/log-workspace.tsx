@@ -4,6 +4,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ChartActivity,
   ClockRewind,
+  Cross,
+  EyeOff,
   MagnifyingGlass,
   MagnifyingGlassMinus,
   Pause,
@@ -29,6 +31,7 @@ import {
   filterQuery,
   isFilterActive,
   resolveRange,
+  TIME_RANGES,
 } from "@/lib/log-filter"
 import { LOG_FIELDS } from "@/lib/log-fields"
 import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
@@ -40,16 +43,18 @@ import { usePoll } from "@/hooks/use-poll"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { FilterBar, LevelChips, claimPane } from "@/components/logs/filter-bar"
+import { FilterBar, claimPane } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
 import { Insights } from "@/components/logs/insights"
 import { LensBar } from "@/components/logs/lens-bar"
+import { LivePulse } from "@/components/logs/live-pulse"
 import type { LensReadingsState } from "@/components/logs/lens-readings"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
 import { oneService, unitJournalLens } from "@/components/logs/logs-model"
 import { RetentionNote } from "@/components/logs/retention-note"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { TimeWindow } from "@/components/logs/time-window"
+import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Pane } from "@/components/panel"
 
@@ -67,6 +72,9 @@ function toLocalInput(date: Date) {
   const offset = date.getTimezoneOffset() * 60_000
   return new Date(date.getTime() - offset).toISOString().slice(0, 23)
 }
+
+/** The presets the time window offers; a custom span is the popover's own fields. */
+const WINDOW_PRESETS = TIME_RANGES.filter((r) => r.id !== "custom")
 
 const MODE_LABEL: Record<"live" | "search" | "insights", string> = {
   live: "Live",
@@ -101,8 +109,6 @@ type WorkspaceProps = {
   onRangeChange: (range: LogTimeRange) => void
   since: string
   until: string
-  onSinceChange: (value: string) => void
-  onUntilChange: (value: string) => void
   onCustomRange: (since: Date, until: Date) => void
   context: number
   onContextChange: (value: number) => void
@@ -115,7 +121,7 @@ type WorkspaceProps = {
    * the source as detected, "none" as plain text.
    */
   lens?: string
-  /** Offers "Read as" in the filter's More row. */
+  /** Offers "Read as" under the filter's Options. */
   onLensChange?: (lens: string) => void
   /** The lens the page named for its source: where the pane starts, not a setting the reader changed. */
   pageLens?: string
@@ -267,6 +273,10 @@ export function LogWorkspace(props: WorkspaceProps) {
 
   const lines = mode === "live" ? live.lines : (search.result?.lines ?? [])
   const counts = useMemo(() => {
+    if (mode === "insights") {
+      const facet = insightFacets?.level
+      return Object.fromEntries((facet?.values ?? []).map((v) => [v.value, v.count]))
+    }
     if (mode === "search") {
       // The level facet counts every match; the histogram only the ones with
       // a timestamp, which on a log without them was zero beside a screen of lines.
@@ -287,7 +297,7 @@ export function LogWorkspace(props: WorkspaceProps) {
       totals[level] = (totals[level] ?? 0) + 1
     }
     return totals
-  }, [mode, live.lines, search.result])
+  }, [mode, live.lines, search.result, insightFacets])
 
   const retention = usePoll(
     (signal) => get<LogRetention>("/logs/retention", { source: sourceId }, signal),
@@ -337,8 +347,138 @@ export function LogWorkspace(props: WorkspaceProps) {
     }
   }
 
+  // A window picked while the stream is on screen is a question about the
+  // past: the pane goes to the reading that answers it, History where it is
+  // offered, with that window.
+  const windowTarget: LogMode = modes.includes("search") ? "search" : "insights"
+  const leaveLive = () => {
+    if (mode === "search" || mode === "insights") return false
+    onModeChange(windowTarget)
+    started.current = true
+    return true
+  }
+  const pickWindow = (range: LogTimeRange) => {
+    props.onRangeChange(range)
+    const left = leaveLive()
+    if (mode === "search" || (left && windowTarget === "search")) search.run({ range })
+  }
+  const pickSpan = (from: Date, to: Date) => {
+    props.onCustomRange(from, to)
+    const at = { range: "custom" as const, since: toLocalInput(from), until: toLocalInput(to) }
+    const left = leaveLive()
+    const target = left ? windowTarget : mode
+    if (target === "search") search.run(at)
+    else setInsightAsk((n) => n + 1)
+  }
+  const changeContext = (next: number) => {
+    props.onContextChange(next)
+    if (mode === "search") search.run({ context: next })
+  }
+  const changeArchives = (next: boolean) => {
+    props.onArchivesChange(next)
+    if (mode === "search") search.run({ archives: next })
+  }
+  const changeBoot = (next: boolean) => {
+    props.onBootChange(next)
+    if (mode === "search") search.run({ boot: next })
+  }
+  // The words and the exclusion wait for Enter in History and Insights, as a
+  // scan per keystroke would; a chip that lets them go is one deliberate
+  // press, so it asks again at once rather than leaving the old answer under
+  // a row that no longer says it.
+  const askAgain = (next: LogFilterState) => {
+    if (mode === "search") search.run({ filter: next })
+    else if (mode === "insights") setInsightAsk((n) => n + 1)
+  }
+
   const view = props.views?.find((v) => v.id === mode)
   const filtered = !view || view.filtered
+  const reading = mode === "live" || mode === "search" || mode === "insights"
+  const windowed = mode === "search" || mode === "insights"
+  const offersWindow = modes.some((m) => m !== "live")
+  const hasArchives = (source.archives ?? 0) > 0
+  const journal = source.kind === "journal"
+  const relensed = Boolean(props.onLensChange) && forced !== (props.pageLens ?? "")
+  const lensName =
+    forced === "none" ? "plain text" : forced ? (lensFor(forced)?.label ?? forced) : "Auto"
+  // What Options holds, said where the narrowings are: a setting behind a
+  // popover that changes the lines on screen is a reason the reader cannot see.
+  const optionChips = [
+    filter.exclude && (
+      <FilterChip
+        key="exclude"
+        selected
+        aria-label="Stop hiding lines"
+        title={`Hiding lines containing "${filter.exclude}" — press to show them`}
+        onClick={() => {
+          const next = { ...filter, exclude: "" }
+          onFilterChange(next)
+          askAgain(next)
+        }}
+      >
+        <EyeOff aria-hidden className="size-3 text-muted-foreground" />
+        <span className="max-w-40 truncate font-mono">{filter.exclude}</span>
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    mode === "search" && props.context > 0 && (
+      <FilterChip
+        key="context"
+        selected
+        aria-label="Stop showing lines around each match"
+        onClick={() => changeContext(0)}
+      >
+        ±{props.context} lines
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    windowed && hasArchives && props.archives && (
+      <FilterChip
+        key="archives"
+        selected
+        aria-label="Leave the rotated files out"
+        onClick={() => changeArchives(false)}
+      >
+        with rotated files
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    journal && props.boot && (
+      <FilterChip
+        key="boot"
+        selected
+        aria-label="Read every boot"
+        onClick={() => changeBoot(false)}
+      >
+        this boot
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+    relensed && (
+      <FilterChip
+        key="lens"
+        selected
+        aria-label={`Stop reading the log as ${lensName}`}
+        onClick={() => props.onLensChange?.(props.pageLens ?? "")}
+      >
+        <span className="text-muted-foreground">read as</span>
+        {lensName}
+        <Cross aria-hidden className="size-3 text-muted-foreground" />
+      </FilterChip>
+    ),
+  ].filter(Boolean)
+  // Everything the row narrows by goes at once, Options' settings with it, and
+  // the reading on screen is asked again with all of them gone.
+  const clearAll = () => {
+    const next = { ...EMPTY_FILTER }
+    onFilterChange(next)
+    if (props.context > 0) props.onContextChange(0)
+    if (props.archives) props.onArchivesChange(false)
+    if (props.boot) props.onBootChange(false)
+    if (relensed) props.onLensChange?.(props.pageLens ?? "")
+    if (mode === "search") search.run({ filter: next, context: 0, archives: false, boot: false })
+    else if (mode === "insights") setInsightAsk((n) => n + 1)
+  }
   const named = props.name !== null
   const requirement = requirementOf(lens, filter)
 
@@ -443,30 +583,26 @@ export function LogWorkspace(props: WorkspaceProps) {
           units={props.units}
           unit={props.unit}
           onUnitChange={props.onUnitChange}
-          range={props.range}
-          onRangeChange={(next) => {
-            props.onRangeChange(next)
-            if (mode === "search" && next !== "custom") search.run({ range: next })
-          }}
-          since={props.since}
-          until={props.until}
-          onSinceChange={props.onSinceChange}
-          onUntilChange={props.onUntilChange}
+          window={
+            reading && offersWindow ? (
+              <TimeWindow
+                presets={WINDOW_PRESETS}
+                value={props.range}
+                since={props.since}
+                until={props.until}
+                live={mode === "live"}
+                onLive={modes.includes("live") ? () => switchMode("live") : undefined}
+                onPreset={(id) => pickWindow(id as LogTimeRange)}
+                onCustom={pickSpan}
+              />
+            ) : undefined
+          }
           context={props.context}
-          onContextChange={(next) => {
-            props.onContextChange(next)
-            if (mode === "search") search.run({ context: next })
-          }}
+          onContextChange={changeContext}
           archives={props.archives}
-          onArchivesChange={(next) => {
-            props.onArchivesChange(next)
-            if (mode === "search") search.run({ archives: next })
-          }}
+          onArchivesChange={changeArchives}
           boot={props.boot}
-          onBootChange={(next) => {
-            props.onBootChange(next)
-            if (mode === "search") search.run({ boot: next })
-          }}
+          onBootChange={changeBoot}
           paneId={paneId}
           fieldKeys={fieldKeys}
           lens={forced}
@@ -492,6 +628,9 @@ export function LogWorkspace(props: WorkspaceProps) {
           }
           readings={props.readings}
           answered={props.answered}
+          levelCounts={counts}
+          applied={optionChips.length > 0 ? optionChips : undefined}
+          onClear={isFilterActive(filter) || optionChips.length > 0 ? clearAll : undefined}
         />
       )}
 
@@ -550,7 +689,13 @@ export function LogWorkspace(props: WorkspaceProps) {
             stateKey={`${sourceId}.${mode}.${JSON.stringify({ filter, range: props.range, since: props.since, until: props.until, boot: props.boot, lens: forced })}`}
             lines={lines}
             filter={applied}
-            leading={<LevelChips filter={filter} onFilterChange={onFilterChange} counts={counts} />}
+            leading={
+              mode === "live" ? (
+                <LiveState live={live} onReconnect={live.reconnect} />
+              ) : (
+                <SearchSummary result={search.result} loading={search.loading} />
+              )
+            }
             showLineNumbers={mode === "search"}
             // A file's "source" is the file already chosen in the rail, repeated
             // on every line. The journal's is which unit spoke, and a stack's
@@ -566,50 +711,6 @@ export function LogWorkspace(props: WorkspaceProps) {
             collapseRepeats={mode === "live"}
             dividers={oneService(source.kind, sourceId)}
             renderDetail={renderDetail}
-            status={
-              mode === "live" ? (
-                live.ended ? (
-                  <>
-                    <Status state="stopped" label="Stopped" className="text-hint" />
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="h-5 px-1.5"
-                      onClick={live.reconnect}
-                    >
-                      <RefreshClockwise className="size-3" />
-                      Reconnect
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Status
-                      state={
-                        live.state === "open"
-                          ? "running"
-                          : live.state === "connecting"
-                            ? "restarting"
-                            : "stopped"
-                      }
-                      label={
-                        live.state === "open"
-                          ? "Live"
-                          : live.state === "connecting"
-                            ? "Connecting"
-                            : "Disconnected"
-                      }
-                      live={live.state === "open"}
-                      className="text-hint"
-                    />
-                    {live.meta?.prefill && !live.meta.prefill.complete && (
-                      <Tag title={live.meta.note}>partial history</Tag>
-                    )}
-                  </>
-                )
-              ) : (
-                <SearchSummary result={search.result} loading={search.loading} />
-              )
-            }
             footer={
               <>
                 <LevelSummary counts={counts} />
@@ -963,14 +1064,55 @@ function useHistorySearch(
   return { result, loading, error, run, rerunIfStale, runId }
 }
 
+/**
+ * The stream's state where the reader is looking — the strip over the lines —
+ * with the last minute's pace beside it once the socket is open, so a tail
+ * that is quiet and a tail that is dead no longer look the same.
+ */
+function LiveState({
+  live,
+  onReconnect,
+}: {
+  live: ReturnType<typeof useLiveTail>
+  onReconnect: () => void
+}) {
+  if (live.ended) {
+    return (
+      <span className="flex shrink-0 items-center gap-2 pl-1">
+        <Status state="stopped" label="Stopped" className="text-hint" />
+        <Button size="xs" variant="ghost" className="h-6 px-1.5" onClick={onReconnect}>
+          <RefreshClockwise className="size-3" />
+          Reconnect
+        </Button>
+      </span>
+    )
+  }
+  const open = live.state === "open"
+  return (
+    <span className="flex shrink-0 items-center gap-3 pl-1">
+      <Status
+        state={open ? "running" : live.state === "connecting" ? "restarting" : "stopped"}
+        label={open ? "Live" : live.state === "connecting" ? "Connecting" : "Disconnected"}
+        live={open}
+        className="text-hint font-medium"
+      />
+      {open && <LivePulse lines={live.lines} paused={live.paused} />}
+      {live.meta?.prefill && !live.meta.prefill.complete && (
+        <Tag title={live.meta.note}>partial history</Tag>
+      )}
+    </span>
+  )
+}
+
 function SearchSummary({ result, loading }: { result: LogSearchResult | null; loading: boolean }) {
   if (loading) {
-    return <span className="text-hint text-muted-foreground">Searching…</span>
+    return <span className="shrink-0 pl-1 text-hint text-muted-foreground">Searching…</span>
   }
-  if (!result) return <span className="text-hint text-muted-foreground">History</span>
+  if (!result) return <span className="shrink-0 pl-1 text-hint text-muted-foreground">History</span>
   return (
-    <span className="numeric text-hint text-muted-foreground">
-      {plural(result.matched, "match", "matches")} in {result.scanned.toLocaleString()} lines ·{" "}
+    <span className="numeric shrink-0 pl-1 text-hint whitespace-nowrap text-muted-foreground">
+      <span className="font-medium text-foreground">{result.matched.toLocaleString()}</span>{" "}
+      {result.matched === 1 ? "match" : "matches"} in {result.scanned.toLocaleString()} lines ·{" "}
       {result.tookMillis}ms
     </span>
   )

@@ -44,6 +44,18 @@ const REQUEST_SERIES: Series[] = [
   { key: "failed", label: "5xx server error", color: "var(--destructive)", kind: "line" },
 ]
 
+/**
+ * Insights adds the people to the same chart: a person is a few requests, so
+ * the green line rides under the volume on its scale, and a spike of requests
+ * with the line flat under it is one client — a crawler, a script — rather
+ * than a crowd.
+ */
+const AUDIENCE_SERIES: Series[] = [
+  ...REQUEST_SERIES.slice(0, 1),
+  { key: "visitors", label: "Visitors", color: "var(--tag-green)", kind: "line" },
+  ...REQUEST_SERIES.slice(1),
+]
+
 const LATENCY_SERIES: Series[] = [
   { key: "p95", label: "p95", color: "var(--chart-3)", kind: "line" },
 ]
@@ -116,6 +128,7 @@ export function RequestChart({
         total: bucket.total,
         refused: bucket.counts["4xx"] ?? 0,
         failed: bucket.counts["5xx"] ?? 0,
+        visitors: bucket.visitors ?? 0,
         ...(bucket.p95 !== undefined ? { p95: bucket.p95 } : {}),
       })),
     [buckets],
@@ -175,6 +188,10 @@ export function RequestChart({
   )
 
   const zoom = (from: number, to: number) => onZoom(new Date(from), new Date(to))
+  const series =
+    showLatency && buckets.some((bucket) => bucket.visitors !== undefined)
+      ? AUDIENCE_SERIES
+      : REQUEST_SERIES
   const hasLatency = showLatency && latencyKnown && rows.some((row) => typeof row.p95 === "number")
 
   if (rows.length === 0) return null
@@ -185,7 +202,7 @@ export function RequestChart({
         title="Requests"
         actions={reading}
         rows={rows}
-        series={REQUEST_SERIES}
+        series={series}
         height={120}
         format={count}
         events={events}
@@ -195,15 +212,15 @@ export function RequestChart({
         note="No requests in this window."
         footer={
           <Legend
-            series={REQUEST_SERIES}
-            caption={`One point is ${widthLabel(bucketSeconds)}. Drag to narrow.`}
+            series={series}
+            caption={`One point is ${widthLabel(bucketSeconds)}. Drag across to zoom in.`}
           />
         }
       />
       {hasLatency && (
         <ChartPanel
           plain
-          title="Slowest tenth"
+          title="Response time"
           rows={rows}
           series={LATENCY_SERIES}
           height={72}
@@ -215,7 +232,12 @@ export function RequestChart({
           showPeaks={false}
           legend={false}
           className="mt-2"
-          footer={<Legend series={LATENCY_SERIES} caption="p95 of each point's requests." />}
+          footer={
+            <Legend
+              series={LATENCY_SERIES}
+              caption="19 in 20 of each point's requests answered faster than the line."
+            />
+          }
         />
       )}
     </div>

@@ -16,6 +16,7 @@ import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
+import { Visitors } from "@/components/deploy/audience"
 import { LatencyLadder } from "@/components/deploy/latency-ladder"
 import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import {
@@ -29,10 +30,10 @@ import {
 /**
  * The readings the window already computes, drawn.
  *
- * The rows say what happened; these say what it adds up to: how the response
- * times spread, which page is failing, which client is trying doors, how much
- * of the traffic is a bot, where visitors came from, and which route the slow
- * tenth belongs to. Each list is a plain block — a head, a hairline, rows —
+ * The rows say what happened; these say what it adds up to: who the people
+ * were and what they opened, how the response times spread, which page is
+ * failing, which address is trying doors, how much of the traffic is a bot,
+ * where visitors came from, and which route the slow tenth belongs to. Each list is a plain block — a head, a hairline, rows —
  * because six framed boxes under a chart is six boxes, and the reader is here
  * to compare. The heads are 13px and semibold, a step above the 12px rows
  * they open; as small-caps eyebrows they were the quietest line in each block
@@ -134,8 +135,13 @@ export function TrafficFacets({
         </BlurFade>
       )}
 
+      {summary.audience && (
+        <Visitors audience={summary.audience} onFilterClient={onFilterClient} index={1} />
+      )}
+
       {latencyKnown && summary.latency && (
-        <Facet title="Response times" reading={`mean ${latency(summary.latency.mean)}`} index={1}>
+        <Facet title="Response times" reading={`mean ${latency(summary.latency.mean)}`} index={2}>
+          <LatencySentence latency={summary.latency} />
           <LatencyLadder latency={summary.latency} threshold={threshold} onPick={onFilterSlow} />
         </Facet>
       )}
@@ -240,7 +246,7 @@ export function TrafficFacets({
 
         <div className="flex min-w-0 flex-col gap-8">
           <Facet
-            title="Clients"
+            title="Addresses"
             reading={[
               tally(summary.clients, "address", "addresses"),
               scanners.size > 0 ? plural(scanners.size, "scanner") : null,
@@ -434,6 +440,35 @@ export function Facet({
         {children}
       </section>
     </BlurFade>
+  )
+}
+
+/**
+ * The ladder's marks in words first: "p50" over a tick is notation, and the
+ * question the reader brought is how long a visitor waits. Each figure past a
+ * second is amber, as on the ladder.
+ */
+function LatencySentence({
+  latency: reading,
+}: {
+  latency: NonNullable<RequestSummary["latency"]>
+}) {
+  const figure = (ms: number) => (
+    <span
+      className={cn(
+        "numeric font-medium text-foreground",
+        latencyTone(ms) === "warning" && "text-warning",
+      )}
+    >
+      {latency(ms)}
+    </span>
+  )
+  return (
+    <p className="mb-2 text-xs text-muted-foreground">
+      Half of the requests were answered within {figure(reading.p50)}, nineteen in twenty within{" "}
+      {figure(reading.p95)}, and the slowest took {figure(reading.max)}. Press a mark to see the
+      requests at least that slow.
+    </p>
   )
 }
 

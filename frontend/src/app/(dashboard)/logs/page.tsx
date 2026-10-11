@@ -623,8 +623,6 @@ function LogsScreen() {
               onRangeChange={setRange}
               since={since}
               until={until}
-              onSinceChange={setSince}
-              onUntilChange={setUntil}
               onCustomRange={(from, to) => {
                 setRange("custom")
                 setSince(toLocalInput(from))

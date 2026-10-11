@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import { clock, timestamp } from "@/lib/format"
+import { clock, plural, timestamp } from "@/lib/format"
 import type { LogBucket } from "@/lib/types"
 import { LEVEL_DOT, LEVEL_LABEL, LOG_LEVELS, type LogLevel } from "@/lib/log-filter"
 import { eventLabel, eventMeta } from "@/lib/log-lenses"
@@ -51,10 +51,10 @@ const NEUTRAL = [
 type Series = { key: string; label: string; className?: string; color?: string }
 
 function widthLabel(seconds: number) {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${seconds / 60}m`
-  if (seconds < 86400) return `${seconds / 3600}h`
-  return `${seconds / 86400}d`
+  if (seconds < 60) return `${seconds} seconds`
+  if (seconds < 3600) return seconds === 60 ? "a minute" : `${seconds / 60} minutes`
+  if (seconds < 86400) return seconds === 3600 ? "an hour" : `${seconds / 3600} hours`
+  return seconds === 86400 ? "a day" : `${seconds / 86400} days`
 }
 
 /**
@@ -128,8 +128,12 @@ function countIn(bucket: LogBucket, key: string) {
  * while the traffic stayed flat", and counting by event turns it into "the
  * deadlocks started at 03:12".
  *
- * Clicking a column narrows the search to it, which is the fast path from a
- * spike on the chart to the lines inside it.
+ * A press on a column narrows the window to it, and a drag across several
+ * narrows it to the span — the fast path from a spike to the lines inside it.
+ * Under the pointer the head reads the column out by series, in the series'
+ * colours, so a red column is "3 errors of 124" before anything is pressed;
+ * at rest it names the busiest column. "One column is 30s" used to be the
+ * chart's title, which was the one thing on it nobody needed first.
  *
  * It is a row of the workspace, not a box in it: the hairline under it is the
  * only edge, and the columns sit on the same ground as the lines they count.
@@ -155,10 +159,16 @@ export function Histogram({
   title?: string
 }) {
   const [hover, setHover] = useState<number | null>(null)
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null)
+  // A finger is a tap or a scroll of the page, never a drag across columns:
+  // a touch captures the pointer to the column it began on, and a chart that
+  // took the swipe kept the page from scrolling past it.
+  const touched = useRef(false)
   const series = useMemo(() => seriesFor(buckets, by, lens), [buckets, by, lens])
   if (buckets.length === 0) return null
 
   const peak = Math.max(...buckets.map((b) => b.total), 1)
+  const peakAt = buckets.findIndex((b) => b.total === peak)
   const active = hover === null ? null : buckets[hover]
   // A window that crosses midnight has the same clock time at both ends, so
   // the axis read "23:00:00 … 23:00:00" over a full day of data.
@@ -173,37 +183,88 @@ export function Histogram({
       (a, b) => LOG_LEVELS.indexOf(a.key as LogLevel) - LOG_LEVELS.indexOf(b.key as LogLevel),
     )
   }
+  const lo = drag ? Math.min(drag.from, drag.to) : -1
+  const hi = drag ? Math.max(drag.from, drag.to) : -1
+  const finish = () => {
+    if (!drag) return
+    const start = new Date(buckets[lo].start)
+    const end = new Date(new Date(buckets[hi].start).getTime() + bucketSeconds * 1000)
+    setDrag(null)
+    onZoom(start, end)
+  }
 
   return (
-    <div className={cn("shrink-0 border-b border-hairline px-3 pt-2 pb-1.5", className)}>
-      <div className="mb-1.5 flex items-baseline justify-between gap-3 text-hint">
-        <span className="eyebrow">
-          {title} · one column is {widthLabel(bucketSeconds)}
-        </span>
-        <span className="numeric truncate text-muted-foreground">
-          {active
-            ? `${timestamp(active.start)} · ${active.total.toLocaleString()} ${active.total === 1 ? "line" : "lines"}`
-            : `peak ${peak.toLocaleString()} · click a column to narrow to it`}
+    <div className={cn("shrink-0 border-b border-hairline px-3 pt-2.5 pb-2", className)}>
+      <div className="mb-2 flex min-h-4 items-baseline justify-between gap-3 text-hint">
+        <span className="eyebrow shrink-0">{title}</span>
+        <span className="numeric flex min-w-0 items-center justify-end gap-x-2.5 truncate text-muted-foreground">
+          {drag && lo !== hi ? (
+            <span>
+              {clock(buckets[lo].start)} – {clock(buckets[hi].start)} · release to zoom in
+            </span>
+          ) : active ? (
+            <>
+              <span className="text-foreground">{timestamp(active.start)}</span>
+              <span>{plural(active.total, "line")}</span>
+              {legend
+                .filter((s) => countIn(active, s.key) > 0)
+                .slice(0, 4)
+                .map((s) => (
+                  <span key={s.key} className="flex items-center gap-1">
+                    <span
+                      className={cn("size-1.5 rounded-full", s.className)}
+                      style={{ backgroundColor: s.color }}
+                    />
+                    {countIn(active, s.key).toLocaleString()} {s.label}
+                  </span>
+                ))}
+            </>
+          ) : (
+            <span className="max-sm:hidden">
+              busiest {clock(buckets[peakAt].start)} · {plural(peak, "line")} in{" "}
+              {widthLabel(bucketSeconds)} · press or drag to zoom
+            </span>
+          )}
         </span>
       </div>
       <div
-        className="flex h-14 items-end gap-px"
+        className="flex h-20 items-end gap-px select-none"
         onMouseLeave={() => setHover(null)}
+        onPointerUp={finish}
+        onPointerLeave={() => setDrag(null)}
         role="group"
         aria-label={title}
       >
         {buckets.map((bucket, i) => (
           <button
             key={bucket.start}
-            onMouseEnter={() => setHover(i)}
+            onPointerEnter={() => {
+              setHover(i)
+              if (drag) setDrag({ ...drag, to: i })
+            }}
+            onPointerDown={(e) => {
+              touched.current = e.pointerType === "touch"
+              if (!touched.current && e.button === 0) setDrag({ from: i, to: i })
+            }}
             onClick={() => {
+              if (!touched.current) return
+              const start = new Date(bucket.start)
+              onZoom(start, new Date(start.getTime() + bucketSeconds * 1000))
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return
+              e.preventDefault()
               const start = new Date(bucket.start)
               onZoom(start, new Date(start.getTime() + bucketSeconds * 1000))
             }}
             aria-label={`${timestamp(bucket.start)}, ${bucket.total} lines — narrow to this column`}
             className={cn(
               "flex h-full min-w-[3px] flex-1 flex-col justify-end rounded-sm focus-ring-inset transition-colors",
-              hover === i ? "bg-row-hover" : "hover:bg-row-hover",
+              i >= lo && i <= hi
+                ? "bg-accent"
+                : hover === i
+                  ? "bg-row-hover"
+                  : "hover:bg-row-hover",
             )}
           >
             {series.map((s) => {
@@ -212,9 +273,12 @@ export function Histogram({
               return (
                 <span
                   key={s.key}
-                  className={cn("w-full", s.className)}
+                  className={cn(
+                    "w-full transition-[height] duration-300 ease-out first:rounded-t-[2px]",
+                    s.className,
+                  )}
                   style={{
-                    height: `${Math.max((count / peak) * 100, 1.5)}%`,
+                    height: `${Math.max((count / peak) * 100, 2)}%`,
                     backgroundColor: s.color,
                   }}
                 />
@@ -223,13 +287,13 @@ export function Histogram({
           </button>
         ))}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-3 text-micro text-muted-foreground">
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-micro text-muted-foreground">
         <span className="numeric">{edge(buckets[0].start)}</span>
-        <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
           {legend.map((s) => (
-            <span key={s.key} className="flex items-center gap-1">
+            <span key={s.key} className="flex items-center gap-1.5">
               <span
-                className={cn("size-1.5 rounded-full", s.className)}
+                className={cn("size-2 rounded-[2px]", s.className)}
                 style={{ backgroundColor: s.color }}
               />
               {s.label}

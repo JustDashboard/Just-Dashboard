@@ -1,12 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { LineChart, MagnifyingGlassMinus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, clock, plural, relativeTime, timestamp } from "@/lib/format"
 import { latency } from "@/lib/requests"
-import type { LogFacet, LogFacetValue, LogSearchResult } from "@/lib/types"
+import type { LogBucket, LogFacet, LogFacetValue, LogSearchResult } from "@/lib/types"
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
 import {
   fieldPredicates,
@@ -19,14 +19,16 @@ import {
 } from "@/lib/log-filter"
 import { fieldOf, isFilterable } from "@/lib/log-fields"
 import { groupScope, overviewFacets, overviewSplit, patternRegex } from "@/lib/log-insights"
-import type { LensGroup, LogLens } from "@/lib/log-lenses"
+import { eventMeta, type LensGroup, type LogLens } from "@/lib/log-lenses"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { Facet } from "@/components/deploy/traffic-facets"
 import { LatencyLadder } from "@/components/deploy/latency-ladder"
 import { FieldMark, FieldValue } from "@/components/logs/field-value"
-import { LevelChips } from "@/components/logs/filter-bar"
 import { Histogram } from "@/components/logs/histogram"
+import { TileTrend } from "@/components/metrics/sparkline"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Table,
   TableBody,
@@ -99,13 +101,6 @@ export function Insights(props: InsightsProps) {
   const { lens, lensId, filter, onFilterChange } = props
   const { answer, error, loading, runId } = useInsights(props)
   const overview = answer?.overview
-  const levelCounts = useMemo(
-    () =>
-      Object.fromEntries(
-        (overview?.facets?.level?.values ?? []).map((v) => [v.value, v.count] as const),
-      ),
-    [overview],
-  )
 
   const narrow = (key: string, value: string) => {
     if (key === "level") {
@@ -134,17 +129,6 @@ export function Insights(props: InsightsProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline px-2 py-1">
-        <LevelChips filter={filter} onFilterChange={onFilterChange} counts={levelCounts} />
-        <span className="numeric ml-auto shrink-0 pr-1 text-hint whitespace-nowrap text-muted-foreground">
-          {loading
-            ? "Reading the window…"
-            : overview
-              ? `${plural(overview.matched, "match", "matches")} in ${overview.scanned.toLocaleString()} lines · ${overview.tookMillis}ms`
-              : null}
-        </span>
-      </div>
-
       {error ? (
         <div className="flex flex-1 items-center justify-center p-6">
           <ErrorState error={new Error(error)} className="max-w-lg" />
@@ -160,7 +144,18 @@ export function Insights(props: InsightsProps) {
           />
         </div>
       ) : (
-        <div key={runId} className={cn("flex flex-col", loading && "opacity-60")}>
+        <div
+          key={runId}
+          className={cn("flex flex-col transition-opacity", loading && "opacity-60")}
+        >
+          <Readings
+            overview={answer.overview}
+            lens={lens}
+            lensId={lensId}
+            loading={loading}
+            filter={filter}
+            onFilterChange={onFilterChange}
+          />
           {answer.overview.histogram.length > 0 && (
             <Histogram
               className="animate-rise"
@@ -259,13 +254,207 @@ export function Insights(props: InsightsProps) {
               <EmptyState
                 icon={LineChart}
                 title="Nothing to rank here"
-                description="This log is read as plain text, so its lines carry no fields to rank. Read it through a lens under More to rank its events and values."
+                description="This log is read as plain text, so its lines carry no fields to rank. Read it through a lens under Options to rank its events and values."
               />
             )}
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+const ERROR_LEVELS: LogLevel[] = ["critical", "error"]
+const WARN_LEVELS: LogLevel[] = ["warn"]
+
+function sameLevels(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((level) => b.includes(level))
+}
+
+/**
+ * Each column's count of the lines in a tone: the levels themselves where the
+ * chart is counted by level, and the events the lens marks in that tone where
+ * it is counted by event — a deadlock and an auth failure are the errors of a
+ * Postgres log's chart.
+ */
+function toneSeries(
+  buckets: LogBucket[],
+  by: string | undefined,
+  lensId: string | undefined,
+  levels: LogLevel[],
+  tone: "danger" | "warning",
+) {
+  if (!by || by === "level") {
+    return buckets.map((b) => levels.reduce((n, level) => n + (b.counts[level] ?? 0), 0))
+  }
+  if (by !== "event") return []
+  return buckets.map((b) =>
+    Object.entries(b.counts).reduce(
+      (n, [event, count]) => (eventMeta(lensId, event)?.tone === tone ? n + count : n),
+      0,
+    ),
+  )
+}
+
+/**
+ * What the window adds up to, before any list: how many lines, how many of
+ * them failed or warned, when it was busiest, and — where the lens reads one
+ * — how many distinct clients spoke. Insights used to open on a strip of level
+ * chips and a chart with "one column is 30s" over it, and nothing said in
+ * words what the window held until the lists a screen down. Each figure
+ * counts up as it lands and carries its own shape across the window; the
+ * errors and the warnings narrow the lines to themselves, as the level chips
+ * do, and press again to let go.
+ */
+function Readings({
+  overview,
+  lens,
+  lensId,
+  loading,
+  filter,
+  onFilterChange,
+}: {
+  overview: LogSearchResult
+  lens: LogLens | undefined
+  lensId: string | undefined
+  loading: boolean
+  filter: LogFilterState
+  onFilterChange: (filter: LogFilterState) => void
+}) {
+  const levels = Object.fromEntries(
+    (overview.facets?.level?.values ?? []).map((v) => [v.value, v.count] as const),
+  )
+  const errors = (levels.critical ?? 0) + (levels.error ?? 0)
+  const warnings = levels.warn ?? 0
+  const buckets = overview.histogram
+  const totals = buckets.map((b) => b.total)
+  const peakAt = totals.indexOf(Math.max(0, ...totals))
+  const peak = peakAt >= 0 ? buckets[peakAt] : undefined
+  const width = overview.bucketSeconds ?? 60
+  const perMinute = peak ? Math.round((peak.total * 60) / width) : 0
+  const share = (n: number) =>
+    overview.matched
+      ? `${((n / overview.matched) * 100).toFixed(n / overview.matched < 0.1 ? 1 : 0)}% of lines`
+      : ""
+  // The lens's own "who": the first key it reads as an address, counted.
+  const who = lens?.facets.find((key) => fieldOf(key).kind === "address")
+  const whoFacet = who ? overview.facets?.[who] : undefined
+  const measure = lens?.measure?.format === "ms" ? overview.measure : undefined
+  const press = (wanted: LogLevel[]) =>
+    onFilterChange({ ...filter, levels: sameLevels(filter.levels, wanted) ? [] : wanted })
+  // The overview is asked with the level chips on screen, so a level they
+  // leave out reads as none: "nothing failed" under a Warnings chip was the
+  // tile saying something the window did not.
+  const leftOut = (levels: LogLevel[]) =>
+    filter.levels.length > 0 && !levels.some((level) => filter.levels.includes(level))
+  const errorsOut = leftOut(ERROR_LEVELS)
+  const warningsOut = leftOut(WARN_LEVELS)
+
+  return (
+    <StatGrid
+      columns={whoFacet || measure ? 5 : 4}
+      dense
+      className="shrink-0 border-b border-hairline"
+    >
+      <StatTile
+        label="Lines"
+        value={<NumberTicker value={overview.matched} />}
+        trend={<TileTrend values={totals} label="Lines across the window" color="var(--chart-2)" />}
+        hint={
+          loading
+            ? "Reading the window…"
+            : `of ${overview.scanned.toLocaleString()} read · ${overview.tookMillis}ms`
+        }
+      />
+      <StatButton
+        label="Show only the errors"
+        pressed={sameLevels(filter.levels, ERROR_LEVELS)}
+        onClick={() => press(ERROR_LEVELS)}
+      >
+        <StatTile
+          label="Errors"
+          tone={errorsOut ? "default" : errors > 0 ? "danger" : "success"}
+          value={errorsOut ? "—" : errors > 0 ? <NumberTicker value={errors} /> : "None"}
+          trend={
+            errors > 0 && (
+              <TileTrend
+                values={toneSeries(buckets, overview.histogramBy, lensId, ERROR_LEVELS, "danger")}
+                label="Errors across the window"
+                color="var(--destructive)"
+              />
+            )
+          }
+          hint={
+            errorsOut
+              ? "left out by the level chips"
+              : errors > 0
+                ? share(errors)
+                : "nothing failed in this window"
+          }
+          className="group-hover:bg-row-hover"
+        />
+      </StatButton>
+      <StatButton
+        label="Show only the warnings"
+        pressed={sameLevels(filter.levels, WARN_LEVELS)}
+        onClick={() => press(WARN_LEVELS)}
+      >
+        <StatTile
+          label="Warnings"
+          tone={!warningsOut && warnings > 0 ? "warning" : "default"}
+          value={warningsOut ? "—" : warnings > 0 ? <NumberTicker value={warnings} /> : "None"}
+          trend={
+            warnings > 0 && (
+              <TileTrend
+                values={toneSeries(buckets, overview.histogramBy, lensId, WARN_LEVELS, "warning")}
+                label="Warnings across the window"
+                color="var(--warning)"
+              />
+            )
+          }
+          hint={
+            warningsOut
+              ? "left out by the level chips"
+              : warnings > 0
+                ? share(warnings)
+                : "nothing to look at"
+          }
+          className="group-hover:bg-row-hover"
+        />
+      </StatButton>
+      <StatTile
+        label="Busiest"
+        value={peak && peak.total > 0 ? <NumberTicker value={perMinute} /> : "—"}
+        trailing={peak && peak.total > 0 ? "a minute" : undefined}
+        hint={peak && peak.total > 0 ? `at ${clock(peak.start)}` : "nothing in the window"}
+      />
+      {measure ? (
+        <StatTile
+          label={`${lens?.measure?.label ?? "Duration"} p95`}
+          tone={measure.p95 >= 1000 ? "warning" : "default"}
+          value={latency(measure.p95)}
+          hint={`median ${latency(measure.p50)} · slowest ${latency(measure.max)}`}
+        />
+      ) : (
+        whoFacet &&
+        who && (
+          <StatTile
+            label={titleOf(who)}
+            value={
+              <>
+                <NumberTicker value={whoFacet.distinct} />
+                {whoFacet.distinctCapped ? "+" : ""}
+              </>
+            }
+            hint={
+              whoFacet.values[0]
+                ? `busiest ${whoFacet.values[0].value} · ${plural(whoFacet.values[0].count, "line")}`
+                : undefined
+            }
+          />
+        )
+      )}
+    </StatGrid>
   )
 }
 

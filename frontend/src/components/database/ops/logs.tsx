@@ -5,8 +5,10 @@ import { Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { DbConnection, DbLogSources } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { kindViews } from "@/components/logs/kind-views"
 import {
   ServiceLogs,
+  type ServiceLogSource,
   type ServiceLogsContext,
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
@@ -126,7 +128,9 @@ function ServerLogs({
       ? ctx
       : { ...ctx, openHistory: (at) => ctx.openHistory({ ...at, source: primary.id }) }
 
-  const views: ServiceLogsView[] = [
+  // The queries are the server's whichever source is on screen; a container
+  // or a unit among them is also read by what Docker or systemd did to it.
+  const views = (source: ServiceLogSource): ServiceLogsView[] => [
     {
       id: "queries",
       label: noun.view,
@@ -134,6 +138,7 @@ function ServerLogs({
         <DatabaseQueries conn={conn} engine={engine} ctx={onServerLog(ctx)} onQuery={onQuery} />
       ),
     },
+    ...kindViews(source),
   ]
 
   return (

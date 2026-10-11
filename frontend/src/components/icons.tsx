@@ -59,6 +59,8 @@ import {
   ComputerDesktopIcon,
   CpuChipIcon,
   CubeIcon,
+  DevicePhoneMobileIcon,
+  DeviceTabletIcon,
   DocumentArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentIcon,
@@ -526,6 +528,8 @@ export const UserSettings: Icon = adapt(UserCircleIcon, "UserSettings")
 export const Logout: Icon = adapt(ArrowLeftStartOnRectangleIcon, "Logout")
 export const Home: Icon = adapt(HomeIcon, "Home")
 export const DesktopDevice: Icon = adapt(ComputerDesktopIcon, "DesktopDevice")
+export const PhoneDevice: Icon = adapt(DevicePhoneMobileIcon, "PhoneDevice")
+export const TabletDevice: Icon = adapt(DeviceTabletIcon, "TabletDevice")
 
 /* Appearance and view controls. `BlendMode` is the appearance page: the swatch
    is a light/dark drawing, where a painter's palette promises a colour picker

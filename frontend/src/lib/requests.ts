@@ -176,7 +176,7 @@ export function statusWord(code: number): string {
 
 /**
  * The line past which a response is slow: a second, the same line the
- * Slowest tenth tile draws. Below it a figure is a reading; above it the
+ * Response time tile draws. Below it a figure is a reading; above it the
  * figure is what the reader came to find.
  */
 export function latencyTone(ms: number | undefined): Tone {
@@ -255,11 +255,11 @@ export function requestKey(entry: RequestEntry, index: number): string {
 }
 
 export const REQUEST_RANGES = [
-  { id: "15m", label: "Last 15 minutes", minutes: 15 },
-  { id: "1h", label: "Last hour", minutes: 60 },
-  { id: "6h", label: "Last 6 hours", minutes: 360 },
-  { id: "24h", label: "Last 24 hours", minutes: 1440 },
-  { id: "7d", label: "Last 7 days", minutes: 10080 },
+  { id: "15m", label: "Last 15 minutes", short: "15 min", minutes: 15 },
+  { id: "1h", label: "Last hour", short: "1 hour", minutes: 60 },
+  { id: "6h", label: "Last 6 hours", short: "6 hours", minutes: 360 },
+  { id: "24h", label: "Last 24 hours", short: "24 hours", minutes: 1440 },
+  { id: "7d", label: "Last 7 days", short: "7 days", minutes: 10080 },
 ] as const
 
 /**

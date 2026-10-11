@@ -27,7 +27,7 @@ for the host to run. The packages under
 
 | Package | Responsibility | Detailed reference |
 | --- | --- | --- |
-| `accesslog` | The ingress request record: reading Caddy's JSON and nginx's combined or timed lines into one shape, the bounded store of them and the summaries the deployment pages draw | [`../deployments/request-observability.md`](../deployments/request-observability.md) |
+| `accesslog` | The ingress request record: reading Caddy's JSON and nginx's combined or timed lines into one shape, the bounded store of them and the summaries the deployment pages draw, among them the audience — distinct visitors apart from bots, their devices and the pages they opened | [`../deployments/request-observability.md`](../deployments/request-observability.md) |
 | `admin` | Local root dashboard account commands, password input and audit, without API/module startup | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `agent` | Agent identity, certificates, and hub-facing mode | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode) |
 | `api` | Route map, middleware composition, handlers, module wiring, audit, and feature joins | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |

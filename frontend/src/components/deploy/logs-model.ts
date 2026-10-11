@@ -4,6 +4,9 @@ import type {
   DockerEvent,
   WorkloadProfile,
 } from "@/lib/types"
+import { dockerSource, fileSource } from "@/lib/log-sources"
+import type { LogAsk } from "@/components/logs/logs-model"
+import type { ServiceLogSource } from "@/components/logs/service-logs"
 import {
   REQUEST_RANGES,
   STATUS_CLASSES,
@@ -249,6 +252,50 @@ function millis(raw: string | null) {
   if (raw === null || raw.trim() === "") return undefined
   const value = Number(raw)
   return Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/** What `?service=` says for the proxy in front of the project, beside its containers. */
+export const PROXY_SERVICE = "proxy"
+
+/** The proxy that answers for a project: where it says why it failed a request, and the names it answers to. */
+export type ProxyLog = { ingress?: string; errorLog?: string; hosts: string[] }
+
+/**
+ * The proxy's own log as a source of the Output view, with what narrows it to
+ * this project: the Caddy ingress is every route's, so its output is read
+ * for this one's hostnames; an nginx site's error file is the site's own.
+ * Nothing where the request record names neither.
+ */
+export function proxyOutput(
+  proxy: ProxyLog | undefined,
+): { source: ServiceLogSource; ask?: LogAsk } | undefined {
+  if (proxy?.ingress) {
+    return {
+      source: {
+        id: dockerSource(proxy.ingress),
+        label: "Proxy (Caddy)",
+        kind: "docker",
+        lens: "caddy",
+        product: "caddy",
+        detail: "The Caddy ingress, shared by every route on it",
+      },
+      ask: proxy.hosts.length > 0 ? { fields: { host: proxy.hosts } } : undefined,
+    }
+  }
+  if (proxy?.errorLog) {
+    return {
+      source: {
+        id: fileSource(proxy.errorLog),
+        label: "Proxy (nginx)",
+        kind: "nginx",
+        path: proxy.errorLog,
+        lens: "nginx-error",
+        product: "nginx",
+        detail: "The error log of this deployment's nginx site",
+      },
+    }
+  }
+  return undefined
 }
 
 /** Which of a release's containers is the application: what leads a list of them. */

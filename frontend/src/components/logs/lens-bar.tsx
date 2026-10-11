@@ -26,8 +26,10 @@ import {
   type LensReadingTile,
   type LensReadingsState,
 } from "@/components/logs/lens-readings"
+import { LevelChips } from "@/components/logs/filter-bar"
 import { readingFor, readingShown, unaskedReadings } from "@/components/logs/logs-model"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -151,6 +153,13 @@ function tally(lines: LogLine[], key: string): { values: Tally[]; missing: numbe
  * above the pane (`answered`), a view a tile answers carries no count at all:
  * the tile says it over its window, and a count of the screen under it was
  * a second figure for one question.
+ *
+ * It is the pane's one filter row. The level chips used to sit a row lower,
+ * on the strip above the lines with the chart between the two, so the
+ * narrowings were in two places and the reader had to find both; they lead
+ * the questions now, and what Options holds is drawn here as chips while it
+ * is set (`applied`). "Clear filters" stands at the row's end, outside its
+ * scroll, whenever anything narrows the lines.
  */
 export function LensBar({
   lens,
@@ -161,6 +170,9 @@ export function LensBar({
   facets,
   readings,
   answered,
+  levelCounts,
+  applied,
+  onClear,
 }: {
   lens: LogLens | undefined
   /** The lens the lines were read through, which names event values. */
@@ -175,6 +187,12 @@ export function LensBar({
   readings?: LensReadingsState
   /** The readings the page draws as tiles: the views they answer take no count. */
   answered?: LensReadingsState
+  /** How many lines of each level the reading on screen holds. */
+  levelCounts: Record<string, number>
+  /** What Options has set, as chips that clear it. */
+  applied?: React.ReactNode
+  /** Lets every narrowing go; offered while there is one. */
+  onClear?: () => void
 }) {
   const fields = fieldsOf(filter)
   const views = lens?.views ?? NO_VIEWS
@@ -213,116 +231,132 @@ export function LensBar({
   const selectedReading = unasked.find((tile) => readingPressed(tile.reading, filter))
   const predicateKeys = selectedView || selectedReading || onDefaults ? [] : Object.keys(fields)
 
-  if (
-    views.length === 0 &&
-    unasked.length === 0 &&
-    !lens?.facets.length &&
-    Object.keys(fields).length === 0
-  )
-    return null
-
   const setFields = (next: LogFields) => onFilterChange({ ...filter, fields: next })
+  const asks = views.length > 0 || unasked.length > 0 || Boolean(lens?.facets.length)
 
   return (
-    <ChipStrip className="scroll-affordance shrink-0 border-b border-hairline px-2 py-1 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1 sm:flex-nowrap sm:overflow-x-auto">
-      {onDefaults && (
-        <FilterChip
-          selected
-          aria-label={`Clear the ${defaults.label.toLowerCase()} filter`}
-          title="The lens hides these by default — press to show them"
-          onClick={() =>
-            onFilterChange({ ...filter, fields: {}, levels: defaults.levels ? [] : filter.levels })
-          }
-        >
-          {defaults.label}
-          <Cross aria-hidden className="size-3 text-muted-foreground" />
-        </FilterChip>
-      )}
-
-      {predicateKeys.map((key) => {
-        const label = fieldOf(key).label
-        const values = fields[key]
-        return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-hairline pr-2">
+      <ChipStrip className="scroll-affordance flex-1 px-2 py-1.5 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1.5 sm:flex-nowrap sm:overflow-x-auto">
+        {onDefaults && (
           <FilterChip
-            key={key}
             selected
-            aria-label={`Clear the ${label} filter`}
-            title={`${label}: ${values.map(describePredicate).join(" or ")} — press to clear`}
-            onClick={() => setFields(clearField(fields, key))}
-          >
-            <span className="text-muted-foreground">{label}</span>
-            <span className="max-w-48 truncate font-mono">
-              {values.map(describePredicate).join(", ")}
-            </span>
-            <Cross aria-hidden className="size-3 text-muted-foreground" />
-          </FilterChip>
-        )
-      })}
-
-      {lens && lens.facets.length > 0 && (
-        <FieldsPopover
-          lens={lens}
-          lensId={lensId}
-          fields={fields}
-          onFieldsChange={setFields}
-          lines={lines}
-          facets={facets}
-        />
-      )}
-
-      {views.map((view) => {
-        const tile = readingFor(view, tiles)
-        const drawn = answered && readingFor(view, answered.tiles)
-        const count = counts.get(view.id)
-        return (
-          <FilterChip
-            key={view.id}
-            selected={selectedView === view}
-            onClick={() => onFilterChange(applyView(filter, view))}
-            title={
-              tile && readings
-                ? readingTitle(tile, readings.window)
-                : drawn && answered
-                  ? readingTitle(drawn, answered.window)
-                  : view.requires
-                    ? `Logged only with ${view.requires} set`
-                    : undefined
+            aria-label={`Clear the ${defaults.label.toLowerCase()} filter`}
+            title="The lens hides these by default — press to show them"
+            onClick={() =>
+              onFilterChange({
+                ...filter,
+                fields: {},
+                levels: defaults.levels ? [] : filter.levels,
+              })
             }
           >
-            {view.label}
-            {tile && readings ? (
-              <ReadingCount tile={tile} window={readings.window} />
-            ) : (
-              !drawn &&
-              count !== undefined &&
-              count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
-            )}
+            {defaults.label}
+            <Cross aria-hidden className="size-3 text-muted-foreground" />
           </FilterChip>
-        )
-      })}
+        )}
 
-      {readings &&
-        unasked.map((tile) => {
-          const pressed = selectedReading === tile
+        {predicateKeys.map((key) => {
+          const label = fieldOf(key).label
+          const values = fields[key]
           return (
             <FilterChip
-              key={tile.reading.id}
-              selected={pressed}
-              title={readingTitle(tile, readings.window)}
-              onClick={() =>
-                onFilterChange(
-                  pressed
-                    ? { ...filter, fields: {}, levels: [] }
-                    : readingFilter(filter, tile.reading),
-                )
-              }
+              key={key}
+              selected
+              aria-label={`Clear the ${label} filter`}
+              title={`${label}: ${values.map(describePredicate).join(" or ")} — press to clear`}
+              onClick={() => setFields(clearField(fields, key))}
             >
-              {tile.reading.label}
-              <ReadingCount tile={tile} window={readings.window} />
+              <span className="text-muted-foreground">{label}</span>
+              <span className="max-w-48 truncate font-mono">
+                {values.map(describePredicate).join(", ")}
+              </span>
+              <Cross aria-hidden className="size-3 text-muted-foreground" />
             </FilterChip>
           )
         })}
-    </ChipStrip>
+
+        {applied}
+
+        <LevelChips filter={filter} onFilterChange={onFilterChange} counts={levelCounts} />
+
+        {asks && <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />}
+
+        {lens && lens.facets.length > 0 && (
+          <FieldsPopover
+            lens={lens}
+            lensId={lensId}
+            fields={fields}
+            onFieldsChange={setFields}
+            lines={lines}
+            facets={facets}
+          />
+        )}
+
+        {views.map((view) => {
+          const tile = readingFor(view, tiles)
+          const drawn = answered && readingFor(view, answered.tiles)
+          const count = counts.get(view.id)
+          return (
+            <FilterChip
+              key={view.id}
+              selected={selectedView === view}
+              onClick={() => onFilterChange(applyView(filter, view))}
+              title={
+                tile && readings
+                  ? readingTitle(tile, readings.window)
+                  : drawn && answered
+                    ? readingTitle(drawn, answered.window)
+                    : view.requires
+                      ? `Logged only with ${view.requires} set`
+                      : undefined
+              }
+            >
+              {view.label}
+              {tile && readings ? (
+                <ReadingCount tile={tile} window={readings.window} />
+              ) : (
+                !drawn &&
+                count !== undefined &&
+                count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
+              )}
+            </FilterChip>
+          )
+        })}
+
+        {readings &&
+          unasked.map((tile) => {
+            const pressed = selectedReading === tile
+            return (
+              <FilterChip
+                key={tile.reading.id}
+                selected={pressed}
+                title={readingTitle(tile, readings.window)}
+                onClick={() =>
+                  onFilterChange(
+                    pressed
+                      ? { ...filter, fields: {}, levels: [] }
+                      : readingFilter(filter, tile.reading),
+                  )
+                }
+              >
+                {tile.reading.label}
+                <ReadingCount tile={tile} window={readings.window} />
+              </FilterChip>
+            )
+          })}
+      </ChipStrip>
+      {onClear && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onClear}
+        >
+          <Cross />
+          Clear filters
+        </Button>
+      )}
+    </div>
   )
 }
 

@@ -129,9 +129,14 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("heading", { name: "Slow statements" })).toBeVisible()
   await expect(page.getByText(/JOIN customers c ON/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Patterns" })).toBeVisible()
-  // The lens's readings stand over the workbench rather than in Insights,
-  // which on this window carries them as its chips' counts instead.
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  // Insights opens on what the window adds up to, in words: its lines, the
+  // errors and warnings among them, its busiest minute and the measure's
+  // tail. The lens's own readings stay the chips' counts.
+  const tiles = page.locator("[data-slot=stat-tile]")
+  await expect(tiles).toHaveCount(5)
+  await expect(tiles.filter({ hasText: "Errors" })).toContainText("2")
+  await expect(tiles.filter({ hasText: "Warnings" })).toContainText("None")
+  await expect(tiles.filter({ hasText: "Statement time p95" })).toContainText("1.84s")
 
   const overview = mocks.searches.find((s) => s.get("facets")?.includes("pattern"))!
   expect(overview.get("limit")).toBe("1")
@@ -272,4 +277,108 @@ test("a service page's logs open on the lens's defaults and drop them for anothe
   await expect(page.getByText("hello from docker:db")).toBeVisible()
   expect(sockets.at(-1)!.getAll("f")).toEqual([])
   expect(searches).toHaveLength(0)
+})
+
+test("the window is one control, and a preset picked on the stream opens History over it", async ({
+  page,
+}) => {
+  const mocks = await mockLensLogs(page)
+  await page.goto(pgLog)
+  await expect(page.getByLabel("Log lines").getByText("slow", { exact: true })).toBeVisible()
+
+  // On the stream the window says it is following, not a range it is not reading.
+  const window = page.getByRole("button", { name: /^Time window: / })
+  await expect(window).toHaveText(/Live/)
+  await window.click()
+  await expect(page.getByRole("button", { name: /^Live tail/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await page.getByRole("button", { name: "6 hours", exact: true }).click()
+
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(window).toHaveText(/Last 6 hours/)
+  await expect.poll(() => lineSearches(mocks).at(-1)?.get("since")).toBeTruthy()
+  const since = Date.parse(lineSearches(mocks).at(-1)!.get("since")!)
+  expect(Math.abs(Date.now() - since - 6 * 3_600_000)).toBeLessThan(120_000)
+
+  // A span typed into the same popover is the window too, and its bounds go to the server.
+  await window.click()
+  await page.getByLabel("From", { exact: true }).fill("2026-09-27T10:00")
+  await page.getByLabel("To", { exact: true }).fill("2026-09-27T10:30")
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect
+    .poll(() => lineSearches(mocks).at(-1)?.get("until"))
+    .toBe(new Date("2026-09-27T10:30").toISOString())
+  await expect(window).not.toHaveText(/Last/)
+
+  // And back to the stream from the same place.
+  await window.click()
+  await page.getByRole("button", { name: /^Live tail/ }).click()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})
+
+test("what Options sets is drawn in the filter row, and every narrowing has one way back", async ({
+  page,
+}) => {
+  const mocks = await mockLensLogs(page)
+  await page.goto(pgLog)
+  await expect(page.getByLabel("Log lines").getByText("slow", { exact: true })).toBeVisible()
+
+  const options = page.getByRole("button", { name: "Options", exact: true })
+  await options.click()
+  await page.getByLabel("Hide lines containing").fill("checkpoint")
+  await page.keyboard.press("Escape")
+  await expect(options).toContainText("1")
+  const hiding = page.getByRole("button", { name: "Stop hiding lines", exact: true })
+  await expect(hiding).toContainText("checkpoint")
+  await expect.poll(() => mocks.sockets.at(-1)?.get("exclude")).toBe("checkpoint")
+
+  // The levels lead the same row, each with its count, and Clear filters
+  // lets every narrowing go at once.
+  const levels = page.getByRole("group", { name: "Levels" })
+  await levels.getByRole("button", { name: /^error/ }).click()
+  await expect.poll(() => mocks.sockets.at(-1)?.get("levels")).toBe("error")
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click()
+  await expect(hiding).toHaveCount(0)
+  await expect(levels.getByRole("button", { name: /^error/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
+  await expect.poll(() => mocks.sockets.at(-1)?.has("exclude")).toBe(false)
+  await expect(page.getByRole("button", { name: "Clear filters", exact: true })).toHaveCount(0)
+})
+
+test("the stream says how busy it is, and the view switches are one group", async ({ page }) => {
+  await mockLensLogs(page)
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    const at = (ago: number) => new Date(Date.now() - ago).toISOString()
+    socket.send(
+      JSON.stringify({ type: "meta", data: { kind: "app", lens: "postgres" }, ts: Date.now() }),
+    )
+    socket.send(
+      JSON.stringify({
+        type: "logs",
+        data: [
+          { text: "a", level: "info", timestamp: at(30_000) },
+          { text: "b", level: "error", timestamp: at(4_000) },
+          { text: "c", level: "info", timestamp: at(1_000) },
+        ],
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto(pgLog)
+  await expect(page.getByTitle("3 lines written in the last minute")).toBeVisible()
+  await expect(page.getByText("3 a minute", { exact: true })).toBeVisible()
+
+  const view = page.getByRole("group", { name: "How the lines are drawn" })
+  await expect(view.getByRole("button", { name: "Wrap" })).toBeVisible()
+  await expect(view.getByRole("button", { name: "Colour" })).toHaveAttribute("aria-pressed", "true")
 })

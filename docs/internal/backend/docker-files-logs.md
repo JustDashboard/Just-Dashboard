@@ -652,7 +652,12 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   container by its image's last path segment, where a list that reports the image as a bare
   `sha256:`/hex id is looked up through inspect's `Config.Image` and kept per image id
   (`Server.logImageRefs`) — a Postgres container read as an application is the first thing a database
-  page would get wrong; a unit by its own name; a `journal-id:` source by its first identifier; the whole
+  page would get wrong; a unit by its own name — an unknown one as an application, but a known system
+  daemon (`tailscaled`, `NetworkManager`, `dnsmasq`, `unbound`, `named`, `docker`, `containerd`, and the
+  `systemd-`, `wg-quick@`, `openvpn@` families) as `systemd`, since reading resolved or WireGuard through
+  the HTTP lens offered 5xx and exceptions it never writes; a MySQL or MariaDB slow or general query log
+  (`IsQueryLog`: "slow" or "general" in its basename) as an application rather than the error lens its
+  directory would give, which cannot parse a slow log; a `journal-id:` source by its first identifier; the whole
   journal as `syslog`; PM2 as `pm2`; a stack container by container. `lens=<id>` forces one, `lens=none`
   reads no lens, and an unknown id is a 400 from `NewFilter`, before a socket upgrades.
 - **A field predicate narrows by what was read out of a line, not by its text** (`predicate.go`):
@@ -748,11 +753,25 @@ rows above the lines: a strip of the views as `tabClasses` buttons with `aria-pr
 rail toggle and the views from its leading edge, and on a service page names the source with its facts
 beside the name (`SourceFacts`, giving way by the strip's own width rather than the window's), the
 views, and after them the page's actions as glyphs at the strip's end — Export as an `IconAction`,
-never an outlined box between the facts and the tabs; `filter-bar.tsx` with the one
-filter, the window and the journal unit inline and the exclusion, context, archives, boot and a
-**Read as** select (Auto, naming the detected lens; each lens; None) behind "More"; and `lens-bar.tsx`
-only when the lens has something to offer or a predicate is on. The histogram sits over History's lines,
-and a footer carries the stream's state, the counts, the search's notes and the retention verdict. One
+never an outlined box between the facts and the tabs; `filter-bar.tsx`, one row of controls that share
+one face: the search field with its `.*` (regular expression) and `Aa` (match case) switches and, in
+History and Insights, Search inside the field's own edge; the journal unit; the window
+(`time-window.tsx`); and **Options**, a popover holding the exclusion, the lines around each match, a
+**Read as** select (Auto, naming the detected lens; each lens; None), the rotated files and This boot
+only, its count lit while any is set. The window is one control in every reading: its trigger names
+what is on screen — **Live** with the socket's dot on the stream, a preset, or the span — and its
+popover holds the live tail (where the pane offers one), the six presets one press each, and a span
+typed as two times with one Apply. A preset or a span picked on the stream opens History over it,
+because a window is a question about the past. Then `lens-bar.tsx`, the pane's one filter row: what
+Options has set, as chips that clear it (hiding "…", ±N lines, with rotated files, this boot, read as
+…), the field predicates and the lens's defaults, the **level chips** with their counts (an error or
+critical count red, a warning amber), Fields, the quick views and the readings, and **Clear filters** at
+its end outside the scroll whenever anything narrows the lines. The levels used to sit on the strip above
+the lines with the chart between the two rows, so the narrowings were in two places. The histogram sits
+over History's lines; the strip above the lines starts with the reading's state — **Live** with the last
+minute's pace (`live-pulse.tsx`: thirty two-second columns by each line's own timestamp, errors red at
+their tops, "N a minute"), or History's matches, scanned lines and time — and a footer carries the counts,
+the search's notes and the retention verdict. One
 filter, because "these errors are scrolling past, when did they start" is one thought. Live applies as
 you type (debounced; the socket restarts, which is what makes the prefill meaningful); History re-runs
 when a chip, a field, the lens or the regex switch changes, and the words in the box wait for Enter,
@@ -794,8 +813,10 @@ its arrival (`lib/log-line-key.ts`, a `WeakMap` sequence on the line object) rat
 position, because the live tail appends and trims: evicting old lines at the 4,000-line cap reuses the
 retained rows and keeps the opened line attached to its text, the weak keys hold no evicted history, and
 identical messages from separate arrivals keep separate keys. A "Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
-written. Below a console width of 28rem those four are one **View** menu beside Pause, Copy and Clear:
-seven buttons left the level chips room for one. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
+written. Those four are one group with one edge, each a segment filled while it is on, their words
+shown from a 48rem console; Pause, Copy and Clear after it are glyphs with no ground of their own,
+where a row of loose buttons, some on a ground and some not, read as four kinds of control. Below a
+console width of 28rem the group is one **View** menu. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
 (`line-detail.tsx`, the request row's shape): the event as its title, its values as facts drawn as what
 they are, each with "Only lines where …" and "Hide lines where …", the raw text in a `Well` (indented
 when it is JSON), and "Lines around this", two searches either side of the line's instant with nothing
@@ -804,12 +825,15 @@ console (`aria-label="Log lines"`) has focus. The source rail draws each source 
 container as its image, nginx, PM2, the system files as the host's distribution, a lens's product where
 it names one). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip
 layout while the scrollbar stays honest, wrapped rows keep real heights, and the browser's own find
-still works. The level chips carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
-level column and the histogram. **Pausing holds incoming lines instead of dropping them**, a new
+still works. The level chips carry the counts and share their swatches (`LEVEL_DOT`) with the
+level column and the histogram; info is the chart blue rather than ink, because a quiet log is nearly
+all info and an ink histogram of a healthy day was a grey wall. **Pausing holds incoming lines instead of dropping them**, a new
 question's opening window included — the empty pane then says how many are held and offers Resume,
 rather than that nothing matches.
 `histogram.tsx` is matches over time by level, or by the key a search split them by (a status class in
-its family's colour, events by their tone); clicking a column narrows the window to it.
+its family's colour, events by their tone); a press on a column narrows the window to it and a drag
+across several to the span. At rest its head names the busiest column; under the pointer it reads the
+column out by series, in their colours.
 
 **A lens's presentation is data** (`lib/log-lenses.ts`, types only from `lib/log-fields.ts`, which names
 each attr's label and kind): per lens, its event labels and tones (`mark: false` for the high-volume
@@ -837,7 +861,12 @@ the measure's ladder where it is milliseconds, each group as a ranked table and 
 distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
 and independent of the filter on screen and of the view, so they hold still while the reader moves
 between Live, History and Insights; each figure counts up as it lands (`NumberTicker`) and glides to the
-next minute's. Insights draws none of its own, which would be a second answer over another window. A
+next minute's. Insights draws none of the lens's readings, which would be a second answer over another
+window; it opens instead on what its own window adds up to (`Readings` in `insights.tsx`): the lines,
+the errors and the warnings among them (each narrowing to its levels on a press, with its line across
+the window — counted by level, or by the events the lens marks in that tone when the chart is split by
+event), the busiest minute, and the measure's p95 where the lens has one, or else how many distinct
+addresses the lens's first address key saw. A
 page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
 draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 
@@ -845,8 +874,10 @@ draws, and the rest are not searched for) and hands them to the pane (`answeredB
 log, a container's output, a site's access log, a unit's journal — so no page sends the reader to
 `/logs`. The page hands over its sources (a picker appears for several), the lens where it knows better
 than detection, its own views (`ServiceLogsView`: a database's Queries, a container's Events, a unit's
-Runs, handed a context with the source, the filter and `openHistory` — History on a stretch of time, on
-another of the page's sources if it names one, narrowed if asked), a `window` to open History on (a crash
+Runs, each handed a context with the source, the filter and `openHistory` — History on a stretch of
+time, on another of the page's sources if it names one, narrowed if asked; or a function of the source
+on screen, so a pane mixing a unit and a container gives each its own, `kindViews` in `kind-views.ts`
+being Events for `docker:` and `stack:` and Runs for a unit's journal), a `window` to open History on (a crash
 window, a request's moment, narrowed where the page knows how) and `onLeaveWindow` for when the reader
 moves off it, an `ask` for a reading pressed on the page's own grid, an `initialRange`, `readings`
 (`true` for tiles from `sm` up, `"chips"` for the counts on the lens row's chips), and `layout="sheet"`
@@ -857,6 +888,21 @@ and no search — keeps its state for the tab under the page's `storageKey` (nev
 host page's) or in React state without one, opens an emptied file with its rotated set, clears the
 fields when the source's lens changes, keeps a **Read as** on the source it was chosen on, and issues
 no search on mount but History's own run.
+**Each page's pane offers the logs that belong to it**, from what the page already knows, rather than
+the one file it was built with. The proxy overview's engine log keeps host Caddy's journal beside an
+ingress container and offers `/var/log/caddy/access.log` once it is found there; a site's page adds the
+application its upstream reaches (the container or unit holding the socket, `upstreamLogSources` in
+`site-log-plan.ts`) and nginx's shared access log when the site writes to it; a deployment's Output ends
+on the proxy that answers for it — the Caddy ingress narrowed to the project's hostnames, or the nginx
+site's error log (`proxyOutput` in `deploy/logs-model.ts`, `?service=proxy`); a container's page adds its
+compose stack and `docker.service`. Three Network pages gained a pane at their end: **DNS log**
+(`systemd-resolved`, a host dnsmasq, unbound or named, and every resolver, adblocker and provisioned DNS
+container the page lists — `network/dns/log-sources.ts`), **VPN log** (each systemd-managed
+`wg-quick@<iface>`, `tailscaled`, a Headscale container — `network/vpn/log-sources.ts`) and **Link log**
+on Interfaces (the kernel ring through the kernel lens, beside whichever of `systemd-networkd` and
+`NetworkManager` is not inactive — `network/interfaces/log-sources.ts`). Each derivation is a pure
+function with its own `bun test`.
+
 `service-views.tsx` is where a source's page views are defined once, for the owning page and `/logs`
 alike: `docker:` and `stack:` get Events, a unit's journal Runs, a container or a host log that is a saved
 connection's server Queries (a container through `/databases/fleet`, a file or unit by asking each of

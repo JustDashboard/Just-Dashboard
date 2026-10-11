@@ -222,6 +222,23 @@ export function ProjectLogs() {
     30000,
     [project.projectId],
   )
+  // Where the proxy in front of the project says why it failed a request,
+  // and the names it answers to: what narrows the ingress, which is every
+  // route's, to this one. The served domains, else the saved ones.
+  const served = project.operations?.domains
+  const saved = project.configuration?.domains
+  const hostnames = useMemo(
+    () => (served?.status === "available" ? served.domains : (saved ?? [])).map((d) => d.hostname),
+    [served, saved],
+  )
+  const proxy = useMemo(
+    () => ({
+      ingress: requests.data?.ingress,
+      errorLog: requests.data?.errorLog,
+      hosts: hostnames,
+    }),
+    [requests.data?.ingress, requests.data?.errorLog, hostnames],
+  )
   // One read of the container's record serves the Events tab's count and the
   // chart's marks. The hour is worked out in the fetcher, which runs in an
   // effect — where reading a clock belongs — rather than in render.
@@ -408,6 +425,7 @@ export function ProjectLogs() {
             kind={kind}
             product={project.product}
             lead={lead}
+            proxy={proxy}
             service={service}
             onServiceChange={setService}
             moment={outputMoment}
@@ -646,7 +664,7 @@ function TrafficReadings({
         }
       />
       <StatTile
-        label="Slowest tenth"
+        label="Response time"
         key={`p95:${summary?.latency?.p95 ?? "none"}`}
         value={summary?.latency ? latency(summary.latency.p95) : "—"}
         tone={latencyTone(summary?.latency?.p95)}

@@ -6788,6 +6788,45 @@ export type RequestBucket = {
   p95?: number
   /** What the column's answers sent, for the Served reading's line. */
   bytes?: number
+  /** The distinct people who opened a page in the column. */
+  visitors?: number
+}
+
+/**
+ * One person in the window: an address and the browser it sent, once it has
+ * opened a page. A script, a crawler or a scanner's probe is never one.
+ */
+export type RequestVisitor = {
+  client: string
+  /** The whole user agent, which the page reads as a browser on a system. */
+  agent?: string
+  requests: number
+  pages: number
+  /** 5xx answers they met, and 4xx. */
+  errors: number
+  refused: number
+  bytes: number
+  first: string
+  last: string
+  /** The first page they opened, and the outside site they came from. */
+  landing?: string
+  referer?: string
+  /** The pages they opened, in order of first opening, at most six. */
+  journey: string[]
+}
+
+/** Who the traffic was: the people, told apart from the programs. */
+export type RequestAudience = {
+  visitors: number
+  /** Distinct addresses whose agent is a crawler, a scanner or a script. */
+  bots: number
+  humanRequests: number
+  botRequests: number
+  /** Counted per visitor, not per request. */
+  devices: RequestFacet[] | null
+  browsers: RequestFacet[] | null
+  systems: RequestFacet[] | null
+  top: RequestVisitor[] | null
 }
 
 /** The distribution, not an average: a p50 of 30ms hides a p99 of nine seconds. */
@@ -6825,6 +6864,7 @@ export type RequestSummary = {
   /** Refused paths that look like scanning, and the clients that asked for several. */
   probes: RequestFacet[]
   scanners: RequestFacet[]
+  audience?: RequestAudience
   buckets: RequestBucket[]
   bucketSeconds: number
   first?: string

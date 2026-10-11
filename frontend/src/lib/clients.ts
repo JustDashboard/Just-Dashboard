@@ -67,6 +67,14 @@ const SYSTEMS: [RegExp, string, string?][] = [
   [/Linux|X11/, "Linux", "linux"],
 ]
 
+/**
+ * The mark for a system as the request log's audience names it ("macOS",
+ * "Android") — the names `SYSTEMS` gives, which the server's table mirrors.
+ */
+export function systemProduct(name: string): string | undefined {
+  return SYSTEMS.find(([, label]) => label === name)?.[2]
+}
+
 export function parseAgent(ua: string): ClientAgent {
   const program = PROGRAMS.find(([pattern]) => pattern.test(ua))
   if (program) return { client: program[1], product: program[2], os: "", device: "program" }
