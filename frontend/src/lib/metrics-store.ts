@@ -93,8 +93,33 @@ let sincePersist = 0
 
 const listeners = new Set<() => void>()
 
+/**
+ * Whether a frame arrived while the tab was hidden and nobody has drawn it.
+ *
+ * The stream keeps running in a background tab so the history has no hole in
+ * it, but re-rendering every reader of a page nobody can see is what a hidden
+ * Metrics tab still spent its time on. The store still takes every frame; its
+ * readers catch up in one render when the tab is shown again.
+ */
+let unseen = false
+
+function hidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden"
+}
+
 function emit() {
+  if (hidden()) {
+    unseen = true
+    return
+  }
+  unseen = false
   for (const listener of listeners) listener()
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (unseen && !hidden()) emit()
+  })
 }
 
 function set(next: Partial<MetricsState>) {

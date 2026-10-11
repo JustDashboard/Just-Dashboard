@@ -148,6 +148,12 @@ The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
 
+Passwords are Argon2id hashes (`auth/crypto.go`, 64 MiB, three passes, four lanes; test binaries use a
+token cost). Each hash allocates its whole memory parameter at once, so at most two run at a time and a
+third sign-in waits for a slot. After a full-cost hash the backend collects and returns the buffer to the
+operating system straight away: otherwise a collection that saw it live put the next one off until the
+heap had doubled, which left the process at about 155 MB for up to half a minute after a sign-in.
+
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
 atomically require a password change, clear login lockout, and revoke sessions/API tokens while keeping

@@ -104,7 +104,9 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 	if compose == "" {
 		compose = "docker-compose.yml"
 	}
-	if err := stream(ctx, run.Dir, out, "docker", "compose", "-f", compose, "build"); err != nil {
+	if err := BuildEachService(ctx, run.Dir, compose, func(args ...string) error {
+		return stream(ctx, run.Dir, out, "docker", args...)
+	}); err != nil {
 		return err
 	}
 	err = stackports.Start(ctx, run.Dir, compose, out, func() error {

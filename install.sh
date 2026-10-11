@@ -656,7 +656,18 @@ step "Building and starting the stack"
 say "  ${DIM}First build compiles the Go backend and the Next.js frontend; give it a few minutes.${RESET}"
 say ""
 
-$COMPOSE build
+# One image at a time. Compose builds every service at once, so the two
+# compilers peak together: between 2.5 and 3 GB for the frontend and more than
+# 1 GB for the backend. In turn they need only the larger of the two, which is
+# what decides how small a server can install this. If the services cannot be
+# listed, the single build below fails exactly as it always did.
+if services=$($COMPOSE config --services) && [ -n "$services" ]; then
+	for service in $services; do
+		$COMPOSE build "$service"
+	done
+else
+	$COMPOSE build
+fi
 # Use the freshly built backend so installs and in-app lifecycle operations
 # share port ownership detection and update every consumer through .env.
 docker run --rm --network host --pid host \

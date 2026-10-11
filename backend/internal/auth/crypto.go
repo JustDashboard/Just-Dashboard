@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -110,6 +111,32 @@ var defaultArgon = argonParams{time: 3, memory: 64 * 1024, threads: 4, keyLen: 3
 // testing.Testing is false in anything but a test binary.
 var testArgon = argonParams{time: 1, memory: 64, threads: 1, keyLen: 32}
 
+// Each hash allocates its whole memory parameter, 64 MiB by default, at once.
+// Two at a time bounds what a burst of sign-ins can claim on a small host; a
+// third waits for one of them, which costs it a fraction of a second.
+var argonSlots = make(chan struct{}, 2)
+
+// argonReleaseKiB is the memory parameter above which a finished hash's buffer
+// is handed back to the operating system straight away.
+const argonReleaseKiB = 16 * 1024
+
+func idKey(password, salt []byte, p argonParams) []byte {
+	sum := func() []byte {
+		argonSlots <- struct{}{}
+		defer func() { <-argonSlots }()
+		return argon2.IDKey(password, salt, p.time, p.memory, p.threads, p.keyLen)
+	}()
+	if p.memory >= argonReleaseKiB {
+		// The buffer is garbage once IDKey returns, but a collection that ran
+		// while it was in use counted it as live, and the next one is not due
+		// until the heap has doubled from there. Measured, that left the
+		// backend at about 155 MB for up to half a minute after a sign-in,
+		// against its usual 40. Collecting now gives the pages back.
+		debug.FreeOSMemory()
+	}
+	return sum
+}
+
 // HashPassword returns a PHC-formatted argon2id hash.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, 16)
@@ -120,7 +147,7 @@ func HashPassword(password string) (string, error) {
 	if testing.Testing() {
 		p = testArgon
 	}
-	sum := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
+	sum := idKey([]byte(password), salt, p)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, p.memory, p.time, p.threads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -149,7 +176,7 @@ func VerifyPassword(password, encoded string) bool {
 		return false
 	}
 	p.keyLen = uint32(len(want))
-	got := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
+	got := idKey([]byte(password), salt, p)
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 

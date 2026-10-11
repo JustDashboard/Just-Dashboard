@@ -100,7 +100,9 @@ rebase when the native baseline changes. VRF routes inherit the observed table; 
 mode/membership and VRF table/membership remain outside this L3 editor. Native writes always use
 temporary apply and reconnection confirmation. The global
 `components/network/change-confirmation.tsx` keeps incomplete native cleanup visible after the network
-decision and offers an explicit owned cleanup retry. These interactions
+decision and offers an explicit owned cleanup retry. It is mounted in the shell for administrators and
+reads `/network/changes/current` every 2 s while a change is unfinished, every 15 s otherwise, at once on
+the `jd:network-change` event a change's own response raises, and again whenever the tab is shown. These interactions
 are checked by `network-native-profile.spec.ts`; the native manager's separate evidence and limits are
 documented in [the backend contract](../backend/network-native-managers.md).
 

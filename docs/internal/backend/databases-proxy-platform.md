@@ -4346,6 +4346,11 @@ done by hand, and the UI refuses to fold it away.
   backend can read what the old one was doing. `Installer.Reconcile` at boot: alive → leave it; gone with
   the version moved → it worked (this process running is the proof); gone with the version unchanged → it
   stopped.
+- It **builds one service at a time** (`selfupdate.BuildEachService`, also used by Settings' rebuild,
+  and the same loop in `install.sh`). Compose builds every service at once, so the frontend's Turbopack
+  peak (2.5–3 GB) and the backend's Go compile (over 1 GB) used to land together; in turn the server
+  needs only the larger. The services are read with `compose config --services` from the file being
+  built, and if that fails the single all-at-once build runs as before.
 - It **fast-forwards, never resets** — unlike a managed deployment checkout, this is the operator's own
   checkout and an
   edited compose file is normal, so a local change survives unless it genuinely collides. And it **waits
