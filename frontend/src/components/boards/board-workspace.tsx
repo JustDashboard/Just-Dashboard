@@ -88,7 +88,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
   if (!Number.isSafeInteger(id) || id < 1)
     return (
       <div className="p-6">
-        <ErrorState error={new Error("Invalid board address")} />
+        <ErrorState error={new Error("Invalid drawing address")} />
       </div>
     )
   if (error)
@@ -191,7 +191,7 @@ function LoadedBoard({ board }: { board: Board }) {
         } else {
           setSaveState("error")
           clearSaveError()
-          errorToastRef.current = notify.error("Board was not saved", cause)
+          errorToastRef.current = notify.error("Drawing was not saved", cause)
         }
         return false
       })
@@ -350,9 +350,9 @@ function LoadedBoard({ board }: { board: Board }) {
     await flush()
     const title = savedNameRef.current
     confirm({
-      title: "Delete board",
-      description: `Delete “${title}” and all its drawings? This cannot be undone.`,
-      confirmLabel: "Delete board",
+      title: "Delete drawing",
+      description: `Delete “${title}” and everything drawn on it? This cannot be undone.`,
+      confirmLabel: "Delete drawing",
       action: async () => {
         abandonedRef.current = true
         if (timerRef.current) clearTimeout(timerRef.current)
@@ -365,7 +365,7 @@ function LoadedBoard({ board }: { board: Board }) {
             throw cause
           }
         }
-        router.push("/boards")
+        router.push("/excalidraw")
       },
     })
   }
@@ -376,13 +376,13 @@ function LoadedBoard({ board }: { board: Board }) {
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Back to boards"
-          onClick={() => void go("/boards")}
+          aria-label="Back to Excalidraw"
+          onClick={() => void go("/excalidraw")}
         >
           <ArrowLeft />
         </Button>
         <Input
-          aria-label="Board name"
+          aria-label="Drawing name"
           value={name}
           maxLength={100}
           readOnly={!canWrite}
@@ -399,9 +399,9 @@ function LoadedBoard({ board }: { board: Board }) {
           {saveState === "pending" && "Unsaved changes"}
           {saveState === "saving" && "Saving…"}
           {saveState === "error" && "Save failed — try again"}
-          {saveState === "unnamed" && "Name the board to save it"}
+          {saveState === "unnamed" && "Name the drawing to save it"}
           {saveState === "conflict" && "Changed in another tab — reload to review"}
-          {saveState === "missing" && "This board was deleted — changes can’t be saved"}
+          {saveState === "missing" && "This drawing was deleted — changes can’t be saved"}
         </span>
         {canWrite && (
           <>
@@ -431,7 +431,7 @@ function LoadedBoard({ board }: { board: Board }) {
           </Button>
         )}
         {can("destructive") && (
-          <Button variant="ghost" size="icon" aria-label="Delete board" onClick={remove}>
+          <Button variant="ghost" size="icon" aria-label="Delete drawing" onClick={remove}>
             <Trash />
           </Button>
         )}
@@ -563,7 +563,7 @@ function LoadedBoard({ board }: { board: Board }) {
         }
       >
         <p className="text-body leading-relaxed">
-          Your latest changes to this board are not on the server. Leaving discards them.
+          Your latest changes to this drawing are not on the server. Leaving discards them.
         </p>
       </Modal>
     </div>

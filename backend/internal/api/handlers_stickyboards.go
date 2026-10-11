@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -96,6 +97,9 @@ type stickyPreviewNote struct {
 	Kind  string  `json:"kind"`
 	Color string  `json:"color"`
 	Style string  `json:"style"`
+	// The note's words without their Markdown, so the thumbnail can show what
+	// is written rather than only where.
+	Text string `json:"text,omitempty"`
 }
 
 type stickyPreview struct {
@@ -321,7 +325,7 @@ func stickyPreviewOf(doc stickyDocument) stickyPreview {
 		index[n.ID] = len(preview.Notes)
 		preview.Notes = append(preview.Notes, stickyPreviewNote{
 			X: math.Round(n.X), Y: math.Round(n.Y), W: math.Round(n.W), H: math.Round(n.H),
-			Kind: n.Kind, Color: n.Color, Style: n.Style,
+			Kind: n.Kind, Color: n.Color, Style: n.Style, Text: stickyPlainText(n.Text),
 		})
 	}
 	for _, l := range doc.Links {
@@ -335,6 +339,66 @@ func stickyPreviewOf(doc stickyDocument) stickyPreview {
 		}
 	}
 	return preview
+}
+
+const (
+	maxStickyPreviewLines = 4
+	maxStickyPreviewText  = 120
+)
+
+var (
+	// Go's regexp has no backreferences, so a rule is one pattern per marker.
+	stickyRule     = regexp.MustCompile(`^(-\s*){3,}$|^(\*\s*){3,}$|^(_\s*){3,}$`)
+	stickyFence    = regexp.MustCompile("^(```|~~~)")
+	stickyHeading  = regexp.MustCompile(`^#{1,6}\s+`)
+	stickyBullet   = regexp.MustCompile(`^([-*+]|\d{1,9}[.)])\s+`)
+	stickyTaskBox  = regexp.MustCompile(`^\[[ xX]\]\s+`)
+	stickyImage    = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	stickyStarEm   = regexp.MustCompile(`(^|[^\w*])\*([^\s*](?:[^*]*[^\s*])?)\*`)
+	stickyUnderEm  = regexp.MustCompile(`(^|\W)_([^\s_](?:[^_]*[^\s_])?)_(\W|$)`)
+	stickyMarkup   = strings.NewReplacer("**", "", "__", "", "~~", "", "`", "")
+	stickyHeadTail = regexp.MustCompile(`\s+#+$`)
+)
+
+// stickyPlainText reduces a note's Markdown to the words a thumbnail can show:
+// at most four lines and 120 characters, with the syntax the notes are drawn
+// from (headings, lists, tasks, quotes, emphasis, code, links) taken out. It
+// reads lines rather than parsing blocks because it only has to be readable,
+// and a stray marker left in a thumbnail costs nothing.
+func stickyPlainText(markdown string) string {
+	lines := make([]string, 0, maxStickyPreviewLines)
+	for _, line := range strings.Split(markdown, "\n") {
+		if len(lines) == maxStickyPreviewLines {
+			break
+		}
+		line = stickyPlainLine(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return truncateRunes(strings.Join(lines, "\n"), maxStickyPreviewText)
+}
+
+func stickyPlainLine(line string) string {
+	line = strings.TrimSpace(line)
+	if stickyRule.MatchString(line) || stickyFence.MatchString(line) {
+		return ""
+	}
+	// A quote can hold a list and a list item a task, so each marker is
+	// peeled in the order they nest.
+	for strings.HasPrefix(line, ">") {
+		line = strings.TrimSpace(line[1:])
+	}
+	if stickyHeading.MatchString(line) {
+		line = stickyHeadTail.ReplaceAllString(stickyHeading.ReplaceAllString(line, ""), "")
+	}
+	line = stickyBullet.ReplaceAllString(line, "")
+	line = stickyTaskBox.ReplaceAllString(line, "")
+	line = stickyImage.ReplaceAllString(line, "$1")
+	line = stickyMarkup.Replace(line)
+	line = stickyStarEm.ReplaceAllString(line, "$1$2")
+	line = stickyUnderEm.ReplaceAllString(line, "$1$2$3")
+	return strings.TrimSpace(line)
 }
 
 func countStickies(doc stickyDocument) int {

@@ -354,10 +354,10 @@ export const INVENTORY_SOURCES: InventorySource[] = [
   },
   {
     kind: "board",
-    label: "Boards",
+    label: "Excalidraw drawings",
     read: async (signal) =>
       (await get<BoardSummary[]>("/boards/", undefined, signal)).map((board) => ({
-        ...resource("board", board.id, board.name, `/boards/${board.id}`, undefined, [
+        ...resource("board", board.id, board.name, `/excalidraw/${board.id}`, undefined, [
           String(board.id),
         ]),
         facts: facts({

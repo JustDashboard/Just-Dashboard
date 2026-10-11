@@ -13,11 +13,14 @@ import {
   linkGeometry,
   noteAt,
   noteTitle,
+  plainText,
+  previewOf,
   readClipboard,
   removeNotes,
   reorder,
   searchNotes,
   taskProgress,
+  wrapWords,
   TEMPLATES,
   toggleTask,
 } from "./stickyboard"
@@ -254,5 +257,47 @@ describe("templates", () => {
   test("building a template twice gives fresh ids", () => {
     const kanban = TEMPLATES.find((t) => t.id === "kanban")
     expect(kanban.build().notes[0].id).not.toBe(kanban.build().notes[0].id)
+  })
+})
+
+describe("plainText", () => {
+  test("a note's words without its Markdown, four lines at most", () => {
+    expect(plainText("## Ship it\n- [x] **tests**\n- [ ] see [docs](http://x)")).toBe(
+      "Ship it\ntests\nsee docs",
+    )
+    expect(plainText("a\n\nb\nc\nd\ne")).toBe("a\nb\nc\nd")
+    expect(plainText("> quoted `code`\n---\n1. first")).toBe("quoted code\nfirst")
+  })
+
+  test("capped at 120 characters, counted as characters rather than bytes", () => {
+    expect([...plainText("ș".repeat(200))]).toHaveLength(120)
+  })
+})
+
+describe("wrapWords", () => {
+  test("breaks at words to the width and keeps paragraphs apart", () => {
+    expect(wrapWords("move backups to b2\nrenew", 10, 5)).toEqual([
+      "move",
+      "backups to",
+      "b2",
+      "renew",
+    ])
+  })
+
+  test("the last line kept says the words run on", () => {
+    expect(wrapWords("one two three four five six", 8, 2)).toEqual(["one two", "three…"])
+  })
+
+  test("a word longer than a line is cut rather than overflowing it", () => {
+    expect(wrapWords("supercalifragilistic", 8, 3)).toEqual(["superca…"])
+  })
+})
+
+describe("previewOf", () => {
+  test("carries each note's words, as the server's preview does", () => {
+    const note = createNote("sticky", { x: 0, y: 0 }, { text: "# Plan\n- [ ] Tag" })
+    expect(
+      previewOf({ version: 1, background: "dots", notes: [note], links: [] }).notes[0].text,
+    ).toBe("Plan\nTag")
   })
 })

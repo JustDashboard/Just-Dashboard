@@ -130,7 +130,7 @@ func TestStickyboardsPersistNormalizeAndRejectStaleSaves(t *testing.T) {
 	if err := json.Unmarshal(list.Body.Bytes(), &boards); err != nil || len(boards) != 3 {
 		t.Fatalf("list = %d %s", list.Code, list.Body.String())
 	}
-	if strings.Contains(list.Body.String(), "Ship it") {
+	if strings.Contains(list.Body.String(), `"document"`) || strings.Contains(list.Body.String(), `"locked"`) {
 		t.Fatalf("the list carried a document: %s", list.Body.String())
 	}
 
@@ -222,5 +222,60 @@ func TestStickyPreviewKeepsTheLargestNotesInPaintOrder(t *testing.T) {
 	// The second link's far end did not make the cut, so only the first is drawn.
 	if len(preview.Links) != 1 || preview.Links[0] != [2]int{0, maxStickyPreview - 1} {
 		t.Fatalf("preview links = %v", preview.Links)
+	}
+}
+
+func TestStickyPlainText(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, in, want string }{
+		{"plain", "Ship it", "Ship it"},
+		{"empty", "", ""},
+		{"only syntax", "---\n```\n```\n>\n", ""},
+		{"heading", "# Sprint 12 #\n### Goals", "Sprint 12\nGoals"},
+		{"not a heading", "#hashtag and C# code", "#hashtag and C# code"},
+		{"bullets", "- one\n* two\n+ three", "one\ntwo\nthree"},
+		{"ordered", "1. first\n2) second\n10. tenth", "first\nsecond\ntenth"},
+		{"nested list", "- one\n    - inner", "one\ninner"},
+		{"tasks", "- [ ] open\n- [x] done\n- [X] also done\n[ ] bare", "open\ndone\nalso done\nbare"},
+		{"quote", "> quoted\n> > deeper\n> - listed", "quoted\ndeeper\nlisted"},
+		{"emphasis", "**bold** and __strong__ and ~~gone~~ and `code`", "bold and strong and gone and code"},
+		{"italic", "*lean* and _slanted_ but 2*3*4 and snake_case_name", "lean and slanted but 2*3*4 and snake_case_name"},
+		{"link", "see [the docs](https://example.com/a_b) now", "see the docs now"},
+		{"image", "![diagram](/x.png) caption", "diagram caption"},
+		{"rules and fences", "intro\n---\n***\n```go\nx := 1\n```\n~~~\nend", "intro\nx := 1\nend"},
+		{"blank lines dropped", "a\n\n\n  \nb\r\nc", "a\nb\nc"},
+		{"four lines at most", "1\n2\n3\n4\n5\n6", "1\n2\n3\n4"},
+		{"120 runes", strings.Repeat("é", 200), strings.Repeat("é", 120)},
+		{"120 runes across lines", strings.Repeat("a", 100) + "\n" + strings.Repeat("b", 100), strings.Repeat("a", 100) + "\n" + strings.Repeat("b", 19)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stickyPlainText(tc.in); got != tc.want {
+				t.Errorf("stickyPlainText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStickyPreviewCarriesEachNotesWords(t *testing.T) {
+	t.Parallel()
+	doc := emptyStickyDocument()
+	doc.Notes = []stickyNote{
+		{ID: "s", Kind: "sticky", W: 200, H: 200, Text: "**Ship** it"},
+		{ID: "t", Kind: "text", W: 200, H: 80, Text: "# Heading"},
+		{ID: "c", Kind: "section", W: 900, H: 600, Text: "This week"},
+		{ID: "e", Kind: "sticky", W: 200, H: 200},
+	}
+	out, err := json.Marshal(stickyPreviewOf(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"text":"Ship it"`, `"text":"Heading"`, `"text":"This week"`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("preview %s lacks %s", out, want)
+		}
+	}
+	if strings.Count(string(out), `"text":`) != 3 {
+		t.Errorf("an empty note carried a text: %s", out)
 	}
 }

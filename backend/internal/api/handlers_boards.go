@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,8 @@ type boardSummary struct {
 	Revision  int64     `json:"revision"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Only the list fills this in; a board is opened for its scene.
+	Preview json.RawMessage `json:"preview,omitempty"`
 }
 
 type boardDetail struct {
@@ -50,7 +53,7 @@ func (s *Server) mountBoardRoutes(r chi.Router) {
 
 func (s *Server) handleBoardList(w http.ResponseWriter, r *http.Request) error {
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id, name, revision, created_at, updated_at FROM boards ORDER BY updated_at DESC, id DESC`)
+		`SELECT id, name, revision, preview, created_at, updated_at FROM boards ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -58,10 +61,12 @@ func (s *Server) handleBoardList(w http.ResponseWriter, r *http.Request) error {
 	boards := []boardSummary{}
 	for rows.Next() {
 		var b boardSummary
+		var preview string
 		var created, updated int64
-		if err := rows.Scan(&b.ID, &b.Name, &b.Revision, &created, &updated); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.Revision, &preview, &created, &updated); err != nil {
 			return httpx.Internal(err)
 		}
+		b.Preview = json.RawMessage(preview)
 		b.CreatedAt = time.Unix(created, 0).UTC()
 		b.UpdatedAt = time.Unix(updated, 0).UTC()
 		boards = append(boards, b)
@@ -69,8 +74,46 @@ func (s *Server) handleBoardList(w http.ResponseWriter, r *http.Request) error {
 	if err := rows.Err(); err != nil {
 		return httpx.Internal(err)
 	}
+	// Close before the backfill below reads scenes: the connection pool may be
+	// a single connection, and this cursor would hold it.
+	if err := rows.Close(); err != nil {
+		return httpx.Internal(err)
+	}
+	for i := range boards {
+		if len(boards[i].Preview) > 0 {
+			continue
+		}
+		preview, err := s.backfillBoardPreview(r.Context(), boards[i].ID, boards[i].Revision)
+		if err != nil {
+			return err
+		}
+		boards[i].Preview = preview
+	}
 	httpx.JSON(w, http.StatusOK, boards)
 	return nil
+}
+
+// backfillBoardPreview derives the preview of a board saved before previews
+// existed. It is not an edit: revision and updated_at stay as they were, so an
+// editor open on the board does not meet a conflict on its next save. The
+// revision in the WHERE keeps a save that lands meanwhile, which stores its own
+// preview, from being overwritten by one of the scene it replaced.
+func (s *Server) backfillBoardPreview(ctx context.Context, id, revision int64) (json.RawMessage, error) {
+	var scene string
+	err := s.Store.DB.QueryRowContext(ctx,
+		`SELECT scene FROM boards WHERE id = ? AND revision = ?`, id, revision).Scan(&scene)
+	if errors.Is(err, sql.ErrNoRows) {
+		return json.RawMessage(emptyBoardPreview), nil
+	}
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	preview := boardPreviewJSON(json.RawMessage(scene))
+	if _, err := s.Store.DB.ExecContext(ctx,
+		`UPDATE boards SET preview = ? WHERE id = ? AND revision = ?`, preview, id, revision); err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return json.RawMessage(preview), nil
 }
 
 func (s *Server) handleBoardGet(w http.ResponseWriter, r *http.Request) error {
@@ -118,8 +161,8 @@ func (s *Server) handleBoardCreate(w http.ResponseWriter, r *http.Request) error
 	}
 	now := time.Now().Unix()
 	result, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO boards(name, scene, created_at, updated_at) VALUES(?,?,?,?)`,
-		name, emptyBoardScene, now, now)
+		`INSERT INTO boards(name, scene, preview, created_at, updated_at) VALUES(?,?,?,?,?)`,
+		name, emptyBoardScene, emptyBoardPreview, now, now)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -207,8 +250,8 @@ func (s *Server) handleBoardPut(w http.ResponseWriter, r *http.Request) error {
 	}
 	now := time.Now().Unix()
 	result, err := s.Store.DB.ExecContext(r.Context(),
-		`UPDATE boards SET name = ?, scene = ?, revision = revision + 1, updated_at = ?
-		 WHERE id = ? AND revision = ?`, name, string(req.Scene), now, id, req.Revision)
+		`UPDATE boards SET name = ?, scene = ?, preview = ?, revision = revision + 1, updated_at = ?
+		 WHERE id = ? AND revision = ?`, name, string(req.Scene), boardPreviewJSON(req.Scene), now, id, req.Revision)
 	if err != nil {
 		return httpx.Internal(err)
 	}

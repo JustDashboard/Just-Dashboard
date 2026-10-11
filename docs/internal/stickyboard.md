@@ -46,19 +46,29 @@ target. A missing board is `404 stickyboard_not_found`. The document is data: no
 host command or grants a capability.
 
 The counts and the preview are derived from the document on every write. The preview is the board's
-shape for the list's thumbnail — each note's rectangle, kind, colour and style, and the links between
-them as index pairs — capped at 300 notes, the largest kept and returned to paint order, so the list
-never reads a whole board to draw it.
+shape for the list's thumbnail — each note's rectangle, kind, colour, style and words, and the links
+between them as index pairs — capped at 300 notes, the largest kept and returned to paint order, so the
+list never reads a whole board to draw it. A note's words are its Markdown reduced to plain text by
+`stickyPlainText`: at most four lines and 120 characters, with headings, list and task markers, quotes,
+emphasis, code and link syntax taken out. A board saved before the words were kept has none in its
+preview until its next save.
 
 ## The list
 
-`/stickyboard` is a reading page: four readings (boards, sticky notes, links, the last edit and on
-which board), a name filter, and the boards as cards drawn as the boards themselves (`BoardPreview`
-draws the server's preview in the notes' own colours). Every card is a board to enter, so it carries the
-lit edge of a thing you take (§16) and a menu with Rename, Duplicate and Delete by capability. New board
-asks for a name and a starting point; the templates — Blank, Kanban, Retrospective, Mind map — are a
-choice between kinds, so they are `ChoiceCard`s, each drawn as the board it will make, and the board is
-created from that document in one request.
+`/stickyboard` is a reading page. It opens on Stickyboard's own mark — three notes fanned out in the
+board's paper colours (`StickyboardMark`), since the feature is this dashboard's own and has no logo to
+borrow — and a line of facts (boards, sticky notes, links, the last edit and on which board) in the
+identity shape the Overview gives the machine, where four stat tiles used to stand. Under it are the
+boards as cards drawn as the boards themselves: `BoardPreview` draws the server's preview on the
+editor's dot grid in the notes' own colours, with each note's words written on it wherever they are
+legible at that size, and the notes land on the grid one after another on arrival (reduced motion, or a
+board of more than 60 notes, simply draws them). A card names the colours its notes are written in, most
+used first. Every card is a board to enter, so it carries the lit edge of a thing you take (§16) and a
+menu with Rename, Duplicate and Delete by capability. A name filter appears from seven boards. Under the
+boards, for the `service.control` capability, **Start from** shows the templates — Blank, Kanban,
+Retrospective, Mind map — as `ChoiceCard`s, each drawn as the board it will make; taking one opens New
+board on it. New board asks for a name and a starting point, and the board is created from that document
+in one request.
 
 ## The board
 

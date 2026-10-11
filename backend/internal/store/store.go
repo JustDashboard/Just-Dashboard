@@ -181,11 +181,16 @@ CREATE TABLE IF NOT EXISTS db_inventory_ignored (
 
 -- Boards live with the dashboard's other durable state, including embedded
 -- Excalidraw image data. Revision guards prevent a stale tab overwriting a
--- newer save. A new table is additive for existing installations.
+-- newer save. The preview is derived from the scene on every save so the list
+-- never reads a whole scene to draw its thumbnail; '' means a board saved
+-- before previews existed, which the list fills in on first sight. A new table
+-- is additive for existing installations, and preview reaches boards that
+-- shipped without it through addedColumns.
 CREATE TABLE IF NOT EXISTS boards (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,
   scene      TEXT NOT NULL DEFAULT '{"elements":[],"appState":{},"files":{}}',
+  preview    TEXT NOT NULL DEFAULT '',
   revision   INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -1422,6 +1427,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"metric_samples", "tcp_listen_drops", "REAL DEFAULT NULL"},
 	{"metric_samples", "tcp_rtt_ms", "REAL DEFAULT NULL"},
 	{"metric_samples", "tcp_rtt_p90_ms", "REAL DEFAULT NULL"},
+	// A board gained a thumbnail derived from its scene on every save. Boards
+	// saved before it hold '' until the list first sees them.
+	{"boards", "preview", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
