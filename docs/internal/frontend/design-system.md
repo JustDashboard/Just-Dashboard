@@ -94,9 +94,18 @@ taking a frame:
   dashed before the thing exists or where a hop is missing, still while it is paused, manual or
   only a draft, amber where it works but should not be relied on (a branch that cannot be read, a
   port that bypasses the proxy), red where a link has broken, a brand-to-signal pulse travelling
-  along it while it carries. Those two draw this server as one mark (`WireHost`): the J in its own
-  blue on `bg-wash-brand` inside a ring of `--rule-brand`, because it is a location — where the
-  reader is standing — and the filled brand face it used to stand on is a command's (§3). The rollback dialog holds a small one of its own — your domains wired
+  along it while it carries. Every picture draws this server as one mark (`WireHost`): the server
+  rack (`Servers`) in the brand's blue on `bg-wash-brand` inside a ring of `--rule-brand`, at the
+  size of the marks beside it. It was the J until 0.7.1, at the operator's request — the J is the
+  dashboard, a product on the machine, where every other mark in a picture is the thing itself —
+  and before that the filled brand face, which is a command's (§3); the tint and the ring say it
+  is a location, where the reader is standing. The other marks are one tile, too: every
+  `WireMark` stands on the same rounded square whatever its tone, a thing's own glyph on the
+  `logo` tone, and the only circle left in a picture is the dashed ring of a thing not added yet
+  (`WirePlaceholder`). The Databases map, Configuration's request path, a site's route map and the
+  rollback dialog's picture took the page's own ground over `wire-grid` with the rest in 0.7.1,
+  the map giving up the frame it kept as the last picture with one. The rollback dialog holds a
+  small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
   (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a

@@ -398,11 +398,14 @@ function Picture({
             )
           })}
           <div className="relative grid gap-y-5 lg:grid-cols-[minmax(0,0.8fr)_4rem_minmax(0,1.2fr)] lg:items-center">
+            {/* The words before the mark, so the wires leave it over the gap
+                rather than across its name. */}
             <WireNode
               nodeRef={hub}
+              align="end"
               mark={
                 network.driver === "host" ? (
-                  <WireHost />
+                  <WireHost size="md" />
                 ) : (
                   <WireMark tone="logo" shape="square" size="md">
                     {network.driver === "bridge" ? (

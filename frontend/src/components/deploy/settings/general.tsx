@@ -1351,7 +1351,7 @@ function AutoDeployPicture({
               nodeRef={watchMark}
               align="center"
               mark={
-                <WireMark tone={broken ? "warning" : "neutral"}>
+                <WireMark tone={broken ? "warning" : "logo"}>
                   <Clock />
                 </WireMark>
               }

@@ -55,99 +55,102 @@ export function RequestPath({
   const certificate = certificateReading(report)
 
   return (
-    <div ref={container} className="relative min-w-0">
-      {[
-        [browserNode, networkNode],
-        [networkNode, proxyNode],
-        [proxyNode, frontendNode],
-        [proxyNode, backendNode],
-      ].map(([from, to], index) => (
-        <AnimatedBeam
-          key={index}
-          containerRef={container}
-          fromRef={from}
-          toRef={to}
-          shape={index > 1 ? "s" : "arc"}
-          still={restarting}
-          tone={restarting ? "warning" : "default"}
-          duration={2.4}
-          delay={index * 0.45}
-        />
-      ))}
+    <div className="relative min-w-0 py-4">
+      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
+      <div ref={container} className="relative min-w-0">
+        {[
+          [browserNode, networkNode],
+          [networkNode, proxyNode],
+          [proxyNode, frontendNode],
+          [proxyNode, backendNode],
+        ].map(([from, to], index) => (
+          <AnimatedBeam
+            key={index}
+            containerRef={container}
+            fromRef={from}
+            toRef={to}
+            shape={index > 1 ? "s" : "arc"}
+            still={restarting}
+            tone={restarting ? "warning" : "default"}
+            duration={2.4}
+            delay={index * 0.45}
+          />
+        ))}
 
-      <ol
-        aria-label="How a request reaches the dashboard"
-        className="grid min-w-0 gap-y-7 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.15fr)] lg:items-center lg:gap-x-6 lg:pb-16"
-      >
-        <li className="min-w-0">
-          <WireNode
-            nodeRef={browserNode}
-            align="center"
-            mark={<Mark product={agent.product} fallback={DesktopDevice} />}
-            eyebrow="You"
-            title={describeClient(navigator.userAgent)}
-            hint={reached}
-          />
-        </li>
-        <li className="min-w-0">
-          <WireNode
-            nodeRef={networkNode}
-            align="center"
-            mark={<Mark product={network.product} fallback={network.glyph} />}
-            eyebrow={network.eyebrow}
-            title={<span className="block truncate font-mono">{network.title}</span>}
-            hint={
-              <>
-                {network.hint && (
-                  <span className={cn("block truncate", network.address && "font-mono")}>
-                    {network.hint}
+        <ol
+          aria-label="How a request reaches the dashboard"
+          className="grid min-w-0 gap-y-7 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1.15fr)] lg:items-center lg:gap-x-6 lg:pb-16"
+        >
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={browserNode}
+              align="center"
+              mark={<Mark product={agent.product} fallback={DesktopDevice} />}
+              eyebrow="You"
+              title={describeClient(navigator.userAgent)}
+              hint={reached}
+            />
+          </li>
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={networkNode}
+              align="center"
+              mark={<Mark product={network.product} fallback={network.glyph} />}
+              eyebrow={network.eyebrow}
+              title={<span className="block truncate font-mono">{network.title}</span>}
+              hint={
+                <>
+                  {network.hint && (
+                    <span className={cn("block truncate", network.address && "font-mono")}>
+                      {network.hint}
+                    </span>
+                  )}
+                  <span className="block">
+                    {allowed} {allowed === 1 ? "network" : "networks"} allowed
                   </span>
-                )}
-                <span className="block">
-                  {allowed} {allowed === 1 ? "network" : "networks"} allowed
+                </>
+              }
+            />
+          </li>
+          <li className="min-w-0">
+            <WireNode
+              nodeRef={proxyNode}
+              align="center"
+              mark={<Mark product="caddy" />}
+              eyebrow="Proxy"
+              title={
+                <>
+                  Caddy <span className="numeric font-mono text-[var(--tag-pink)]">:{s.port}</span>
+                </>
+              }
+              hint={
+                <span className="inline-flex items-center gap-1.5">
+                  {certificate.product && <ProductGlyph id={certificate.product} />}
+                  {certificate.label}
                 </span>
-              </>
-            }
-          />
-        </li>
-        <li className="min-w-0">
-          <WireNode
-            nodeRef={proxyNode}
-            align="center"
-            mark={<Mark product="caddy" />}
-            eyebrow="Proxy"
-            title={
-              <>
-                Caddy <span className="numeric font-mono text-[var(--tag-pink)]">:{s.port}</span>
-              </>
-            }
-            hint={
-              <span className="inline-flex items-center gap-1.5">
-                {certificate.product && <ProductGlyph id={certificate.product} />}
-                {certificate.label}
-              </span>
-            }
-          />
-        </li>
-        {/* Two to a row on a phone, so both wires leave the proxy's mark
+              }
+            />
+          </li>
+          {/* Two to a row on a phone, so both wires leave the proxy's mark
             rather than one of them running through the other service. */}
-        <li className="grid min-w-0 grid-cols-2 gap-4 lg:flex lg:flex-col lg:gap-6">
-          <WireNode
-            nodeRef={frontendNode}
-            mark={<Mark product="nextjs" restarting={restarting} />}
-            eyebrow="Frontend"
-            title={<Loopback port={s.frontendPort} />}
-            hint="Next.js · every page"
-          />
-          <WireNode
-            nodeRef={backendNode}
-            mark={<Mark product="go" restarting={restarting} />}
-            eyebrow="Backend"
-            title={<Loopback port={s.backendPort} />}
-            hint="Go · /api and /healthz"
-          />
-        </li>
-      </ol>
+          <li className="grid min-w-0 grid-cols-2 gap-4 lg:flex lg:flex-col lg:gap-6">
+            <WireNode
+              nodeRef={frontendNode}
+              mark={<Mark product="nextjs" restarting={restarting} />}
+              eyebrow="Frontend"
+              title={<Loopback port={s.frontendPort} />}
+              hint="Next.js · every page"
+            />
+            <WireNode
+              nodeRef={backendNode}
+              mark={<Mark product="go" restarting={restarting} />}
+              eyebrow="Backend"
+              title={<Loopback port={s.backendPort} />}
+              hint="Go · /api and /healthz"
+            />
+          </li>
+        </ol>
+      </div>
     </div>
   )
 }

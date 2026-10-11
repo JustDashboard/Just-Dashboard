@@ -305,8 +305,8 @@ function Picture({
           align="center"
           mark={
             app ? (
-              <WireMark tone="ink">
-                <GitHubMark className="size-8" />
+              <WireMark tone="logo">
+                <GitHubMark />
               </WireMark>
             ) : (
               <WirePlaceholder>
