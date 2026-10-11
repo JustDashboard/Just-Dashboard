@@ -631,6 +631,17 @@ test.describe("a deployment's traffic", () => {
     ).toContainText("www.google.com")
     await expect(page.getByRole("heading", { name: "Visitors", exact: true })).toBeVisible()
 
+    // The readings and both charts scroll with the lists, so the lists have the
+    // pane's height rather than the strip left under two pinned charts.
+    const scroller = page
+      .locator(".overflow-auto")
+      .filter({ has: page.getByRole("heading", { name: "Visitors", exact: true }) })
+      .last()
+    await expect(scroller.getByText("Response time", { exact: true })).toBeVisible()
+    await expect(
+      scroller.locator("[data-slot=stat-tile]").filter({ hasText: "Bots and scripts" }),
+    ).toHaveCount(1)
+
     // Each person as the browser on its system, with the pages they opened in order.
     const person = page.getByRole("button", { name: "Show every request from 89.28.56.43" }).first()
     await expect(person).toContainText("Chrome on macOS")
