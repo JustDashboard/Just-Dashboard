@@ -94,6 +94,7 @@ import {
   MagnifyingGlassCircleIcon,
   MagnifyingGlassIcon,
   MagnifyingGlassMinusIcon,
+  MagnifyingGlassPlusIcon,
   MapIcon,
   MapPinIcon,
   MinusIcon,
@@ -267,6 +268,7 @@ export const Rocket: Icon = adapt(RocketLaunchIcon, "Rocket")
 export const CloudUpload: Icon = adapt(CloudArrowUpIcon, "CloudUpload")
 export const MagnifyingGlass: Icon = adapt(MagnifyingGlassIcon, "MagnifyingGlass")
 export const MagnifyingGlassMinus: Icon = adapt(MagnifyingGlassMinusIcon, "MagnifyingGlassMinus")
+export const MagnifyingGlassPlus: Icon = adapt(MagnifyingGlassPlusIcon, "MagnifyingGlassPlus")
 export const Filter: Icon = adapt(FunnelIcon, "Filter")
 export const RefreshClockwise: Icon = adapt(ArrowPathIcon, "RefreshClockwise")
 export const RotateClockwise: Icon = adapt(ArrowUturnRightIcon, "RotateClockwise")
