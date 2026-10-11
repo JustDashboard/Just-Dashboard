@@ -70,6 +70,9 @@ Retrospective, Mind map — as `ChoiceCard`s, each drawn as the board it will ma
 board on it. New board asks for a name and a starting point, and the board is created from that document
 in one request.
 
+**New board**, available with `service.control`, sits at the right end of the identity line beside
+the page title and facts. The identity line wraps on narrow screens.
+
 ## The board
 
 The canvas is React Flow (`@xyflow/react`, already the database diagram's), controlled by the document:

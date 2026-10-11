@@ -74,6 +74,9 @@ from the deployment fleet and the database fleet, read only when some drawing li
 holds Delete for the `destructive` capability. A name filter appears from seven drawings. The empty page
 shows a small drawing of what the editor is for here instead of a glyph.
 
+**New drawing**, available with `service.control`, sits at the right end of the identity line beside
+the page title and facts. The identity line wraps on narrow screens.
+
 ## Server cards
 
 The insert panel reads the deployment list and database fleet through their existing authenticated
