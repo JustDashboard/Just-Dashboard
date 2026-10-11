@@ -477,7 +477,7 @@ export function ChoiceRow({
   const card = disabled ? (
     <div className="relative isolate rounded-xl border bg-choice-surface">{body}</div>
   ) : (
-    <SpotlightBorder radius={320}>{body}</SpotlightBorder>
+    <SpotlightBorder>{body}</SpotlightBorder>
   )
   return (
     <li data-slot="choice-row" className="min-w-0">
