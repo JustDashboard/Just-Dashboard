@@ -26,11 +26,16 @@ const QUERY = FAMILIES.map((p) => `action_prefix=${encodeURIComponent(p)}`).join
  * failure is said as one in its row: a reload nginx refused or a renewal
  * that did not go through is the change most worth seeing here. Read by
  * the accounts that may read the audit log, which is system.admin.
+ *
+ * Five, two lines each: it sits in the rail beside the routes, and eight
+ * three-line rows ran the rail a screen past the routes it stands beside,
+ * leaving the wide column empty all the way down. The rest are the audit
+ * log's.
  */
 export function RecentChanges() {
   const activity = usePoll(
     (signal) =>
-      get<{ entries: AuditEntry[]; total: number }>(`/audit/?${QUERY}&limit=8`, undefined, signal),
+      get<{ entries: AuditEntry[]; total: number }>(`/audit/?${QUERY}&limit=5`, undefined, signal),
     60_000,
   )
   const entries = activity.data?.entries
@@ -65,26 +70,31 @@ export function RecentChanges() {
         ) : (
           <ul aria-label="Recent changes" className="animate-rise divide-y divide-hairline">
             {entries.map((entry) => (
-              <li key={entry.id} className="flex min-w-0 items-start gap-3 py-2.5">
+              <li key={entry.id} className="flex min-w-0 items-center gap-3 py-2">
                 <ActionMark action={entry.action} />
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <div className="flex min-w-0 items-center justify-between gap-2">
-                    <ActionName action={entry.action} className="text-xs" />
-                    {!entry.success && <Status tone="danger" label={`Failed · ${entry.status}`} />}
+                    <ActionName action={entry.action} className="min-w-0 truncate text-xs" />
+                    {entry.success ? (
+                      <span className="numeric shrink-0 text-hint text-muted-foreground">
+                        {relativeTime(entry.ts)}
+                      </span>
+                    ) : (
+                      <Status tone="danger" label={`Failed · ${entry.status}`} />
+                    )}
                   </div>
-                  {entry.target && (
-                    <p
-                      className={cn(
-                        "truncate font-mono text-hint",
-                        entry.success ? "text-muted-foreground" : "text-foreground",
-                      )}
-                      title={entry.target}
-                    >
-                      {entry.target}
-                    </p>
-                  )}
-                  <p className="text-hint text-muted-foreground">
-                    {actorName(entry)} · {relativeTime(entry.ts)}
+                  <p
+                    className="truncate text-hint text-muted-foreground"
+                    title={entry.target ? `${entry.target} · ${actorName(entry)}` : undefined}
+                  >
+                    {entry.target && (
+                      <span className={cn("font-mono", !entry.success && "text-foreground")}>
+                        {entry.target}
+                      </span>
+                    )}
+                    {entry.target && " · "}
+                    {actorName(entry)}
+                    {!entry.success && ` · ${relativeTime(entry.ts)}`}
                   </p>
                 </div>
               </li>

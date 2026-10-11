@@ -1984,11 +1984,13 @@ test("the page opens on what the host serves: its applications, its hour and its
   const hour = (site: string, requests: number, errorRate: number) => ({
     site,
     file: "",
+    engine: "nginx",
     status: "available",
     requests,
     errorRate,
     bytes: 0,
     complete: true,
+    points: [],
   })
   await page.route("**/api/v1/proxy/traffic", (route) =>
     json(route, {

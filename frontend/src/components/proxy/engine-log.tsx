@@ -115,7 +115,7 @@ export function EngineLog({ status }: { status: ProxyStatus }) {
           sources={sources}
           storageKey="proxy.engine"
           pickerLabel="Engine log"
-          paneClassName="h-[min(70vh,40rem)] min-h-96"
+          paneClassName="h-[min(90vh,64rem)] min-h-[40rem]"
         />
       </PanelBody>
     </Panel>

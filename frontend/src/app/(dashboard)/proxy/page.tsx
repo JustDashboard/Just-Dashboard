@@ -31,6 +31,7 @@ import {
   EngineActions,
   EngineExtras,
   EngineIdentity,
+  ModulesFact,
   useEngineUnit,
 } from "@/components/proxy/engine"
 import { EngineLog } from "@/components/proxy/engine-log"
@@ -153,14 +154,17 @@ export default function ProxyOverviewPage() {
     [],
     { enabled: Boolean(status?.nginx) },
   )
-  // Each site's last hour and nginx's recent errors, read from the logs on
-  // this host. A digest beside the routes rather than a source of findings:
-  // a failed read says so in its own panel and nowhere else.
+  // Each site's last hour — nginx's files and the Docker Caddy ingress's
+  // routes — and nginx's recent errors. A digest beside the routes rather
+  // than a source of findings: a failed read says so in its own panel and
+  // nowhere else. The server reads only what each log gained since the last
+  // ask, so Live traffic's quarter-minute cadence is cheap.
+  const traffics = Boolean(status?.nginx || status?.ingressContainer)
   const traffic = usePoll(
     (signal) => get<SiteTrafficSummary>("/proxy/traffic", undefined, signal),
-    60_000,
+    15_000,
     [],
-    { enabled: Boolean(status?.nginx) },
+    { enabled: traffics },
   )
   const nginxErrors = usePoll(
     (signal) => get<ErrorReport>("/proxy/errors", { window: "1h" }, signal),
@@ -472,6 +476,9 @@ export default function ProxyOverviewPage() {
     },
   ]
   const inventory = facts.filter((fact) => fact.error || fact.text)
+  // A route's file name is the dashboard's; the name its visitors type is
+  // what the Traffic and Errors rows lead with.
+  const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
 
   return (
     <Page className="animate-rise">
@@ -509,28 +516,30 @@ export default function ProxyOverviewPage() {
         serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
-        inventory={inventory.map((fact) => (
-          <Fragment key={fact.key}>
-            <FactDot />
-            {fact.error ? (
-              <span className="font-medium text-warning" title={errorMessage(fact.error)}>
-                {`couldn't read ${fact.key}`}
-              </span>
-            ) : (
-              <Link
-                href={fact.href}
-                title={fact.title}
-                className={cn(
-                  "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
-                  fact.tone === "danger" && "font-medium text-destructive",
-                  fact.tone === "warning" && "font-medium text-warning",
-                )}
-              >
-                {fact.text}
-              </Link>
-            )}
-          </Fragment>
-        ))}
+        inventory={inventory
+          .map((fact) => (
+            <Fragment key={fact.key}>
+              <FactDot />
+              {fact.error ? (
+                <span className="font-medium text-warning" title={errorMessage(fact.error)}>
+                  {`couldn't read ${fact.key}`}
+                </span>
+              ) : (
+                <Link
+                  href={fact.href}
+                  title={fact.title}
+                  className={cn(
+                    "rounded-sm focus-ring transition-colors hover:text-foreground hover:underline",
+                    fact.tone === "danger" && "font-medium text-destructive",
+                    fact.tone === "warning" && "font-medium text-warning",
+                  )}
+                >
+                  {fact.text}
+                </Link>
+              )}
+            </Fragment>
+          ))
+          .concat(status.nginx ? [<ModulesFact key="modules" />] : [])}
         verdict={verdict && <Status verdict={verdict.tone} label={verdict.label} />}
         actions={
           admin &&
@@ -577,7 +586,12 @@ export default function ProxyOverviewPage() {
           )
         ))}
 
+      {traffics && (
+        <LiveTraffic admin={admin} nginx={status.nginx} sites={siteTraffic} error={traffic.error} />
+      )}
+
       <OverviewBand
+        traffics={traffics}
         nginx={status.nginx}
         traffic={{ sites: siteTraffic, error: traffic.error }}
         certificates={{
@@ -589,9 +603,8 @@ export default function ProxyOverviewPage() {
         }}
         errors={{ report: errorReport, error: nginxErrors.error }}
         productOf={(site) => backends.get(site)?.product}
+        labelOf={labelOf}
       />
-
-      {status.nginx && <LiveTraffic admin={admin} />}
 
       {/* Route destinations need room for both ends; verdicts fit in the rail. */}
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
@@ -650,7 +663,7 @@ export default function ProxyOverviewPage() {
                 {routes.shown.map((vhost) => {
                   const target = routeTarget(vhost)
                   const reached = upstreamsOf(upstreamReport, vhost.path)
-                  const load = vhost.kind === "nginx" ? trafficBySite.get(vhost.name) : undefined
+                  const load = trafficBySite.get(vhost.name)
                   const backend = backends.get(vhost.name) ?? siteBackend(vhost, [])
                   return (
                     <ChoiceRow

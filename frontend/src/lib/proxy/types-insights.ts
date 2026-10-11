@@ -141,9 +141,20 @@ export type SiteTraffic = DeploymentRequests & { logs: SiteLogs }
 export type SiteTrafficTail = { entries: RequestEntry[]; cursor: number }
 
 /** One site's last hour, as the overview reads it. */
+/** One minute of a site's hour, by what went wrong in it. */
+export type TrafficPoint = {
+  start: string
+  total: number
+  refused: number
+  failed: number
+  bytes: number
+}
+
 export type SiteTrafficReading = {
   site: string
   file: string
+  /** What answered: nginx, or the Docker Caddy ingress holding 80 and 443. */
+  engine: "nginx" | "caddy-ingress"
   status: "available" | "unavailable"
   reason?: string
   /** The hour's count, which is its rate per hour. */
@@ -152,6 +163,8 @@ export type SiteTrafficReading = {
   bytes: number
   p95?: number
   complete: boolean
+  /** The hour minute by minute. */
+  points: TrafficPoint[]
 }
 
 export type SiteTrafficSummary = { observedAt: string; sites: SiteTrafficReading[] }

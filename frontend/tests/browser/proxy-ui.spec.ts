@@ -90,11 +90,13 @@ test("the overview draws each domain wired through nginx to what answers it", as
   const hour = (site: string, requests: number, errorRate: number) => ({
     site,
     file: `/etc/nginx/sites-available/${site}`,
+    engine: "nginx",
     status: "available",
     requests,
     errorRate,
     bytes: requests * 2_000,
     complete: true,
+    points: [],
   })
   await page.route("**/api/v1/proxy/traffic", (route) =>
     json(route, {
@@ -127,8 +129,9 @@ test("the overview draws each domain wired through nginx to what answers it", as
 
   // The hour's traffic is shared out by site, and a site opens its traffic.
   const traffic = page.getByRole("region", { name: "Traffic", exact: true })
-  await expect(traffic.getByText("1.3k req in the hour")).toBeVisible()
-  await traffic.getByRole("button", { name: "Open app.example.com's traffic" }).click()
+  await expect(traffic.getByText("requests this hour")).toBeVisible()
+  await expect(traffic).toContainText("1.3k")
+  await traffic.getByRole("button", { name: "Open app.example.com's requests" }).click()
   await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
 })
 

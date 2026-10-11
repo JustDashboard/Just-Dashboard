@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Box } from "@/components/icons"
+import { ArrowRight, Box, CheckCircle } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { LANES } from "@/lib/hue"
 import { plural } from "@/lib/format"
@@ -12,12 +12,13 @@ import { BarList, type BarListItem } from "@/components/bar-list"
 import { FindingList } from "@/components/finding-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { Sparkline } from "@/components/metrics/sparkline"
 import { ShareBar } from "@/components/procs/workloads"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { certificateProduct } from "@/components/proxy/marks"
 import { errorFinding } from "@/components/proxy/site-errors"
-import { compactCount, errorRateTone, share, trafficHref } from "@/components/proxy/site-traffic"
+import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
 
 /** How many sites and certificates a block names; the rest are one link away. */
 const SHOWN = 5
@@ -27,18 +28,27 @@ const RUNWAY_DAYS = 90
 
 /**
  * The readings the four tiles never gave, as three blocks under the route
- * map: where the hour's requests went, how long every certificate has left
- * on one runway, and what nginx complained about. Each is a destination's
- * digest — a press opens the site's traffic, the certificate, the error log.
+ * map: which sites the hour's requests went to, how long every certificate
+ * has left on one runway, and what failed. Each opens on its one figure at
+ * the page's reading size, then the rows that make it up — a press opens the
+ * site's requests, the certificate, the error log.
+ *
+ * Traffic and errors are read from every site's access record, nginx's and
+ * the Docker Caddy ingress's alike, so a host where the ingress holds ports
+ * 80 and 443 is read as busy as it is.
  */
 export function OverviewBand({
+  traffics,
   nginx,
   traffic,
   certificates,
   errors,
   productOf,
+  labelOf,
 }: {
-  /** Traffic and errors are read from nginx's logs; a Caddy host has neither. */
+  /** Some engine here writes access records the dashboard reads. */
+  traffics: boolean
+  /** nginx is on this host, so its error log is read too. */
   nginx: boolean
   traffic: { sites?: SiteTrafficReading[]; error?: Error }
   certificates: {
@@ -52,18 +62,28 @@ export function OverviewBand({
   errors: { report?: ErrorReport; error?: Error }
   /** The product a site's visitors reach, for its mark. */
   productOf: (site: string) => string | undefined
+  /** The name a site's visitors type, which says more than its file's. */
+  labelOf: (site: string) => string
 }) {
   return (
     <div
       data-slot="overview-band"
       className={cn(
         "grid min-w-0 gap-x-10 gap-y-8 [&>*]:min-w-0",
-        nginx && "lg:grid-cols-2 xl:grid-cols-3",
+        traffics && "lg:grid-cols-2 xl:grid-cols-3",
       )}
     >
-      {nginx && <TrafficBlock {...traffic} productOf={productOf} />}
+      {traffics && <TrafficBlock {...traffic} productOf={productOf} labelOf={labelOf} />}
       <CertificatesBlock {...certificates} />
-      {nginx && <ErrorsBlock {...errors} />}
+      {traffics && (
+        <ErrorsBlock
+          {...errors}
+          nginx={nginx}
+          sites={traffic.sites}
+          trafficError={traffic.error}
+          labelOf={labelOf}
+        />
+      )}
     </div>
   )
 }
@@ -90,19 +110,56 @@ function Bones() {
 }
 
 /**
+ * A block's one figure, at the size a reading takes on this page, with what
+ * it counts beside it and the line that qualifies it under.
+ */
+function Headline({
+  value,
+  unit,
+  caption,
+  tone,
+}: {
+  value: React.ReactNode
+  unit: React.ReactNode
+  caption?: React.ReactNode
+  tone?: "warning" | "danger" | "success"
+}) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <p className="flex min-w-0 items-baseline gap-2">
+        <span
+          className={cn(
+            "numeric text-2xl leading-tight font-semibold tracking-tight",
+            tone === "warning" && "text-warning",
+            tone === "danger" && "text-destructive",
+            tone === "success" && "text-success",
+          )}
+        >
+          {value}
+        </span>
+        <span className="truncate text-hint text-muted-foreground">{unit}</span>
+      </p>
+      {caption && <p className="truncate text-hint text-muted-foreground">{caption}</p>}
+    </div>
+  )
+}
+
+/**
  * The hour's requests as one bar shared out by site, each rank a hue of its
  * own from `LANES` (none of them a state's, and no two neighbours alike, which
- * a hash of five names did not promise), then the five busiest as rows with
- * what they reach and their 5xx share.
+ * a hash of five names did not promise), then the five busiest as rows: what
+ * they reach, the hour's shape, their 5xx share and their count.
  */
 function TrafficBlock({
   sites,
   error,
   productOf,
+  labelOf,
 }: {
   sites?: SiteTrafficReading[]
   error?: Error
   productOf: (site: string) => string | undefined
+  labelOf: (site: string) => string
 }) {
   const router = useRouter()
   const read = (sites ?? []).filter((s) => s.status === "available")
@@ -111,23 +168,15 @@ function TrafficBlock({
   const total = read.reduce((sum, s) => sum + s.requests, 0)
   const rest = total - top.reduce((sum, s) => sum + s.requests, 0)
   const silent = (sites ?? []).length - read.length
+  const busy = ranked.filter((s) => s.requests > 0).length
 
   return (
     <Panel plain aria-label="Traffic">
       <PanelHeader
         title="Traffic"
-        actions={
-          <div className="flex items-center gap-3">
-            {sites && total > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {compactCount(total)} req in the hour
-              </span>
-            )}
-            <HeadLink href="/proxy/traffic">All traffic</HeadLink>
-          </div>
-        }
+        actions={<HeadLink href="/proxy/traffic">All traffic</HeadLink>}
       />
-      <PanelBody className="space-y-3 pt-4">
+      <PanelBody className="space-y-4 pt-4">
         {error ? (
           <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
             {"Couldn't read the sites' access logs."}
@@ -138,75 +187,95 @@ function TrafficBlock({
           <p className="py-2 text-body text-muted-foreground">
             No site writes an access log the dashboard can read.
           </p>
-        ) : total === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">No requests in the last hour.</p>
         ) : (
-          <div className="animate-rise space-y-3">
-            <ShareBar
-              label="Requests in the last hour"
-              capacity={total}
-              rest={rest}
-              parts={top.map((s, rank) => ({
-                key: s.site,
-                value: s.requests,
-                color: LANES[rank % LANES.length],
-                label: `${s.site} ${compactCount(s.requests)}`,
-              }))}
-              format={compactCount}
+          <div className="animate-rise space-y-4">
+            <Headline
+              value={compactCount(total)}
+              unit="requests this hour"
+              caption={
+                total === 0
+                  ? `None of ${plural(read.length, "site")} answered a request`
+                  : `${busy} of ${plural(read.length, "site")} answered`
+              }
             />
-            <ul aria-label="Busiest sites" className="-mx-2">
-              {top.map((s, rank) => {
-                const product = productOf(s.site)
-                const tone = errorRateTone(s.errorRate)
-                return (
-                  <li key={s.site}>
-                    <button
-                      type="button"
-                      title={`Open ${s.site}'s traffic`}
-                      aria-label={`Open ${s.site}'s traffic`}
-                      onClick={() => router.push(trafficHref(s.site))}
-                      className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
-                    >
-                      <span
-                        aria-hidden
-                        className="h-2.5 w-0.5 shrink-0 rounded-full"
-                        style={{ background: LANES[rank % LANES.length] }}
-                      />
-                      <span className="flex size-4 shrink-0 items-center justify-center">
-                        {hasProductLogo(product) ? (
-                          <ProductGlyph id={product} />
-                        ) : (
-                          <Box aria-hidden className="size-3.5 text-muted-foreground" />
-                        )}
-                      </span>
-                      <span className="min-w-0 truncate font-medium">{s.site}</span>
-                      {s.errorRate > 0 && (
-                        <span
-                          className={cn(
-                            "numeric shrink-0 text-hint",
-                            tone === "danger"
-                              ? "font-medium text-destructive"
-                              : tone === "warning"
-                                ? "text-warning"
-                                : "text-muted-foreground",
-                          )}
+            {total > 0 && (
+              <>
+                <ShareBar
+                  label="Requests in the last hour"
+                  capacity={total}
+                  rest={rest}
+                  parts={top.map((s, rank) => ({
+                    key: s.site,
+                    value: s.requests,
+                    color: LANES[rank % LANES.length],
+                    label: `${labelOf(s.site)} ${compactCount(s.requests)}`,
+                  }))}
+                  format={compactCount}
+                />
+                <ul aria-label="Busiest sites" className="-mx-2">
+                  {top.map((s, rank) => {
+                    const product = productOf(s.site)
+                    const tone = errorRateTone(s.errorRate)
+                    const label = labelOf(s.site)
+                    return (
+                      <li key={s.site}>
+                        <button
+                          type="button"
+                          title={`Open ${label}'s requests`}
+                          aria-label={`Open ${label}'s requests`}
+                          onClick={() => router.push(readingHref(s))}
+                          className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
                         >
-                          {share(s.errorRate)} 5xx
-                        </span>
-                      )}
-                      <span className="numeric ml-auto shrink-0 font-medium">
-                        {compactCount(s.requests)}
-                        <span className="font-normal text-muted-foreground">/h</span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+                          <span
+                            aria-hidden
+                            className="h-3 w-0.5 shrink-0 rounded-full"
+                            style={{ background: LANES[rank % LANES.length] }}
+                          />
+                          <span className="flex size-4 shrink-0 items-center justify-center">
+                            {hasProductLogo(product) ? (
+                              <ProductGlyph id={product} />
+                            ) : (
+                              <Box aria-hidden className="size-3.5 text-muted-foreground" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                          {s.errorRate > 0 && (
+                            <span
+                              className={cn(
+                                "numeric shrink-0 text-hint",
+                                tone === "danger"
+                                  ? "font-medium text-destructive"
+                                  : tone === "warning"
+                                    ? "text-warning"
+                                    : "text-muted-foreground",
+                              )}
+                            >
+                              {share(s.errorRate)} 5xx
+                            </span>
+                          )}
+                          <Sparkline
+                            values={s.points.map((p) => p.total)}
+                            color={LANES[rank % LANES.length]}
+                            width={56}
+                            height={16}
+                            className="shrink-0 max-sm:hidden"
+                            label={`${label}'s requests a minute over the last hour`}
+                          />
+                          <span className="numeric w-12 shrink-0 text-right font-medium">
+                            {compactCount(s.requests)}
+                            <span className="font-normal text-muted-foreground">/h</span>
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
             {(ranked.length > top.length || silent > 0) && (
               <p className="border-t border-hairline pt-3 text-hint text-muted-foreground">
                 {[
-                  ranked.length > top.length && plural(ranked.length - top.length, "more site"),
+                  ranked.length > top.length && plural(ranked.length - top.length, "quieter site"),
                   silent > 0 && `${plural(silent, "site")} with no log the dashboard reads`,
                 ]
                   .filter(Boolean)
@@ -256,6 +325,7 @@ function CertificatesBlock({
   const all = list ?? []
   const wrong = all.filter((c) => standing(c) !== "fine").length
   const severe = all.some((c) => standing(c) === "wrong")
+  const next = [...all].sort((a, b) => a.daysLeft - b.daysLeft)[0]
   // Life left against the longest term on this host, floored at the ninety
   // days certbot issues for, so a host whose certificates are all nearly due
   // reads as a run of short bars rather than one full bar the rest are
@@ -302,29 +372,9 @@ function CertificatesBlock({
     <Panel plain aria-label="Certificates">
       <PanelHeader
         title="Certificates"
-        actions={
-          <div className="flex items-center gap-3">
-            {list && all.length > 0 && (
-              <span
-                className={cn(
-                  "numeric text-hint",
-                  wrong === 0
-                    ? "text-muted-foreground"
-                    : severe
-                      ? "font-medium text-destructive"
-                      : "font-medium text-warning",
-                )}
-              >
-                {wrong > 0
-                  ? `${wrong} of ${all.length} ${wrong === 1 ? "needs" : "need"} attention`
-                  : `${all.length} valid`}
-              </span>
-            )}
-            {all.length > 0 && <HeadLink href="/proxy/certificates">All certificates</HeadLink>}
-          </div>
-        }
+        actions={all.length > 0 && <HeadLink href="/proxy/certificates">All certificates</HeadLink>}
       />
-      <PanelBody className="space-y-3 pt-4">
+      <PanelBody className="space-y-4 pt-4">
         {loading ? (
           <Bones />
         ) : error ? (
@@ -336,7 +386,23 @@ function CertificatesBlock({
               : "No certificates were found on this host."}
           </p>
         ) : (
-          <div className="animate-rise space-y-3">
+          <div className="animate-rise space-y-4">
+            {wrong > 0 ? (
+              <Headline
+                value={wrong}
+                unit={wrong === 1 ? "needs attention" : "need attention"}
+                caption={`of ${plural(all.length, "certificate")}`}
+                tone={severe ? "danger" : "warning"}
+              />
+            ) : (
+              next && (
+                <Headline
+                  value={next.daysLeft}
+                  unit={next.daysLeft === 1 ? "day to the next expiry" : "days to the next expiry"}
+                  caption={`${next.name} · all ${plural(all.length, "certificate")} valid`}
+                />
+              )
+            )}
             <Runway certificates={all} />
             <BarList items={soonest} />
           </div>
@@ -398,41 +464,113 @@ function Runway({ certificates }: { certificates: Certificate[] }) {
   )
 }
 
-/** nginx's error log over the hour, grouped by what went wrong. */
-function ErrorsBlock({ report, error }: { report?: ErrorReport; error?: Error }) {
-  const total = report?.groups.reduce((sum, g) => sum + g.count, 0) ?? 0
+/**
+ * What failed this hour, in the two places a failure is written: the 5xx
+ * answers in every site's access record, by site, and — where nginx is on
+ * the host — its error log, grouped by what went wrong. It read nginx's
+ * error log alone, which on a host where the Docker Caddy ingress answers
+ * said "no errors" about requests nginx never saw.
+ */
+function ErrorsBlock({
+  report,
+  error,
+  nginx,
+  sites,
+  trafficError,
+  labelOf,
+}: {
+  report?: ErrorReport
+  error?: Error
+  nginx: boolean
+  sites?: SiteTrafficReading[]
+  trafficError?: Error
+  labelOf: (site: string) => string
+}) {
+  const router = useRouter()
+  const failing = (sites ?? [])
+    .filter((s) => s.status === "available")
+    .map((s) => ({ reading: s, failed: Math.round(s.errorRate * s.requests) }))
+    .filter((s) => s.failed > 0)
+    .sort((a, b) => b.failed - a.failed)
+  const failed = failing.reduce((sum, s) => sum + s.failed, 0)
+  const logged = report?.groups.reduce((sum, g) => sum + g.count, 0) ?? 0
+  const waiting = (!sites && !trafficError) || (nginx && !report && !error)
+  const quiet = failed === 0 && logged === 0
+
   return (
-    <Panel plain aria-label="Recent nginx errors">
+    <Panel plain aria-label="Recent errors">
       <PanelHeader
-        title="Recent nginx errors"
-        actions={
-          <div className="flex items-center gap-3">
-            {total > 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {total.toLocaleString()} in the hour
-              </span>
-            )}
-            <HeadLink href="/proxy/traffic?view=errors">Error log</HeadLink>
-          </div>
-        }
+        title="Recent errors"
+        actions={nginx && <HeadLink href="/proxy/traffic?view=errors">Error log</HeadLink>}
       />
-      <PanelBody>
-        {error ? (
-          <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
-            {"Couldn't read nginx's error log."}
-          </p>
-        ) : !report ? (
+      <PanelBody className="space-y-4 pt-4">
+        {waiting ? (
           <Bones />
         ) : (
-          <div className="animate-rise">
-            {report.note ? (
-              <p className="text-hint text-muted-foreground">{report.note}</p>
+          <div className="animate-rise space-y-4">
+            <Headline
+              value={failed.toLocaleString()}
+              unit={failed === 1 ? "server error this hour" : "server errors this hour"}
+              tone={failed > 0 ? "danger" : undefined}
+              caption={
+                trafficError
+                  ? "Couldn't read the sites' access logs"
+                  : nginx && !error && report && !report.note
+                    ? `${logged.toLocaleString()} nginx error-log ${logged === 1 ? "line" : "lines"}`
+                    : failed > 0
+                      ? `across ${plural(failing.length, "site")}`
+                      : undefined
+              }
+            />
+            {quiet && !trafficError && !error && !report?.note ? (
+              <p className="flex items-center gap-2.5 text-body text-muted-foreground">
+                <CheckCircle aria-hidden className="size-4 shrink-0 text-success" />
+                Nothing failed in the last hour
+              </p>
             ) : (
-              <FindingList
-                findings={report.groups.slice(0, 4).map(errorFinding)}
-                emptyLabel="No errors in the last hour"
-              />
+              failing.length > 0 && (
+                <ul aria-label="Sites answering 5xx" className="-mx-2">
+                  {failing.slice(0, SHOWN).map(({ reading, failed }) => {
+                    const label = labelOf(reading.site)
+                    return (
+                      <li key={reading.site}>
+                        <button
+                          type="button"
+                          title={`Open ${label}'s requests`}
+                          onClick={() => router.push(readingHref(reading))}
+                          className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body focus-ring-inset transition-colors hover:bg-row-hover"
+                        >
+                          <span
+                            aria-hidden
+                            className="size-1.5 shrink-0 rounded-full bg-destructive"
+                          />
+                          <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                          <span className="numeric shrink-0 text-hint text-muted-foreground">
+                            {share(reading.errorRate)}
+                          </span>
+                          <span className="numeric w-12 shrink-0 text-right font-medium text-destructive">
+                            {failed.toLocaleString()}
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
             )}
+            {nginx &&
+              (error ? (
+                <p className="text-hint text-muted-foreground" title={errorMessage(error)}>
+                  {"Couldn't read nginx's error log."}
+                </p>
+              ) : report?.note ? (
+                <p className="text-hint text-muted-foreground">{report.note}</p>
+              ) : (
+                report &&
+                report.groups.length > 0 && (
+                  <FindingList findings={report.groups.slice(0, 4).map(errorFinding)} />
+                )
+              ))}
           </div>
         )}
       </PanelBody>
