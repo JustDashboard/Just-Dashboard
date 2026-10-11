@@ -187,11 +187,19 @@ to the contribution terms above, including the additional licence grant to the p
   itself rather than the read. A package whose tests read the frontend's half of a contract
   (`internal/version`, `internal/deploy`) runs when that file changes. `frontend` lints the changed
   files (the whole tree when the rules or the dependencies change), type-checks, and runs the unit
-  tests. `browser` runs the specs `scripts/test-changed.sh` would pick, except that a change reaching
-  the dashboard's shell runs the whole suite rather than the two specs that open every page; the specs
-  are dealt into up to eight jobs of about two hundred tests each, in name order, so that a slow
-  section is spread over the jobs. A change to the workflow or its scripts runs everything,
-  as does a manual run, and a documentation-only change runs nothing past `plan`.
+  tests. `browser` runs, for a pull request, the specs `scripts/test-changed.sh` would pick: a module
+  more than one section draws, the shell, a root layout or global CSS runs `design-system.spec.ts`
+  and `navigation.spec.ts` rather than every spec that opens a page it reaches, and a public asset is
+  followed from the modules that name its file. A pull request is what somebody waits on before
+  merging; the push run of the merge, which nobody waits on, follows the same change to every page it
+  reaches, the whole suite for the shell or a public asset, so what the pull request left out is
+  checked one merge later. A change to the dependencies, the build's configuration or the request
+  proxy runs the whole suite in both. The specs are dealt into up to eight jobs, in name order, so
+  that a slow section is spread over the jobs: of about a hundred tests each for a pull request, which
+  finishes sooner, and two hundred for a merge. A change to the workflow or its scripts runs
+  everything, as does a manual run, and a documentation-only change runs nothing past `plan`. A pull
+  request from `main` or a `patch/*` branch runs nothing either: its commit is the one that branch's
+  push run checks, and GitHub shows that run's checks on the pull request.
   GitHub runs twenty jobs of a public repository's at once across every branch, so the suites are
   split only as far as a runner's four cores are full: more jobs than that queue behind each other and
   behind every other pull request. Go and Bun come from `go.mod` and `package.json`, and dependencies
@@ -207,7 +215,11 @@ to the contribution terms above, including the additional licence grant to the p
   deployment packages (those of the race gate) or `go.mod` changed: `live (fixtures)` runs the
   artifact, activation, preview, runtime-fault, database, Compose and cutover fixtures of whichever of
   `internal/{deploy,api,dockerx,proxysvc}` the change reaches, and a change reaching `internal/deploy`
-  also builds the framework fixtures in four jobs. The lists are
+  also builds the framework fixtures in four jobs. A pull request narrows both to the deployment code
+  itself: it runs the fixtures of those four that import the deployment package that changed, so a
+  change to a handler and to `internal/metrics`, which `internal/deploy` reads, runs the API's
+  fixtures and none of `internal/deploy`'s, and it builds the frameworks only when a file in
+  `internal/deploy` changed. The merge's push run keeps the wider rule. The lists are
   in `scripts/ci-plan.py`; the last framework job runs every framework the others do not name, so a
   new one is built without being added there. They used to run on a self-hosted runner on the release
   host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
