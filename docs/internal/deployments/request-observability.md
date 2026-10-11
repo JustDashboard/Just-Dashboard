@@ -298,7 +298,14 @@ tick at the line; its form speaks the rule back before it is saved, and removing
 
 ## Security intel and blocking
 
-The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
+The Insights view opens on the scanners when there are any: a warning `Notice` titled with how many
+addresses and probes, laid out as the lists under it are — each address a ranked row with its probes
+as an amber bar against the busiest and **Block** in a column of its own (a press on the row narrows
+the window to the address), beside the paths they tried, ranked the same way (a press narrows to the
+path). It had been one column of addresses hugging the left of a notice as wide as the pane, each
+Block landing wherever its probe count happened to end. `Notice`'s content now takes the notice's
+width, so content laid out across it is not squeezed to its longest line. The Addresses list names
+scanners too and, for `system.admin`, offers **Block** on each
 address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
 verbs do. This saves a persistent **host firewall rule**, rather than proving an ingress block:
 Docker-published ingress ports can bypass the host's inbound firewall. The scanner notice and the

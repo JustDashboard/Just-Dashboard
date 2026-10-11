@@ -276,7 +276,10 @@ export function Notice({
           )}
         />
       )}
-      <div className="min-w-0 space-y-1">
+      {/* The notice's width, not its words': content laid out across it —
+          a title with a reading at its end, two lists side by side — had the
+          width of its longest line and hugged the left of a wide box. */}
+      <div className="min-w-0 flex-1 space-y-1">
         <p className="text-body leading-tight font-medium">{title}</p>
         {children && (
           <div className="text-xs leading-relaxed text-muted-foreground">{children}</div>
