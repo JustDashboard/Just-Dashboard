@@ -116,14 +116,14 @@ export function DrawingList() {
 
   return (
     <Page>
-      <PageContext title="Excalidraw" actions={newDrawing} />
+      <PageContext title="Excalidraw" />
       {error && !boards ? (
         <ErrorState error={error} />
       ) : !boards ? (
         <ListSkeleton />
       ) : (
         <>
-          <Identity boards={boards} />
+          <Identity boards={boards} actions={newDrawing} />
           {boards.length === 0 ? (
             <EmptyState
               mark={
@@ -203,7 +203,7 @@ export function DrawingList() {
  * The product the page is, and what it holds, in the line the Overview gives
  * the machine.
  */
-function Identity({ boards }: { boards: BoardSummary[] }) {
+function Identity({ boards, actions }: { boards: BoardSummary[]; actions: React.ReactNode }) {
   const shapes = boards.reduce((sum, b) => sum + (b.preview?.count ?? 0), 0)
   const links = new Set(
     boards.flatMap((b) => (b.preview?.resources ?? []).map((r) => `${r.kind}:${r.id ?? ""}`)),
@@ -213,6 +213,7 @@ function Identity({ boards }: { boards: BoardSummary[] }) {
     <HostIdentity
       mark="excalidraw"
       title="Excalidraw"
+      aside={actions}
       facts={
         <>
           <span className="numeric">{plural(boards.length, "drawing")}</span>

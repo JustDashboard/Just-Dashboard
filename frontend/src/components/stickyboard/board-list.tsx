@@ -117,23 +117,23 @@ export function BoardList() {
 
   return (
     <Page>
-      <PageContext
-        title="Stickyboard"
-        actions={
-          canWrite && (
-            <Button onClick={() => setCreating(TEMPLATES[0])}>
-              <Plus /> New board
-            </Button>
-          )
-        }
-      />
+      <PageContext title="Stickyboard" />
       {error && !boards ? (
         <ErrorState error={error} />
       ) : !boards ? (
         <ListSkeleton />
       ) : (
         <>
-          <Identity boards={boards} />
+          <Identity
+            boards={boards}
+            actions={
+              canWrite && (
+                <Button onClick={() => setCreating(TEMPLATES[0])}>
+                  <Plus /> New board
+                </Button>
+              )
+            }
+          />
           {boards.length === 0 ? (
             <EmptyState
               mark={<StickyboardMark className="size-12" />}
@@ -234,7 +234,7 @@ export function BoardList() {
 }
 
 /** The product the page is, and what it holds, in the line the Overview gives the machine. */
-function Identity({ boards }: { boards: StickySummary[] }) {
+function Identity({ boards, actions }: { boards: StickySummary[]; actions: React.ReactNode }) {
   const totals = boards.reduce(
     (sum, b) => ({ notes: sum.notes + b.notes, links: sum.links + b.links }),
     { notes: 0, links: 0 },
@@ -248,6 +248,7 @@ function Identity({ boards }: { boards: StickySummary[] }) {
         </span>
       }
       title="Stickyboard"
+      aside={actions}
       facts={
         <>
           <span className="numeric">{plural(boards.length, "board")}</span>
