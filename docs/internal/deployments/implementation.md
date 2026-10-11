@@ -11,6 +11,9 @@ only renderer/executor/validation authority for their feature.
 - Worker capacity defaults to one heavy and two light slots and is bounded by
   `JD_DEPLOY_HEAVY_SLOTS` / `JD_DEPLOY_LIGHT_SLOTS` (1..8). Claims expire after
   `JD_DEPLOY_LEASE_TTL` (30s by default, 5s..5m); these are boot-time settings, not mutable project data.
+  The engine looks for work every 250 ms and on every `Notify`; `ClaimNext` first asks with a plain read
+  whether anything is queued, so an idle queue never takes the IMMEDIATE write transaction the claim
+  needs.
 - The only activation strategies are `blue_green` for an eligible proxy-owned stateless HTTP service and
   `stop_first` for Compose, fixed-port, game and exclusive-storage workloads. A failed candidate cannot
   replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
