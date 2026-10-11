@@ -5557,6 +5557,18 @@ export type GitResult = {
 }
 
 /**
+ * A pull that did not start, answered as `409 pull_blocked` beside the error:
+ * the files git would not overwrite, or the folders git — running as `owner`
+ * — could not write the pulled files into.
+ */
+export type GitPullBlocked = {
+  changed?: string[]
+  untracked?: string[]
+  unwritable?: { path: string; owner: string }[]
+  owner?: string
+}
+
+/**
  * Who this server is, to GitHub, in one repository.
  *
  * The answer is per repository and not global, and `owner` is why: gh keeps

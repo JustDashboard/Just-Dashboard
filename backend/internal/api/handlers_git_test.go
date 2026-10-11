@@ -124,6 +124,7 @@ func TestGitDestructiveRoutesDoNotRequirePhrases(t *testing.T) {
 		{"/api/v1/git/discard", `{"file":"a.txt"}`},
 		{"/api/v1/git/reset", `{"ref":"HEAD","hard":true}`},
 		{"/api/v1/git/stash/drop", `{"index":0}`},
+		{"/api/v1/git/pull/discard", ``},
 	}
 	for _, tc := range actions {
 		w := c.do(http.MethodPost, gitPath(tc.path, repo), tc.body, nil)
@@ -160,6 +161,7 @@ func TestGitRoutesHonourCapabilities(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/git/fetch", "/api/v1/git/stage", "/api/v1/git/commit", "/api/v1/git/tag",
 		"/api/v1/git/merge", "/api/v1/git/identity", "/api/v1/git/clone", "/api/v1/git/init",
+		"/api/v1/git/pull/stash", "/api/v1/git/pull/own",
 	} {
 		if w := readonly.do(http.MethodPost, gitPath(path, repo), `{}`, nil); w.Code != http.StatusForbidden {
 			t.Errorf("readonly %s = %d, want 403", path, w.Code)
@@ -169,10 +171,61 @@ func TestGitRoutesHonourCapabilities(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/git/discard", "/api/v1/git/reset", "/api/v1/git/stash/drop",
 		"/api/v1/git/branch/delete", "/api/v1/git/tag/delete", "/api/v1/git/remote/delete",
+		"/api/v1/git/pull/discard",
 	} {
 		if w := limited.do(http.MethodPost, gitPath(path, repo), `{}`, nil); w.Code != http.StatusForbidden {
 			t.Errorf("limited %s = %d, want 403", path, w.Code)
 		}
+	}
+}
+
+// A pull refused for local work answers with the files in the way rather
+// than with git's paragraph, so the page can offer stash or discard; stashing
+// then lets the same pull through.
+func TestGitPullBlockedAnswersWithTheFilesInTheWay(t *testing.T) {
+	c, _, root, repo := gitFixture(t)
+	source := filepath.Join(root, "source")
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run(root, "clone", "-q", repo, source)
+	if err := os.WriteFile(filepath.Join(source, "a.txt"), []byte("remote\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(source, "commit", "-qam", "remote edit")
+	run(repo, "remote", "add", "origin", source)
+	run(repo, "fetch", "-q", "origin")
+	run(repo, "branch", "-q", "--set-upstream-to=origin/main")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w := c.do(http.MethodPost, gitPath("/api/v1/git/pull", repo), "", nil)
+	var refused struct {
+		Error   struct{ Code string }
+		Blocked struct{ Changed []string }
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &refused); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusConflict || refused.Error.Code != "pull_blocked" ||
+		len(refused.Blocked.Changed) != 1 || refused.Blocked.Changed[0] != "a.txt" {
+		t.Fatalf("pull = %d %s", w.Code, w.Body.String())
+	}
+	w = c.do(http.MethodPost, gitPath("/api/v1/git/pull/stash", repo), "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("pull/stash = %d %s", w.Code, w.Body.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(repo, "a.txt")); string(b) != "remote\n" {
+		t.Errorf("a.txt after stash and pull = %q", b)
 	}
 }
 

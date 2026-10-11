@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 import { notify } from "@/lib/toast"
 import type { GitResult } from "@/lib/types"
+import { pullBlocked } from "@/components/git/pull-blocked"
 
 export type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<GitResult>
 
@@ -14,7 +15,8 @@ export type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<Gi
  * refresh whatever the caller reads — and the Git page and the terminal's git
  * tab had each written that shape out for themselves. `busy` is the label of
  * the operation in flight, so a button can say "Pulling…" rather than going
- * inert and saying nothing.
+ * inert and saying nothing. A pull blocked by what is in the working tree is
+ * not toasted: the caller opens `PullBlockedDialog` on it instead.
  */
 export function useGitRun(onChanged: () => void): { busy?: string; run: GitRun } {
   const [busy, setBusy] = useState<string>()
@@ -27,7 +29,7 @@ export function useGitRun(onChanged: () => void): { busy?: string; run: GitRun }
         onChanged()
         return res
       } catch (err) {
-        notify.error(`${label} failed`, err)
+        if (!pullBlocked(err)) notify.error(`${label} failed`, err)
         // Whatever failed may still have moved something — a merge that was
         // abandoned, a push that half landed — so the reads catch up either way.
         onChanged()

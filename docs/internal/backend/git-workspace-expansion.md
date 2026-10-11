@@ -85,6 +85,11 @@ Otherwise it requires a unique matching remote, and lets Git establish tracking 
 An existing upstream is never replaced, even when it is gone. Missing or ambiguous remote branches
 require **Branches → Set upstream**, while unpublished branches can use Push. Remote lookup and fetch
 errors remain failures; local edits and divergent commits retain Git's fast-forward-only protection.
+On the Git page a pull blocked by local work or by another account's folder opens `PullBlockedDialog`
+(`components/git/pull-blocked.tsx`) instead of a toast: **Give them to … and pull**, or **Stash and
+pull** and **Discard and pull** beside the files each would act on. A step that clears one obstacle
+and meets the next — a folder given back, then the files a half-finished pull left in it — turns the
+dialog into that one.
 
 ## Submodules, LFS and patches
 
@@ -146,6 +151,9 @@ and newline handling, stale edits, conflict continue/abort, worktrees, rescue/bl
 submodules and patch containment. A loopback Git daemon verifies branch/shallow/sparse cloning.
 `ops_pull_test.go` uses temporary repositories to cover missing/unfetched tracking, remote selection,
 ambiguity, existing/gone upstreams, detached HEAD, lookup failures and preservation of local work.
+`pullblock_test.go` covers reading git's refusal, stash-and-pull and discard-and-pull and, under
+`sudo go test`, a pull refused before writing into a root-owned folder and completed once it is given
+back; `hostexec/owned_test.go` proves `GiveBack` will not follow a link out of the tree.
 `TestLFSLifecycleUsesRepositoryConfig` needs `git-lfs` on PATH and uses only a temporary repository.
 GitHub tests replace the CLI runner; GitLab/Gitea tests use local HTTP fixtures to prove payloads,
 credential isolation, encryption, head checks and redirect refusal. They do not post live reviews.

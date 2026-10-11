@@ -5,12 +5,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 )
 
@@ -149,6 +153,11 @@ func upgrade(ctx context.Context, store *Store, run *Run, out io.Writer) error {
 // and says exactly what is in the way — which is a far better outcome than a
 // successful upgrade that ate somebody's configuration.
 func fastForward(ctx context.Context, dir, ref string, out io.Writer) (string, error) {
+	if owner, ok := hostexec.OwnerOf(dir); ok {
+		if before, err := gitOutput(ctx, dir, "rev-parse", "HEAD"); err == nil {
+			defer handBack(ctx, dir, owner, strings.TrimSpace(before), out)
+		}
+	}
 	fmt.Fprintf(out, "$ git fetch --prune origin\n")
 	if err := gitStream(ctx, dir, out, "fetch", "--prune", "origin"); err != nil {
 		return "", err
@@ -170,6 +179,58 @@ func fastForward(ctx context.Context, dir, ref string, out io.Writer) (string, e
 	commit := strings.TrimSpace(head)
 	fmt.Fprintf(out, "now at %s\n", commit)
 	return commit, nil
+}
+
+// handBack gives the checkout's owner back what this process wrote into it.
+//
+// The updater is root, and git run as root leaves root's name on every file it
+// writes: the objects and refs a fetch adds to .git, and each file and new
+// folder a merge brings in. Nothing about the update notices — root can write
+// anywhere — but the next `git pull` the operator runs as themselves, from a
+// shell or from the Git page, can unlink nothing in a folder an update
+// created, and stops halfway with the files it did write left behind as local
+// changes. Running git itself as the owner would avoid the root-owned files
+// and break the update instead: inside this container the owner has no
+// passwd entry, which ssh refuses to run without, and the folders earlier
+// updates made root-owned would stop the merge partway. So git stays root and
+// what it wrote is handed back: anything root-owned in .git, and the files
+// this update changed with the folders above them. It runs whether or not the
+// merge went through, because a fetch that succeeded has already written.
+func handBack(ctx context.Context, dir string, owner hostexec.Owner, before string, out io.Writer) {
+	seen := map[string]bool{}
+	var rels []string
+	rootOwned := func(rel string) {
+		if seen[rel] {
+			return
+		}
+		seen[rel] = true
+		var st syscall.Stat_t
+		if syscall.Lstat(filepath.Join(dir, rel), &st) == nil && st.Uid == 0 {
+			rels = append(rels, rel)
+		}
+	}
+	_ = filepath.WalkDir(filepath.Join(dir, ".git"), func(p string, _ fs.DirEntry, err error) error {
+		if err == nil {
+			rel, _ := filepath.Rel(dir, p)
+			rootOwned(rel)
+		}
+		return nil
+	})
+	if changed, err := gitOutput(ctx, dir, "diff", "--name-only", "-z", "--no-renames", before, "HEAD", "--"); err == nil {
+		for _, rel := range strings.Split(changed, "\x00") {
+			for ; rel != "" && rel != "."; rel = filepath.Dir(rel) {
+				rootOwned(rel)
+			}
+		}
+	}
+	if len(rels) == 0 {
+		return
+	}
+	if err := hostexec.GiveBack(dir, owner, rels); err != nil {
+		fmt.Fprintf(out, "could not give what the update wrote back to %s: %v\n", owner.Name, err)
+		return
+	}
+	fmt.Fprintf(out, "gave %d paths the update wrote back to %s\n", len(rels), owner.Name)
 }
 
 // waitHealthy is what makes "the update finished" mean the dashboard came

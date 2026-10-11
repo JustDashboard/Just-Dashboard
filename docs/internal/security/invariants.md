@@ -165,7 +165,7 @@ Typed confirmation is reserved for five deletion operations:
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
-board deletion, Git discard/reset, firewall and SSH changes, package changes, certificate export and
+board deletion, Git discard/reset and discard-and-pull, firewall and SSH changes, package changes, certificate export and
 revocation, and self-update, use an ordinary confirmation in the UI. Read-only actions and routine
 mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
 `destrLim` rate budget, audit entries, path containment, or host command rules.

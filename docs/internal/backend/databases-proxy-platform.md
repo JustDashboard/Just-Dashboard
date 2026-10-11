@@ -4351,7 +4351,11 @@ done by hand, and the UI refuses to fold it away.
   stopped.
 - It **fast-forwards, never resets** — unlike a managed deployment checkout, this is the operator's own
   checkout and an
-  edited compose file is normal, so a local change survives unless it genuinely collides. And it **waits
+  edited compose file is normal, so a local change survives unless it genuinely collides. Git runs there
+  as root, so afterwards the updater hands back to the checkout's owner everything root-owned in `.git`
+  and each file the update changed with the folders above it (`handBack`, through `hostexec.GiveBack`).
+  Until 0.7.1 an update's new folders stayed root's, and the operator's own next pull stopped halfway in
+  them. And it **waits
   for the health URL to answer** before calling itself finished, since `compose up -d` returns as soon as
   containers start and a backend that starts then dies looks identical from there.
 - **The transcript is read two ways.** The report carries `Store.Tail()` — the last 64 KB, with a

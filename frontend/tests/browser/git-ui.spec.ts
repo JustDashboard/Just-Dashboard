@@ -581,6 +581,76 @@ test("discarding a file uses ordinary confirmation", async ({ page }) => {
 })
 
 /**
+ * A pull that cannot start offers the ways past it instead of git's paragraph.
+ *
+ * The case it was built for: an update run as root had left a folder git —
+ * running as the checkout's owner — could not write into, so a pull wrote
+ * half its files and stopped, and every later pull was refused for the files
+ * the first one left. The dialog meets the folder first, then the leftovers
+ * the same way, and the pull goes through without a terminal.
+ */
+test("a blocked pull offers to give folders back, then to stash, instead of an error", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page)
+  const refuse = (route: Route, blocked: unknown) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "pull_blocked", message: "Nothing has been changed." },
+        blocked,
+      }),
+    })
+  const pulls: string[] = []
+  const bodies: string[] = []
+  const pull = /^\/api\/v1\/git\/pull(\/(own|stash|discard))?$/
+  await page.route(
+    (url) => pull.test(url.pathname),
+    async (route) => {
+      const path = new URL(route.request().url()).pathname
+      pulls.push(path.replace(/^\/api\/v1/, ""))
+      bodies.push(route.request().postData() ?? "")
+      switch (path) {
+        case "/api/v1/git/pull":
+          return refuse(route, {
+            owner: "ubuntu",
+            unwritable: [{ path: "frontend/src/components/network/drift", owner: "root" }],
+          })
+        case "/api/v1/git/pull/own":
+          return refuse(route, {
+            changed: ["docs/internal/boards.md"],
+            untracked: ["docs/screenshots/after.png"],
+          })
+        case "/api/v1/git/pull/stash":
+          return json(route, { command: "git stash && git pull", output: "Fast-forward", ok: true })
+      }
+      return route.fallback()
+    },
+  )
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  await page.getByRole("button", { name: /^Pull( \d+)?$/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("The pull would stop halfway")
+  await expect(dialog).toContainText("frontend/src/components/network/drift")
+  await expect(page.getByText("Pulled failed")).toHaveCount(0)
+
+  await dialog.getByRole("button", { name: "Give them to ubuntu and pull" }).click()
+  await expect(dialog).toContainText("Local changes are in the way")
+  await expect(dialog).toContainText("docs/internal/boards.md")
+  await expect(dialog).toContainText("docs/screenshots/after.png")
+  await expect(dialog.getByRole("button", { name: "Discard and pull" })).toBeVisible()
+
+  await dialog.getByRole("button", { name: "Stash and pull" }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(pulls).toEqual(["/git/pull", "/git/pull/own", "/git/pull/stash"])
+  // The server works out again what is in the way; the page sends no paths.
+  expect(bodies.every((body) => body === "")).toBe(true)
+})
+
+/**
  * Dragging a column wider has a floor, and the floor is the other column.
  *
  * The widths were stored raw: `usePanelSize` deliberately does not clamp

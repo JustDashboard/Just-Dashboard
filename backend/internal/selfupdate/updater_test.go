@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -209,5 +210,47 @@ func TestUpdaterRefusesAJobThatIsNotThere(t *testing.T) {
 	// asked for — the case a rebooted machine would otherwise produce.
 	if err := RunUpdater(dir); err == nil {
 		t.Fatal("the updater replayed a job that had already finished")
+	}
+}
+
+// The updater is root and the checkout is somebody's. What the update writes
+// has to end up theirs, or their own next `git pull` stops halfway in the
+// first folder this update created.
+func TestFastForwardLeavesNothingRootOwnedBehind(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root, which is what the updater runs as")
+	}
+	upstream, checkout := installed(t)
+	if err := os.MkdirAll(filepath.Join(upstream, "network", "drift"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(upstream, "network", "drift", "repairs.tsx"), "new\n")
+	git(t, upstream, "add", ".")
+	git(t, upstream, "commit", "-q", "-m", "0.7")
+	const owner = 4242
+	root := filepath.Dir(checkout)
+	err := filepath.Walk(root, func(p string, _ os.FileInfo, err error) error {
+		if err != nil || strings.HasPrefix(p, upstream) {
+			return err
+		}
+		return os.Lchown(p, owner, owner)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var log bytes.Buffer
+	if _, err := fastForward(context.Background(), checkout, "main", &log); err != nil {
+		t.Fatalf("%v\n%s", err, log.String())
+	}
+	var left []string
+	_ = filepath.Walk(checkout, func(p string, info os.FileInfo, err error) error {
+		if err == nil && info.Sys().(*syscall.Stat_t).Uid != owner {
+			left = append(left, p)
+		}
+		return nil
+	})
+	if len(left) > 0 {
+		t.Fatalf("not the owner's after the update: %v\n%s", left, log.String())
 	}
 }
