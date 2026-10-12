@@ -11,7 +11,9 @@ import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { useWorkspaceCommands } from "@/components/workspace/commands"
 import type { Capability, DbDriverInfo, ProxyReloadResult, ProxyValidation } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { usePoll } from "@/hooks/use-poll"
+import { sectionOf } from "@/lib/sidebar-sections"
 import { NAV, PERSONAL_NAV, navLocation, type NavEntry, type NavItem } from "@/components/nav"
 import { PaletteModal } from "@/components/modal"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
@@ -63,6 +65,7 @@ type PaletteValue = { open: () => void; close: () => void; toggle: () => void }
 const PaletteContext = createContext<PaletteValue | null>(null)
 type PaletteItem = PreviewItem & {
   run?: () => void
+  /** Listed only once something is typed: a command that acts, or a page the account hid. */
   explicit?: boolean
 }
 
@@ -254,6 +257,10 @@ function Palette({
   const router = useRouter()
   const pathname = usePathname()
   const { can, logout } = useAuth()
+  const { hidden } = useHiddenSections()
+  // A section kept out of the sidebar is kept out of the empty list too, and
+  // is still one word away: search is how a hidden page is reached on purpose.
+  const isHidden = (href: string) => hidden.has(sectionOf(href) ?? "")
   const [selected, setSelected] = useState({ query: "", id: "" })
   const input = useRef<HTMLInputElement>(null)
   const scopes = useRef<HTMLDivElement>(null)
@@ -302,6 +309,7 @@ function Palette({
           href: page.href,
           icon: page.icon,
           product: PAGE_PRODUCTS[page.href],
+          explicit: isHidden(page.href),
           neighbours: parent
             ? { label: parent.title, pages: shown(parent.children ?? []) }
             : { label: group.label, pages: shown(group.items) },
@@ -328,6 +336,7 @@ function Palette({
             href: "/deploy/new",
             icon: Plus,
             keywords: ["create", "deploy"],
+            explicit: isHidden("/deploy/new"),
           },
         ]
       : []),

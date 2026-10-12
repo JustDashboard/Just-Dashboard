@@ -179,6 +179,18 @@ group's `GET /dashboard-users/{id}/avatar` serve it with a long private cache li
 stamp `avatarVersion` rides on the URL. `POST /account/sessions/revoke-others` drops every session of
 the caller but the one asking.
 
+An account also carries its answer to the first-run question (additive columns in 0.7.3):
+`needs_onboarding`, set on every account `CreateUser` makes — the bootstrap admin, an administrator's
+new account, `scripts/create-user.sh` — and defaulting to `0` for accounts that predate it, and
+`hidden_sections`, a JSON list of the sections it keeps out of its sidebar, defaulting to `[]`. Both
+ride on the session's `user` (`needsOnboarding`, `hiddenSections`). The holder alone writes them, with
+`PUT /account/workspace` (session-only, no capability beyond that, audited as
+`account.workspace.update` with the list stored): it takes `hiddenSections` — at most 32 names shaped
+like a path segment, since the list of sections belongs to the frontend's nav registry — stores them
+sorted without repeats, and clears `needs_onboarding`. The list narrows what the shell draws and
+nothing the account may do; every route still answers by role. See
+[the shell](../frontend/shell-design.md#sections-an-account-keeps-out-of-its-sidebar).
+
 State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.

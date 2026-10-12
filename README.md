@@ -185,6 +185,7 @@ free.
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
 - Roles, two-factor, sessions and API keys for every account
+- A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
 
 </td>
@@ -286,6 +287,13 @@ rest in four labelled stages:
 
 Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**.
+
+**First sign-in:** every new account is asked once what it will use the server for — shipping apps,
+running databases, containers, the network, security, or working on the box — and its sidebar,
+Overview and search's empty list keep only those sections. Hiding a section is about the sidebar,
+not access: links from other pages still open it, search still finds it, and the role decides what
+the account may do. **Account → Workspace** changes the answer or asks the question again. Accounts
+that existed before 0.7.3 are not asked and keep every section.
 
 **Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
 followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and

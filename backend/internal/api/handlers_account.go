@@ -60,6 +60,38 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
+// --- the account's own sidebar ---
+
+type workspaceRequest struct {
+	HiddenSections []string `json:"hiddenSections"`
+}
+
+// handleSetWorkspace records which sections the caller keeps out of the
+// sidebar, and is how the first-run question is answered or skipped. It
+// changes what the shell draws for this account and nothing it may do, so it
+// asks for no capability beyond a session — the same as renaming yourself.
+func (s *Server) handleSetWorkspace(w http.ResponseWriter, r *http.Request) error {
+	var req workspaceRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.HiddenSections == nil {
+		return httpx.BadRequest("hiddenSections required")
+	}
+	p := httpx.MustPrincipal(r)
+	hidden, err := s.Auth.SetHiddenSections(r.Context(), p.UserID(), req.HiddenSections)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	updated, err := s.Auth.UserByID(r.Context(), p.UserID())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "account.workspace.update", updated.Username, map[string]any{"hidden": hidden})
+	httpx.JSON(w, http.StatusOK, updated)
+	return nil
+}
+
 // The picture is small by construction — the client draws it onto a 256px
 // canvas before sending — so anything larger is refused up front rather than
 // resized here: the server has no image codec beyond the two decoders it

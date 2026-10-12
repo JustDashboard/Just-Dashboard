@@ -145,6 +145,7 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 		r.Method(http.MethodDelete, "/sessions/{id}", s.handle(s.handleRevokeOwnSession))
 		r.Method(http.MethodPost, "/sessions/revoke-others", s.handle(s.handleRevokeOtherSessions))
 		r.Method(http.MethodPatch, "/profile", s.handle(s.handleUpdateProfile))
+		r.Method(http.MethodPut, "/workspace", s.handle(s.handleSetWorkspace))
 		r.Method(http.MethodGet, "/avatar", s.handle(s.handleOwnAvatar))
 		r.Method(http.MethodPost, "/avatar", s.handle(s.handleUploadOwnAvatar))
 		r.Method(http.MethodDelete, "/avatar", s.handle(s.handleDeleteOwnAvatar))

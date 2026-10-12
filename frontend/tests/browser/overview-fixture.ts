@@ -19,7 +19,7 @@ export const fleet = JSON.parse(
   ),
 )
 
-const containers = [
+export const containers = [
   ["shop-web", "registry.gitlab.com/acme/shop:2.4.0", "running"],
   ["shop-db", "postgres:16-alpine", "running"],
   ["shop-cache", "redis:7-alpine", "running"],
@@ -49,7 +49,7 @@ const containers = [
   hasHealthcheck: false,
 }))
 
-const databases = [
+export const databases = [
   [1, "shop", "postgres", "5432"],
   [2, "blog", "mysql", "3306"],
   [3, "cache", "redis", "6379"],
@@ -69,7 +69,7 @@ const databases = [
   origin: "",
 }))
 
-const certificates = [
+export const certificates = [
   ["shop.example.test", 61],
   ["status.example.test", 12],
   ["docs.example.test", 74],
@@ -100,7 +100,7 @@ const backupRun = (jobId: number, hoursAgo: number, status = "success") => ({
   trigger: "schedule",
 })
 
-const backups = [
+export const backups = [
   [1, "Databases nightly", 7],
   [2, "App data", 3],
 ].map(([id, name, hoursAgo]) => ({
@@ -122,7 +122,7 @@ const backups = [
   stored: { runs: 7, bytes: 7 * 1024 ** 3 },
 }))
 
-const traffic = Object.fromEntries(
+export const traffic = Object.fromEntries(
   [
     ["8", 3.2, 0],
     ["10", 11.8, 0.002],
@@ -143,7 +143,7 @@ const traffic = Object.fromEntries(
   ]),
 )
 
-const events = [
+export const events = [
   [12, "deploy", "shop-stack deployed", "release 349 · main@9f8e7d6", "info"],
   [41, "backup", "App data backed up", "1.0 GB to atlas-backups", "info"],
   [95, "deploy", "docs-site deploy failed", "build_failed · exit 1", "error"],
@@ -158,7 +158,7 @@ const events = [
   severity,
 }))
 
-const processes = [
+export const processes = [
   ...hostProcesses,
   ...[
     ["node", "node /app/dist/server.js", "app", 6.2, 420, "container", "shop-web"],
@@ -188,7 +188,7 @@ const processes = [
   })),
 ]
 
-const repos = [
+export const repos = [
   ["shop", "https://gitlab.com/acme/shop", true, 0],
   ["docs", "git@codeberg.org:acme/docs.git", false, 0],
   ["billing", "https://github.com/acme/billing", false, 2],
@@ -207,6 +207,38 @@ const repos = [
   behind,
   detached: false,
 }))
+
+export const packageUpdates = {
+  available: true,
+  manager: "apt",
+  packages: Array.from({ length: 7 }, (_, i) => ({
+    name: `pkg-${i}`,
+    current: "1.0",
+    candidate: "1.1",
+    security: i < 2,
+  })),
+  securityCount: 2,
+  rebootRequired: false,
+  securityFiltering: true,
+  lastChecked: iso(now - 3_600_000),
+}
+
+export const exposure = {
+  grade: "tailscale",
+  summary: "",
+  allowlist: ["100.64.0.0/10"],
+  interfaces: ["tailscale0"],
+}
+
+export const selfUpdate = {
+  version: "0.7.1",
+  available: false,
+  releases: [],
+  history: [],
+  breaking: false,
+  check: { enabled: true, repo: "a/b", ref: "main" },
+  install: { supported: true },
+}
 
 /**
  * Mocks every read the Overview makes. `deployments` replaces the fleet, so a
@@ -238,30 +270,8 @@ export async function mockOverview(
   await page.route("**/api/v1/certificates/", (route) => json(route, certificates))
   await page.route("**/api/v1/backups/", (route) => json(route, backups))
   await page.route("**/api/v1/git/", (route) => json(route, { available: true, repos }))
-  await page.route("**/api/v1/packages/updates", (route) =>
-    json(route, {
-      available: true,
-      manager: "apt",
-      packages: Array.from({ length: 7 }, (_, i) => ({
-        name: `pkg-${i}`,
-        current: "1.0",
-        candidate: "1.1",
-        security: i < 2,
-      })),
-      securityCount: 2,
-      rebootRequired: false,
-      securityFiltering: true,
-      lastChecked: iso(now - 3_600_000),
-    }),
-  )
-  await page.route("**/api/v1/exposure", (route) =>
-    json(route, {
-      grade: "tailscale",
-      summary: "",
-      allowlist: ["100.64.0.0/10"],
-      interfaces: ["tailscale0"],
-    }),
-  )
+  await page.route("**/api/v1/packages/updates", (route) => json(route, packageUpdates))
+  await page.route("**/api/v1/exposure", (route) => json(route, exposure))
   await page.route("**/api/v1/deploy/**", (route) => {
     const url = new URL(route.request().url())
     if (url.pathname.endsWith("/deploy/traffic")) return json(route, traffic)
@@ -274,15 +284,5 @@ export async function mockOverview(
       })
     return json(route, [])
   })
-  await page.route("**/api/v1/dashboard/update**", (route) =>
-    json(route, {
-      version: "0.7.1",
-      available: false,
-      releases: [],
-      history: [],
-      breaking: false,
-      check: { enabled: true, repo: "a/b", ref: "main" },
-      install: { supported: true },
-    }),
-  )
+  await page.route("**/api/v1/dashboard/update**", (route) => json(route, selfUpdate))
 }

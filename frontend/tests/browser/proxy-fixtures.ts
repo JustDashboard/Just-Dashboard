@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Page, Route } from "@playwright/test"
 import * as certTools from "./fixtures/proxy/cert-tools"
 import * as certs from "./fixtures/proxy/certs"
 import * as engine from "./fixtures/proxy/engine"
@@ -86,6 +86,16 @@ async function serve(page: Page, options: ProxyMockOptions, tables: ProxyRoutes[
       body: JSON.stringify({ error: { code: "not_available", message: "Not mocked" } }),
     })
   })
+}
+
+/**
+ * The showcase's answer for one API path, or `undefined` where it has none —
+ * for a spec that mocks the rest of the server itself and needs the proxy
+ * pages to be the showcase's when a link from elsewhere lands on them.
+ */
+export function showcaseHandler(path: string) {
+  const handler = SHOWCASE[path] ?? ROUTES[path]
+  return handler && ((route: Route) => handler(route, { included: true }))
 }
 
 /** A host with three sites, two certificates, three sockets and no streams. */

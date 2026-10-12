@@ -3,10 +3,13 @@
 import { useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
+import { ChevronLeft, ChevronRight, EyeOff, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
+import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
+import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { useCommandPalette } from "@/components/command-palette"
 import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
@@ -21,7 +24,9 @@ import {
   PROJECT_SETTINGS_NAV,
   navMatches,
   navOwns,
+  sectionEntry,
   sectionsFor,
+  shownFor,
   type NavEntry,
 } from "@/components/nav"
 import {
@@ -243,6 +248,8 @@ export function AppSidebar() {
   const collapsed = state === "collapsed"
   const scope = useNavScopeValue()
   const marks = useNavMarksValue()
+  const { hidden } = useHiddenSections()
+  const here = sectionOf(pathname)
 
   const [knownDatabases] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
 
@@ -334,8 +341,11 @@ export function AppSidebar() {
           {parent && (
             <PanelHead panel={panel} parent={parent} onBack={() => setView(stack.slice(0, -1))} />
           )}
+          {onRoute && here && hidden.has(here) && <HiddenHere section={here} />}
           {panel.groups.map((group, index) => {
-            const items = group.items.filter((item) => !item.capability || can(item.capability))
+            const items = group.items.filter((item) =>
+              shownFor("section" in item ? item.section : item, hidden, pathname, can),
+            )
             if (items.length === 0) return null
             return (
               <SidebarGroup key={group.label ?? index} className="px-0 py-1.5">
@@ -530,6 +540,55 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
 }
 
 /**
+ * The one thing the rail says about a section the account keeps out of it,
+ * while you are inside that section anyway.
+ *
+ * A link brought you here — a domain's Manage on a deployment, a container's
+ * row on a database — and the rail drew the section so it could say where
+ * you are. Without this line it would look as though the answer to the
+ * first-run question had been ignored; with it, the reader learns that hiding
+ * is about the sidebar and not about access, and can bring the section back
+ * in one press if they turn out to use it after all.
+ */
+function HiddenHere({ section }: { section: SectionKey }) {
+  const { hidden, save } = useHiddenSections()
+  const [busy, setBusy] = useState(false)
+  const title = sectionEntry(section)?.title ?? section
+
+  const show = async () => {
+    setBusy(true)
+    try {
+      await save([...hidden].filter((key) => key !== section))
+      notify.success(`${title} is back in your sidebar`)
+    } catch (err) {
+      notify.error(`Could not show ${title}`, err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      data-slot="hidden-section-note"
+      className="mt-1.5 flex min-w-0 items-start gap-2 rounded-md border border-hairline px-2 py-1.5 text-hint leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden"
+    >
+      <EyeOff aria-hidden className="mt-px size-3.5 shrink-0" />
+      <p className="min-w-0 flex-1">
+        {title} is hidden from your sidebar.{" "}
+        <button
+          type="button"
+          onClick={show}
+          disabled={busy}
+          className="rounded-sm font-medium text-foreground underline-offset-2 focus-ring hover:underline disabled:opacity-50"
+        >
+          Show it
+        </button>
+      </p>
+    </div>
+  )
+}
+
+/**
  * A row in whichever panel is showing. A page, or a section or group, which is
  * the same row with a chevron saying the rail goes in rather than the page
  * changes.
@@ -602,7 +661,7 @@ function NavRow({
  * Who is signed in, and everything that belongs to them rather than to the
  * server: the account pages and signing out.
  *
- * A card at the foot of the rail rather than five more nav rows, because none
+ * A card at the foot of the rail rather than six more nav rows, because none
  * of it is a place in the product — it is the same identity menu on every
  * page, and mixing it into the nav made the nav look longer than it is. Once
  * you are inside one of those pages the rail does drill into them, the way it

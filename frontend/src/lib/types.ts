@@ -32,6 +32,10 @@ export type DashboardUser = {
   mustChangePassword: boolean
   lastLoginAt: string
   createdAt: string
+  /** Not yet asked what the dashboard is for; the shell sends the account to `/welcome`. */
+  needsOnboarding: boolean
+  /** Sections kept out of this account's sidebar (`lib/sidebar-sections.ts`). */
+  hiddenSections: string[]
 }
 
 export type AuthStatus = {

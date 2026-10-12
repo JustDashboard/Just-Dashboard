@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,6 +70,14 @@ type User struct {
 	// the cache key a client appends to the avatar URL, so a new upload shows
 	// at once and an unchanged one is not fetched again.
 	AvatarVersion int64 `json:"avatarVersion"`
+	// NeedsOnboarding holds from the moment an account is made until its
+	// holder has said what they use the dashboard for, or skipped the
+	// question. The shell asks it once, after sign-in.
+	NeedsOnboarding bool `json:"needsOnboarding"`
+	// HiddenSections are the sections this account keeps out of its sidebar.
+	// They narrow what the shell draws and nothing the account may do: every
+	// route still answers by role, and a link into a hidden section opens it.
+	HiddenSections []string `json:"hiddenSections"`
 }
 
 func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, int64, error) {
@@ -84,11 +93,17 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 		locked     int64
 		lastLogin  int64
 		created    int64
+		onboarding int
+		hidden     string
 	)
-	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created, &u.DisplayName, &u.AvatarVersion)
+	err := row.Scan(&u.ID, &u.Username, &pwHash, &role, &totpSecret, &totpOK, &disabled, &mustChange, &failed, &locked, &lastLogin, &created, &u.DisplayName, &u.AvatarVersion, &onboarding, &hidden)
 	if err != nil {
 		return nil, "", "", 0, 0, err
 	}
+	if err := json.Unmarshal([]byte(hidden), &u.HiddenSections); err != nil {
+		return nil, "", "", 0, 0, fmt.Errorf("hidden sections of user %d: %w", u.ID, err)
+	}
+	u.NeedsOnboarding = onboarding == 1
 	if u.DisplayName == "" {
 		u.DisplayName = u.Username
 	}
@@ -103,7 +118,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, string, string, int, 
 	return &u, pwHash, totpSecret, failed, locked, nil
 }
 
-const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at, display_name, avatar_at`
+const userCols = `id, username, password_hash, role, totp_secret, totp_enabled, disabled, must_change_pw, failed_count, locked_until, last_login_at, created_at, display_name, avatar_at, needs_onboarding, hidden_sections`
 
 func (s *Service) UserByID(ctx context.Context, id int64) (*User, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id)
@@ -167,8 +182,10 @@ func (s *Service) CreateUserWithDisplayName(ctx context.Context, username, displ
 	if mustChange {
 		mc = 1
 	}
+	// Every account made from here on is asked what it is for on its first
+	// sign-in; the column's default is for the accounts that predate asking.
 	res, err := s.st.DB.ExecContext(ctx,
-		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at, display_name) VALUES(?,?,?,?,?,?)`,
+		`INSERT INTO users(username, password_hash, role, must_change_pw, created_at, display_name, needs_onboarding) VALUES(?,?,?,?,?,?,1)`,
 		username, hash, string(role), mc, time.Now().Unix(), displayName)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
