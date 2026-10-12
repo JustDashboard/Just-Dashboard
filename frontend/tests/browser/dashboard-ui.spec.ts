@@ -258,6 +258,24 @@ test("the version page is the history, with the update in the header", async ({ 
   expect(await framedPanels(page)).toEqual([])
 })
 
+test("the allowlist destination lands on Access after the configuration loads", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto("/dashboard/configuration#allowlist")
+  const access = page.locator("#allowlist")
+  await expect(access).toBeVisible()
+  await expect
+    .poll(async () => {
+      const box = await access.boundingBox()
+      return box?.y ?? -1
+    })
+    .toBeGreaterThanOrEqual(0)
+  const box = await access.boundingBox()
+  expect(box!.y).toBeLessThan(page.viewportSize()!.height / 2)
+  await expect(access.getByRole("textbox").first()).toBeVisible()
+})
+
 test("the configuration page edits in place and says where it lives", async ({ page }) => {
   await mockApi(page)
   await page.goto("/dashboard/configuration")

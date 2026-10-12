@@ -160,7 +160,7 @@ describe("the last config test in Needs attention", () => {
     })
     expect(folded.map((f) => f.id)).toEqual([CONFIG_TEST, "source.unreadable.ports"])
     // The overview answers it by showing the test; its href alone opens the overview.
-    expect(findingAction(folded[0])).toBe("Open")
+    expect(findingAction(folded[0])).toBeUndefined()
   })
 })
 

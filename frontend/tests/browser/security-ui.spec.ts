@@ -673,7 +673,7 @@ test("the overview reads as readings, findings and how the panel is reached", as
   await expect(ways.locator('img[src="/logos/fail2ban.webp"]')).toHaveCount(1)
 
   // A check's segment narrows the findings to its area, and lets it go.
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
   await checks.getByRole("button", { name: "SSH: 1 warning" }).click()
   await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toHaveAttribute(
     "aria-pressed",
@@ -681,12 +681,25 @@ test("the overview reads as readings, findings and how the panel is reached", as
   )
   await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
   await page.getByRole("button", { name: "Show every area" }).click()
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
 
-  // The findings, with the remedy the dashboard can carry out as a button.
+  // The action is visible before expansion and lands on the setting without applying it.
   // The finding's row, not the SSH tile's hint, which quotes the same title.
-  await page.getByRole("button", { name: /SSH accepts passwords/ }).click()
-  await expect(page.getByRole("button", { name: "Turn off passwords" })).toBeVisible()
+  await page.getByRole("button", { name: "Review SSH password login", exact: true }).click()
+  await expect(page).toHaveURL(
+    /\/security\/ssh\?setting=passwordauthentication#ssh-passwordauthentication$/,
+  )
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Password authentication" })
+      .getByRole("radio", { name: "yes", exact: true }),
+  ).toBeFocused()
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Password authentication" })
+      .getByRole("radio", { name: "yes", exact: true }),
+  ).toBeChecked()
+  await expect(page.getByRole("button", { name: "Apply changes", exact: true })).toHaveCount(0)
 })
 
 for (const path of PAGES) {

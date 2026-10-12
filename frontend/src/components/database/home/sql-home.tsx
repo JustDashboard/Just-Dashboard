@@ -83,7 +83,6 @@ export function SqlHome() {
         ) : (
           <ConcernAttention
             pending={false}
-            quiet="Nothing about how it is placed needs you"
             concerns={placementConcerns(
               {
                 name: conn.name,

@@ -682,10 +682,12 @@ export function CertificatesPage() {
         <div className="grid items-start gap-8 xl:grid-cols-2 [&>*]:min-w-0">
           <CertificateHygienePanel
             hygiene={hygiene}
-            onIssue={issueFor}
-            onDeleteLineage={admin && !certbotGone ? deleteLineage : undefined}
+            onIssue={admin ? issueFor : undefined}
+            onDeleteLineage={
+              admin && can("destructive") && !certbotGone ? deleteLineage : undefined
+            }
           />
-          <CertificateCoveragePanel coverage={coverage} onIssue={issueFor} />
+          <CertificateCoveragePanel coverage={coverage} onIssue={admin ? issueFor : undefined} />
         </div>
       )}
 

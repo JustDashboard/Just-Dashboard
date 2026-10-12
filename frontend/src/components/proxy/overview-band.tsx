@@ -17,7 +17,8 @@ import { ShareBar } from "@/components/procs/workloads"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { certificateProduct } from "@/components/proxy/marks"
-import { errorFinding } from "@/components/proxy/site-errors"
+import { errorFinding, isActionableProxyError } from "@/components/proxy/site-errors"
+import { useAuth } from "@/hooks/use-auth"
 import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
 
 /** How many sites and certificates a block names; the rest are one link away. */
@@ -487,13 +488,15 @@ function ErrorsBlock({
   labelOf: (site: string) => string
 }) {
   const router = useRouter()
+  const { can } = useAuth()
   const failing = (sites ?? [])
     .filter((s) => s.status === "available")
     .map((s) => ({ reading: s, failed: Math.round(s.errorRate * s.requests) }))
     .filter((s) => s.failed > 0)
     .sort((a, b) => b.failed - a.failed)
   const failed = failing.reduce((sum, s) => sum + s.failed, 0)
-  const logged = report?.groups.reduce((sum, g) => sum + g.count, 0) ?? 0
+  const errorGroups = report?.groups.filter(isActionableProxyError) ?? []
+  const logged = errorGroups.reduce((sum, g) => sum + g.count, 0)
   const waiting = (!sites && !trafficError) || (nginx && !report && !error)
   const quiet = failed === 0 && logged === 0
 
@@ -568,7 +571,11 @@ function ErrorsBlock({
               ) : (
                 report &&
                 report.groups.length > 0 && (
-                  <FindingList findings={report.groups.slice(0, 4).map(errorFinding)} />
+                  <FindingList
+                    findings={errorGroups
+                      .slice(0, 4)
+                      .map((group) => errorFinding(group, { mayConfigure: can("system.admin") }))}
+                  />
                 )
               ))}
           </div>

@@ -932,9 +932,7 @@ test("the overview does not call streams within limits when it could not read th
   )
   await page.goto("/proxy")
   await expect(
-    page.getByText(
-      "Certificates, renewal, sites, upstreams, streams and exposed ports all within limits",
-    ),
+    page.getByText("No priority problems found in the completed proxy checks"),
   ).toBeVisible()
 
   broken = true

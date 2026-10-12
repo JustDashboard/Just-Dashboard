@@ -33,28 +33,30 @@ export function hygieneFindings(
   hygiene: CertificateHygiene | undefined,
   actions: HygieneActions = {},
 ): ProxyFinding[] {
-  return (hygiene?.findings ?? []).map((finding) => {
-    const { issue, deleteLineage } = actions
-    const names = finding.names ?? []
-    const lineage = finding.lineage
-    return {
-      id: finding.id,
-      level: finding.level,
-      title: finding.title,
-      detail: finding.detail,
-      advice: finding.advice,
-      meta: finding.kind === "stale" || finding.kind === "uncovered" ? "coverage" : "key",
-      href: finding.certificate
-        ? `/proxy/certificates?cert=${encodeURIComponent(finding.certificate)}`
-        : "/proxy/certificates",
-      action:
-        finding.kind === "uncovered" && issue && names.length > 0
-          ? { label: "Issue for these", onClick: () => issue(names) }
-          : finding.kind === "stale" && deleteLineage && lineage
-            ? { label: "Delete", onClick: () => deleteLineage(lineage) }
-            : undefined,
-    }
-  })
+  return (hygiene?.findings ?? [])
+    .filter((finding) => finding.level !== "notice")
+    .map((finding) => {
+      const { issue, deleteLineage } = actions
+      const names = finding.names ?? []
+      const lineage = finding.lineage
+      return {
+        id: finding.id,
+        level: finding.level,
+        title: finding.title,
+        detail: finding.detail,
+        advice: finding.advice,
+        meta: finding.kind === "stale" || finding.kind === "uncovered" ? "coverage" : "key",
+        href: finding.certificate
+          ? `/proxy/certificates?cert=${encodeURIComponent(finding.certificate)}`
+          : "/proxy/certificates",
+        action:
+          finding.kind === "uncovered" && issue && names.length > 0
+            ? { label: "Issue certificate", onClick: () => issue(names) }
+            : finding.kind === "stale" && deleteLineage && lineage
+              ? { label: "Review certificate removal", onClick: () => deleteLineage(lineage) }
+              : undefined,
+      }
+    })
 }
 
 /**
@@ -125,9 +127,9 @@ export function certificateFindings({
         fingerprint: cert.fingerprint ?? cert.path,
         level: cert.daysLeft <= 7 ? "critical" : "warning",
         title: `${cert.name} expires in ${cert.daysLeft} day${cert.daysLeft === 1 ? "" : "s"}`,
-        detail: `Inside Let's Encrypt's renewal window and still not renewed.${usedBy}`,
+        detail: `Clients will reject this certificate after it expires.${usedBy}`,
         advice:
-          "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
+          "Review its renewal schedule and recent runs, then renew or replace it before expiry.",
         meta: "certificate",
         href,
       })
@@ -183,9 +185,7 @@ export function certificateFindings({
       level: due ? "critical" : "warning",
       title: `${lineage.name} will fail to renew`,
       detail: lineage.willFail.join(" "),
-      advice: due
-        ? "It is inside its renewal window, so certbot tries at every run and fails the same way until this is fixed."
-        : "Fix this before it reaches its renewal window, thirty days before it expires.",
+      advice: "Fix the reported configuration problem before the next renewal attempt.",
       meta: "renewal",
       href: lineage.certPath
         ? `/proxy/certificates?cert=${encodeURIComponent(lineage.certPath)}`
@@ -217,7 +217,7 @@ export function certificateFindings({
       detail: `No certbot timer and no cron entry was found for ${certbot.certs.length} certificate${certbot.certs.length === 1 ? "" : "s"}.`,
       advice: certbot.renewUnit
         ? `${certbot.renewUnit} is installed but not running. Turn it on from the Certificates page.`
-        : "Install certbot's timer or a cron entry; without one every certificate here expires in ninety days.",
+        : "Set up a renewal timer or cron entry before the saved certificates expire.",
       meta: "renewal",
       href: "/proxy/certificates",
       remedy: certbot.renewUnit ? { kind: "start-unit", unit: certbot.renewUnit } : undefined,

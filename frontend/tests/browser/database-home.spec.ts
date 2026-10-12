@@ -719,9 +719,7 @@ test("what needs attention leads to the page that acts on it", async ({ page }) 
     "/databases/1/advisor",
   )
   // A finding that names a page of this database opens it.
-  await attention
-    .getByRole("button", { name: /No backup of this database has been taken from here/ })
-    .click()
+  await attention.getByRole("button", { name: /No dashboard backup recorded/ }).click()
   await attention.getByRole("button", { name: "Open Backups" }).click()
   await expect(page).toHaveURL(/\/databases\/1\/backups$/)
 
@@ -749,7 +747,7 @@ test("an advisor link that leaves this database is not followed", async ({ page 
   })
   await visit(page, "/databases/1")
   const attention = block(page, "Needs attention")
-  await attention.getByRole("button", { name: /No backup/ }).click()
+  await attention.getByRole("button", { name: /No dashboard backup/ }).click()
   await expect(attention).toContainText("Take one now")
   await expect(attention.getByRole("button", { name: /^Open / })).toHaveCount(0)
 })
@@ -966,9 +964,7 @@ test("a key–value store has its own home and is asked nothing of a SQL server'
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   // No advisor on the server: what needs attention is read off its own answers.
-  await expect(block(page, "Needs attention")).toContainText(
-    "No backup of it has been taken from here",
-  )
+  await expect(block(page, "Needs attention")).toContainText("No dashboard backup recorded")
   // The commands that use the store are ranked; the ones that ask about it —
   // this page's own among them — are counted apart and said to be.
   const commands = block(page, "Busiest commands")
@@ -1072,7 +1068,7 @@ test("a file-based database is its file: no sessions, no chart, no server to rea
 
   await expect(block(page, "The file")).toContainText("/srv/notes/notes.db")
   await expect(block(page, "The file")).toContainText("3 tables · 1 index · 1 view")
-  await expect(block(page, "Needs attention")).toContainText("found nothing to fix")
+  await expect(block(page, "Needs attention")).toContainText("No priority issues found")
   await expect(block(page, "Runs as")).toContainText("A SQLite database is a file")
   await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Reachable from" })).toHaveCount(0)

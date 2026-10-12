@@ -1396,8 +1396,10 @@ test("the overview's finding for a link to nothing leads to its removal", async 
     })
   })
   await page.goto("/proxy")
-  await page.getByText("sites-enabled/ghost points at a file that is gone").click()
-  await page.getByRole("button", { name: "Open site" }).click()
+  const finding = page
+    .locator("[data-finding]")
+    .filter({ hasText: "sites-enabled/ghost points at a file that is gone" })
+  await finding.getByRole("button", { name: "Open site" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\?site=ghost$/)
 
   const confirm = page.getByRole("dialog", { name: "Remove sites-enabled/ghost" })
@@ -1442,10 +1444,9 @@ test("the distribution's untouched default site waits on nobody", async ({ page 
   await expect(page.getByRole("list", { name: "Serving" })).not.toContainText("default")
   await expect(page.getByRole("list", { name: "Serving" })).toContainText("app.example.com")
 
-  // The Overview's engine line counts the site someone has to decide about,
-  // and not the stock default.
+  // Intentional inactivity stays in the inventory rather than becoming a fault.
   await page.goto("/proxy")
-  await expect(page.getByText("off.example.com is on disk but not serving")).toBeVisible()
+  await expect(page.getByText("off.example.com is on disk but not serving")).toHaveCount(0)
   await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
   const identity = page.locator("[data-slot='host-identity']")
   const disabled = identity.getByRole("link", { name: "1 disabled" })

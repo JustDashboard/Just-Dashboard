@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/components/icons"
@@ -107,6 +108,20 @@ export function SSHPanel({
     "all",
   )
   const [busy, setBusy] = useState(false)
+  const wanted = useSearchParams().get("setting")
+  useEffect(() => {
+    if (!wanted || !data?.available || !data.settings.some((s) => s.key === wanted)) return
+    // A remembered filter must not hide the directive the operator came here to review.
+    setOnly("all")
+    const timer = window.setTimeout(() => {
+      const field = document.getElementById(`ssh-${wanted}`)
+      field?.scrollIntoView({ block: "center" })
+      const control =
+        field?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? field
+      control?.focus({ preventScroll: true })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [wanted, data, setOnly])
   // The network journal's temporary apply covers sshd too: where the host can
   // run the independent watchdog, a change is kept only once this session
   // returns a fresh dashboard response, and restored by the host otherwise.
@@ -393,7 +408,7 @@ export function SSHPanel({
         </Notice>
       )}
 
-      <Panel plain>
+      <Panel plain id="ssh-settings" className="scroll-mt-20">
         <PanelHeader
           title="Settings"
           actions={

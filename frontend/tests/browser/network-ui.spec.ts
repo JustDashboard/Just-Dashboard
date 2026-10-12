@@ -151,7 +151,7 @@ test("the overview draws the topology, the readings and the attention list", asy
   await expect(page.getByRole("heading", { name: "Attention" })).toBeVisible()
   // A finding opens the page that fixes it.
   await page.getByRole("button", { name: /ens3 dropped or failed/ }).click()
-  await page.getByRole("button", { name: "Open", exact: true }).click()
+  await page.getByRole("link", { name: "Inspect interfaces", exact: true }).click()
   await expect(page).toHaveURL(/\/network\/interfaces$/)
 })
 

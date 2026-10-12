@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Check,
   Clock,
@@ -1066,6 +1066,7 @@ function IssueDialogBody({
   // "" is whom JD_ACME_DIRECTORY configures, Let's Encrypt without it; a
   // key names an authority, and "custom" any other ACME directory.
   const [ca, setCa] = useState("")
+  const namesField = useRef<HTMLInputElement>(null)
   const [customDirectory, setCustomDirectory] = useState("")
   const authorities = usePoll<ACMEAccounts>(
     (signal) => get("/certificates/accounts", undefined, signal),
@@ -1351,6 +1352,7 @@ function IssueDialogBody({
         >
           <Input
             id="issue-domains"
+            ref={namesField}
             value={domains}
             onChange={(e) => setDomains(e.target.value)}
             placeholder="app.example.com www.app.example.com"
@@ -1735,6 +1737,7 @@ function IssueDialogBody({
             checking={checking}
             staging={staging}
             onRecheck={() => setRecheck((n) => n + 1)}
+            onReviewNames={() => namesField.current?.focus()}
           />
         )}
         <OptionList>
@@ -1814,15 +1817,17 @@ function PreflightChecks({
   checking,
   staging,
   onRecheck,
+  onReviewNames,
 }: {
   result?: IssuePreflight
   error?: string
   checking: boolean
   staging: boolean
   onRecheck: () => void
+  onReviewNames: () => void
 }) {
-  const open = result?.checks.filter((c) => c.level !== "ok") ?? []
-  const passed = (result?.checks.length ?? 0) - open.length
+  const open = result?.checks.filter((c) => c.level === "critical" || c.level === "warning") ?? []
+  const passed = result?.checks.filter((c) => c.level === "ok").length ?? 0
   const limits = result?.limits
   return (
     <Field
@@ -1856,8 +1861,22 @@ function PreflightChecks({
               detail: c.detail,
               advice: c.advice,
               meta: c.name,
+              action:
+                c.name && (c.check === "dns" || c.check === "caa")
+                  ? {
+                      label: "Inspect DNS records",
+                      href: `/network/tools?tool=dns&target=${encodeURIComponent(c.name.replace(/^\*\./, ""))}&record=${c.check === "caa" ? "CAA" : "A"}`,
+                    }
+                  : c.name && !c.name.startsWith("*.") && c.check === "http"
+                    ? {
+                        label: "Check HTTP response",
+                        href: `/network/tools?tool=http&target=${encodeURIComponent(`http://${c.name}`)}`,
+                      }
+                    : c.check === "lineage"
+                      ? { label: "Review certificate names", onClick: onReviewNames }
+                      : undefined,
             }))}
-            emptyLabel="Every check passed"
+            emptyLabel="No blocking problems found in these checks"
           />
           {limits && limits.applies && (
             <div className="grid gap-2">

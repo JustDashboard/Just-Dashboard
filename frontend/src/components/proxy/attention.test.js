@@ -193,15 +193,16 @@ describe("foldProxyFindings", () => {
     expect(foldProxyFindings(inputs.healthy)).toEqual([])
   })
 
-  test("every condition, worst first, ties in the order the areas are gathered", () => {
+  test("priorities only, worst first, ties in the order the areas are gathered", () => {
+    expect(foldProxyFindings(inputs.everything).some((f) => f.level === "notice")).toBe(false)
     expect(foldProxyFindings(inputs.everything)).toMatchObject([
       {
         id: "cert.expiring./s",
         level: "critical",
         title: "soon.example.com expires in 1 day",
-        detail: "Inside Let's Encrypt's renewal window and still not renewed.",
+        detail: "Clients will reject this certificate after it expires.",
         advice:
-          "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
+          "Review its renewal schedule and recent runs, then renew or replace it before expiry.",
         meta: "certificate",
         href: "/proxy/certificates?cert=%2Fs",
       },
@@ -237,10 +238,9 @@ describe("foldProxyFindings", () => {
         id: "cert.expiring./w",
         level: "warning",
         title: "week.example.com expires in 20 days",
-        detail:
-          "Inside Let's Encrypt's renewal window and still not renewed. Used by week, week-api.",
+        detail: "Clients will reject this certificate after it expires. Used by week, week-api.",
         advice:
-          "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
+          "Review its renewal schedule and recent runs, then renew or replace it before expiry.",
         meta: "certificate",
         href: "/proxy/certificates?cert=%2Fw",
       },
@@ -316,25 +316,6 @@ describe("foldProxyFindings", () => {
         meta: "ports",
         href: "/proxy/ports?q=port:5432,6379",
       },
-      {
-        id: "site.disabled.off",
-        level: "notice",
-        title: "off is on disk but not serving",
-        detail: "The file is in sites-available with no link in sites-enabled.",
-        advice: "Enable it from Sites if it is meant to serve, or delete it if it is not.",
-        meta: "site",
-        href: "/proxy/sites?site=off",
-      },
-      {
-        id: "stream.open.game",
-        level: "notice",
-        title: "Stream game forwards port 25565 to anyone",
-        detail: "UDP 25565 → 10.0.0.5:5432 with no allow list.",
-        advice:
-          "A stream has no authentication of its own. Restrict the source unless the service behind it authenticates for itself.",
-        meta: "stream",
-        href: "/proxy/streams?stream=game",
-      },
     ])
   })
 
@@ -345,8 +326,7 @@ describe("foldProxyFindings", () => {
         level: "critical",
         title: "Nothing is scheduled to renew certbot's certificates",
         detail: "No certbot timer and no cron entry was found for 1 certificate.",
-        advice:
-          "Install certbot's timer or a cron entry; without one every certificate here expires in ninety days.",
+        advice: "Set up a renewal timer or cron entry before the saved certificates expire.",
         meta: "renewal",
         href: "/proxy/certificates",
       },
@@ -378,9 +358,9 @@ describe("foldProxyFindings", () => {
         id: "cert.expiring./etc/letsencrypt/live/app.example.com/fullchain.pem",
         level: "critical",
         title: "app.example.com expires in 7 days",
-        detail: "Inside Let's Encrypt's renewal window and still not renewed.",
+        detail: "Clients will reject this certificate after it expires.",
         advice:
-          "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
+          "Review its renewal schedule and recent runs, then renew or replace it before expiry.",
         meta: "certificate",
         href: "/proxy/certificates?cert=%2Fetc%2Fletsencrypt%2Flive%2Fapp.example.com%2Ffullchain.pem",
       },
@@ -507,7 +487,9 @@ describe("finding actions", () => {
     expect(action(undefined, "/proxy/certificates#lineage")).toBe("Open certificates")
     expect(action("served cert", "/proxy/ports")).toBe("Open ports")
     expect(action("stream readiness", "/proxy/streams?stream=db")).toBe("Open streams")
-    expect(action("config", "/proxy/config?path=/etc/nginx/nginx.conf")).toBe("Open")
+    expect(action("config", "/proxy/config?path=/etc/nginx/nginx.conf")).toBe(
+      "Inspect proxy configuration",
+    )
   })
 
   // A finding about one certificate opens that one once it links to it,

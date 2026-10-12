@@ -41,8 +41,8 @@ export function CertificateHygienePanel({
   const findings = useMemo(
     () =>
       hygieneFindings(hygiene.data, { issue: onIssue, deleteLineage: onDeleteLineage }).map(
-        (finding, i) => {
-          const path = hygiene.data?.findings[i].certificate
+        (finding) => {
+          const path = new URL(finding.href, "http://certificate.invalid").searchParams.get("cert")
           return finding.action || !path
             ? finding
             : { ...finding, action: { label: "Open certificate", onClick: () => select(path) } }
@@ -62,7 +62,7 @@ export function CertificateHygienePanel({
           <>
             <FindingList
               findings={findings}
-              emptyLabel="No exposed, shared, weak or mismatched keys, and every name is covered"
+              emptyLabel="No priority certificate issues found in the completed checks"
             />
             {hygiene.data.configNote && (
               <p className="pt-2 text-hint text-muted-foreground">{hygiene.data.configNote}</p>

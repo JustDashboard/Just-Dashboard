@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { External, LockOpen, ShieldCheck, Warning, type Icon } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
@@ -87,6 +87,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * polls goes away with the stack.
  */
 export default function DashboardConfigurationPage() {
+  const landedAccess = useRef(false)
+  useEffect(() => {
+    if (landedAccess.current || window.location.hash !== "#allowlist") return
+    const target = document.getElementById("allowlist")
+    if (!target) return
+    landedAccess.current = true
+    target.scrollIntoView({ block: "start" })
+  })
   const { can } = useAuth()
   const { report, loading, error, restarting, running, apply, restart, issueCertificate, dismiss } =
     useSelfConfig()
@@ -653,6 +661,7 @@ export default function DashboardConfigurationPage() {
             <FormSection
               aside
               title="Access"
+              id="allowlist"
               actions={pending(["allowedCidrs", "require2fa"])}
               className={SECTION}
               hint={

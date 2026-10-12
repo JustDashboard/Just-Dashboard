@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { securityRemedy } from "@/lib/security-remedies"
+import { needsSecurityAttention, securityRemedy } from "@/lib/security-remedies"
 
 import {
   Bug,
@@ -65,7 +65,7 @@ export function PosturePanel({
   const { can } = useAuth()
   const router = useRouter()
   const act = (finding: SecurityFinding) => {
-    const remedy = securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can)
+    const remedy = securityRemedy(finding, can)
     if (remedy.apply && onFix) onFix(finding)
     else if (remedy.href) router.push(remedy.href)
   }
@@ -82,9 +82,10 @@ export function PosturePanel({
   }
   if (!posture) return null
 
+  const relevant = posture.findings.filter(needsSecurityAttention)
   const count = (level: SecurityFinding["level"]) =>
-    posture.findings.filter((finding) => finding.level === level).length
-  const shown = area ? posture.findings.filter((f) => f.area === area) : posture.findings
+    relevant.filter((finding) => finding.level === level).length
+  const shown = area ? relevant.filter((f) => f.area === area) : relevant
   const narrowed = POSTURE_AREAS.find((a) => a.area === area)
 
   return (
@@ -100,15 +101,12 @@ export function PosturePanel({
                 <Cross aria-hidden className="size-3 text-muted-foreground" />
               </FilterChip>
             )}
-            <Status
-              verdict={count("critical") ? "critical" : "notice"}
-              label={`${count("critical")} critical`}
-            />
-            <Status
-              verdict={count("warning") ? "warning" : "notice"}
-              label={`${count("warning")} warning`}
-            />
-            <Status verdict="notice" label={`${count("notice")} notice`} />
+            {count("critical") > 0 && (
+              <Status verdict="critical" label={`${count("critical")} critical`} />
+            )}
+            {count("warning") > 0 && (
+              <Status verdict="warning" label={`${count("warning")} warning`} />
+            )}
           </span>
         }
       />
@@ -116,19 +114,17 @@ export function PosturePanel({
         {/* Keyed by the area, so narrowing it is an arrival (§11). */}
         <div key={area ?? "all"} className="animate-rise">
           <FindingList
-            findings={shown.map((finding) =>
-              toFinding(
-                finding,
-                act,
-                securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can).label,
-              ),
-            )}
+            emphasize
+            findings={shown.map((finding) => {
+              const remedy = securityRemedy(finding, can)
+              return toFinding(finding, remedy.apply || remedy.href ? act : undefined, remedy.label)
+            })}
             emptyLabel={
               posture.skipped.length > 0
                 ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
                 : (posture.unknowns ?? []).length > 0
                   ? "No findings in the layers these checks can see"
-                  : "All security checks passed"
+                  : "No priority risks found in the completed security checks"
             }
           />
         </div>
@@ -183,12 +179,13 @@ export function AreaFindings({
   const { can } = useAuth()
   const router = useRouter()
   const act = (finding: SecurityFinding) => {
-    const remedy = securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can)
+    const remedy = securityRemedy(finding, can)
     if (remedy.apply && onFix) onFix(finding)
     else if (remedy.href) router.push(remedy.href)
   }
   const areas = Array.isArray(area) ? area : [area]
-  const findings = posture?.findings.filter((f) => areas.includes(f.area)) ?? []
+  const findings =
+    posture?.findings.filter((f) => areas.includes(f.area) && needsSecurityAttention(f)) ?? []
   if (findings.length === 0) return null
   return (
     <Panel plain className={className}>
@@ -203,9 +200,11 @@ export function AreaFindings({
       />
       <PanelBody>
         <FindingList
-          findings={findings.map((f) =>
-            toFinding(f, act, securityRemedy(!onFix ? { ...f, fix: undefined } : f, can).label),
-          )}
+          emphasize
+          findings={findings.map((finding) => {
+            const remedy = securityRemedy(finding, can)
+            return toFinding(finding, remedy.apply || remedy.href ? act : undefined, remedy.label)
+          })}
         />
       </PanelBody>
     </Panel>
@@ -231,7 +230,7 @@ function toFinding(
     level: finding.level,
     title: finding.title,
     detail: finding.detail,
-    advice: finding.advice,
+    advice: !onFix && label ? [finding.advice, label].filter(Boolean).join(" ") : finding.advice,
     meta: (
       <span className="inline-flex items-center gap-1">
         {finding.area === "intrusion" ? (
@@ -242,9 +241,7 @@ function toFinding(
         {finding.area}
       </span>
     ),
-    action: onFix
-      ? { label: label ?? finding.fixLabel ?? "Review controls", onClick: () => onFix(finding) }
-      : undefined,
+    action: onFix && label ? { label, onClick: () => onFix(finding) } : undefined,
   }
 }
 

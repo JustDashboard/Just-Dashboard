@@ -2,7 +2,7 @@
 
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   FirewallCheck,
@@ -169,6 +169,12 @@ export function FirewallPanel({
     profiles: false,
   }
   const writable = admin && Boolean(status?.available) && caps.editable
+  useEffect(() => {
+    if (!status?.available || window.location.hash !== "#firewall-enabled") return
+    const control = document.getElementById("firewall-enabled")
+    control?.scrollIntoView({ block: "center" })
+    control?.focus({ preventScroll: true })
+  }, [status?.available])
   // The rule is looked up by number and opened only while it still names the
   // port the link was about: ufw renumbers on every delete, and the form
   // would otherwise replace whichever rule took the number since.
@@ -192,6 +198,7 @@ export function FirewallPanel({
       />
       {writable && caps.toggle && (
         <Switch
+          id="firewall-enabled"
           aria-label="Firewall enabled"
           checked={status.enabled}
           onCheckedChange={(enabled) =>

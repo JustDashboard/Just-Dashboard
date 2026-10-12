@@ -1,5 +1,7 @@
 "use client"
 
+import { needsProjectAttention } from "@/components/deploy/attention"
+
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -528,11 +530,11 @@ const WORST: Verdict[] = ["critical", "warning", "notice"]
  */
 function Assessment({ diagnosis, href }: { diagnosis?: DeploymentDiagnosis; href: string }) {
   if (!diagnosis) return null
-  const count = diagnosis.findings.length
+  const findings = diagnosis.findings.filter(needsProjectAttention)
+  const count = findings.length
   if (count > 0) {
     const worst =
-      WORST.find((level) => diagnosis.findings.some((finding) => finding.severity === level)) ??
-      "notice"
+      WORST.find((level) => findings.some((finding) => finding.severity === level)) ?? "notice"
     return (
       <Link href={href} className="flex rounded-sm focus-ring hover:underline">
         <Status
@@ -544,5 +546,5 @@ function Assessment({ diagnosis, href }: { diagnosis?: DeploymentDiagnosis; href
   }
   if (diagnosis.status === "partial")
     return <p className="text-xs text-muted-foreground">Partly assessed</p>
-  return <Status verdict="ok" label="All checks passed" />
+  return <Status verdict="ok" label="No priority issues found" />
 }

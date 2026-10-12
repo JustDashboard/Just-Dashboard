@@ -33,16 +33,13 @@
 - `run-console.tsx` deliberately **does not** let `useSocket` reconnect: reconnecting re-issues the GET,
   and re-issuing the GET runs the command again — a redeploy fired twice because a VPN blinked is not a
   re-render. A dropped socket ends the run and says so.
-- `attention.tsx` renders the half of the diagnosis that is not runtime, through the product's one
-  `FindingList` (`components/finding-list.tsx`) rather than through a parallel component of its own.
-  Docker had grown a second one — a two-line title-and-detail row with a glyph, a tag and a chevron —
-  while Metrics and Security shared a one-line accordion for the identical idea, so a page showing both
-  read as two products. What is left here is the Docker-specific part: repeats of one kind collapse to a
-  single row ("9 containers have no memory limit") whose body states the shared reasoning once and names
-  the containers as chips that run that container's own remedy. The severity filter strip, the "N
-  distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
-  five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
-  and the container's page asks for one.
+- `attention.tsx` renders priority risks and failures through the product's shared `FindingList`
+  (`components/finding-list.tsx`). Each row shows its consequence and a named action before the
+  measured evidence disclosure. Repeated risks collapse to one row; Review containers opens each
+  target's own evidence and remedy, rather than applying a group-wide change. Routine recommendations
+  remain in Configure. `ContainerFindings` filters the same diagnosis to one container. Configuration
+  remedies preserve credentials and Compose ownership, require review before replacement, and offer
+  inspection when the account cannot change the settings. Dismissal lasts until Rescan.
   The other half — what is *fine* as well as what is not — was `RuntimeHealthPanel`, a bar of the
   health-check counts over the containers list, because a list of problems can never say "eight
   healthy, four with no health check at all" and that last number is what stops "all healthy" meaning
@@ -250,8 +247,10 @@ the click: the page reports it, and a container removed from its own page return
 back/forward restore them; closing clears only that selection parameter.
 
 **Security and proxy** (`components/security/`, `components/proxy/`) follow the same rule — teaching next
-to the control, not in a banner above it. `posture-panel.tsx` turns a finding's `fix` into a button and
-maps it to the request plus the confirmation it deserves. `rule-form.tsx` is why the catalogue lives on
+to the control, not in a banner above it. `posture-panel.tsx` names the finding's owning controls;
+SSH fixes focus their directive and retain the full access preview, confirmation and recovery flow.
+Firewall findings open enforcement review, and allowlist findings open Access in configuration.
+`rule-form.tsx` is why the catalogue lives on
 the server: picking "Redis" fills in 6379 *and* raises the warning at the moment of choosing, not in a
 report afterwards; the `ufw` line it would run is in the footer. `ssh-panel.tsx` stages every change and
 applies them together, and its dialog says to keep the session open and check a second terminal — the one

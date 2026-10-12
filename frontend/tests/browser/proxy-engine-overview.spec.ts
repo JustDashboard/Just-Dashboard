@@ -75,8 +75,8 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
 
   // The finding's own button reads the source again.
   sitesFail = false
-  await page.getByText("Sites could not be read").click()
-  await page.getByRole("button", { name: "Try again" }).click()
+  const source = page.locator("[data-finding]").filter({ hasText: "Sites could not be read" })
+  await source.getByRole("button", { name: "Try again" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -155,19 +155,23 @@ test("a finding's button names where it leads", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy")
 
-  // One finding open at a time, so each button found is that finding's.
+  // Actions remain available while the measured evidence is folded away.
   const open = async (title: string, label: string) => {
-    await page.getByText(title).click()
-    const button = page.getByRole("button", { name: label, exact: true })
+    const finding = page.locator("[data-finding]").filter({ hasText: title })
+    const trigger = finding.getByRole("button", { name: title, exact: true })
+    const button = finding.getByRole("button", { name: label, exact: true })
     await expect(button).toBeVisible()
     // It was `Open ${meta}`: "Open renewal", "Open stream" for a list. "Open
     // certificate" is kept for a finding that links to one certificate.
     await expect(page.getByRole("button", { name: /^Open (renewal|stream)$/ })).toHaveCount(0)
-    await page.getByText(title).click()
-    await expect(button).toHaveCount(0)
+    await trigger.click()
+    await expect(trigger).toHaveAttribute("aria-expanded", "true")
+    await trigger.click()
+    await expect(trigger).toHaveAttribute("aria-expanded", "false")
+    await expect(button).toBeVisible()
   }
   await open("old.example.com has expired", "Open certificate")
-  await open("Nothing is scheduled to renew certbot's certificates", "Open certificates")
+  await open("Nothing is scheduled to renew certbot's certificates", "Enable automatic renewal")
   await open("PostgreSQL answers on every interface", "Open ports")
 
   await open("legacy.example.com serves an application in plain text", "Open site")

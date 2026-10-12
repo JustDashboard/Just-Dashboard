@@ -303,7 +303,7 @@ function Origin({ container }: { container: Container }) {
 /**
  * What the dashboard thinks is wrong with it, beside its name: the count of
  * issues in their worst tone, and nothing when there are none. The
- * recommendations stay in Attention, where there is room for the reasoning.
+ * recommendations stay in Configure, where their controls and reasoning are.
  */
 function Issues({
   container,

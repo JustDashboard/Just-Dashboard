@@ -176,7 +176,7 @@ describe("fleetAttention", () => {
       ["project-1", "warning"],
     ])
     expect(findings[1].title).toBe("noisy is failing 20.0% of requests")
-    expect(findings[1].action.href).toBe("/deploy/1/logs")
+    expect(findings[1].action.href).toBe("/deploy/1/logs?view=requests")
   })
 
   test("a live release failing its check opens the runtime", () => {
