@@ -21,6 +21,15 @@ Every new account is now asked, once, what it will use the server for, and its s
 
 - A hidden section stays one link or one search away
   - A link into a hidden section, such as a deployment's domain opening its proxy site, still opens it; the sidebar shows the section while you are in it and offers to keep it. Search lists hidden pages as soon as you type, and the Overview leaves out a hidden section's tiles and the reads behind them.
+- Sign-in is redrawn, and fits a phone
+  - One card, with the server and the products it runs drawn beside the form on colour instead of a grid. The steps it shows are the ones your account actually has, Forgot it? gives the command that resets a password on the server, and a password you are asked to change signs you straight back in.
+- The first-run question fits a phone
+  - Purposes are rows rather than tiles, each step's button stays at the foot of the screen, and the last screen puts the count and Open the dashboard on one line instead of a row of its own.
+
+### Fixed
+
+- A password set from the server is not asked for again at sign-in
+  - scripts/reset-password.sh and scripts/create-user.sh set the password the account signs in with. They marked it temporary, so the dashboard demanded a new one the moment you signed in with it.
 
 ## 0.7.2 — 12 October 2026
 
