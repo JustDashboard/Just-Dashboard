@@ -77,10 +77,8 @@ export default function AccountWorkspacePage() {
             </Button>
           </PanelFooter>
         </Panel>
-        <div className="min-w-0 space-y-2">
-          <p className="eyebrow px-1">Your sidebar</p>
-          <SidebarPreview hidden={current} />
-        </div>
+        {/* Unlabelled: drawn as the rail it is, it needs no name. */}
+        <SidebarPreview hidden={current} />
       </div>
     </Page>
   )

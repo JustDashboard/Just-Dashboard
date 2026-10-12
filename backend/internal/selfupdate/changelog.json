@@ -1,6 +1,23 @@
 {
-  "latest": "0.7.3",
+  "latest": "0.7.4",
   "releases": [
+    {
+      "version": "0.7.4",
+      "date": "2026-10-12",
+      "title": "A shorter first sign-in",
+      "summary": "The question a new account is asked after its first sign-in is one screen now, and its answer is the next. Pick what the server is for from big cards, press Continue, and the server appears wired to each purpose you chose, with one button to the dashboard. Choosing sections one by one has moved out of the first sign-in to Account → Workspace, where it always was.",
+      "changes": [
+        {
+          "kind": "changed",
+          "text": "The first-run question is two screens instead of three",
+          "detail": "The purposes are big cards with nothing beside them. Continue saves your sidebar and shows your server in the middle of the screen, each purpose you chose drawn around it, with Go to dashboard under it. The screen of fifteen section switches is gone from the first sign-in; Account → Workspace still has it."
+        },
+        {
+          "kind": "changed",
+          "text": "Account → Workspace draws the sidebar preview without a label"
+        }
+      ]
+    },
     {
       "version": "0.7.3",
       "date": "2026-10-12",

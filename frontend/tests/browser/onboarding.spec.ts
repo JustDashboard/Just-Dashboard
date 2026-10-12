@@ -32,16 +32,15 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(
     page.getByRole("heading", { level: 1, name: "What will you use this server for?" }),
   ).toBeVisible()
-  await expect(page.getByText("Welcome, Ion · Step 1 of 3")).toBeVisible()
+  await expect(page.getByText("Welcome, Ion", { exact: true })).toBeVisible()
+  // The question is the cards and nothing beside them: the picture is the answer.
+  await expect(page.getByRole("list", { name: "What this server is for" })).toHaveCount(0)
 
   // The server already runs a project and four databases, so those two start
   // chosen and their cards say why.
   const purposes = page.getByRole("group", { name: "Purposes" })
   await expect(purposes.getByText("1 project here")).toBeVisible()
   await expect(purposes.getByText("4 databases here")).toBeVisible()
-  // Each chosen purpose is wired to the server in the picture beside the cards.
-  const server = page.getByRole("list", { name: "What this server is for" })
-  await expect(server.getByRole("listitem")).toHaveText(["Ship apps", "Run databases"])
   await expect(purposes.getByRole("button", { name: "Ship apps" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -55,38 +54,16 @@ test("a new account is asked what the server is for, and the answer shapes the s
     "aria-pressed",
     "false",
   )
-  await expect(server.getByRole("listitem")).toHaveText(["Ship apps"])
   await page.getByRole("button", { name: "Continue" }).click()
 
-  // The purposes filled the sections in; the sections decide, beside the rail
-  // they will draw.
+  // Continue is the answer: saved, and drawn as the server wired to each
+  // purpose, with the one command under it. There is no sections screen.
+  await expect(page.getByRole("heading", { level: 1, name: "Your server is ready" })).toBeVisible()
   await expect(
-    page.getByRole("heading", { level: 1, name: "Which sections should your sidebar show?" }),
-  ).toBeVisible()
-  const preview = page.getByRole("navigation", { name: "Sidebar preview" })
-  const tile = (name: string) => page.getByRole("button", { name, exact: true })
-  await expect(tile("Deployments")).toHaveAttribute("aria-pressed", "true")
-  await expect(tile("Network")).toHaveAttribute("aria-pressed", "false")
-  await expect(preview.getByText("Proxy & TLS")).toBeVisible()
-  await tile("Proxy & TLS").click()
-  await expect(preview.getByText("Proxy & TLS")).toHaveCount(0)
-  await expect(page.getByText("5 of 15 shown")).toBeVisible()
-  // Overview, Monitoring and Settings cannot be hidden, and are drawn.
-  for (const always of ["Overview", "Monitoring", "Settings"]) {
-    await expect(preview.getByText(always, { exact: true })).toBeVisible()
-  }
-  await page.getByRole("button", { name: "Finish" }).click()
-
-  await expect(page.getByRole("heading", { level: 1, name: "Your sidebar is ready" })).toBeVisible()
-  await expect(page.getByText(/of 15 sections in your sidebar/)).toBeVisible()
-  // The count and the command share the foot: the command on a row of its own
-  // under the facts was a band of nothing around one button.
-  const count = await page.getByText(/of 15 sections in your sidebar/).boundingBox()
-  const open = await page.getByRole("button", { name: "Open the dashboard" }).boundingBox()
-  expect(Math.abs(count!.y + count!.height / 2 - (open!.y + open!.height / 2))).toBeLessThan(12)
-  await expect(page.getByRole("list", { name: "What this server is for" })).toContainText(
-    "Ship apps",
-  )
+    page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
+  ).toHaveText(["Ship apps"])
+  await expect(page.getByText(/^6 sections in your sidebar/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
     [
@@ -95,7 +72,6 @@ test("a new account is asked what the server is for, and the answer shapes the s
       "files",
       "network",
       "packages",
-      "proxy",
       "security",
       "stickyboard",
       "system-users",
@@ -103,21 +79,27 @@ test("a new account is asked what the server is for, and the answer shapes the s
     ].sort(),
   )
 
-  await page.getByRole("button", { name: "Open the dashboard" }).click()
+  await page.getByRole("button", { name: "Go to dashboard" }).click()
   await expect(page).toHaveURL(/\/$/)
-  for (const shown of ["Overview", "Deployments", "Databases", "Docker", "Git", "Backups"]) {
+  for (const shown of [
+    "Overview",
+    "Deployments",
+    "Databases",
+    "Docker",
+    "Git",
+    "Proxy & TLS",
+    "Backups",
+  ]) {
     await expect(rail(page).getByRole("link", { name: shown, exact: true })).toBeVisible()
   }
-  for (const hidden of ["Network", "Proxy & TLS", "Security", "Terminal", "Excalidraw"]) {
+  for (const hidden of ["Network", "Security", "Terminal", "Excalidraw"]) {
     await expect(rail(page).getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
   }
   // Server configuration held only hidden sections, so its row is gone, and a
   // label with nothing left under it goes with its rows. Protection keeps
   // Backups, which shipping apps uses, so it stays.
   await expect(rail(page).getByText("Server configuration")).toHaveCount(0)
-  for (const label of ["Network", "Advanced"]) {
-    await expect(rail(page).getByText(label, { exact: true })).toHaveCount(0)
-  }
+  await expect(rail(page).getByText("Advanced", { exact: true })).toHaveCount(0)
   await expect(rail(page).getByText("Protection", { exact: true })).toBeVisible()
   // The Overview drops the tiles of what was hidden, and keeps the rest.
   await expect(page.getByRole("link", { name: /^Docker/ }).first()).toBeVisible()
@@ -141,19 +123,26 @@ test("showing everything is an answer too, and nothing is hidden", async ({ page
   }
 })
 
-test("on a phone each step's command stays at the foot of the window", async ({ page }) => {
+test("on a phone the command stays in reach, and the answer fits the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockOnboarding(page)
   await page.goto("/welcome")
-  await expect(page.getByRole("button", { name: "Continue" })).toBeInViewport()
-  await page.getByRole("button", { name: "Continue" }).click()
-  // Fifteen tiles are taller than the phone; Finish is held in reach over them.
+  const purposes = page.getByRole("group", { name: "Purposes" })
+  for (const name of ["Manage containers", "Route the network", "Secure the server"]) {
+    await purposes.getByRole("button", { name }).click()
+  }
+  // Six cards as rows leave Continue under them on the screen, without a bar
+  // holding it there.
+  const command = page.getByRole("button", { name: "Continue" })
+  await expect(command).toBeInViewport()
+  expect(await command.evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe(
+    "static",
+  )
+  await command.click()
   await expect(
-    page.getByRole("heading", { level: 1, name: "Which sections should your sidebar show?" }),
-  ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Finish" })).toBeInViewport()
-  await page.getByRole("button", { name: "Finish" }).click()
-  await expect(page.getByRole("button", { name: "Open the dashboard" })).toBeInViewport()
+    page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
+  ).toHaveCount(5)
+  await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
 })
 
 test("an account that has answered is never sent to the question", async ({ page }) => {

@@ -4,6 +4,18 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.4 — 12 October 2026
+
+**A shorter first sign-in**
+
+The question a new account is asked after its first sign-in is one screen now, and its answer is the next. Pick what the server is for from big cards, press Continue, and the server appears wired to each purpose you chose, with one button to the dashboard. Choosing sections one by one has moved out of the first sign-in to Account → Workspace, where it always was.
+
+### Changed
+
+- The first-run question is two screens instead of three
+  - The purposes are big cards with nothing beside them. Continue saves your sidebar and shows your server in the middle of the screen, each purpose you chose drawn around it, with Go to dashboard under it. The screen of fifteen section switches is gone from the first sign-in; Account → Workspace still has it.
+- Account → Workspace draws the sidebar preview without a label
+
 ## 0.7.3 — 12 October 2026
 
 **A first sign-in that fits the sidebar to what you use**
