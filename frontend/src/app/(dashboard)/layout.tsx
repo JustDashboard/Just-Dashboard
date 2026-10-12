@@ -21,12 +21,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
-  // behind this shell is independently authenticated by the server.
+  // behind this shell is independently authenticated by the server. An
+  // account that has not been asked what the dashboard is for is asked first,
+  // wherever it was headed; answering or skipping ends that for good.
+  const onboarding = Boolean(status?.user?.needsOnboarding)
   useEffect(() => {
     if (!loading && !status?.authenticated) router.replace("/login")
-  }, [loading, status, router])
+    else if (onboarding) router.replace("/welcome")
+  }, [loading, status, onboarding, router])
 
-  if (loading || !status?.authenticated) return <ShellSplash />
+  if (loading || !status?.authenticated || onboarding) return <ShellSplash />
 
   return (
     <WorkspaceCommandsProvider>

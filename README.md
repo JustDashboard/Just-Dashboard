@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.2** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.3** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -185,6 +185,7 @@ free.
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
 - Roles, two-factor, sessions and API keys for every account
+- A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
 
 </td>
@@ -287,6 +288,13 @@ rest in four labelled stages:
 Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**.
 
+**First sign-in:** every new account is asked once what it will use the server for — shipping apps,
+running databases, containers, the network, security, or working on the box — and its sidebar,
+Overview and search's empty list keep only those sections. Hiding a section is about the sidebar,
+not access: links from other pages still open it, search still finds it, and the role decides what
+the account may do. **Account → Workspace** changes the answer or asks the question again. Accounts
+that existed before 0.7.3 are not asked and keep every section.
+
 **Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
 followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and
 sessions.
@@ -299,7 +307,7 @@ while the backend is stopped.
 
 | Script | What it does |
 | --- | --- |
-| `sudo ./scripts/reset-password.sh admin` | Recover an account with a temporary password |
+| `sudo ./scripts/reset-password.sh admin` | Recover an account by setting a new password |
 | `sudo ./scripts/create-user.sh alice limited` | Create an account (`readonly`, `limited` or `admin`) |
 | `sudo ./scripts/manage.sh users` | List accounts, roles and two-factor status |
 | `sudo ./scripts/manage.sh revoke-sessions alice` | Sign out every browser session for an account |
@@ -313,11 +321,13 @@ while the backend is stopped.
 
 <br>
 
-Passwords are entered twice with hidden input and must meet the dashboard's strength rules. New and
-reset passwords are temporary: the account holder changes them at sign-in, after any required
-two-factor step. A reset clears failed-login lockout and revokes that account's sessions and API
-tokens, while keeping two-factor enrolment, recovery codes, role and disabled state. Account changes
-are audited as local root; `revoke-sessions` leaves API tokens unchanged.
+Passwords are entered twice with hidden input and must meet the dashboard's strength rules. The
+password a script sets is the one the account signs in with — the dashboard does not ask for another
+at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
+generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
+clears failed-login lockout and revokes that account's sessions and API tokens, while keeping
+two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
+root; `revoke-sessions` leaves API tokens unchanged.
 
 For automation, append `--password-stdin` to either password command and pipe one password line from
 a trusted source — never put passwords in arguments or shell history. The scripts find the checkout
@@ -354,7 +364,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.2**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.3**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.

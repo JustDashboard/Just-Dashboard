@@ -344,7 +344,7 @@ export async function json(route: Route, body: unknown) {
 }
 
 /** Where a history request points, whether by range or by an explicit span. */
-function windowOf(url: URL): { from: number; to: number; explicit: boolean } {
+export function windowOf(url: URL): { from: number; to: number; explicit: boolean } {
   const from = url.searchParams.get("from")
   const to = url.searchParams.get("to")
   if (from && to) return { from: Number(from) * 1000, to: Number(to) * 1000, explicit: true }

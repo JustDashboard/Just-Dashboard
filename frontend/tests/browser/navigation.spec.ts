@@ -220,8 +220,11 @@ for (const layout of ["expanded", "mobile"] as const) {
     expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height)
     if (layout === "mobile") {
+      // The row's layout height, not Playwright's box: with the menu at a
+      // fractional offset that box came back 43.99997 for a 44px row.
       for (const item of await menu.getByRole("menuitem").all()) {
-        expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        const height = await item.evaluate((el) => el.getBoundingClientRect().height)
+        expect(height).toBeGreaterThanOrEqual(44)
       }
     }
   })

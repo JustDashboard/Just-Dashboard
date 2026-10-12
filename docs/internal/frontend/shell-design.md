@@ -1,7 +1,7 @@
 # Frontend shell and design system
 
-The App Router currently has 91 `page.tsx` entry points, including nested database, Docker, proxy,
-security, and deployment workflows plus `/login`. Most page modules are client components; the three
+The App Router currently has 111 `page.tsx` entry points, including nested database, Docker, proxy,
+security, and deployment workflows plus `/login` and `/welcome`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
 
@@ -51,7 +51,8 @@ or one database inside Databases — or, inside a group, the group, a section in
 pages (Monitoring → Processes → PM2; Server configuration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
-`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation` — so `app-sidebar.tsx` and
+`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation`, and for the sections an
+account hides `shownFor`, `hideableSections` and `sectionEntry` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
 the one surface that still sees them all at once.
@@ -67,6 +68,89 @@ that is "Monitoring" as such, so pressing the row opens its panel over the page 
 navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
 share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail
 draws one panel per link of it; the breadcrumb names every link (`navLocation().parents`).
+
+### Sections an account keeps out of its sidebar
+
+**Hiding a section is about the rail, never about access.** Every account made from 0.7.3 on is asked
+once, straight after sign-in, what it will use the server for (`/welcome`, below), and the answer is
+a list of sections kept out of its sidebar — stored on the account (`users.hidden_sections`, served as
+`user.hiddenSections` on the session and written by `PUT /account/workspace`), so it follows the person
+to every browser rather than living in this one's storage. `lib/sidebar-sections.ts` names the
+sections that can be hidden — the first segment of their path: Deployments, Databases, Docker, the
+five Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
+log — and the purposes the question offers, each the sections it needs. Overview, Monitoring,
+Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
+or back to the switch.
+
+What a hidden section loses is exactly three things, each read through `useHiddenSections()`:
+
+- **Its row in the rail.** `shownFor` in `nav.ts` decides every row (and asks the role, so a group
+  whose remaining entries the role cannot open goes with them — Server configuration with Packages
+  hidden, to an account without `system.admin`). A section's root is hidden, never a page inside it.
+  **While you are inside a hidden section it is drawn anyway**: a deployment's domain links to
+  `/proxy/sites?site=…`, about 150 such links cross sections, and the rail must still say where you
+  are. It says why the row is there, too — `HiddenHere` in `app-sidebar.tsx` puts one line under the
+  panel's head, "Proxy & TLS is hidden from your sidebar. Show it", and Show it removes the section
+  from the list. The line is in the rail rather than over the page so a `fill` page (the terminal, a
+  database workbench) keeps its exact height; on a phone it is in the sheet.
+- **Its tiles and reads on the Overview.** Each Services tile, the Deployments section and the read
+  behind it are gated on the section, so the page asks the server only about what it draws.
+- **Its pages in the palette's empty list.** They are `explicit`, listed as soon as a word is typed:
+  search is how a hidden page is reached on purpose.
+
+No route, link, embedded pane or permission changes. The links into a hidden section are left as they
+are on purpose — wrapping them in "can I go here?" checks would make every missed one a dead end.
+
+### The first-run question
+
+`app/welcome/page.tsx` sits outside the shell — the rail is what it decides — and the shell's layout
+sends an account whose session says `needsOnboarding` there from any address, after sign-in, two-factor
+and any forced password change; answering or skipping clears the flag server-side, and it is never
+asked again. It is a flow page (design system §16, `components/onboarding/welcome-flow.tsx`) in three
+steps, each the one surface being decided beside a picture of what it makes, so the answer is seen
+rather than read — the words are the question, the names and the counts:
+
+1. **The purposes** as `ChoiceCard`s, any number of them, each drawn as the three products it means
+   (`PURPOSES[].products` in `lib/sidebar-sections.ts`) and its name. On a server that already has
+   projects or saved databases those purposes start chosen, with the count on their card. Beside
+   them `ServerPicture` (`components/onboarding/server-picture.tsx`) draws this server — the wiring
+   pictures' rack, named and marked with its distribution — with an `AnimatedBeam` running to each
+   purpose chosen, drawn as its first product; nothing chosen is the dashed ring of a place not
+   filled. The lines are the picture's own children rather than the marks', because a mark's row
+   rises in on a transform and a line inside it would be positioned against the row.
+2. **The sections** as `SectionTiles` (`section-tiles.tsx`): one compact `ChoiceCard` per section under
+   the rail's group names, with the rail's glyph and name and nothing else, beside `SidebarPreview`,
+   the rail drawn from the same registry with the same rule. This is the screen that decides.
+3. **The outcome**: the wired server beside three one-line facts — links still open hidden sections,
+   ⌘K finds every page, Account → Workspace changes it — and one foot holding the count of sections
+   and the command, with *Change sections* back to step two. The command used to have a row of its
+   own under the facts, with the count in a header above the picture, which made the outcome three
+   bands of white space around one button.
+
+The screen stands on arrival's ground (`.auth-backdrop`, design system §16), the one sign-in stands on.
+On a phone each step is one column: the purposes are rows rather than tiles, the rail preview is left
+out because the tiles already say what is in and out, and the panel's command bar sticks to the foot of
+the window (`max-xl:sticky` on `FlowActions`, with the panel's clip lifted below `xl` so the bar sticks
+to the page's scroll rather than to the panel).
+
+### Signing in
+
+`app/login/page.tsx` is one `FlowPanel` card: the form, and from `lg` a picture half drawing
+`ProductOrbit` (`components/onboarding/product-orbit.tsx`) — the same server rack, ringed by the
+products the dashboard drives with a beam running out to each, so sign-in and the first-run question
+are one drawing. Nothing in it is read from the server, because nobody has signed in. On a phone the
+picture is a strip across the top of the card. The spine names only the steps the account has, from
+the server's answer (`needsTotp`, `needsEnrollment`, `user.totpEnabled`, `user.mustChangePassword`), and
+is not drawn before that answer: it used to promise *Verify* to every account. *Forgot it?* shows
+`scripts/reset-password.sh` with the typed name filled in, since recovery happens on the host. A forced
+password change does not ask again for the current password the page already holds, reads the server's
+rule as the reader types (`lib/password.ts`), and signs straight back in with the new password once the
+change has ended the session.
+
+Nothing is saved until Finish or *Show me everything* (which hides nothing). Only the sections the role
+can see are offered. `/account/workspace` is the same tiles and preview after the fact, in the reading
+register, with *Ask me again* back to `/welcome`. Accounts that predate the question default to answered
+with nothing hidden, so an upgrade changes nobody's rail.
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: one database's layout
@@ -129,13 +213,13 @@ one question, and the four configuration pages are opened to change the server r
 Deployments open the second group because shipping something is the reason most visits happen; until
 0.6.7 it sat fourth in a group called Operations, between Packages and Backups.
 
-`PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
-`system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
+`PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
+and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
 the rail's foot. Its button is a neutral control with a circular picture, display name and role,
 with no chevron. Above the card the menu is exactly the card's width (Radix's trigger width),
 so it reads as the card opening rather than a panel overhanging the rail. It
-opens with a small picture, display name, sign-in name and a role `Tag`, then the five pages
+opens with a small picture, display name, sign-in name and a role `Tag`, then the six pages
 (Security carries a `Status` for two-factor) and a separate neutral Sign out row. It grows out of the
 card on the product's ease, and its rows `rise` in an 18ms stagger starting from the row nearest the
 card; the stagger is `motion-safe` because the reduced-motion rule collapses durations, not delays.
@@ -156,7 +240,8 @@ the shortcut in keycaps for the reader's platform — ⌘K on Apple keyboards, C
 `lib/platform.ts`), or the search button in the top strip a phone gets in place of the rail. An
 empty search puts the
 previous distinct destination first, then the other recent destinations, current page commands
-and permission-visible navigation. Enter on that first result switches back to the previous
+and permission-visible navigation outside the sections the account keeps out of its sidebar, whose
+pages are listed as soon as a word is typed. Enter on that first result switches back to the previous
 place without a browser history traversal; native Back/Forward remain available. The bounded
 12-destination history observes pathname and query changes from every navigation entry point,
 keeps resource selections, and uses `useMemoryState` per account. Filter and tab edits update the

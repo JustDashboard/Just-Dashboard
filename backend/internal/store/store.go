@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS users (
   display_name   TEXT NOT NULL DEFAULT '',
   avatar         BLOB NOT NULL DEFAULT x'',
   avatar_type    TEXT NOT NULL DEFAULT '',
-  avatar_at      INTEGER NOT NULL DEFAULT 0
+  avatar_at      INTEGER NOT NULL DEFAULT 0,
+  needs_onboarding INTEGER NOT NULL DEFAULT 0,
+  hidden_sections  TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS recovery_codes (
@@ -1247,6 +1249,12 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"users", "avatar", "BLOB NOT NULL DEFAULT x''"},
 	{"users", "avatar_type", "TEXT NOT NULL DEFAULT ''"},
 	{"users", "avatar_at", "INTEGER NOT NULL DEFAULT 0"},
+	// A new account is asked what it uses the dashboard for and keeps the
+	// sections it does not need out of its sidebar. The default is the answer
+	// for every account that existed before the question did: already past
+	// it, with nothing hidden, so an upgrade changes nobody's rail.
+	{"users", "needs_onboarding", "INTEGER NOT NULL DEFAULT 0"},
+	{"users", "hidden_sections", "TEXT NOT NULL DEFAULT '[]'"},
 	{"backup_runs", "manifest_json", "TEXT NOT NULL DEFAULT '{}'"},
 	{"backup_jobs", "recovery_json", "TEXT NOT NULL DEFAULT 'null'"},
 	{"backup_jobs", "sqlite_paths", "TEXT NOT NULL DEFAULT '[]'"},

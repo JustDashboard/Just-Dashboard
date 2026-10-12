@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
@@ -167,3 +169,55 @@ func TestRevokeOtherSessionsRoute(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A new account owes the first-run question until it answers it; the answer
+// is the account's own and needs no capability, so a read-only account can
+// give it too. Every answer is audited with the list as stored.
+func TestWorkspaceAnswersOnboardingAndIsAudited(t *testing.T) {
+	s := testServer(t)
+	const password = "Correct-Horse-Battery-9"
+	reader, err := s.Auth.CreateUser(t.Context(), "reader", password, auth.RoleReadOnly, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, err := s.Auth.Login(t.Context(), reader.Username, password, "127.0.0.1", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &client{t: t, h: s.Routes(), cookie: httpx.SessionCookie + "=" + login.Token}
+
+	session := func() auth.User {
+		t.Helper()
+		w := c.do(http.MethodGet, "/api/v1/auth/session", "", nil)
+		var st struct{ User auth.User }
+		if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+			t.Fatal(err)
+		}
+		return st.User
+	}
+	if before := session(); !before.NeedsOnboarding || before.HiddenSections == nil || len(before.HiddenSections) != 0 {
+		t.Fatalf("new account: onboarding %v hidden %#v", before.NeedsOnboarding, before.HiddenSections)
+	}
+
+	w := c.do(http.MethodPut, "/api/v1/account/workspace", `{"hiddenSections":["proxy","network","proxy"]}`, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("answer: %d %s", w.Code, w.Body.String())
+	}
+	after := session()
+	if after.NeedsOnboarding || strings.Join(after.HiddenSections, ",") != "network,proxy" {
+		t.Fatalf("after answering: onboarding %v hidden %v", after.NeedsOnboarding, after.HiddenSections)
+	}
+	entries, _, err := s.Audit.List(t.Context(), audit.Filter{Action: "account.workspace.update"})
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("audit entries %d err %v", len(entries), err)
+	}
+
+	for _, body := range []string{`{}`, `{"hiddenSections":["../files"]}`, `{"hiddenSections":"docker"}`} {
+		if w := c.do(http.MethodPut, "/api/v1/account/workspace", body, nil); w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	if got := session(); strings.Join(got.HiddenSections, ",") != "network,proxy" {
+		t.Fatalf("a refused answer changed the sidebar: %v", got.HiddenSections)
+	}
+}

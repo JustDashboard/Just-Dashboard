@@ -119,6 +119,8 @@ const SURFACES = [
   "/account/sessions",
   "/account/keys",
   "/account/users",
+  "/account/workspace",
+  "/welcome",
   "/stickyboard",
 ] as const
 

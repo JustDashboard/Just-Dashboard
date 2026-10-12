@@ -4,6 +4,33 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.3 — 12 October 2026
+
+**A first sign-in that fits the sidebar to what you use**
+
+Every new account is now asked, once, what it will use the server for, and its sidebar, Overview and search keep only those sections. A hidden section is out of the sidebar, never out of reach: links from other pages still open it, search still finds it, and the role still decides what the account may do. Account → Workspace changes the answer or asks the question again, and accounts that existed before this release keep every section.
+
+### Added
+
+- New accounts are asked what the server is for after their first sign-in
+  - Shipping apps, running databases, containers, the network, security or working on the box, each drawn as the products it means: any number of them, with what the server already runs chosen in advance and the server drawn wired to each one picked. The answer becomes the sections themselves beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing.
+- Account → Workspace chooses which sections the sidebar shows
+  - The same sections and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered.
+
+### Changed
+
+- A hidden section stays one link or one search away
+  - A link into a hidden section, such as a deployment's domain opening its proxy site, still opens it; the sidebar shows the section while you are in it and offers to keep it. Search lists hidden pages as soon as you type, and the Overview leaves out a hidden section's tiles and the reads behind them.
+- Sign-in is redrawn, and fits a phone
+  - One card, with the server and the products it runs drawn beside the form on colour instead of a grid. The steps it shows are the ones your account actually has, Forgot it? gives the command that resets a password on the server, and a password you are asked to change signs you straight back in.
+- The first-run question fits a phone
+  - Purposes are rows rather than tiles, each step's button stays at the foot of the screen, and the last screen puts the count and Open the dashboard on one line instead of a row of its own.
+
+### Fixed
+
+- A password set from the server is not asked for again at sign-in
+  - scripts/reset-password.sh and scripts/create-user.sh set the password the account signs in with. They marked it temporary, so the dashboard demanded a new one the moment you signed in with it.
+
 ## 0.7.2 — 12 October 2026
 
 **Stickyboard, an uninstaller, and findings that lead to their fix**

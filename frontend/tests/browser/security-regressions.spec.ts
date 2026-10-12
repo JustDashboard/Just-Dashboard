@@ -329,11 +329,14 @@ test("slow polling has only one request in flight", async ({ page }) => {
 
 test("a reset password is changed only after the account's second factor", async ({ page }) => {
   const changes: unknown[] = []
+  const logins: unknown[] = []
   let status: unknown = { authenticated: false, needsTotp: false, needsEnrollment: false }
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.slice(7)
-    if (path === "/auth/login")
+    if (path === "/auth/login") {
+      logins.push(route.request().postDataJSON())
       status = { ...signedIn, authenticated: false, needsTotp: true, needsPasswordChange: false }
+    }
     if (path === "/auth/2fa/verify")
       status = { ...signedIn, authenticated: false, needsPasswordChange: true }
     if (path === "/account/password") {
@@ -354,12 +357,18 @@ test("a reset password is changed only after the account's second factor", async
   await expect(
     page.getByRole("heading", { name: "Change your password", exact: true }),
   ).toBeVisible()
-  await page.getByLabel("New password", { exact: true }).fill("replacement-password")
-  await page.getByLabel("Repeat new password", { exact: true }).fill("replacement-password")
+  await page.getByLabel("New password", { exact: true }).fill("Replacement-Password-9")
+  await page.getByLabel("Repeat new password", { exact: true }).fill("Replacement-Password-9")
   await page.getByRole("button", { name: "Change password", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible()
+  // The change ends the session; the page signs straight back in with the
+  // password just chosen, and the account's second factor is asked for again.
+  await expect(page.getByRole("heading", { name: "Two-factor code", exact: true })).toBeVisible()
   expect(changes).toEqual([
-    { currentPassword: "temporary-password", newPassword: "replacement-password" },
+    { currentPassword: "temporary-password", newPassword: "Replacement-Password-9" },
+  ])
+  expect(logins).toEqual([
+    { username: "operator", password: "temporary-password" },
+    { username: "operator", password: "Replacement-Password-9" },
   ])
 })
 

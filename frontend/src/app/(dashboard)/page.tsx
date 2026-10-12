@@ -30,6 +30,8 @@ import type {
   UpdateReport,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { useHiddenSections } from "@/hooks/use-hidden-sections"
+import type { SectionKey } from "@/lib/sidebar-sections"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
@@ -89,7 +91,12 @@ export default function OverviewPage() {
   const { host, snapshot, error, connection } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(DAY)
-  const reads = useModuleReads()
+  // A section the account keeps out of its sidebar is kept off its Overview
+  // too, and so is the read behind its tile: the page asks the server only
+  // about what it is going to draw.
+  const { hidden } = useHiddenSections()
+  const shows = (key: SectionKey) => !hidden.has(key)
+  const reads = useModuleReads(shows)
   const { confirm, dialog } = useConfirm()
 
   const trends = useMemo(() => {
@@ -287,7 +294,9 @@ export default function OverviewPage() {
         </div>
       </Section>
 
-      <DeploymentsSection fleet={reads.fleet} traffic={reads.traffic.data} confirm={confirm} />
+      {shows("deploy") && (
+        <DeploymentsSection fleet={reads.fleet} traffic={reads.traffic.data} confirm={confirm} />
+      )}
 
       {/* Who is spending the machine and what changed on it — the two
           questions the tiles raise — side by side, as /metrics pairs its
@@ -304,13 +313,13 @@ export default function OverviewPage() {
           section above, so its tile went to Git. */}
       <Section title="Services">
         <StatGrid columns={4}>
-          <DockerCard read={reads.docker} />
-          <DatabasesCard read={reads.databases} />
-          <ProxyCard read={reads.certificates} />
-          <SecurityCard read={reads.exposure} />
-          <PackagesCard read={reads.packages} platform={host.platform} />
-          <BackupsCard read={reads.backups} />
-          <GitCard read={reads.git} />
+          {shows("docker") && <DockerCard read={reads.docker} />}
+          {shows("databases") && <DatabasesCard read={reads.databases} />}
+          {shows("proxy") && <ProxyCard read={reads.certificates} />}
+          {shows("security") && <SecurityCard read={reads.exposure} />}
+          {shows("packages") && <PackagesCard read={reads.packages} platform={host.platform} />}
+          {shows("backups") && <BackupsCard read={reads.backups} />}
+          {shows("git") && <GitCard read={reads.git} />}
           <UpdatesCard />
         </StatGrid>
       </Section>
@@ -321,44 +330,66 @@ export default function OverviewPage() {
 
 /**
  * Every module's own read, once, at the page: the Services tiles draw them,
- * and the Deployments section shares the fleet and its traffic.
+ * and the Deployments section shares the fleet and its traffic. A read whose
+ * section is hidden is never made.
  */
-function useModuleReads() {
+function useModuleReads(shows: (key: SectionKey) => boolean) {
   return {
     docker: usePoll<Container[]>(
       (signal) => get<Container[]>("/docker/containers/", undefined, signal),
       60_000,
+      [],
+      { enabled: shows("docker") },
     ),
     databases: usePoll<DbConnection[]>(
       (signal) => get<DbConnection[]>("/databases/", undefined, signal),
       60_000,
+      [],
+      { enabled: shows("databases") },
     ),
     certificates: usePoll<Certificate[]>(
       (signal) => get<Certificate[]>("/certificates/", undefined, signal),
       300_000,
+      [],
+      { enabled: shows("proxy") },
     ),
-    exposure: usePoll<Exposure>((signal) => get<Exposure>("/exposure", undefined, signal), 60_000),
+    exposure: usePoll<Exposure>(
+      (signal) => get<Exposure>("/exposure", undefined, signal),
+      60_000,
+      [],
+      { enabled: shows("security") },
+    ),
     packages: usePoll<UpdateReport>(
       (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
       300_000,
+      [],
+      { enabled: shows("packages") },
     ),
     // The fleet's own cadence is five seconds; a glance can take ten, which
     // still moves a run's release path while the reader watches.
     fleet: usePoll<DeploymentFleet>(
       (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
       10_000,
+      [],
+      { enabled: shows("deploy") },
     ),
     traffic: usePoll<Record<string, TrafficPulse>>(
       (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
       60_000,
+      [],
+      { enabled: shows("deploy") },
     ),
     backups: usePoll<BackupJob[]>(
       (signal) => get<BackupJob[]>("/backups/", undefined, signal),
       120_000,
+      [],
+      { enabled: shows("backups") },
     ),
     git: usePoll<{ available: boolean; repos: GitRepo[] }>(
       (signal) => get<{ available: boolean; repos: GitRepo[] }>("/git/", undefined, signal),
       120_000,
+      [],
+      { enabled: shows("git") },
     ),
   }
 }

@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, Check, Copy, Eye, EyeOff, Key, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
+import { passwordChecks } from "@/lib/password"
 import { cn } from "@/lib/utils"
+import type { AuthStatus } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,30 +16,40 @@ import { Notice } from "@/components/state"
 import { Logo } from "@/components/logo"
 import { useCopy } from "@/hooks/use-copy"
 import { Well } from "@/components/panel"
+import { FieldCheck } from "@/components/form"
+import { FlowPanel, FlowSteps } from "@/components/flow"
 import { TotpSecret } from "@/components/account/totp-secret"
+import { ProductOrbit } from "@/components/onboarding/product-orbit"
 
 type Step = "credentials" | "totp" | "enroll" | "password"
+
+const HEADINGS: Record<Step, string> = {
+  credentials: "Sign in",
+  totp: "Two-factor code",
+  enroll: "Set up two-factor",
+  password: "Change your password",
+}
 
 /**
  * Signing in.
  *
- * One column, centred, and that is the whole layout. It used to be a split
- * screen with the product's three security claims down the left, which read
- * well in a mock-up and poorly in use: the thing a person came here to do was
- * pinned to one side of a very wide page, and on the laptop screens these
- * dashboards are actually opened on, the panel took half the width to say
- * something nobody reads twice. The claims are true and they are still made —
- * on the marketing page, in the README, and in the one line under the card
- * that matters at the moment of signing in.
+ * One card: the form, and beside it on a wide screen the picture of what is
+ * on the other side of it — this server wired to the products the dashboard
+ * drives, on the arrival ground's colour. It was a lone form on a grid of
+ * hairlines, which read as graph paper behind a login box; the picture is the
+ * same drawing the first-run question opens on, so the two screens a new
+ * account sees first are one piece. On a phone the picture is a strip across
+ * the top of the card, and the form keeps the width.
  *
- * Everything here is the shared design system: the card is the same surface as
- * every panel in the app, the inputs are the same inputs, and the backdrop is
- * the same two washes used elsewhere. Sign-in should look like the beginning
- * of the product rather than a page from a different one.
+ * Every step after the first is only as long as the account needs: the spine
+ * names the steps this account actually has — a code where it has an
+ * authenticator, a new password where it owes one — and is not drawn at all
+ * before the server has said which those are. It used to promise "Verify" to
+ * every account, two-factor or not.
  */
 export default function LoginPage() {
   const router = useRouter()
-  const { status, loading, login, verifyTotp, refresh } = useAuth()
+  const { status, loading, login, verifyTotp, refresh, logout } = useAuth()
   // "auto" defers to whatever the session says; the explicit values are set
   // only once the user has moved the flow forward themselves.
   const [chosenStep, setChosenStep] = useState<Step | "auto">("auto")
@@ -46,11 +58,14 @@ export default function LoginPage() {
   const [newPassword, setNewPassword] = useState("")
   const [repeatPassword, setRepeatPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [forgot, setForgot] = useState(false)
   const [code, setCode] = useState("")
   const [recoveryMode, setRecoveryMode] = useState(false)
   const [busy, setBusy] = useState(false)
   const [enrollment, setEnrollment] = useState<{ secret: string; otpauthUrl: string } | null>(null)
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+  // Enrolled on this page: the session is complete, so no code step follows.
+  const [enrolled, setEnrolled] = useState(false)
 
   const step: Step =
     chosenStep !== "auto"
@@ -63,20 +78,26 @@ export default function LoginPage() {
             ? "password"
             : "credentials"
   const setStep = setChosenStep
+  const steps = spineFor(step, status, enrolled)
+  const here = steps.findIndex((s) => s.key === step)
+  const hint = hintFor(step, recoveryMode, Boolean(recoveryCodes))
 
   useEffect(() => {
     if (!loading && status?.authenticated) router.replace("/")
   }, [loading, status, router])
 
+  const advance = (next: AuthStatus) => {
+    if (next.authenticated) router.replace("/")
+    else if (next.needsTotp) setStep("totp")
+    else if (next.needsEnrollment) setStep("enroll")
+    else if (next.needsPasswordChange) setStep("password")
+  }
+
   const submitCredentials = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     try {
-      const next = await login(username, password)
-      if (next.authenticated) router.replace("/")
-      else if (next.needsTotp) setStep("totp")
-      else if (next.needsEnrollment) setStep("enroll")
-      else if (next.needsPasswordChange) setStep("password")
+      advance(await login(username, password))
     } catch (err) {
       notify.error("Sign in failed", err instanceof ApiError ? err.message : String(err))
     } finally {
@@ -101,6 +122,7 @@ export default function LoginPage() {
     try {
       const res = await post<{ recoveryCodes: string[] }>("/auth/2fa/enable", { code })
       setRecoveryCodes(res.recoveryCodes)
+      setEnrolled(true)
       setCode("")
     } catch (err) {
       notify.error("Code rejected", err instanceof ApiError ? err.message : String(err))
@@ -130,18 +152,33 @@ export default function LoginPage() {
       notify.error("Passwords do not match")
       return
     }
+    // The server ends every session on a change, this one included. Signing
+    // straight back in with the password just chosen is what the reader would
+    // do next anyway; asking them to type it a third time was the step that
+    // made a forced change feel like a loop.
+    const account = status?.user?.username ?? username
     setBusy(true)
     try {
       await post("/account/password", { currentPassword: password, newPassword })
-      setPassword("")
-      setNewPassword("")
-      setRepeatPassword("")
-      setCode("")
-      setStep("credentials")
-      await refresh()
-      notify.success("Password changed", { description: "Sign in with your new password." })
     } catch (err) {
       notify.error("Could not change password", err instanceof ApiError ? err.message : String(err))
+      setBusy(false)
+      return
+    }
+    setPassword("")
+    setNewPassword("")
+    setRepeatPassword("")
+    setCode("")
+    setRecoveryMode(false)
+    setUsername(account)
+    notify.success("Password changed")
+    try {
+      advance(await login(account, newPassword))
+    } catch {
+      // Whatever stopped it, the new password is set; the reader signs in
+      // with it by hand from here.
+      await refresh()
+      setStep("credentials")
     } finally {
       setBusy(false)
     }
@@ -172,283 +209,416 @@ export default function LoginPage() {
     }
   }
 
+  const startOver = async () => {
+    await logout()
+    setStep("auto")
+    setCode("")
+    setPassword("")
+    setRecoveryMode(false)
+    setEnrollment(null)
+    setEnrolled(false)
+  }
+
   return (
-    <div className="relative flex min-h-svh flex-col items-center justify-center bg-background px-5 py-10">
-      <div className="auth-backdrop pointer-events-none absolute inset-0" />
-      <div className="auth-grid pointer-events-none absolute inset-0" />
+    <div className="auth-backdrop flex min-h-svh flex-col bg-background">
+      <main className="mx-auto flex w-full max-w-[60rem] flex-1 flex-col justify-center px-4 py-6 sm:px-6 sm:py-10">
+        <FlowPanel className="animate-rise lg:grid lg:min-h-[36rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+          <div className="flex min-w-0 flex-col gap-7 p-5 sm:gap-8 sm:p-9">
+            <Logo size="md" />
+            <ProductOrbit layout="row" className="-mx-1 lg:hidden" />
 
-      <main className="relative z-10 flex w-full max-w-[25rem] flex-col items-center">
-        <Logo size="md" className="mb-7" />
-
-        {/* Two steps on an ordinary install, three where an authenticator is
-            compulsory. The rail is hidden entirely when there is only one step
-            left to show, because a progress indicator with a single segment is
-            decoration pretending to be information. */}
-        <Steps current={recoveryCodes ? "totp" : step} enrolling={step === "enroll"} />
-
-        <div className="mt-5 w-full rounded-xl border bg-card p-6 sm:p-7">
-          {recoveryCodes ? (
-            <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} />
-          ) : (
-            <>
-              <header className="mb-6 space-y-1.5 text-center">
-                <h1 className="text-lg leading-tight font-semibold">
-                  {step === "credentials" && "Sign in"}
-                  {step === "totp" && "Two-factor code"}
-                  {step === "enroll" && "Set up two-factor"}
-                  {step === "password" && "Change your password"}
-                </h1>
-                <p className="text-body leading-relaxed text-balance text-muted-foreground">
-                  {step === "credentials" && "Administrator access to this server."}
-                  {step === "totp" && "Enter the six-digit code from your authenticator app."}
-                  {step === "enroll" &&
-                    "This dashboard requires an authenticator. Enrol one to continue."}
-                  {step === "password" && "Set a new password before accessing this server."}
-                </p>
+            <div className="flex flex-1 flex-col justify-center gap-6">
+              <header className="space-y-4">
+                <div className="space-y-1.5">
+                  <p className="eyebrow">
+                    {steps.length > 1 ? `Step ${here + 1} of ${steps.length}` : "Welcome"}
+                  </p>
+                  <h1 className="text-2xl leading-tight font-semibold tracking-tight text-balance">
+                    {recoveryCodes ? "Save your recovery codes" : HEADINGS[step]}
+                  </h1>
+                  {hint && (
+                    <p className="text-body leading-relaxed text-pretty text-muted-foreground">
+                      {hint}
+                    </p>
+                  )}
+                </div>
+                {steps.length > 1 && <FlowSteps steps={steps} current={here} />}
               </header>
 
-              {step === "credentials" && (
-                <form onSubmit={submitCredentials} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="username">Username</Label>
-                    <Input
-                      id="username"
-                      autoFocus
-                      autoComplete="username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      required
+              {recoveryCodes ? (
+                <RecoveryCodes codes={recoveryCodes} onDone={finishEnrollment} busy={busy} />
+              ) : (
+                <>
+                  {step === "credentials" && (
+                    <form onSubmit={submitCredentials} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="username">Username</Label>
+                        <Input
+                          id="username"
+                          autoFocus
+                          autoComplete="username"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label htmlFor="password">Password</Label>
+                          <button
+                            type="button"
+                            aria-expanded={forgot}
+                            onClick={() => setForgot((v) => !v)}
+                            className="rounded-sm text-hint text-muted-foreground underline-offset-4 focus-ring transition-colors hover:text-foreground hover:underline"
+                          >
+                            Forgot it?
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <Input
+                            id="password"
+                            type={showPassword ? "text" : "password"}
+                            autoComplete="current-password"
+                            className="pr-10"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((v) => !v)}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
+                            className="absolute top-1/2 right-1.5 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:text-foreground"
+                          >
+                            {showPassword ? (
+                              <EyeOff className="size-4" />
+                            ) : (
+                              <Eye className="size-4" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      {forgot && <ForgotPassword username={username} />}
+                      <Button type="submit" size="lg" className="w-full" pending={busy}>
+                        Continue
+                        {!busy && <ArrowRight className="size-4" />}
+                      </Button>
+                    </form>
+                  )}
+
+                  {step === "password" && (
+                    <ChangePassword
+                      knowsCurrent={password !== ""}
+                      current={password}
+                      onCurrent={setPassword}
+                      next={newPassword}
+                      onNext={setNewPassword}
+                      repeat={repeatPassword}
+                      onRepeat={setRepeatPassword}
+                      busy={busy}
+                      onSubmit={submitPassword}
                     />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password">Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="password"
-                        type={showPassword ? "text" : "password"}
-                        autoComplete="current-password"
-                        className="pr-9"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                        className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                  )}
+
+                  {step === "totp" && (
+                    <form onSubmit={submitTotp} className="space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="code">
+                          {recoveryMode ? "Recovery code" : "Verification code"}
+                        </Label>
+                        <Input
+                          id="code"
+                          autoFocus
+                          key={recoveryMode ? "recovery" : "totp"}
+                          inputMode={recoveryMode ? "text" : "numeric"}
+                          autoComplete="one-time-code"
+                          placeholder={recoveryMode ? "xxxx-xxxx" : "000000"}
+                          maxLength={recoveryMode ? 32 : 6}
+                          className={cn(
+                            "h-14 text-center font-mono sm:h-14",
+                            recoveryMode ? "text-base" : "text-2xl tracking-[0.45em] sm:text-2xl",
+                          )}
+                          value={code}
+                          onChange={(e) => setCode(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <Button
+                        type="submit"
+                        size="lg"
+                        className="w-full"
+                        disabled={busy || !code}
+                        pending={busy}
                       >
-                        {showPassword ? (
-                          <EyeOff className="size-3.5" />
-                        ) : (
-                          <Eye className="size-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <Button type="submit" className="w-full" pending={busy}>
-                    Continue
-                    {!busy && <ArrowRight className="size-4" />}
-                  </Button>
-                </form>
+                        Verify
+                      </Button>
+                      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                        <TextButton
+                          onClick={() => {
+                            setRecoveryMode((v) => !v)
+                            setCode("")
+                          }}
+                        >
+                          {recoveryMode
+                            ? "Use your authenticator app instead"
+                            : "Use a recovery code instead"}
+                        </TextButton>
+                        <TextButton onClick={() => void startOver()}>Start over</TextButton>
+                      </div>
+                    </form>
+                  )}
+
+                  {step === "enroll" &&
+                    (!enrollment ? (
+                      <div className="space-y-4">
+                        <Notice title="One secret, kept encrypted" icon={ShieldCheck}>
+                          The seed is generated on the server and sealed with the dashboard&apos;s
+                          master key. It is shown to you exactly once, here.
+                        </Notice>
+                        <Button
+                          size="lg"
+                          className="w-full"
+                          onClick={beginEnrollment}
+                          pending={busy}
+                        >
+                          Generate a secret
+                        </Button>
+                      </div>
+                    ) : (
+                      <form onSubmit={submitEnrollment} className="space-y-4">
+                        <TotpSecret secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
+                        <div className="space-y-1.5">
+                          <Label htmlFor="enroll-code">Code from your app</Label>
+                          <Input
+                            id="enroll-code"
+                            autoFocus
+                            inputMode="numeric"
+                            maxLength={6}
+                            placeholder="000000"
+                            className="h-14 text-center font-mono text-2xl tracking-[0.45em] sm:h-14 sm:text-2xl"
+                            value={code}
+                            onChange={(e) => setCode(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          size="lg"
+                          className="w-full"
+                          disabled={busy || code.length < 6}
+                          pending={busy}
+                        >
+                          Enable two-factor
+                        </Button>
+                      </form>
+                    ))}
+                </>
               )}
+            </div>
 
-              {step === "password" && (
-                <form onSubmit={submitPassword} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="current-password">Current password</Label>
-                    <Input
-                      id="current-password"
-                      type="password"
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="new-password">New password</Label>
-                    <Input
-                      id="new-password"
-                      type="password"
-                      autoComplete="new-password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="repeat-password">Repeat new password</Label>
-                    <Input
-                      id="repeat-password"
-                      type="password"
-                      autoComplete="new-password"
-                      value={repeatPassword}
-                      onChange={(e) => setRepeatPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" pending={busy}>
-                    Change password
-                  </Button>
-                </form>
-              )}
+            <p className="flex items-start gap-2 text-hint leading-relaxed text-pretty text-muted-foreground">
+              <ShieldCheck aria-hidden className="mt-px size-3.5 shrink-0 text-brand" />
+              Only addresses on this server&apos;s allowlist reach this page, and every sign-in
+              attempt is recorded.
+            </p>
+          </div>
 
-              {step === "totp" && (
-                <form onSubmit={submitTotp} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="code">
-                      {recoveryMode ? "Recovery code" : "Verification code"}
-                    </Label>
-                    <Input
-                      id="code"
-                      autoFocus
-                      key={recoveryMode ? "recovery" : "totp"}
-                      inputMode={recoveryMode ? "text" : "numeric"}
-                      autoComplete="one-time-code"
-                      placeholder={recoveryMode ? "xxxx-xxxx" : "000000"}
-                      maxLength={recoveryMode ? 32 : 6}
-                      className={cn(
-                        "h-12 text-center font-mono",
-                        recoveryMode ? "text-base" : "text-xl tracking-[0.45em]",
-                      )}
-                      value={code}
-                      onChange={(e) => setCode(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={busy || !code} pending={busy}>
-                    Verify
-                  </Button>
-                  <button
-                    type="button"
-                    className="block w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                    onClick={() => {
-                      setRecoveryMode((v) => !v)
-                      setCode("")
-                    }}
-                  >
-                    {recoveryMode
-                      ? "Use your authenticator app instead"
-                      : "Use a recovery code instead"}
-                  </button>
-                </form>
-              )}
-
-              {step === "enroll" &&
-                (!enrollment ? (
-                  <div className="space-y-4">
-                    <Notice title="One secret, kept encrypted" icon={ShieldCheck}>
-                      The seed is generated on the server and sealed with the dashboard&apos;s
-                      master key. It is shown to you exactly once, here.
-                    </Notice>
-                    <Button className="w-full" onClick={beginEnrollment} pending={busy}>
-                      Generate a secret
-                    </Button>
-                  </div>
-                ) : (
-                  <form onSubmit={submitEnrollment} className="space-y-4">
-                    <TotpSecret secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
-                    <div className="space-y-1.5">
-                      <Label htmlFor="enroll-code">Code from your app</Label>
-                      <Input
-                        id="enroll-code"
-                        autoFocus
-                        inputMode="numeric"
-                        maxLength={6}
-                        placeholder="000000"
-                        className="h-12 text-center font-mono text-xl tracking-[0.45em]"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      className="w-full"
-                      disabled={busy || code.length < 6}
-                      pending={busy}
-                    >
-                      Enable two-factor
-                    </Button>
-                  </form>
-                ))}
-            </>
-          )}
-        </div>
-
-        <p className="mt-6 max-w-[22rem] text-center text-hint leading-relaxed text-balance text-muted-foreground">
-          This host only accepts connections from its configured allowlist, and every sign-in
-          attempt — successful or not — is recorded.
-        </p>
+          <aside
+            aria-hidden
+            className="auth-art relative hidden min-w-0 flex-col justify-between gap-8 overflow-hidden border-l border-hairline p-9 lg:flex"
+          >
+            <ProductOrbit className="mx-auto max-w-[22rem]" />
+            <div className="space-y-2">
+              <p className="eyebrow">Just Dashboard</p>
+              <p className="max-w-[22rem] text-2xl leading-tight font-semibold tracking-tight text-balance">
+                Apps, databases, containers and the network, on one screen.
+              </p>
+            </div>
+          </aside>
+        </FlowPanel>
       </main>
     </div>
   )
 }
 
 /**
- * Where you are, when there is more than one place to be.
- *
- * Two dashes for the ordinary flow, three while enrolling. It is a rail rather
- * than numbered circles because the steps are seconds apart and what is worth
- * saying is "one more after this", not "step 2 of 3".
+ * The steps this account has, in the order it meets them. Before the server
+ * has answered a sign-in there is only the first, and no spine is drawn: a
+ * rail promising a code to an account without an authenticator was a promise
+ * the next screen broke.
  */
-function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
-  if (current === "password") return null
-  const steps: { id: Step; label: string }[] = enrolling
-    ? [
-        { id: "credentials", label: "Identify" },
-        { id: "enroll", label: "Enrol" },
-        { id: "totp", label: "Verify" },
-      ]
-    : [
-        { id: "credentials", label: "Identify" },
-        { id: "totp", label: "Verify" },
-      ]
-  const index = steps.findIndex((s) => s.id === current)
+function spineFor(step: Step, status: AuthStatus | null, enrolled: boolean) {
+  const steps: { key: Step; label: string }[] = [{ key: "credentials", label: "Sign in" }]
+  if (step === "enroll" || status?.needsEnrollment || enrolled)
+    steps.push({ key: "enroll", label: "Authenticator" })
+  // An enrolled account is always asked for its code, so the step stays drawn
+  // — ticked — once it is behind the reader.
+  if (step === "totp" || status?.needsTotp || (status?.user?.totpEnabled && !enrolled))
+    steps.push({ key: "totp", label: "Code" })
+  if (step === "password" || status?.user?.mustChangePassword)
+    steps.push({ key: "password", label: "New password" })
+  return steps
+}
 
+function hintFor(step: Step, recoveryMode: boolean, savingCodes: boolean) {
+  if (savingCodes)
+    return "Each one works once, in place of your authenticator. This is the only time they are shown."
+  if (step === "totp")
+    return recoveryMode
+      ? "Enter one of the recovery codes you saved when you set up two-factor."
+      : "Enter the six-digit code from your authenticator app."
+  if (step === "enroll") return "This dashboard asks every account for an authenticator."
+  if (step === "password")
+    return "This account was given a password to start with. Choose your own to continue."
+  return null
+}
+
+/**
+ * A forgotten password is recovered on the server, not here — there is no
+ * mail to send a link to. Saying where, with the command filled in, is the
+ * difference between a dead end and a thirty-second fix.
+ */
+function ForgotPassword({ username }: { username: string }) {
+  const { copy, copied } = useCopy()
+  const command = `sudo ./scripts/reset-password.sh ${username.trim().toLowerCase() || "USER"}`
   return (
-    <ol className="flex w-full items-center gap-2">
-      {steps.map((step, i) => {
-        const done = i < index
-        const active = i === index
-        return (
-          <li key={step.id} className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <span
-              className={cn(
-                "h-0.5 w-full rounded-full transition-colors",
-                done || active ? "bg-primary" : "bg-border",
-              )}
-            />
-            <span
-              className={cn(
-                "flex items-center gap-1 text-micro font-semibold tracking-[0.14em] uppercase transition-colors",
-                active ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {done && <Check className="size-2.5 text-primary" />}
-              {step.label}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
+    <div className="space-y-2 rounded-lg border border-hairline bg-surface-sunken p-3">
+      <p className="text-hint leading-relaxed text-muted-foreground">
+        Reset it from a shell on the server, in the dashboard&apos;s folder. The password you set
+        there is the one you sign in with.
+      </p>
+      <div className="flex min-w-0 items-center gap-2">
+        <code className="min-w-0 flex-1 truncate font-mono text-xs">{command}</code>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={copied ? "Copied" : "Copy command"}
+          onClick={() => void copy(command)}
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </Button>
+      </div>
+    </div>
   )
 }
 
-function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+/**
+ * The change an account owes. The current password is asked for only when
+ * this page does not already hold it: an account that has just typed it on
+ * the first step is not asked for it again thirty seconds later.
+ */
+function ChangePassword({
+  knowsCurrent,
+  current,
+  onCurrent,
+  next,
+  onNext,
+  repeat,
+  onRepeat,
+  busy,
+  onSubmit,
+}: {
+  knowsCurrent: boolean
+  current: string
+  onCurrent: (value: string) => void
+  next: string
+  onNext: (value: string) => void
+  repeat: string
+  onRepeat: (value: string) => void
+  busy: boolean
+  onSubmit: (e: React.FormEvent) => void
+}) {
+  // Decided once, when the step opens; typing into the field must not hide it.
+  const [askCurrent] = useState(!knowsCurrent)
+  const checks = passwordChecks(next)
+  const mismatch = repeat !== "" && next !== repeat
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      {askCurrent && (
+        <div className="space-y-1.5">
+          <Label htmlFor="current-password">Current password</Label>
+          <Input
+            id="current-password"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => onCurrent(e.target.value)}
+            required
+          />
+        </div>
+      )}
+      <div className="space-y-1.5">
+        <Label htmlFor="new-password">New password</Label>
+        <Input
+          id="new-password"
+          type="password"
+          autoFocus
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => onNext(e.target.value)}
+          required
+        />
+        <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+          <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
+          <FieldCheck met={checks.mixed}>three of upper, lower, digits, symbols</FieldCheck>
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="repeat-password">Repeat new password</Label>
+        <Input
+          id="repeat-password"
+          type="password"
+          autoComplete="new-password"
+          aria-invalid={mismatch || undefined}
+          value={repeat}
+          onChange={(e) => onRepeat(e.target.value)}
+          required
+        />
+        {mismatch && <p className="text-hint text-destructive">These do not match yet.</p>}
+      </div>
+      <Button
+        type="submit"
+        size="lg"
+        className="w-full"
+        disabled={busy || !checks.ok || next !== repeat || !current}
+        pending={busy}
+      >
+        Change password
+        {!busy && <ArrowRight className="size-4" />}
+      </Button>
+    </form>
+  )
+}
+
+function TextButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-sm text-hint text-muted-foreground underline-offset-4 focus-ring transition-colors hover:text-foreground hover:underline"
+    >
+      {children}
+    </button>
+  )
+}
+
+function RecoveryCodes({
+  codes,
+  onDone,
+  busy,
+}: {
+  codes: string[]
+  onDone: () => void
+  busy: boolean
+}) {
   const { copy, copied } = useCopy()
 
   return (
     <div className="space-y-4">
-      <header className="space-y-1.5 text-center">
-        <h1 className="text-lg leading-tight font-semibold">Save your recovery codes</h1>
-        <p className="text-body leading-relaxed text-balance text-muted-foreground">
-          Each one works once, in place of your authenticator. This is the only time they are shown.
-        </p>
-      </header>
-
-      <Well plain className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+      <Well plain className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-xs">
         {codes.map((c) => (
           <span key={c} className="tracking-wider">
             {c}
@@ -456,17 +626,18 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
         ))}
       </Well>
 
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <Button
           type="button"
           variant="outline"
-          className="flex-1"
+          size="lg"
+          className="sm:flex-1"
           onClick={() => void copy(codes.join("\n"))}
         >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied ? "Copied" : "Copy all"}
         </Button>
-        <Button className="flex-1" onClick={onDone}>
+        <Button size="lg" className="sm:flex-1" onClick={onDone} pending={busy}>
           <Key className="size-4" />I have saved them
         </Button>
       </div>

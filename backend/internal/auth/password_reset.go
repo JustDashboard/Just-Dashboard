@@ -2,9 +2,13 @@ package auth
 
 import "context"
 
-// ResetPassword issues a temporary credential for recovery. Revocation and the
-// new hash commit together, so an old session cannot survive a partial reset.
-// Authenticator enrollment and disabled state remain the account's decisions.
+// ResetPassword sets the password root chose on the host for recovery.
+// Revocation and the new hash commit together, so an old session cannot
+// survive a partial reset. The password is not demanded again at sign-in:
+// whoever typed it twice at a root shell has already chosen it, and asking
+// for a third was the one thing between a locked-out operator and their
+// server. Authenticator enrollment and disabled state remain the account's
+// decisions.
 func (s *Service) ResetPassword(ctx context.Context, userID int64, password string) error {
 	if err := ValidatePasswordStrength(password); err != nil {
 		return err
@@ -18,7 +22,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, password stri
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_pw = 1,
+	res, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_pw = 0,
 		failed_count = 0, locked_until = 0 WHERE id = ?`, hash, userID)
 	if err != nil {
 		return err

@@ -2895,7 +2895,7 @@ the reader through it.
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
 | A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the project header's shape saying what the run is, its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the far end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
-| Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
+| Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
 is correct: making a project is a flow and reading one is not.
@@ -3022,6 +3022,15 @@ exception. What §16 buys is depth on one surface, a mandatory command face, and
 
 `--flow-surface`, `--flow-lit`, `--flow-lit-soft` and the `flow-rule` utility are register B's whole
 palette, and a reading page must not grow a use for them.
+
+**One ground is not flat: arrival's.** Sign-in, `/welcome` and the shell's splash between them are the
+only full-bleed screens in the product and the first a new account sees, and they stand on
+`.auth-backdrop` — three washes, the signal from the top edge and the chart ramp's blue and violet from
+the lower corners (never `--brand`, which is near white and washes to grey). The sign-in card's picture
+half is the same lights closer (`.auth-art`), pooled behind the server it draws. The operator asked for
+these screens to have colour and life, and for the line grid that used to sit under the washes to go;
+the exception is the ground of those screens and nothing else — no page in either register takes a
+wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
 
 ## 17. Redesigning a flow page
 

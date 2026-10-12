@@ -51,6 +51,7 @@ import {
   Plus,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
+import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import { StickyGlyph } from "@/components/stickyboard/glyphs"
 
@@ -369,13 +370,14 @@ export const PERSONAL_NAV: NavChild[] = [
   { title: "Security", href: "/account/security", icon: Shield },
   { title: "Sessions", href: "/account/sessions", icon: DesktopDevice },
   { title: "API keys", href: "/account/keys", icon: Key },
+  { title: "Workspace", href: "/account/workspace", icon: GridSquare },
   { title: "Users", href: "/account/users", icon: Users, capability: "system.admin" },
 ]
 
 /**
  * The account as a section of the rail, for the one thing the footer menu
  * cannot do: say where you are once you are inside it. Opening any of its
- * pages drills the rail in exactly as Docker's row does, so the five pages are
+ * pages drills the rail in exactly as Docker's row does, so the six pages are
  * a list you can walk rather than a menu you have to reopen.
  */
 export const ACCOUNT_SECTION = {
@@ -445,6 +447,74 @@ export function navOwns(entry: NavEntry, pathname: string): boolean {
   return entry.href === undefined
     ? entry.children.some((child) => navOwns(child, pathname))
     : navMatches(entry.href, pathname)
+}
+
+/**
+ * The section an entry is the root of, if it is one an account can hide.
+ * Only the section's own row counts: Docker's Images is a page *inside* a
+ * section, drawn whenever Docker's panel is, and never hidden on its own.
+ */
+function hideableKey(href: string): SectionKey | null {
+  const key = sectionOf(href)
+  return key && href === `/${key}` ? key : null
+}
+
+/**
+ * Whether the rail draws an entry for this role and an account keeping
+ * `hidden` out of its sidebar.
+ *
+ * A hidden section is still drawn while you are inside it — a deployment's
+ * domain links into the proxy, and once there the rail has to be able to say
+ * where you are — and a group goes when nothing in it is left to draw, which
+ * is why the role is asked here rather than beside the call: Server
+ * configuration with Packages hidden is empty to an account that cannot see
+ * System users or the audit log.
+ */
+export function shownFor(
+  entry: { href?: string; capability?: Capability; children?: NavEntry[] },
+  hidden: ReadonlySet<string>,
+  pathname: string,
+  can: (capability: Capability) => boolean,
+): boolean {
+  if (entry.capability && !can(entry.capability)) return false
+  if (entry.href === undefined) {
+    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can))
+  }
+  const key = hideableKey(entry.href)
+  return !key || !hidden.has(key) || navMatches(entry.href, pathname)
+}
+
+/**
+ * The rail's sections an account can hide, under the rail's own group names
+ * and in its order, with the entry that draws each — what the first-run
+ * question and the account's Workspace page offer a switch for.
+ */
+export function hideableSections(
+  can: (capability: Capability) => boolean,
+): { label: string; sections: { key: SectionKey; entry: NavItem }[] }[] {
+  const walk = (entries: NavEntry[]): { key: SectionKey; entry: NavItem }[] =>
+    entries.flatMap((entry) => {
+      if (entry.capability && !can(entry.capability)) return []
+      if (entry.href === undefined) return walk(entry.children)
+      const key = hideableKey(entry.href)
+      return key ? [{ key, entry }] : []
+    })
+  return NAV.map((group) => ({ label: group.label, sections: walk(group.items) })).filter(
+    (group) => group.sections.length > 0,
+  )
+}
+
+/** The rail entry that is a section's root: its name and glyph wherever it is named. */
+export function sectionEntry(key: SectionKey): NavItem | undefined {
+  const find = (entries: NavEntry[]): NavItem | undefined => {
+    for (const entry of entries) {
+      if (entry.href === `/${key}`) return entry
+      const inner = entry.href === undefined ? find(entry.children) : undefined
+      if (inner) return inner
+    }
+    return undefined
+  }
+  return find(NAV.flatMap((group) => group.items))
 }
 
 function chainIn(entries: NavEntry[], pathname: string): NavEntry[] {

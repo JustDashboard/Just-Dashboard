@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -139,7 +140,7 @@ func assertAccountUnchanged(t *testing.T, s *Server, before *auth.User) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *after != *before {
+	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("rejected request changed the account: before=%+v after=%+v", before, after)
 	}
 }

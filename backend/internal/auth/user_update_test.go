@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestUpdateUserRollsBackAllFieldsWhenSessionRevocationFails(t *testing.T) {
 	svc, user := newTestService(t, false)
@@ -32,7 +35,7 @@ func TestUpdateUserRollsBackAllFieldsWhenSessionRevocationFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *after != *before || !svc.VerifyUserPassword(t.Context(), user.ID, testPassword) {
+	if !reflect.DeepEqual(after, before) || !svc.VerifyUserPassword(t.Context(), user.ID, testPassword) {
 		t.Fatalf("failed revocation left a partial edit: before=%+v after=%+v", before, after)
 	}
 	if _, _, err := svc.ResolveSession(t.Context(), login.Token); err != nil {

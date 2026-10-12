@@ -92,7 +92,8 @@ strategy, and feature ownership behind those rules.
   checked-in deployment guides above; missing checkpoint evidence must not be treated as verified.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
-- [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, layout primitives,
+- [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an
+  account keeps out of its sidebar, the first-run question and sign-in, layout primitives,
   accessibility, Monaco, and charts.
 - [`frontend/features-terminal.md`](frontend/features-terminal.md) — Docker/security/package feature UX and
   the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
@@ -113,6 +114,10 @@ strategy, and feature ownership behind those rules.
   screenshots.
 - [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
   — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
+
+- [`../audits/2026-10-12-onboarding/README.md`](../audits/2026-10-12-onboarding/README.md)
+  — the first-run question: why a hidden section leaves the sidebar but never becomes unreachable,
+  the three steps, and the recording from sign-in to a deployment's domain opening a hidden proxy.
 
 - [`../audits/2026-10-11-log-filters-insights/README.md`](../audits/2026-10-11-log-filters-insights/README.md)
   — the log panes' one filter row and time window, Insights' readings and request visitors, and the

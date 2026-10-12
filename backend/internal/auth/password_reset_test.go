@@ -17,8 +17,10 @@ func TestResetPasswordRevokesCredentialsAndPreservesEnrollment(t *testing.T) {
 		(user_id, name, prefix, token_hash, role, created_at) VALUES (?, 'test', 'test', 'hash', 'admin', 1)`, user.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Owing a change beforehand, as an account an admin made in the dashboard
+	// does: the reset is the password now, so the debt goes with the old one.
 	if _, err := svc.st.DB.ExecContext(ctx, `UPDATE users SET totp_enabled = 1, totp_secret = 'sealed',
-		totp_last_step = 123, failed_count = 4, locked_until = ? WHERE id = ?`, time.Now().Add(time.Hour).Unix(), user.ID); err != nil {
+		totp_last_step = 123, failed_count = 4, locked_until = ?, must_change_pw = 1 WHERE id = ?`, time.Now().Add(time.Hour).Unix(), user.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.st.DB.ExecContext(ctx, `INSERT INTO recovery_codes(user_id, code_hash) VALUES (?, 'recovery')`, user.ID); err != nil {
@@ -41,7 +43,7 @@ func TestResetPasswordRevokesCredentialsAndPreservesEnrollment(t *testing.T) {
 		Scan(&secret, &enabled, &mustChange, &failed, &locked, &step); err != nil {
 		t.Fatal(err)
 	}
-	if secret != "sealed" || enabled != 1 || step != 123 || mustChange != 1 || failed != 0 || locked != 0 {
+	if secret != "sealed" || enabled != 1 || step != 123 || mustChange != 0 || failed != 0 || locked != 0 {
 		t.Fatalf("unexpected recovery state: secret=%q 2fa=%d step=%d change=%d failed=%d locked=%d",
 			secret, enabled, step, mustChange, failed, locked)
 	}

@@ -39,8 +39,9 @@ Password prompts read hidden input twice. Noninteractive input requires explicit
 the scripts send the password only on stdin, never as Docker/Compose arguments or in `.env`. The
 backend accepts a single line of at most 4096 bytes and never prints it or puts it in audit detail.
 
-- Creation defaults to `readonly` and sets `must_change_pw` for every role.
-- `auth.ResetPassword` atomically replaces the hash, sets `must_change_pw`, clears `failed_count` and
+- Creation defaults to `readonly` and leaves `must_change_pw` clear: root typed the password twice
+  on the host, so it is already chosen and the dashboard does not demand another at first sign-in.
+- `auth.ResetPassword` atomically replaces the hash, clears `must_change_pw`, `failed_count` and
   `locked_until`, deletes browser sessions and revokes API tokens. A failed revocation rolls the whole
   reset back. It preserves role, disabled state, TOTP seed/enrollment/counter and recovery codes.
 - `revoke-sessions` calls `auth.RevokeAllSessions`; it leaves API tokens unchanged.
@@ -48,11 +49,12 @@ backend accepts a single line of at most 4096 bytes and never prints it or puts 
 - Mutations and failed account operations use `audit.Logger`: actor `cli`, username `root`, method
   `CLI`, actions `dashboard.user.create-user`, `dashboard.user.reset-password`, and
   `dashboard.user.revoke-sessions`. The target identifies the dashboard account. Success/failure is
-  recorded in the database and mirrored to stderr. Audit detail contains only chosen role and
-  required-password-change metadata.
+  recorded in the database and mirrored to stderr. Audit detail contains only the chosen role.
 
-The account holder completes required factors before changing a temporary password. Resetting a
-password does not provide a way around enrolled two-factor or enable a disabled account.
+Neither command issues a temporary password. Until 0.7.3 both set `must_change_pw`, so an operator
+who had just reset their own password from a root shell was signed in and immediately asked for a
+third one. Resetting a password does not provide a way around enrolled two-factor or enable a
+disabled account; a reset also clears a change an account still owed.
 
 ## Stack commands
 

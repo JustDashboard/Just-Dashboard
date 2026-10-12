@@ -147,6 +147,8 @@ API tokens may narrow their creator's role, never widen it, and are demoted with
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
+The same holds for `scripts/create-user.sh` and `scripts/reset-password.sh`: a password root typed on
+the host is already chosen. Only an account an admin creates from Account → Users owes a change.
 
 Passwords are Argon2id hashes (`auth/crypto.go`, 64 MiB, three passes, four lanes; test binaries use a
 token cost). Each hash allocates its whole memory parameter at once, so at most two run at a time and a
@@ -156,9 +158,10 @@ heap had doubled, which left the process at about 155 MB for up to half a minute
 
 Local host-root account recovery uses the same binary's isolated `--admin` mode through
 `scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
-atomically require a password change, clear login lockout, and revoke sessions/API tokens while keeping
-TOTP enrollment, recovery codes and disabled state; account mutations are audited as actor `cli`.
-See [terminal tools](../operations/terminal-tools.md) for commands and the local privilege boundary.
+atomically set the new password, clear any owed change and login lockout, and revoke sessions/API
+tokens while keeping TOTP enrollment, recovery codes and disabled state; account mutations are audited
+as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for commands and the local
+privilege boundary.
 
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
 strings, deploy env, backup credentials.
@@ -178,6 +181,18 @@ declared type is ignored, and the stored type is the one served. `GET /account/a
 group's `GET /dashboard-users/{id}/avatar` serve it with a long private cache life, since the version
 stamp `avatarVersion` rides on the URL. `POST /account/sessions/revoke-others` drops every session of
 the caller but the one asking.
+
+An account also carries its answer to the first-run question (additive columns in 0.7.3):
+`needs_onboarding`, set on every account `CreateUser` makes — the bootstrap admin, an administrator's
+new account, `scripts/create-user.sh` — and defaulting to `0` for accounts that predate it, and
+`hidden_sections`, a JSON list of the sections it keeps out of its sidebar, defaulting to `[]`. Both
+ride on the session's `user` (`needsOnboarding`, `hiddenSections`). The holder alone writes them, with
+`PUT /account/workspace` (session-only, no capability beyond that, audited as
+`account.workspace.update` with the list stored): it takes `hiddenSections` — at most 32 names shaped
+like a path segment, since the list of sections belongs to the frontend's nav registry — stores them
+sorted without repeats, and clears `needs_onboarding`. The list narrows what the shell draws and
+nothing the account may do; every route still answers by role. See
+[the shell](../frontend/shell-design.md#sections-an-account-keeps-out-of-its-sidebar).
 
 State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` block in
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
