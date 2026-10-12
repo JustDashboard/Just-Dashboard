@@ -25,7 +25,7 @@ func TestLifecycleAdmissionExcludesOtherOperations(t *testing.T) {
 		t.Fatalf("admission did not release: %v", err)
 	}
 	another()
-	for _, name := range []string{StateFile, "self-config.json"} {
+	for _, name := range []string{StateFile, "self-config.json", "self-uninstall.json"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"status":"pending"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}

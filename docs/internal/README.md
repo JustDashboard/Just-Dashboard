@@ -72,7 +72,7 @@ strategy, and feature ownership behind those rules.
   the SQL workbench, schema and operations, the Redis and MongoDB surfaces, code generation, transfer,
   and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
   mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
-  rollback, Tailscale certificates).
+  rollback, Tailscale certificates) and uninstalling it.
 - [`boards.md`](boards.md) — the Excalidraw page: the embedded editor, server-side drawing storage,
   the derived preview and the list, save conflicts, resource cards, and route permissions.
 - [`stickyboard.md`](stickyboard.md) — the sticky-note boards: the validated document, its routes and

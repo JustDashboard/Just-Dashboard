@@ -6,9 +6,9 @@
  *    token is never readable from JS, which is the point of it.
  *  - `X-JD-CSRF` on every mutation, which makes a forged browser request need
  *    a CORS preflight the server will not authorise.
- *  - `X-Confirm` for project, database, and Docker stack deletion. These
- *    handlers enforce the phrase on the server and return the expected phrase
- *    in the error body.
+ *  - `X-Confirm` for project, database, Docker stack and Git checkout
+ *    deletion, and for an uninstall that wipes. These handlers enforce the
+ *    phrase on the server and return the expected phrase in the error body.
  */
 
 import { networkPendingHeaders } from "@/lib/network-pending"

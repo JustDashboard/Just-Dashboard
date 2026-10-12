@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 )
 
 // backupContainerPauser is the Docker owner's side of a job's paused
@@ -99,9 +100,12 @@ func (s *Server) backupResources(ctx context.Context, jobs []*backups.Job) backu
 		Detail: "Settings, accounts, saved connections and deployment records",
 		Paths:  []string{dataDir},
 		Suggest: backupSuggestion{
-			Name:        "Dashboard data",
-			Sources:     []string{dataDir},
-			Excludes:    []string{filepath.Join(dataDir, "staging"), filepath.Join(dataDir, "deployment-workspaces")},
+			Name:    "Dashboard data",
+			Sources: []string{dataDir},
+			// The key a kept uninstall leaves beside the data must not travel
+			// with an archive of that data.
+			Excludes: []string{filepath.Join(dataDir, "staging"), filepath.Join(dataDir, "deployment-workspaces"),
+				filepath.Join(dataDir, uninstall.KeptEnv)},
 			SQLitePaths: []string{filepath.Join(dataDir, store.DatabaseFile)},
 		},
 	})

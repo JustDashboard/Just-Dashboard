@@ -337,8 +337,8 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
   account *must* enrol.
 - Capabilities are checked on every backend route, never in the UI alone.
-- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout
-  asks for a typed phrase checked on the server.
+- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
+  and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
 
 ### Roles
@@ -469,6 +469,24 @@ printed once in `docker compose logs backend`.
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 </details>
+
+## Uninstalling
+
+**Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one
+question first:
+
+- **Keep for a reinstall** removes the dashboard's containers and images and closes its web-terminal
+  sessions. Deployments keep running, and the data in `/var/lib/just-dashboard`, the backups and the
+  `.env` (with a copy of it beside the data) stay where they are. `sudo ./install.sh` in the checkout —
+  or in a fresh clone, which offers to restore the kept `.env` — brings everything back.
+- **Wipe everything** also removes every deployment with its containers, managed volumes and folders,
+  images, networks, routes and the public ingress, and deletes the data directory and every copy of the
+  `.env`. Whether the backups go too is a separate switch, off by default. A wipe asks for the server's
+  name to be typed.
+
+Either way, databases the dashboard created, proxy sites, firewall rules, WireGuard and other network
+settings are left as they are, and so is the checkout. The page follows the uninstall until the
+dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.log`.
 
 ## Backing it up
 

@@ -35,8 +35,9 @@ const ConfirmParam = "confirm"
 // What is left is the rare and unrecoverable, and invariant 3
 // (docs/internal/security/invariants.md) lists it: permanently deleting an
 // archived deployment project, dropping a database, taking a Compose stack
-// down (from its page or from an archived project's removal plan), and
-// deleting a Git checkout from the server. A prune is not on that list — a
+// down (from its page or from an archived project's removal plan), deleting a
+// Git checkout from the server, and uninstalling the dashboard with a wipe.
+// A prune is not on that list — a
 // container, network or image comes back from a registry or a compose file —
 // nor is deleting a proxy site, a stream or a branch, each of which is
 // recreated from the same form or recovered from the reflog.

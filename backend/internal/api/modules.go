@@ -41,6 +41,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
@@ -71,6 +72,7 @@ type moduleSet struct {
 	updates       *updates.Service
 	selfUpdate    *selfupdate.Service
 	selfConfig    *selfcfg.Service
+	uninstall     *uninstall.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
 	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
@@ -359,6 +361,7 @@ func (s *Server) initModules() {
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
 
 	s.initProxyExtras()
+	s.initUninstall()
 }
 
 // tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy

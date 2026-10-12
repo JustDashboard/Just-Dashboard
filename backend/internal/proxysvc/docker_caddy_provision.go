@@ -13,7 +13,11 @@ import (
 )
 
 const managedIngressName = "just-dashboard-ingress"
-const managedIngressSource = "/etc/just-dashboard/ingress/Caddyfile"
+
+// IngressDir holds the provisioned ingress's Caddyfile on the host. An
+// uninstall that removes the ingress removes it too.
+const IngressDir = "/etc/just-dashboard/ingress"
+const managedIngressSource = IngressDir + "/Caddyfile"
 const managedIngressConfig = "{\n  admin 127.0.0.1:2019\n}\n"
 
 // Planning observes sockets and Docker mappings without binding or provisioning.

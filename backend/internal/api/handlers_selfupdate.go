@@ -63,6 +63,8 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			// the proxy for a second or two, which is the same interruption a
 			// renewal makes on its own at three in the morning.
 			r.Method(http.MethodPost, "/config/certificate", s.handle(s.handleSelfConfigCertificate))
+			// Removing the dashboard from the server; see handlers_uninstall.go.
+			s.mountUninstallRoutes(r)
 		})
 	})
 }

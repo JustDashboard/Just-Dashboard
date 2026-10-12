@@ -144,7 +144,7 @@ if args == ["compose", "build"]:
                 process.kill()
                 process.wait()
 
-    def run_installer(self, build_fail=False):
+    def run_installer(self, build_fail=False, env_file=True):
         script = (REPO / "install.sh").read_text()
         # Every writable absolute host path is confined to this disposable fixture.
         for prefix in ("/var/lib/", "/var/backups/", "/tmp/just-dashboard"):
@@ -153,7 +153,7 @@ if args == ["compose", "build"]:
         installer.write_text(script)
         installer.chmod(0o755)
         (self.root / "docker-compose.yml").write_text("services: {}\n")
-        (self.root / ".env").write_text("""JD_MASTER_KEY=fixture
+        self.env_body = """JD_MASTER_KEY=fixture
 JD_SITE=localhost
 JD_BIND=
 JD_TLS=off
@@ -162,7 +162,11 @@ JD_TERMINAL_ENABLED=false
 JD_PORT=8443
 JD_BACKEND_PORT=42001
 JD_FRONTEND_PORT=42002
-""")
+"""
+        if env_file:
+            (self.root / ".env").write_text(self.env_body)
+        else:
+            (self.root / ".env").unlink(missing_ok=True)
         version_dir = self.root / "backend/internal/version"
         version_dir.mkdir(parents=True)
         shutil.copy2(REPO / "backend/internal/version/version.go", version_dir / "version.go")
@@ -187,6 +191,21 @@ JD_FRONTEND_PORT=42002
         self.assertNotIn("\x1b", result.stdout)
         self.assertIn("./scripts/manage.sh restart", result.stdout)
         self.assertNotIn("compose restart", result.stdout)
+
+    def test_installer_restores_the_env_a_kept_uninstall_left(self):
+        kept = pathlib.Path(self.temp.name) / "host/var/lib/just-dashboard/install.env"
+        kept.parent.mkdir(parents=True)
+        kept.write_text("JD_MASTER_KEY=kept\nJD_SITE=localhost\nJD_TLS=off\nJD_PORT=8443\n")
+        result = self.run_installer(env_file=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Settings kept by an earlier uninstall", result.stdout)
+        # Restored, and kept rather than asked about a second time.
+        self.assertNotIn("An .env already exists", result.stdout)
+        # The kept key, not a new one; settings it predates are added as on any re-run.
+        restored = (self.root / ".env").read_text()
+        self.assertTrue(restored.startswith(kept.read_text()), restored)
+        self.assertEqual(restored.count("JD_MASTER_KEY="), 1)
+        self.assertEqual((self.root / ".env").stat().st_mode & 0o777, 0o600)
 
     def test_installer_build_failure_never_claims_success(self):
         result = self.run_installer(build_fail=True)

@@ -4375,9 +4375,10 @@ work runs in a sibling container (`just-dashboard-reconfigure`, this image, `-se
 this install" rather than asking Docker the same question twice — `Options.Locate` is
 `selfupdate.Service.Location`.
 
-Update, apply, restart and rebuild admission share `JD_DATA_DIR/lifecycle.lock`, held before either
-run record, transcript or `.env` backup can be replaced. Both durable run records are checked under
-that lock: a pending/running operation blocks the other path even after the launching process exits.
+Update, apply, restart, rebuild and uninstall admission share `JD_DATA_DIR/lifecycle.lock`, held before
+any run record, transcript or `.env` backup can be replaced. All three durable run records
+(`self-update.json`, `self-config.json`, `self-uninstall.json`) are checked under that lock: a
+pending/running operation blocks the other paths even after the launching process exits.
 Unreadable or corrupt records fail closed and must be dismissed explicitly. This prevents concurrent
 requests from overwriting the configuration needed for rollback.
 
@@ -4465,3 +4466,67 @@ installer with fake package commands, without changing host packages. Hostname r
 `certificateIssue` alongside `certificateMethod`, preserving listener/plugin errors for Quick Deploy.
 Quick Deploy keeps HTTPS selected when readiness fails, presenting the actual blocker instead of
 silently switching the initial configuration to plain HTTP.
+
+### Uninstalling
+
+**`internal/uninstall`** removes the dashboard from the server, from the Danger zone at the end of
+`/dashboard/configuration`. It is the third lifecycle operation and the only one nothing comes back from,
+so it is built around the moment the page watching it loses its API.
+
+- **One question, two modes.** `keep` removes the stack — its three containers, the two images it builds,
+  the lifecycle siblings, `/tmp/just-dashboard` and the held terminal sessions (`systemctl stop
+  jd-terminal-*` on the host) — and leaves everything the dashboard made: deployments keep running, and
+  `JD_DATA_DIR`, the backups and the checkout's `.env` stay, with a copy of the `.env` written to
+  `JD_DATA_DIR/install.env`. `wipe` also removes the deployments and deletes `JD_DATA_DIR`, the proxy's
+  two Compose volumes (its CA) and every copy of the `.env` in the checkout (`.env`, `.env.jd-previous`,
+  `.env.jd-tmp`, `.env.backup.*`). `deleteBackups` deletes `JD_BACKUP_DIR` too and is honoured only with a
+  wipe. Neither mode touches databases the dashboard provisioned, proxy sites and their `jd-*` files,
+  certificates, the network module's `/etc/just-dashboard/network` and its boot units (the docs promise a
+  reinstall finds them), SSH and fail2ban drop-ins, Linux accounts, or the checkout itself.
+- **The work is split across two processes, in the order the stack can lose them.** `Service.Begin`
+  admits under the lifecycle lock, records the run (`self-uninstall.json`, transcript `self-uninstall.log`)
+  and answers 202; the backend's own half then runs in a goroutine while it still serves the page.
+  `Server.pauseForUninstall` stops what would put a deployment back — the Git watcher, the schedules, the
+  preview reconciler and quarantine, the database-network keeper, the backup scheduler and the ingress
+  keeper — and `deploy.Engine.Shutdown` waits up to 15 minutes for running deployments to reach a point
+  they can resume from. For a wipe, `Teardown` removes the deployments (below). Then it starts the sibling
+  `just-dashboard-uninstall` from its own image (`-self-uninstall -state-dir`), which takes the stack down
+  and removes the rest. The paused modules cannot be restarted in place, so a run that fails in the
+  backend's half records the failure and recreates the stack through `selfcfg.Restart` (`Options.Resume`),
+  which is what brings them back.
+- **What the deployments own is read two ways** (`deployments.go`). Docker marks containers and networks
+  — `io.just-dashboard.managed=true`, the `com.docker.compose.project` of a managed container, the
+  `com.just-dashboard.ingress=true` ingress — and the database knows the rest: every project's
+  `RemovalPlan` (archived or not) supplies managed volumes, bind paths, routes, database networks and image
+  digests. The dashboard's own compose project is excluded by name. `Remove` goes in dependency order:
+  preview tailnet addresses (`NormalizedStepExecutor.WithdrawPreviewAddresses`), containers, routes
+  through `proxysvc.RemoveDeploymentRoute`, the ingress container and `proxysvc.IngressDir`, networks
+  (disconnecting any other container still attached — a database a deployment was linked to — first),
+  volumes, bind paths through the deployment roots' `files.Delete`, then images, never forced. A
+  `just-dashboard/deployment-*` image is removed by tag, so an image the dashboard only retagged keeps its
+  other names. Anything that will not go is a warning on the run, not a failure: an uninstall that stopped
+  at an in-use volume would leave the dashboard installed.
+- **The sibling** (`runner.go`) runs `--privileged --pid host --rm` beside the checkout and data mounts:
+  host commands go through `hostexec` and host paths through PID 1's root. Only `docker compose down`
+  can fail the run — the stack is then started again so the operator is not left with half of one —
+  and everything after it is best effort. Deletions are done in Go and stay on the filesystem they start
+  on (`removeContained`), since BusyBox `rm` has no `--one-file-system`; `deletable` refuses the system
+  directories whatever the record says. A wipe leaves `JD_DATA_DIR/nginx-cache` when a file under
+  `JD_NGINX_DIR` names it, because nginx creates a cache's last directory but not its parents. The image
+  the sibling runs from cannot be removed while it runs, so it asks the host to: a `systemd-run` timer 30
+  seconds later runs `docker image rm`; without systemd the transcript says to do it by hand.
+- **The transcript outlives the stack.** Both halves also write `/var/log/just-dashboard-uninstall.log`,
+  outside the data directory a wipe deletes; it is the only record of the sibling's half. The page reads
+  a failed poll during a live run as the stack having gone (`frontend/src/lib/uninstall.ts`), whatever
+  phase it last saw, because a keep finishes between two polls; a backend that merely crashed restarts
+  and answers with the run closed as failed.
+- **Reinstalling.** At boot `Service.Start` closes a live run whose sibling is gone as failed, and clears
+  a successful one — this process running after a kept uninstall is the reinstall — removing
+  `install.env` once the key in it is the key the process runs with. `install.sh` on a fresh clone with
+  no `.env` offers to restore `install.env` and continues as a re-run that keeps its settings. The
+  suggested self-backup job excludes `install.env`.
+- Routes: `GET /api/v1/dashboard/uninstall` (the run and its transcript's tail, polled),
+  `GET /api/v1/dashboard/uninstall/plan` (what each mode removes and leaves, read once by the dialog),
+  `GET /api/v1/dashboard/uninstall/log`, `DELETE /api/v1/dashboard/uninstall/run` and
+  `POST /api/v1/dashboard/uninstall` (`{mode, deleteBackups}`, inside `s.destructive`), all
+  `system.admin`. A wipe requires the host name as the typed phrase (invariant 3); a keep does not.
