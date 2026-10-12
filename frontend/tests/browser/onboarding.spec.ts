@@ -131,10 +131,14 @@ test("on a phone the command stays in reach, and the answer fits the screen", as
   for (const name of ["Manage containers", "Route the network", "Secure the server"]) {
     await purposes.getByRole("button", { name }).click()
   }
-  // Six cards and the header are taller than the phone; Continue is held at
-  // the foot of the window over them.
-  await expect(page.getByRole("button", { name: "Continue" })).toBeInViewport()
-  await page.getByRole("button", { name: "Continue" }).click()
+  // Six cards as rows leave Continue under them on the screen, without a bar
+  // holding it there.
+  const command = page.getByRole("button", { name: "Continue" })
+  await expect(command).toBeInViewport()
+  expect(await command.evaluate((el) => getComputedStyle(el.parentElement!).position)).toBe(
+    "static",
+  )
+  await command.click()
   await expect(
     page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
   ).toHaveCount(5)

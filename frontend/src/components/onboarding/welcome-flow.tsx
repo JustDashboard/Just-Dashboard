@@ -121,9 +121,11 @@ export function WelcomeFlow() {
         ) : (
           <>
             <Purposes chosen={purposes} readings={found.readings} onPick={setPicked} />
-            {/* On a phone six cards are taller than the screen, so the
-                command is held at the foot of the window over them. */}
-            <div className="flex items-center justify-center gap-3 max-md:sticky max-md:bottom-0 max-md:z-20 max-md:-mx-4 max-md:border-t max-md:border-hairline max-md:bg-background max-md:px-4 max-md:py-3">
+            {/* Under the cards on every screen. A phone held them in a dark
+                bar stuck to the foot of the window, which the wide screen
+                does not have and which read as a second surface; six cards as
+                rows fit a phone with the command under them anyway. */}
+            <div className="flex items-center justify-center gap-3">
               <Button
                 variant="ghost"
                 size="lg"

@@ -125,8 +125,9 @@ screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the
 Until 0.7.4 it was three steps: the purposes beside a small picture of the server, then the sections
 as fifteen tiles beside a preview of the rail, then the outcome. Choosing sections one by one is
 Account → Workspace's job — the same tiles and preview, after the fact — and the first sign-in no
-longer asks for it. On a phone the question's cards are rows and its command is held at the foot of
-the window.
+longer asks for it. On a phone the question's cards are rows with the commands under them, as on a
+wide screen: a bar holding them at the foot of the window drew a dark strip the wide screen does not
+have.
 
 Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is where sections are
 chosen one by one, in the reading register: `SectionTiles` (`section-tiles.tsx`), one compact
