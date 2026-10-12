@@ -6560,6 +6560,89 @@ export type DashboardConfigReport = {
 }
 
 /**
+ * Removing the dashboard from the server. Mirrors internal/uninstall.
+ *
+ * The phases are in the order they run: the first two in the backend while it
+ * still serves this page, the rest in a sibling container that takes the stack
+ * down — which is the moment this page loses the API it is polling.
+ */
+export type UninstallMode = "keep" | "wipe"
+
+export type UninstallPhase = "queued" | "pausing" | "deployments" | "stack" | "files" | "finished"
+
+export type UninstallRun = {
+  id: string
+  status: "pending" | "running" | "success" | "failed"
+  /** Where it is; a failed run keeps the phase it failed in. */
+  phase: UninstallPhase
+  mode: UninstallMode
+  deleteBackups: boolean
+  dir: string
+  compose: string
+  project?: string
+  image: string
+  envPath: string
+  dataDir: string
+  backupDir?: string
+  /** Entries of the data directory a wipe leaves, because a site still uses them. */
+  keep?: string[]
+  container: string
+  /** What could not be removed. None of them stops the run. */
+  warnings?: string[]
+  actor: string
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  error?: string
+}
+
+export type UninstallReport = {
+  /** False on an install with no compose stack to take down. */
+  supported: boolean
+  reason?: string
+  run?: UninstallRun
+  log?: string
+}
+
+export type UninstallItem = { id: string; name: string }
+
+export type DirectoryUsage = {
+  path: string
+  files: number
+  bytes: number
+  /** Counting stopped at its time budget, so the figures are a floor. */
+  partial?: boolean
+}
+
+/** What the deployments own on this host — what a wipe removes. */
+export type DeploymentFootprint = {
+  projects: number
+  containers: UninstallItem[]
+  routes: UninstallItem[]
+  networks: UninstallItem[]
+  volumes: UninstallItem[]
+  paths: UninstallItem[]
+  images: UninstallItem[]
+  ingress?: UninstallItem
+}
+
+/** What the uninstall dialog shows before anything happens. */
+export type UninstallPlan = {
+  /** What a wipe asks to be typed: the server's name. */
+  phrase: string
+  dir: string
+  envPath: string
+  data: DirectoryUsage
+  backups?: DirectoryUsage
+  /** The data directory's nginx-cache, kept by a wipe because a site caches into it. */
+  keptCache?: string
+  deployments: DeploymentFootprint
+  deploymentsError?: string
+  /** Where the transcript survives the stack and, for a wipe, the data directory. */
+  durableLog: string
+}
+
+/**
  * The security verdict. Mirrors netsec.Posture: the same three-field shape as
  * a health finding, because what was measured, what it means and what to do
  * are three different things and the UI renders them differently.

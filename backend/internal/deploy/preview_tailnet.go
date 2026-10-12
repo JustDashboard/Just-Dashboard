@@ -390,6 +390,32 @@ func (e *NormalizedStepExecutor) withdrawPreviewAddress(ctx context.Context, env
 	return true, e.store.DeletePreviewAddress(ctx, environmentID)
 }
 
+// WithdrawPreviewAddresses takes every preview off the tailnet, which is what
+// an uninstall that removes the previews owes the serve config it published
+// them on. It reports how many addresses there were.
+func (e *NormalizedStepExecutor) WithdrawPreviewAddresses(ctx context.Context) (int, error) {
+	if e == nil || e.store == nil {
+		return 0, nil
+	}
+	addresses, err := e.store.ListPreviewAddresses(ctx)
+	if err != nil {
+		return 0, err
+	}
+	withdrawn := 0
+	var errs []error
+	for environmentID := range addresses {
+		had, err := e.withdrawPreviewAddress(ctx, environmentID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if had {
+			withdrawn++
+		}
+	}
+	return withdrawn, errors.Join(errs...)
+}
+
 func tailnetWithdrawFailure(err error) StepResult {
 	return runtimeStepFailure(err, "tailnet_withdraw_failed",
 		"the preview's tailnet address could not be withdrawn: "+err.Error(), nil)

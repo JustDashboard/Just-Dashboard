@@ -6,6 +6,11 @@ secret-preservation and port-selection decisions remain authoritative. Substeps 
 or `[!]` labels keep status readable without color. Color requires a capable terminal and is disabled
 by `NO_COLOR` or `TERM=dumb`. `--help` prints usage without provisioning the host.
 
+When the checkout has no `.env` and `/var/lib/just-dashboard/install.env` exists — the copy an uninstall
+that kept its data left beside that data — the installer offers to restore it (default yes) and then
+continues as a re-run that keeps its settings, so the reinstall opens the secrets it kept. Declining
+starts fresh and says the kept data's secrets stay unreadable.
+
 The completion guide appears after backend health verification and shows the dashboard address,
 sign-in instructions and terminal command examples, including a shell-quoted checkout path.
 `scripts/manage.sh` owns the commands; `scripts/create-user.sh` and `scripts/reset-password.sh` are
@@ -63,7 +68,8 @@ automatic rollback.
 Run `scripts/test-changed.sh main`, plus `python3 scripts/test_manage.py` and
 `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`.
 The Python fixtures check command arguments, stdin preservation, root and input checks, checkout paths
-with spaces, Compose fallback and the installer's successful/failing completion flows without changing
+with spaces, Compose fallback, restoring a kept uninstall's `.env`, and the installer's successful/failing
+completion flows without changing
 host packages or the installed stack. Go tests use temporary stores to verify password strength,
 account creation, TOTP preservation, token/session revocation, transactional rollback, audit records,
 and secret-free output.

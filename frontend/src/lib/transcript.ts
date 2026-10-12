@@ -58,11 +58,20 @@ export type TranscriptLine = {
 
 export const TRIMMED_MARKER = "… earlier output trimmed …"
 
-// The sentences the two runners write about themselves, as opposed to the
+// The sentences the three runners write about themselves, as opposed to the
 // output of the commands they run. Kept as prefixes so a reworded message
 // degrades to plain output rather than to a wrong colour.
 const NOTES = [
-  /^(Rebuilding|Restarting|Applying|Updating) Just Dashboard\b/,
+  /^(Rebuilding|Restarting|Applying|Updating|Uninstalling|Stopping) Just Dashboard\b/,
+  /^(keeping|wiping) the deployments\b/,
+  /^Pausing deployments\b/,
+  /^Removing (the deployments|what is left)\b/,
+  /^Closing the web terminal's sessions\b/,
+  /^Handing over to \S+/,
+  /^Restarting the dashboard to resume\b/,
+  /^Just Dashboard is uninstalled\b/,
+  /^Its data is in \S+/,
+  /^The source checkout is still at\b/,
   /^New settings? .*requested by\b/,
   /^.* requested by \S+$/,
   /^stack: /,

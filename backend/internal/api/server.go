@@ -201,6 +201,10 @@ func (s *Server) Start(ctx context.Context) error {
 	// successful one this process is likewise the only evidence it worked,
 	// because the sibling that carried it out has already exited.
 	s.modules.selfConfig.Start(ctx)
+	// And for an uninstall: one that stopped without an outcome is closed as
+	// failed, and a kept install's record is cleared by the reinstall that is
+	// this process.
+	s.modules.uninstall.Start(ctx)
 	// Issued and renewed here rather than at install time, because the
 	// certificate this obtains lives 90 days and the install that most needs
 	// it is the one nobody has touched since.

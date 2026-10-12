@@ -179,7 +179,8 @@ streams a gzip-compressed tar archive to a `0600` staging file, fails on unreada
 applies exclusions to both full paths and basenames, then moves locally or uploads through the
 AWS S3 multipart client. A source may contain the staging directory only when an exclusion covers it —
 the dashboard's own data directory is the one source where that is legitimate, and the suggested job
-excludes `staging` and `deployment-workspaces`. Database dumps are taken first, while the engines can
+excludes `staging`, `deployment-workspaces` and `install.env` (the copy of the key a kept uninstall leaves
+beside the data, which must not travel in an archive of that data). Database dumps are taken first, while the engines can
 still answer; then the job's containers are paused through `ContainerPauser` (the Docker owner's
 `Lifecycle` pause/unpause, wired in `modules.go`) for exactly the filesystem walk, and resumed with a
 context that cannot be cancelled, whatever the walk did. A stopped container needs no pause and is

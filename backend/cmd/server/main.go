@@ -35,6 +35,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/uninstall"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/version"
 )
 
@@ -120,6 +121,11 @@ func main() {
 	// and this is the flag that makes this binary that sibling.
 	selfRestart := flag.Bool("self-restart", false,
 		"carry out the dashboard restart recorded in -state-dir, then exit")
+	// The last of the three: removing the dashboard takes down the container
+	// that was asked, so a sibling finishes the job, and this flag makes this
+	// binary that sibling.
+	selfUninstall := flag.Bool("self-uninstall", false,
+		"carry out the dashboard uninstall recorded in -state-dir, then exit")
 	stateDir := flag.String("state-dir", "",
 		"directory holding the upgrade record and its transcript (the value of JD_DATA_DIR)")
 	preparePorts := flag.String("prepare-ports", "", "select available dashboard ports in the checkout before starting Compose")
@@ -187,6 +193,23 @@ func main() {
 		}
 		if err := selfcfg.RunRestart(dir); err != nil {
 			fmt.Fprintln(os.Stderr, "restart failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *selfUninstall {
+		// Before config.Load, like the other two: the record on disk is the
+		// whole job, and this process is handed no secret.
+		dir := *stateDir
+		if dir == "" {
+			dir = config.Env("JD_DATA_DIR")
+		}
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "fatal: -self-uninstall needs -state-dir (the dashboard's JD_DATA_DIR)")
+			os.Exit(2)
+		}
+		if err := uninstall.RunUninstall(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "uninstall failed:", err)
 			os.Exit(1)
 		}
 		return
