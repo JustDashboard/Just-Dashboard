@@ -1,9 +1,8 @@
 "use client"
 
 import type { RefObject } from "react"
-import { Plus, type Icon } from "@/components/icons"
+import { Plus, Servers, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 
 /**
@@ -92,20 +91,27 @@ export function WireNode({
  * A filled mark: the thing exists.
  *
  * `logo` is a product drawn as itself — a `ProductGlyph` child, or a kind's
- * glyph for a thing no product names — on ProductLogo's own tile, square as a
- * product's tile is everywhere else, so a channel or a source reads as the
- * service it is rather than as a letter in a circle. A child glyph or image is
- * sized by the mark.
+ * glyph for a thing no product names — on ProductLogo's own tile, so a channel
+ * or a source reads as the service it is rather than as a letter in a circle. A
+ * child glyph or image is sized by the mark.
+ *
+ * Every tone stands on the same square tile. Some pictures drew their neutral
+ * and state marks as discs beside another's tiles, so two pictures of the same
+ * kind of thing read as two vocabularies; the only circle left in a picture is
+ * the dashed ring of a thing not added yet (`WirePlaceholder`).
  */
 export function WireMark({
   tone = "neutral",
   size = "lg",
-  shape = tone === "logo" ? "square" : "round",
+  shape = "square",
   className,
   children,
 }: {
-  /** neutral is a step of ground; brand is this product; ink is a third party's own mark; logo is a product's. */
-  tone?: "neutral" | "brand" | "ink" | "logo" | "success" | "danger" | "warning"
+  /**
+   * neutral is a step of ground, for a thing that is off; brand is this
+   * product; logo is a thing's own mark or glyph.
+   */
+  tone?: "neutral" | "brand" | "logo" | "success" | "danger" | "warning"
   size?: "lg" | "md" | "sm"
   shape?: "round" | "square"
   className?: string
@@ -129,7 +135,6 @@ export function WireMark({
           size === "sm" && "size-9 [&>img]:size-4 [&>svg]:size-4",
           tone === "neutral" && "border border-hairline bg-control text-foreground",
           tone === "brand" && "bg-brand text-brand-foreground",
-          tone === "ink" && "bg-foreground text-background",
           tone === "logo" && "border border-hairline bg-background text-muted-foreground",
           tone === "success" && "bg-plot-success text-success",
           tone === "danger" && "bg-plot-danger text-destructive",
@@ -143,27 +148,44 @@ export function WireMark({
 }
 
 /**
- * This server, drawn as the product it runs: the J in its own blue on a tile
- * of the brand's tint, inside a ring of the brand's rule.
+ * This server, drawn as a server: the rack in the brand's blue on a tile of the
+ * brand's tint, inside a ring of the brand's rule.
  *
- * It was the pale filled square with the J in black — the command face (§3),
- * so the one mark in a picture that is *here* read as a button nobody could
- * press, and the logo stood in a colour it never takes anywhere else. Every
- * other mark in a picture is a product on its own tile somewhere else; this
- * one is where the reader is standing, and the tint and the ring say so the
- * way the current nav entry does. Its outer edge is the same size as a `lg`
- * WireMark, so a line meets it where it would meet any other mark.
+ * It was the J, and the J is the dashboard — a product running on the machine
+ * — where every other mark in a picture is the thing itself. The node is the
+ * machine, so it is the rack the Databases map already drew for "processes
+ * here". It was before that the pale filled square, the command face (§3),
+ * which read as a button nobody could press. This one is where the reader is
+ * standing, and the tint and the ring say so the way the current nav entry
+ * does. Its outer edge is the size of a WireMark of the same `size`, so a line
+ * meets it where it would meet any other mark.
  */
-export function WireHost({ className }: { className?: string }) {
+export function WireHost({
+  size = "lg",
+  className,
+}: {
+  size?: "lg" | "md" | "sm"
+  className?: string
+}) {
   return (
     <span
       className={cn(
-        "flex shrink-0 rounded-[1.125rem] border border-rule-brand bg-background p-[3px]",
+        "flex shrink-0 border border-rule-brand bg-background",
+        size === "lg" && "rounded-[1.125rem] p-[3px]",
+        size === "md" && "rounded-[0.875rem] p-[2px]",
+        size === "sm" && "rounded-xl p-[2px]",
         className,
       )}
     >
-      <span className="flex size-12 items-center justify-center rounded-[0.875rem] bg-wash-brand text-brand">
-        <LogoGlyph className="h-[1.625rem]" />
+      <span
+        className={cn(
+          "flex items-center justify-center bg-wash-brand text-brand",
+          size === "lg" && "size-12 rounded-[0.875rem] [&>svg]:size-6",
+          size === "md" && "size-[2.375rem] rounded-[0.625rem] [&>svg]:size-5",
+          size === "sm" && "size-[1.875rem] rounded-lg [&>svg]:size-4",
+        )}
+      >
+        <Servers aria-hidden />
       </span>
     </span>
   )

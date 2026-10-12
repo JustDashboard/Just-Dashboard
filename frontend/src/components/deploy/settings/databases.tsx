@@ -1128,7 +1128,7 @@ function DatabasePicture({
           nodeRef={network}
           align="center"
           mark={
-            <WireMark size="md">
+            <WireMark tone="logo" size="md">
               <Connection />
             </WireMark>
           }

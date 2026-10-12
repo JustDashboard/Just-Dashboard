@@ -1,12 +1,11 @@
 "use client"
 
 import { useMemo } from "react"
-import { Box, Globe, type Icon } from "@/components/icons"
+import { Box, Globe, Servers, type Icon } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import {
@@ -131,15 +130,15 @@ export function UsedBy() {
 }
 
 /**
- * This server, where a product's logo would be: the dashboard's own mark in
- * its own blue on the brand's tint, the way the wiring pictures draw the
- * machine the reader is standing on. No product names "processes on this
- * machine", and a grey box in the slot said nothing at all.
+ * This server, where a product's logo would be: the rack in the brand's blue
+ * on its tint, the way the wiring pictures draw the machine the reader is
+ * standing on (`WireHost`). No product names "processes on this machine", and
+ * a grey box in the slot said nothing at all.
  */
 function HostMark() {
   return (
     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-rule-brand bg-wash-brand text-brand">
-      <LogoGlyph className="h-4" />
+      <Servers aria-hidden className="size-4" />
     </span>
   )
 }

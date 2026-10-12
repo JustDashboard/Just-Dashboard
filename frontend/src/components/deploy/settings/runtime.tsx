@@ -41,7 +41,7 @@ import {
   MAX_REQUEST_BODY_MB,
 } from "@/components/deploy/deployment-defaults"
 import { useProject } from "@/components/deploy/project-context"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
@@ -1079,7 +1079,7 @@ function ListenPicture({
       align="end"
       mark={
         domain ? (
-          <WireMark size="md">
+          <WireMark tone="logo" size="md">
             <Globe />
           </WireMark>
         ) : (
@@ -1135,9 +1135,13 @@ function ListenPicture({
       nodeRef={hostMark}
       align={hostNetwork ? "start" : "center"}
       mark={
-        <WireMark size="md" tone={hostNetwork ? "warning" : "neutral"}>
-          <Servers />
-        </WireMark>
+        hostNetwork ? (
+          <WireMark size="md" tone="warning">
+            <Servers />
+          </WireMark>
+        ) : (
+          <WireHost size="md" />
+        )
       }
       eyebrow="This server"
       title={
@@ -1170,7 +1174,7 @@ function ListenPicture({
       align="start"
       mark={
         port > 0 ? (
-          <WireMark key="listens" size="md" tone="brand" className="animate-rise">
+          <WireMark key="listens" size="md" tone="logo" className="animate-rise">
             <Box />
           </WireMark>
         ) : (

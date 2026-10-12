@@ -265,7 +265,7 @@ function DomainNode({
       align="end"
       mark={
         <span ref={nodeRef} className="flex">
-          <WireMark tone={domain.tls ? "success" : "warning"} size="sm">
+          <WireMark tone={domain.tls ? "success" : "warning"} size="md">
             {domain.tls ? <LockClosed aria-hidden /> : <LockOpen aria-hidden />}
           </WireMark>
         </span>
