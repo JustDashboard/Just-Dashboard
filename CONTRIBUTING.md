@@ -198,6 +198,12 @@ to the contribution terms above, including the additional licence grant to the p
   use the frozen Bun lockfile. The module, build, Bun, Playwright, Next and `tsc` caches are saved only
   by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
   the caches of its base branch and never those of another task branch.
+- `.github/workflows/release.yml` publishes the GitHub release. It runs after Verify passes on a push
+  to `main`, reads `latest` from `backend/internal/selfupdate/changelog.json`, and when that push
+  changed it and no release `v<latest>` exists yet, tags that commit and publishes the release with the version's section of
+  `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge that
+  bumps no version publishes nothing. Never tag or publish a release by hand; a manual run of the
+  workflow on `main` retries one that failed.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run. `TestLiveSiteControlsAreMeasured` instead writes its
   site for the build it finds — HTTP/2 in the listen before 1.25.1, a QUIC listen only with

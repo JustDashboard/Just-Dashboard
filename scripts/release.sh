@@ -95,8 +95,10 @@ ${BOLD}Released $VERSION locally.${RESET} What is left:
   (cd frontend && bun run build)
 
   git commit -am "Release $VERSION"
-  git push origin main
+  ${DIM}# push the release branch and open its pull request into main${RESET}
 
-Every install polling this repository sees $VERSION within six hours of that
-push, because the changelog on the tracked branch *is* the announcement.
+Every install polling this repository sees $VERSION within six hours of the
+merge into main, because the changelog on the tracked branch *is* the
+announcement. Once Verify passes on that merge, .github/workflows/release.yml
+tags it v$VERSION and publishes the GitHub release from this changelog entry.
 EOF

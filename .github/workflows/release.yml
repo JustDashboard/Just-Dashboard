@@ -1,0 +1,80 @@
+name: Release
+
+# Publishes the GitHub release for the version main now carries, once Verify
+# has passed on that commit.
+#
+# The release itself is still the commit: every install compares its version
+# with backend/internal/selfupdate/changelog.json on main, and
+# scripts/release.sh is what writes a new one. This only gives that version a
+# tag and a page under Releases, so the version is read from the changelog
+# rather than from a branch name, and only a push that changes it publishes:
+# a merge that bumps nothing stops, and so does one whose release exists. Waiting for Verify means a version whose
+# merge run fails is never announced, and the page appears when main is known
+# good rather than when the merge was pushed.
+
+on:
+  workflow_run:
+    workflows: [Verify]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two merges in quick succession must not both find the release missing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Only the run of a push to main: a pull request whose head branch happens
+    # to be called main is not a release.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.SHA }}
+          # The parent is what the version is compared with.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Publish the changelog's newest release
+        run: |
+          set -euo pipefail
+          manifest=backend/internal/selfupdate/changelog.json
+          version=$(jq -r .latest "$manifest")
+          tag="v$version"
+          # A manual run publishes whatever main carries, to retry a failed one.
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            before=$(git show "HEAD^1:$manifest" | jq -r .latest)
+            if [ "$before" = "$version" ]; then
+              echo "This push leaves the version at $version; nothing to publish."
+              exit 0
+            fi
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released; nothing to publish."
+            exit 0
+          fi
+          title=$(jq -r --arg v "$version" '.releases[] | select(.version == $v) | .title' "$manifest")
+          # The notes are the version's section of the generated CHANGELOG.md,
+          # so the page says exactly what the dashboard's own notice says.
+          awk -v v="$version" '
+            /^## / { if (found) exit; if (index($0, "## " v " ") == 1) { found = 1; next } }
+            found
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          [ -s "$RUNNER_TEMP/notes.md" ] || { echo "CHANGELOG.md has no section for $version" >&2; exit 1; }
+          # An existing tag keeps the commit it names; otherwise it is made on
+          # the commit Verify just passed.
+          gh release create "$tag" --target "$SHA" --title "$version — $title" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          echo "Published $tag: $(gh release view "$tag" --json url --jq .url)"

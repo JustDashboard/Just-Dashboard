@@ -4314,6 +4314,14 @@ version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit i
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
 
+A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
+`main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
+a push to `main`, reads `latest` from the changelog, and when that push changed it and no release
+`v<latest>` exists, tags that
+commit and publishes the release with the version's `CHANGELOG.md` section as its notes. The version
+comes from the changelog, never from the branch name, so a merge without a bump publishes nothing.
+Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
+
 A changelog entry is written for the person deciding whether to upgrade a root-equivalent panel on their
 own server. Each change has a `kind` (`added`, `changed`, `fixed`, `removed`, `security`, `deprecated` —
 closed set, parser-enforced) and reads as what they can now do; `detail` is for a non-obvious
