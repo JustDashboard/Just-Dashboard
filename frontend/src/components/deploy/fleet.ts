@@ -232,7 +232,7 @@ function projectFacts(deployment: DeploymentSummary, pulses: FleetPulses): Fact[
       detail: `${rate} requests a minute over the last hour.`,
       also: `${share} of its ${rate} requests a minute failed over the last hour.`,
       meta: "traffic",
-      action: { label: "Open requests", href: `${base}/logs` },
+      action: { label: "Open requests", href: `${base}/logs?view=requests` },
     })
   }
   return facts.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level])

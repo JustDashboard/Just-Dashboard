@@ -319,36 +319,40 @@ function SwapPicture({
   const from = useRef<HTMLSpanElement>(null)
   const now = useRef<HTMLSpanElement>(null)
   const next = useRef<HTMLSpanElement>(null)
+  // On the dialog's own ground over the dot grid, as every picture stands on
+  // its page's, rather than in a box of its own inside the dialog's.
   return (
-    <div
-      ref={container}
-      aria-hidden
-      className="relative flex min-w-0 items-center justify-between gap-10 rounded-lg border border-hairline px-4 py-4"
-    >
-      <AnimatedBeam containerRef={container} fromRef={from} toRef={now} still />
-      <AnimatedBeam
-        containerRef={container}
-        fromRef={from}
-        toRef={next}
-        still={!busy}
-        dashed={!busy}
-      />
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="min-w-0 text-right">
-          <p className="text-body font-medium">Your domains</p>
-          <p className="text-hint text-muted-foreground">
-            {domains ? plural(domains, "hostname") : "private service"}
-          </p>
+    <div aria-hidden className="relative min-w-0 py-4">
+      <div className="wire-grid pointer-events-none absolute inset-0" />
+      <div
+        ref={container}
+        className="relative flex min-w-0 items-center justify-between gap-10 px-4"
+      >
+        <AnimatedBeam containerRef={container} fromRef={from} toRef={now} still />
+        <AnimatedBeam
+          containerRef={container}
+          fromRef={from}
+          toRef={next}
+          still={!busy}
+          dashed={!busy}
+        />
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0 text-right">
+            <p className="text-body font-medium">Your domains</p>
+            <p className="text-hint text-muted-foreground">
+              {domains ? plural(domains, "hostname") : "private service"}
+            </p>
+          </div>
+          <span ref={from} className="relative z-10 flex">
+            <WireMark tone="logo" size="md">
+              <Globe />
+            </WireMark>
+          </span>
         </div>
-        <span ref={from} className="relative z-10 flex">
-          <WireMark tone="logo" size="md">
-            <Globe />
-          </WireMark>
-        </span>
-      </div>
-      <div className="flex flex-col gap-4">
-        <Node markRef={now} number={live} />
-        <Node markRef={next} number={target} lit />
+        <div className="flex flex-col gap-4">
+          <Node markRef={now} number={live} />
+          <Node markRef={next} number={target} lit />
+        </div>
       </div>
     </div>
   )

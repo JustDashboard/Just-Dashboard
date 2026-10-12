@@ -146,7 +146,7 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for five deletion operations:
+Typed confirmation is reserved for six deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -162,11 +162,15 @@ Typed confirmation is reserved for five deletion operations:
   a repository with worktrees or other checkouts inside it, and a locked worktree are refused before
   the phrase is asked for. Removing a clean linked worktree through `/git/worktree/remove`, deleting a
   branch, and every other Git deletion keep ordinary confirmation.
+- Uninstalling the dashboard with a wipe (`POST /dashboard/uninstall` with `mode: "wipe"`) requires
+  the server's host name, because it removes every deployment with its managed volumes and paths and
+  deletes the dashboard's database and the key it is sealed with. Uninstalling and keeping everything
+  takes ordinary confirmation: running `install.sh` again restores the dashboard as it was.
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
-board deletion, Git discard/reset, firewall and SSH changes, package changes, certificate export and
-revocation, and self-update, use an ordinary confirmation in the UI. Read-only actions and routine
+board deletion, Git discard/reset and discard-and-pull, firewall and SSH changes, package changes, certificate export and
+revocation, self-update, and an uninstall that keeps the data, use an ordinary confirmation in the UI. Read-only actions and routine
 mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
 `destrLim` rate budget, audit entries, path containment, or host command rules.
 
@@ -179,7 +183,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the five phrases inside their handlers. The browser sends an
+The server enforces the six phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

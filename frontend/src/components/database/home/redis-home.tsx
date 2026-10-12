@@ -104,11 +104,7 @@ export function KeyValueHome() {
         events={events}
       />
       <Pair>
-        <ConcernAttention
-          concerns={concerns}
-          pending={loading || server.loading}
-          quiet="Memory, persistence, clients and where it listens are all within limits"
-        />
+        <ConcernAttention concerns={concerns} pending={loading || server.loading} />
         <UsedBy />
       </Pair>
       <Pair>

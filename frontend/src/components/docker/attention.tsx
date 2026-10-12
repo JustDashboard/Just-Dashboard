@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { ChevronDown, Cross, RefreshClockwise } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { priorityDockerFindings } from "@/lib/docker-findings"
 import { useViewState } from "@/lib/view-state"
 import type {
   AttentionSummary,
@@ -75,7 +76,7 @@ const CLASS_LABEL: Record<FindingClass, string> = {
   lifecycle: "Lifecycle",
 }
 
-export type FindingAction = ((finding: DockerFinding) => void) & {
+export type FindingAction = ((finding: DockerFinding) => void | Promise<unknown>) & {
   label?: (finding: DockerFinding) => string
 }
 
@@ -202,43 +203,50 @@ function toFinding(group: FindingGroup, onAction?: FindingAction): Finding {
       : `${first.title} (${group.findings.length} containers)`,
     // Stated once, because it is the same sentence on every member. Repeating
     // it per container is how a panel of four real problems reads as twenty-six.
-    detail: first.detail,
+    detail: "Review the evidence for each container before changing its configuration.",
+    summary: group.findings.map((finding) => finding.target ?? finding.targetId).join(", "),
     advice: first.advice,
     meta,
     extra: <Targets group={group} onAction={onAction} />,
+    action: onAction
+      ? { label: `Review ${group.findings.length} containers`, reveal: true }
+      : undefined,
   }
 }
 
 /**
- * Which containers, as the thing you press to deal with one of them.
- *
- * The group is the summary, never a replacement for knowing which ones — and a
- * name that is only a name makes the reader go and find it themselves. Each
- * chip carries that container's own finding, so pressing it runs that
- * container's remedy where there is one and opens it where there is not.
+ * A group retains every target's evidence and reviewed remedy.
  */
 function Targets({ group, onAction }: { group: FindingGroup; onAction?: FindingAction }) {
+  const [working, setWorking] = useState<string | undefined>(undefined)
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="space-y-3">
       {group.findings.map((finding) =>
         onAction ? (
-          // A container's name is a literal string from the host, so it is
-          // drawn the way every other one is — a `mono` tag — and the press is
-          // the tag itself rather than a control beside it.
-          <Tag
-            key={finding.id}
-            mono
-            asChild
-            className="focus-ring transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <button
+          <div key={finding.id} className="space-y-1">
+            <Button
               type="button"
-              onClick={() => onAction(finding)}
-              title={onAction.label?.(finding) ?? finding.actionLabel ?? `Open ${finding.target}`}
+              size="sm"
+              variant="outline"
+              pending={working === finding.id}
+              disabled={working !== undefined}
+              onClick={async () => {
+                if (working) return
+                setWorking(finding.id)
+                try {
+                  await onAction(finding)
+                } finally {
+                  setWorking(undefined)
+                }
+              }}
             >
-              {finding.target}
-            </button>
-          </Tag>
+              <span className="font-mono">{finding.target}</span>
+              <span className="text-muted-foreground">
+                · {onAction.label?.(finding) ?? finding.actionLabel ?? "Inspect container"}
+              </span>
+            </Button>
+            <p className="text-hint">{finding.detail}</p>
+          </div>
         ) : (
           <Tag key={finding.id} mono>
             {finding.target}
@@ -286,7 +294,10 @@ export function AttentionPanel({
   const [dismissed, setDismissed] = useViewState<string[]>("docker.attention.dismissed", [])
 
   const findings = useMemo(
-    () => (diagnosis?.findings ?? []).filter((f) => includeRuntime || f.class !== "runtime"),
+    () =>
+      priorityDockerFindings(diagnosis?.findings ?? []).filter(
+        (f) => includeRuntime || f.class !== "runtime",
+      ),
     [diagnosis, includeRuntime],
   )
   const groups = useMemo(
@@ -324,7 +335,7 @@ export function AttentionPanel({
             emptyLabel={
               diagnosis.silences?.length
                 ? "No findings in completed checks"
-                : "Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+                : "No priority issues found in the completed Docker checks"
             }
           />
         </PanelBody>
@@ -414,7 +425,7 @@ export function AttentionPanel({
       />
       <PanelBody>
         <DiagnosisSilences diagnosis={diagnosis} />
-        <FindingList findings={rows} onDismiss={dismissOne} />
+        <FindingList emphasize findings={rows} onDismiss={dismissOne} />
         {(rest > 0 || showAll) && (
           <Button
             size="xs"
@@ -470,7 +481,9 @@ export function ContainerFindings({
   containerId: string
   onAction?: FindingAction
 }) {
-  const mine = (diagnosis?.findings ?? []).filter((f) => f.targetId === containerId)
+  const mine = priorityDockerFindings(diagnosis?.findings ?? []).filter(
+    (f) => f.targetId === containerId,
+  )
   if (mine.length === 0) return null
 
   const rows = mine
@@ -508,7 +521,7 @@ export function ContainerFindings({
         }
       />
       <PanelBody>
-        <FindingList findings={rows} />
+        <FindingList emphasize findings={rows} />
       </PanelBody>
     </Panel>
   )

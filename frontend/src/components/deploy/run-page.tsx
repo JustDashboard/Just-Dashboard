@@ -15,6 +15,7 @@ import {
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { plural } from "@/lib/format"
+import { previewURL } from "@/lib/pull-requests"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -22,6 +23,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentEngineRun,
   DeploymentOperations,
+  DeploymentPreview,
   DeploymentRelease,
   DeploymentRunSettingsDrift,
   DeploymentRunSnapshot,
@@ -147,6 +149,20 @@ export function RunPage() {
   // resolving a release id to the number an operator recognises ("release
   // #12") needs the environment's release list, which nothing else on this
   // page reads.
+  // A pull request's preview is an environment of its own, with its own live
+  // release and address: read against production's, a preview that went live
+  // said "Superseded" and offered nowhere to visit.
+  const forPreview = Boolean(
+    snapshot &&
+    project.data &&
+    snapshot.run.environmentId !== project.data.deployment.environmentId,
+  )
+  const previews = usePoll(
+    (signal) => get<DeploymentPreview[]>(`/deploy/${projectId}/previews`, undefined, signal),
+    10000,
+    [projectId],
+    { enabled: validIds && forPreview },
+  )
   const targetReleaseId = numberOf(snapshot?.run.metadata?.targetReleaseId)
   const releases = usePoll(
     (signal) =>
@@ -273,15 +289,17 @@ export function RunPage() {
   // told apart from a release this engine planned.
   const legacy = attempts.some((step) => step.key === "legacy_pipeline")
   const deployment = project.data?.deployment
-  const url = deploymentURL(deployment?.endpoint)
-  const isLiveRelease = Boolean(run.releaseId) && deployment?.liveReleaseId === run.releaseId
+  const preview = previews.data?.find((entry) => entry.environmentId === run.environmentId)
+  const liveReleaseId = forPreview ? preview?.liveReleaseId : deployment?.liveReleaseId
+  const url = forPreview ? previewURL(preview) : deploymentURL(deployment?.endpoint)
+  const isLiveRelease = Boolean(run.releaseId) && liveReleaseId === run.releaseId
   // A Stop leaves its release the live one but not serving, until a newer run
   // starts it again: a project read from before this run ended has no newer
   // run, and does not say stopped yet.
   const stopped = runStopped(run)
   const startedSince = stopped && !deployment?.stopped && (deployment?.lastRun?.id ?? 0) > run.id
   const release = releases.data?.find((candidate) => candidate.id === run.releaseId)
-  const liveRelease = releases.data?.find((candidate) => candidate.id === deployment?.liveReleaseId)
+  const liveRelease = releases.data?.find((candidate) => candidate.id === liveReleaseId)
   // The release that stayed live when this run rolled back is the one its
   // candidate replaced — not whichever is live today, which a later deploy
   // may have changed since.
@@ -454,7 +472,7 @@ export function RunPage() {
     },
     ...releaseVerbs({
       release,
-      liveReleaseId: deployment?.liveReleaseId,
+      liveReleaseId,
       can,
       working: working === "pin" ? "pin" : undefined,
       on: {
@@ -462,7 +480,7 @@ export function RunPage() {
         compare: (target) =>
           setCompare({
             open: true,
-            releaseId: deployment?.liveReleaseId,
+            releaseId: liveReleaseId,
             fromReleaseId: target.id,
           }),
         rollback: () => setRollbackOpen(true),
@@ -501,7 +519,7 @@ export function RunPage() {
               : "Deploy with current settings"}
         </Button>
       )}
-      {canRun && run.state === "succeeded" && isLiveRelease && !stopped && (
+      {canRun && !forPreview && run.state === "succeeded" && isLiveRelease && !stopped && (
         <Button
           variant="outline"
           size="sm"
@@ -512,7 +530,7 @@ export function RunPage() {
           {working === "redeploy" ? "Redeploying…" : "Redeploy"}
         </Button>
       )}
-      {canRun && stopped && isLiveRelease && deployment?.stopped && (
+      {canRun && !forPreview && stopped && isLiveRelease && deployment?.stopped && (
         <Button size="sm" pending={working === "start"} onClick={() => void enqueue("start")}>
           <Play className="size-3.5" />
           {working === "start" ? "Starting…" : "Start"}
@@ -546,6 +564,7 @@ export function RunPage() {
         run={run}
         release={release}
         deployment={deployment}
+        environment={forPreview ? (preview ? `PR ${preview.providerRef}` : "Preview") : undefined}
         product={deployment && projectProduct(deployment)}
         branch={project.data?.project.branch}
         steps={attempts}
@@ -608,8 +627,9 @@ export function RunPage() {
 
       {/* project.data is a separate poll from the run snapshot; reading
           isLiveRelease before it lands would flash "Superseded" for every
-          successful run while the project fetch is still in flight. */}
-      {run.state === "succeeded" && project.data && (
+          successful run while the project fetch is still in flight — and a
+          preview's run waits for its preview the same way. */}
+      {run.state === "succeeded" && project.data && (!forPreview || previews.data) && (
         <RunReady
           live={isLiveRelease}
           stopped={stopped}

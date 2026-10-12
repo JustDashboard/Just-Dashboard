@@ -127,6 +127,11 @@ export function heldReason(preview: DeploymentPreview | null | undefined): strin
   return reading ? HELD[reading.label] : undefined
 }
 
+/** Where an open preview can be visited — only while its address answers. */
+export function previewURL(preview: DeploymentPreview | null | undefined): string | undefined {
+  return preview?.state === "open" && preview.address?.published ? preview.address.url : undefined
+}
+
 /** A preview whose removal ended short of success keeps its containers: the thing to retry. */
 export function cleanupFailed(preview: DeploymentPreview | null | undefined): boolean {
   return previewStatus(preview)?.label === "Cleanup failed"

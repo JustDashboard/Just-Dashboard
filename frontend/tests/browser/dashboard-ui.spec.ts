@@ -11,7 +11,9 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * a box cannot come back by accident on either. The 0.7.0 pass took the row of
  * readings off the top of both (each figure moved beside the control or the
  * release it describes) and the tinted banners out of the restart record, and
- * both of those are asserted too.
+ * both of those are asserted too. The one frame Configuration has since 0.7.1
+ * is the danger rule around Uninstall, which the design system gives every
+ * page's acts that end something.
  */
 
 const now = new Date().toISOString()
@@ -155,12 +157,57 @@ async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
 
+const phrase = "atlas"
+
+const uninstallPlan = {
+  phrase,
+  dir,
+  envPath: `${dir}/.env`,
+  data: { path: "/var/lib/just-dashboard", files: 412, bytes: 48_000_000 },
+  backups: { path: "/var/backups/just-dashboard", files: 6, bytes: 900_000_000 },
+  deployments: {
+    projects: 2,
+    containers: [
+      { id: "c1", name: "jd-e1-r3" },
+      { id: "c2", name: "jd-e2-web-1" },
+    ],
+    routes: [{ id: "just-dashboard-env-1", name: "just-dashboard-env-1" }],
+    networks: [{ id: "n1", name: "jd-e2_default" }],
+    volumes: [{ id: "uploads", name: "uploads-1a2b" }],
+    paths: [],
+    images: [{ id: "i1", name: "just-dashboard/deployment-1:run-3" }],
+    ingress: { id: "c3", name: "just-dashboard-ingress" },
+  },
+  durableLog: "/var/log/just-dashboard-uninstall.log",
+}
+
+const uninstallRun = {
+  id: "20261012T120000Z",
+  status: "running",
+  phase: "pausing",
+  mode: "keep",
+  deleteBackups: false,
+  dir,
+  compose: "docker-compose.yml",
+  project: "just-dashboard",
+  image: "just-dashboard-backend:latest",
+  envPath: `${dir}/.env`,
+  dataDir: "/var/lib/just-dashboard",
+  backupDir: "/var/backups/just-dashboard",
+  container: "just-dashboard-uninstall",
+  actor: "operator",
+  startedAt: earlier,
+  updatedAt: now,
+}
+
 async function mockApi(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
     if (path === "/dashboard/update") return json(route, update)
     if (path === "/dashboard/config") return json(route, config)
+    if (path === "/dashboard/uninstall") return json(route, { supported: true })
+    if (path === "/dashboard/uninstall/plan") return json(route, uninstallPlan)
     if (path === "/dashboard/config/log") {
       return route.fulfill({ status: 200, contentType: "text/plain", body: wholeLog })
     }
@@ -168,12 +215,16 @@ async function mockApi(page: Page) {
   })
 }
 
-/** Every `Panel` on the page is plain: the redesign's one structural promise. */
+/**
+ * Every `Panel` on the page is plain: the redesign's one structural promise.
+ * The danger rule is the exception the design system makes on every page,
+ * around the acts that cannot be undone.
+ */
 async function framedPanels(page: Page) {
   return page.evaluate(() =>
-    Array.from(document.querySelectorAll("[data-slot=panel]:not([data-plain])")).map((el) =>
-      el.outerHTML.slice(0, 120),
-    ),
+    Array.from(
+      document.querySelectorAll("[data-slot=panel]:not([data-plain]):not(.border-rule-danger)"),
+    ).map((el) => el.outerHTML.slice(0, 120)),
   )
 }
 
@@ -205,6 +256,24 @@ test("the version page is the history, with the update in the header", async ({ 
   await expect(history.getByRole("heading", { name: "0.7.0" })).toHaveCount(0)
 
   expect(await framedPanels(page)).toEqual([])
+})
+
+test("the allowlist destination lands on Access after the configuration loads", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto("/dashboard/configuration#allowlist")
+  const access = page.locator("#allowlist")
+  await expect(access).toBeVisible()
+  await expect
+    .poll(async () => {
+      const box = await access.boundingBox()
+      return box?.y ?? -1
+    })
+    .toBeGreaterThanOrEqual(0)
+  const box = await access.boundingBox()
+  expect(box!.y).toBeLessThan(page.viewportSize()!.height / 2)
+  await expect(access.getByRole("textbox").first()).toBeVisible()
 })
 
 test("the configuration page edits in place and says where it lives", async ({ page }) => {
@@ -287,6 +356,88 @@ test("the stack is the path a request takes, and the allowlist is its networks",
   await page.getByRole("button", { name: "Discard" }).click()
   await expect(networks.getByRole("listitem")).toHaveCount(2)
   await expect(networks.getByText("your tailnet")).toBeVisible()
+})
+
+test("uninstalling asks what stays, and a wipe asks for the server's name", async ({ page }) => {
+  await mockApi(page)
+  const sent: { body: unknown; confirm?: string }[] = []
+  await page.route("**/api/v1/dashboard/uninstall", async (route) => {
+    if (route.request().method() !== "POST") return json(route, { supported: true })
+    sent.push({
+      body: route.request().postDataJSON(),
+      confirm: route.request().headers()["x-confirm"],
+    })
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ ...uninstallRun, mode: "wipe" }),
+    })
+  })
+  await page.goto("/dashboard/configuration")
+
+  const zone = page.locator("section", { hasText: "Danger zone" })
+  await zone.getByRole("button", { name: "Uninstall…" }).click()
+  const dialog = page.getByRole("dialog", { name: "Uninstall Just Dashboard" })
+  await expect(dialog.getByText("Just Dashboard on atlas")).toBeVisible()
+
+  // Keeping is the default, and needs nothing typed.
+  await expect(
+    dialog.getByRole("button", { name: "Keep the deployments and data" }),
+  ).toHaveAttribute("aria-pressed", "true")
+  const kept = dialog.getByRole("region", { name: "Kept" })
+  await expect(kept.getByText("2 deployments, still running")).toBeVisible()
+  await expect(kept.getByText(/2 containers · 1 volume · 1 image/)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Uninstall", exact: true })).toBeEnabled()
+  await expect(dialog.getByLabel(/Type atlas to confirm/)).toHaveCount(0)
+
+  // A wipe moves the deployments to what goes and asks for the server's name.
+  await dialog.getByRole("button", { name: "Wipe the deployments and data" }).click()
+  const removed = dialog.getByRole("region", { name: "Removed" })
+  await expect(removed.getByText("2 deployments", { exact: true })).toBeVisible()
+  await expect(removed.getByText("Its key")).toBeVisible()
+  // The backups are the operator's, and stay unless asked.
+  await expect(dialog.getByRole("switch", { name: "Delete the backups too" })).not.toBeChecked()
+  await expect(
+    dialog.getByRole("region", { name: "Kept" }).getByText("Backups", { exact: true }),
+  ).toBeVisible()
+  const wipe = dialog.getByRole("button", { name: "Wipe and uninstall" })
+  await expect(wipe).toBeDisabled()
+  await dialog.getByLabel(/Type atlas to confirm/).fill("atlas")
+  await expect(wipe).toBeEnabled()
+  await wipe.click()
+
+  await expect(dialog).toHaveCount(0)
+  expect(sent).toEqual([
+    { body: { mode: "wipe", deleteBackups: false }, confirm: encodeURIComponent(phrase) },
+  ])
+  expect(await framedPanels(page)).toEqual([])
+})
+
+test("an uninstall follows the stack down, then says what is left to do", async ({ page }) => {
+  await mockApi(page)
+  let down = false
+  await page.route("**/api/v1/dashboard/uninstall", async (route) => {
+    // The sibling has taken over and is stopping the stack: the next poll
+    // finds nothing answering, which is the uninstall working.
+    if (down) return route.abort("connectionrefused")
+    down = true
+    return json(route, {
+      supported: true,
+      run: { ...uninstallRun, phase: "stack" },
+      log: "Uninstalling Just Dashboard, requested by operator\nPausing deployments, schedules and backups\n\nHanding over to just-dashboard-uninstall, which stops the dashboard\n",
+    })
+  })
+  await page.goto("/dashboard/configuration")
+
+  const record = page.locator("section", { hasText: "Uninstalling" })
+  await expect(record.getByText("The dashboard has stopped")).toBeVisible({ timeout: 10_000 })
+  await expect(record.getByText("sudo tail -f /var/log/just-dashboard-uninstall.log")).toBeVisible()
+  await expect(record.getByText(`cd ${dir} && sudo ./install.sh`)).toBeVisible()
+  // The page stays drawn: losing the API is not an error state here.
+  await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible()
+  // Nothing is offered that the stack going away has made meaningless.
+  await expect(page.getByRole("button", { name: "Restart the dashboard" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Uninstall…" })).toHaveCount(0)
 })
 
 for (const path of ["/dashboard", "/dashboard/configuration"] as const) {

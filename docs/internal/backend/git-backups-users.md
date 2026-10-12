@@ -63,7 +63,8 @@ find the checkout containing its current directory while keeping "not a reposito
 configured roots" as honest non-error states.
 
 All Git subprocesses receive explicit argv and run as the checkout owner through `hostexec.AsOwner`, so a
-web operation does not leave root-owned files. They run with `GIT_OPTIONAL_LOCKS=0`, so a page polling
+web operation does not leave root-owned files; what another root process left behind is caught at Pull
+(below). They run with `GIT_OPTIONAL_LOCKS=0`, so a page polling
 `status` never takes `.git/index.lock` from under a commit typed in a terminal, and with `GIT_EDITOR=true`,
 so no operation can open an interactive editor. Local rebase instead uses the server's private
 `--git-editor` entrypoint with a validated JSON plan; caller text never becomes an editor command.
@@ -81,7 +82,20 @@ precedence over `checkout.defaultRemote`; otherwise exactly one remote must have
 lookups use `ls-remote`, so stale or missing fetched refs cannot choose an upstream. Missing or ambiguous
 matches direct the operator to **Branches → Set upstream**; an unpublished branch can be pushed first.
 Lookup failures stop the pull. The whole operation keeps its three-minute deadline, and Git still
-refuses divergent history or overwriting local edits. Push never forces and establishes a missing
+refuses divergent history or overwriting local edits. A pull refused for local work, or one that would
+write into a folder another account owns, answers `409 pull_blocked` with `blocked` beside the error:
+git's own `changed` and `untracked` lists, or the `unwritable` folders (path and owner) with the `owner`
+git runs as. The folder check runs only when a directory holding tracked files belongs to someone else;
+it then fetches what the pull would merge and refuses only when the incoming paths land in such a
+folder, because git writes every file it can, stops at the first it cannot, and leaves the written
+ones as local changes that block every later pull. Three routes take the ways past it: `POST
+/git/pull/stash` stashes everything, untracked included, and pulls; `POST /git/pull/discard` (inside
+`s.destructive`) restores exactly the files git named to HEAD, deletes the untracked ones it named and
+pulls; `POST /git/pull/own` (also `file.write`) hands the blocking folders to the checkout's owner
+through `hostexec.GiveBack` — `openat` with `O_NOFOLLOW` for every component and `fchown` on the
+descriptor, under a root that must already be the owner's — audits them with their previous owners as
+`git.pull.own`, and pulls. Each works out again on the server what is in the way; none takes a path
+from the request. Push never forces and establishes a missing
 upstream on the branch's own remote; checkout never forces, and a remote branch is checked out as a new
 local branch that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure.
 The workspace uses `/operation/start`, which requires a clean checkout and retains conflicts for the
@@ -109,10 +123,10 @@ linked worktree is removed through its repository — `git worktree remove --for
 checkout, then `git worktree prune` — so no record of it is left; anything else is deleted from disk.
 It is audited as `git.repository.delete`.
 
-Route capabilities reflect recoverability: reads require `read`; fetch/pull/push (and pushing tags),
+Route capabilities reflect recoverability: reads require `read`; fetch/pull/push (and pushing tags), stash-and-pull,
 checkout, branch create/rename, merge, revert, cherry-pick, tag create, stash push/pop/apply,
-stage/unstage/commit, identity, adding a remote, clone and init require `service.control`; discard, reset,
-stash drop, deleting a branch, a remote branch, a tag or a remote, and deleting a checkout pass through
+stage/unstage/commit, identity, adding a remote, clone and init require `service.control`, and giving a
+blocked pull's folders back also `file.write`; discard, reset, discard-and-pull, stash drop, deleting a branch, a remote branch, a tag or a remote, and deleting a checkout pass through
 `s.destructive`. Discard, hard reset, stash drop, and Git deletions use ordinary confirmation; deleting
 a whole checkout is the one Git route that takes a typed phrase. Every mutation lands in
 the audit log as `git.<verb>` with the repository it touched.
@@ -165,7 +179,8 @@ streams a gzip-compressed tar archive to a `0600` staging file, fails on unreada
 applies exclusions to both full paths and basenames, then moves locally or uploads through the
 AWS S3 multipart client. A source may contain the staging directory only when an exclusion covers it —
 the dashboard's own data directory is the one source where that is legitimate, and the suggested job
-excludes `staging` and `deployment-workspaces`. Database dumps are taken first, while the engines can
+excludes `staging`, `deployment-workspaces` and `install.env` (the copy of the key a kept uninstall leaves
+beside the data, which must not travel in an archive of that data). Database dumps are taken first, while the engines can
 still answer; then the job's containers are paused through `ContainerPauser` (the Docker owner's
 `Lifecycle` pause/unpause, wired in `modules.go`) for exactly the filesystem walk, and resumed with a
 context that cannot be cancelled, whatever the walk did. A stopped container needs no pause and is

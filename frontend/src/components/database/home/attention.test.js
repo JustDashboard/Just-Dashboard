@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mongoConcerns, placementConcerns, ranked, redisConcerns } from "./attention"
+import { concernParams, mongoConcerns, placementConcerns, ranked, redisConcerns } from "./attention"
 
 const at = (seconds, counters = {}, gauges = {}) => ({ at: seconds * 1000, counters, gauges })
 const ids = (concerns) => concerns.map((concern) => concern.id)
@@ -21,6 +21,15 @@ const healthy = {
   },
   replication: { role: "primary", replicas: [] },
 }
+
+test("findings open the matching view or parameter and never an unavailable engine view", () => {
+  expect(concernParams({ id: "replica-link-down" }, () => true)).toEqual({ view: "persistence" })
+  expect(concernParams({ id: "memory-near-limit" }, () => true)).toEqual({ view: "memory" })
+  expect(concernParams({ id: "operations-queued" }, () => true)).toEqual({ view: "operations" })
+  expect(concernParams({ id: "rejecting-connections" }, () => true)).toEqual({ q: "maxclients" })
+  expect(concernParams({ id: "no-memory-limit" }, () => true)).toEqual({ q: "maxmemory" })
+  expect(concernParams({ id: "memory-near-limit" }, () => false)).toBeUndefined()
+})
 
 describe("what the connection's own summary gives away", () => {
   test("a port the internet can reach, and a database nobody has dumped", () => {
@@ -117,7 +126,7 @@ describe("what a MongoDB server's readings say", () => {
     ).toEqual([])
   })
 
-  test("connections near the limit, operations queued, a cache it cannot evict from", () => {
+  test("connections near the limit and operations queued; a full cache alone is not a fault", () => {
     const run = [
       at(
         0,
@@ -132,9 +141,14 @@ describe("what a MongoDB server's readings say", () => {
       ),
     ]
     const found = mongoConcerns(run)
-    expect(ids(found)).toEqual(["connections-near-limit", "operations-queued", "cache-full"])
+    expect(ids(found)).toEqual(["connections-near-limit", "operations-queued"])
     expect(found[0].level).toBe("critical")
     expect(found[1].title).toBe("3 operations are waiting for a lock")
+    expect(mongoConcerns([at(0, {}, { cachePercent: 99 })])).toEqual([])
+    expect(mongoConcerns([at(0, {}, { cachePercent: 100 })])[0]).toMatchObject({
+      id: "cache-at-limit",
+      level: "critical",
+    })
   })
 
   test("queries that read a thousand documents for each one returned", () => {

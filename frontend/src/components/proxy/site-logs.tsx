@@ -9,6 +9,7 @@ import { EMPTY_FILTER, filterQuery, type LogLevel } from "@/lib/log-filter"
 import { lensFor } from "@/lib/log-lenses"
 import { usePoll } from "@/hooks/use-poll"
 import type { LogFields } from "@/components/logs/types"
+import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type LogWindow } from "@/components/logs/service-logs"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
@@ -213,6 +214,7 @@ export function SiteLogs({
       {view === "files" && (
         <ServiceLogs
           sources={plan.sources}
+          views={kindViews}
           source={source}
           onSourceChange={(id) => {
             setSource(id)

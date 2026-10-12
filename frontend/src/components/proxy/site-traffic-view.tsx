@@ -34,7 +34,6 @@ import {
   compactCount,
   errorRateTone,
   share,
-  trafficHref,
   type TrafficView,
 } from "@/components/proxy/site-traffic"
 
@@ -195,7 +194,7 @@ export function SiteTrafficView() {
         ) : !sites ? (
           <LoadingPanel />
         ) : (
-          <BusiestSites sites={sites} onOpen={(name) => router.push(trafficHref(name))} />
+          <BusiestSites sites={sites} onOpen={(href) => router.push(href)} />
         )}
       </Page>
     )
@@ -310,7 +309,7 @@ function BusiestSites({
   onOpen,
 }: {
   sites: SiteTrafficSummary["sites"]
-  onOpen: (site: string) => void
+  onOpen: (href: string) => void
 }) {
   return (
     <Panel plain>
@@ -319,7 +318,7 @@ function BusiestSites({
         <BarList
           className="animate-rise"
           items={busiestItems(sites, onOpen)}
-          emptyLabel="No nginx sites on this host."
+          emptyLabel="No sites on this host."
         />
       </PanelBody>
     </Panel>

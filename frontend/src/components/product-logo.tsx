@@ -142,6 +142,7 @@ const LOGOS: Record<string, string> = {
   eleventy: "eleventy.svg",
   elixir: "elixir.svg",
   ember: "ember.svg",
+  excalidraw: "excalidraw.svg",
   etcd: "etcd.svg",
   express: "express.svg",
   facebook: "facebook.svg",

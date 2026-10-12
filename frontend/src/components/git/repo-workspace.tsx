@@ -29,6 +29,7 @@ import { forgeRepository } from "@/lib/git-repos"
 import { cn } from "@/lib/utils"
 import type {
   GitFileChange,
+  GitPullBlocked,
   GitPullRequestSummary,
   GitRepo,
   GitResult,
@@ -59,6 +60,7 @@ import { IdentityDialog } from "@/components/git/identity-dialog"
 import { PreviewPanel, type GitPreview, type PreviewContext } from "@/components/git/preview-panel"
 import { RemotesDialog } from "@/components/git/remotes-dialog"
 import { WorktreesDialog } from "@/components/git/worktrees-dialog"
+import { PullBlockedDialog, pullBlocked } from "@/components/git/pull-blocked"
 import { useGitRun } from "@/components/git/run"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { ResizeHandle } from "@/components/resize-handle"
@@ -235,6 +237,7 @@ export function RepoWorkspace({
     onRepoChanged()
   }, [status, onRepoChanged])
   const { busy, run } = useGitRun(onChanged)
+  const [pullBlockedBy, setPullBlockedBy] = useState<GitPullBlocked>()
 
   // The tree badges changed files; git reports them relative to the repo root.
   const statusMap = useMemo(() => {
@@ -698,7 +701,7 @@ export function RepoWorkspace({
                           onClick={() =>
                             void run("Pulled", () =>
                               post<GitResult>("/git/pull", undefined, { query: q }),
-                            ).catch(() => undefined)
+                            ).catch((err) => setPullBlockedBy(pullBlocked(err)))
                           }
                         >
                           <ChevronDoubleDown className="size-4" />
@@ -999,6 +1002,14 @@ export function RepoWorkspace({
           identity={status.data?.identity}
           onSaved={onChanged}
         />
+        {pullBlockedBy && (
+          <PullBlockedDialog
+            repoPath={repo.path}
+            blocked={pullBlockedBy}
+            onClose={() => setPullBlockedBy(undefined)}
+            onChanged={onChanged}
+          />
+        )}
         {dialog}
         {removal.dialog}
       </Page>

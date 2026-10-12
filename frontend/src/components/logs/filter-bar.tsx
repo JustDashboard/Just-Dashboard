@@ -1,15 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import {
-  Check,
-  ChevronDown,
-  Cross,
-  MagnifyingGlass,
-  SettingsSliders,
-  SlashForward,
-  TextUppercase,
-} from "@/components/icons"
+import { Check, ChevronDown, Cross, MagnifyingGlass, SettingsSliders } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes } from "@/lib/format"
 import type { LogJournalUnit, LogSource } from "@/lib/types"
@@ -18,14 +10,11 @@ import {
   LEVEL_HINT,
   LEVEL_LABEL,
   LOG_LEVELS,
-  TIME_RANGES,
-  logTimeInput,
   withFieldTokens,
   type LogLevel,
 } from "@/lib/log-filter"
 import { LENS_CHOICES, lensFor } from "@/lib/log-lenses"
-import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
-import { SearchInput } from "@/components/page"
+import type { LogFilterState, LogMode } from "@/components/logs/types"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -34,6 +23,12 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Command,
   CommandEmpty,
@@ -70,6 +65,15 @@ function ownsSlash(id: string) {
   return owner === id
 }
 
+/** The settings behind Options that narrow or widen what is read, as the filter row draws them. */
+export type LogOptions = {
+  context: number
+  archives: boolean
+  boot: boolean
+  /** The lens the reader forced: "" for the detected one, "none" for none. */
+  lens: string
+}
+
 /**
  * One filter for both questions.
  *
@@ -80,11 +84,15 @@ function ownsSlash(id: string) {
  * it — because "these errors are scrolling past, when did they start" is one
  * thought, not two forms.
  *
- * It is a row of the workspace pane rather than a panel above it. The window
- * and the unit sit in the row itself, because they are the two narrowings
- * somebody reaches for on every visit; what is left behind "More" is the
- * exclusion, the context lines, the archives and the boot — used, but not
- * daily.
+ * The bar is one row of controls that share one face: the search field with
+ * its two switches and its Search inside the field's own edge, the unit, the
+ * window, and Options. It used to be four kinds of control in a row — a brand
+ * Search button standing alone, a filled select, a ghost More, and two bare
+ * glyphs at the end of the field that read as a keyboard hint ("/") and a
+ * letter ("B") — so nothing said which of them did what. Options is a popover
+ * now rather than a row that opened under the bar and pushed the lines down,
+ * and what it holds is drawn in the filter row while it is set, so a
+ * narrowing behind it is never out of sight.
  */
 export function FilterBar({
   mode,
@@ -96,12 +104,7 @@ export function FilterBar({
   units,
   unit,
   onUnitChange,
-  range,
-  onRangeChange,
-  since,
-  until,
-  onSinceChange,
-  onUntilChange,
+  window: timeWindow,
   context,
   onContextChange,
   archives,
@@ -125,12 +128,8 @@ export function FilterBar({
   units: LogJournalUnit[]
   unit: string
   onUnitChange: (unit: string) => void
-  range: LogTimeRange
-  onRangeChange: (range: LogTimeRange) => void
-  since: string
-  until: string
-  onSinceChange: (value: string) => void
-  onUntilChange: (value: string) => void
+  /** The time window control, where the reading on screen has one. */
+  window?: React.ReactNode
   context: number
   onContextChange: (value: number) => void
   archives: boolean
@@ -145,7 +144,7 @@ export function FilterBar({
   lens?: string
   /**
    * The lens the page reads its source through, which is where the pane
-   * starts rather than a setting the reader changed: More does not count it.
+   * starts rather than a setting the reader changed: Options does not count it.
    */
   pageLens?: string
   /** The lens the source was detected as, for the Auto choice's words. */
@@ -154,6 +153,9 @@ export function FilterBar({
   onLensChange?: (lens: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // The exclusion as Options opened on it: closed with another, History and
+  // Insights ask again, as Enter in the field does.
+  const [excludeAtOpen, setExcludeAtOpen] = useState(filter.exclude)
   const queryRef = useRef<HTMLInputElement>(null)
 
   // "/" is the search key everywhere a log is read; without it the operator's
@@ -187,28 +189,32 @@ export function FilterBar({
   }
   const isJournal = source?.kind === "journal"
   const hasArchives = (source?.archives ?? 0) > 0
-  const advancedCount =
+  // History and Insights both read a window of the file; Live reads its end.
+  const windowed = mode === "search" || mode === "insights"
+  // What is set and applies to the reading on screen: context lines are
+  // History's, the rotated files a window's.
+  const optionCount =
     (filter.exclude ? 1 : 0) +
-    (context > 0 ? 1 : 0) +
-    (archives && hasArchives ? 1 : 0) +
+    (context > 0 && mode === "search" ? 1 : 0) +
+    (archives && hasArchives && windowed ? 1 : 0) +
     (boot && isJournal ? 1 : 0) +
     (onLensChange && (lens ?? "") !== (pageLens ?? "") ? 1 : 0)
   const detected = lensFor(detectedLens)?.label
-  // History and Insights both read a window of the file; Live reads its end.
-  const windowed = mode === "search" || mode === "insights"
-  const customRow = windowed && range === "custom"
 
   return (
-    <>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-3 py-2">
-        <form
-          className="relative flex min-w-56 flex-1 items-center"
-          onSubmit={(e) => {
-            e.preventDefault()
-            submit()
-          }}
-        >
-          <SearchInput
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-3 py-2">
+      <form
+        className="flex min-w-56 flex-1 basis-80"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <InputGroup className="sm:h-8">
+          <InputGroupAddon className="border-r-0 pr-0">
+            <MagnifyingGlass />
+          </InputGroupAddon>
+          <InputGroupInput
             ref={queryRef}
             data-workspace-search
             value={filter.q}
@@ -216,210 +222,184 @@ export function FilterBar({
             aria-label={mode === "live" ? "Filter the stream" : "Search this log's history"}
             placeholder={
               mode === "live"
-                ? "Filter the stream — matched on the server, press / to focus"
+                ? "Filter the live stream · Enter searches the history"
                 : fieldKeys?.size
-                  ? "Search this log's history — words, or user:postgres — press Enter"
-                  : "Search this log's history — press Enter"
+                  ? "Search words, or a field like user:postgres"
+                  : "Search this log's history"
             }
-            className="pr-18"
-            containerClassName="sm:w-full"
-            trailing={
-              <>
-                {filter.q && (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-6"
-                    aria-label="Clear the filter"
-                    onClick={() => set({ q: "" })}
-                  >
-                    <Cross className="size-3" />
-                  </Button>
-                )}
-                <InputToggle
-                  active={filter.regex}
-                  onClick={() => set({ regex: !filter.regex })}
-                  icon={SlashForward}
-                  hint="Treat the search as a regular expression (RE2, the same one the server runs)"
-                />
-                <InputToggle
-                  active={!filter.ignoreCase}
-                  onClick={() => set({ ignoreCase: !filter.ignoreCase })}
-                  icon={TextUppercase}
-                  hint="Match case exactly"
-                />
-              </>
-            }
+            className="sm:text-body"
           />
-        </form>
-
-        {isJournal && units.length > 0 && (
-          <UnitPicker units={units} value={unit} onChange={onUnitChange} />
-        )}
-
-        {windowed && (
-          <>
-            <Select value={range} onValueChange={(v) => onRangeChange(v as LogTimeRange)}>
-              <SelectTrigger size="sm" className="w-40" aria-label="Window">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TIME_RANGES.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button size="sm" onClick={submit} pending={searching} className="h-8">
-              <MagnifyingGlass className="size-3.5" />
-              Search
-            </Button>
-          </>
-        )}
-
-        <Button
-          size="sm"
-          variant={open || advancedCount > 0 ? "secondary" : "ghost"}
-          className="h-8 gap-1.5"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <SettingsSliders className="size-3.5" />
-          {/* On a phone the window and Search take the second row, and the
-              word left "More" alone on a third. */}
-          <span className="max-sm:sr-only">More</span>
-          {advancedCount > 0 && <ChipCount>{advancedCount}</ChipCount>}
-          <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
-        </Button>
-      </div>
-
-      {/* The custom window's fields are History's; in Live the row would be
-          an empty strip with a border, which is what it used to draw. */}
-      {(open || customRow) && (
-        <div className="flex shrink-0 animate-rise flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline px-3 py-2">
-          {customRow && (
-            <>
-              <Field label="From">
-                <Input
-                  type="datetime-local"
-                  value={logTimeInput(since)}
-                  step="0.001"
-                  aria-label="From"
-                  onChange={(e) => onSinceChange(e.target.value)}
-                  // As wide as the reader's own clock writes it: a fixed
-                  // width cut a 12-hour locale's PM off, and 19:02 read 07:02.
-                  className="h-8 w-auto text-body"
-                />
-              </Field>
-              <Field label="To">
-                <Input
-                  type="datetime-local"
-                  value={logTimeInput(until)}
-                  step="0.001"
-                  aria-label="To"
-                  onChange={(e) => onUntilChange(e.target.value)}
-                  className="h-8 w-auto text-body"
-                />
-              </Field>
-            </>
+          {filter.q && (
+            <InputGroupAddon align="inline-end" className="border-l-0 px-1">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Clear the search"
+                onClick={() => {
+                  set({ q: "" })
+                  queryRef.current?.focus()
+                }}
+              >
+                <Cross />
+              </Button>
+            </InputGroupAddon>
           )}
+          <InputGroupAddon align="inline-end" className="gap-0 p-0">
+            <MatchToggle
+              active={filter.regex}
+              onClick={() => set({ regex: !filter.regex })}
+              glyph=".*"
+              label="Regular expression"
+              hint="Read the search as a regular expression (RE2, the one the server runs)"
+            />
+            <MatchToggle
+              active={!filter.ignoreCase}
+              onClick={() => set({ ignoreCase: !filter.ignoreCase })}
+              glyph="Aa"
+              label="Match case"
+              hint="Match upper and lower case exactly"
+            />
+            {windowed && (
+              <InputGroupButton
+                type="submit"
+                variant="default"
+                pending={searching}
+                className="gap-1.5 px-3 font-medium"
+              >
+                Search
+              </InputGroupButton>
+            )}
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
 
-          {open && (
-            <>
-              <Field label="Hide lines containing">
-                <Input
-                  value={filter.exclude}
-                  onChange={(e) => set({ exclude: e.target.value })}
-                  placeholder="e.g. /healthz"
-                  aria-label="Hide lines containing"
-                  className="h-8 w-44 text-body"
-                />
-              </Field>
-
-              {mode === "search" && (
-                <Field label="Context lines">
-                  <ToggleGroup
-                    type="single"
-                    value={String(context)}
-                    onValueChange={(v) => v && onContextChange(Number(v))}
-                    variant="outline"
-                    size="sm"
-                  >
-                    {CONTEXT_CHOICES.map((n) => (
-                      <ToggleGroupItem key={n} value={String(n)} className="px-2 text-hint">
-                        {n === 0 ? "none" : `±${n}`}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </Field>
-              )}
-
-              {windowed && hasArchives && (
-                <label className="flex items-center gap-2 text-xs">
-                  <Switch size="sm" checked={archives} onCheckedChange={onArchivesChange} />
-                  <span>
-                    Include {source?.archives} rotated{" "}
-                    {source?.archives === 1 ? "archive" : "archives"}
-                    <span className="text-muted-foreground"> ({bytes(source?.archiveBytes)})</span>
-                  </span>
-                </label>
-              )}
-
-              {onLensChange && (
-                <Field label="Read as">
-                  <Select
-                    value={lens || "auto"}
-                    onValueChange={(v) => onLensChange(v === "auto" ? "" : v)}
-                  >
-                    <SelectTrigger size="sm" className="w-52" aria-label="Read as">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto" hint={detected ? `detected ${detected}` : undefined}>
-                        Auto
-                      </SelectItem>
-                      {LENS_CHOICES.map((choice) => (
-                        <SelectItem key={choice.id} value={choice.id}>
-                          {choice.label}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="none" hint="the text as written">
-                        None
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
-
-              {isJournal && (
-                <label className="flex items-center gap-2 text-xs">
-                  <Switch size="sm" checked={boot} onCheckedChange={onBootChange} />
-                  <span>
-                    This boot only
-                    <span className="text-muted-foreground">
-                      {" "}
-                      — everything since the machine came up
-                    </span>
-                  </span>
-                </label>
-              )}
-            </>
-          )}
-        </div>
+      {isJournal && units.length > 0 && (
+        <UnitPicker units={units} value={unit} onChange={onUnitChange} />
       )}
-    </>
+
+      {timeWindow}
+
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          if (next) setExcludeAtOpen(filter.exclude)
+          else if (windowed && filter.exclude !== excludeAtOpen) submit()
+          setOpen(next)
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10"
+            aria-label="Options"
+          >
+            <SettingsSliders className="size-3.5 text-muted-foreground" />
+            {/* On a phone the word goes and the glyph and count stay: the bar
+                is the field over the window and this. */}
+            <span className="text-body max-sm:sr-only">Options</span>
+            {optionCount > 0 && (
+              <ChipCount className="text-signal opacity-100">{optionCount}</ChipCount>
+            )}
+            <ChevronDown
+              aria-hidden
+              className="size-3.5 text-muted-foreground transition-transform in-data-[state=open]:rotate-180"
+            />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80 space-y-4 p-4">
+          <OptionField label="Hide lines containing" htmlFor="log-exclude">
+            <Input
+              id="log-exclude"
+              value={filter.exclude}
+              onChange={(e) => set({ exclude: e.target.value })}
+              placeholder="e.g. /healthz"
+              className="h-8 text-body"
+            />
+          </OptionField>
+
+          {mode === "search" && (
+            <OptionField label="Lines around each match">
+              <ToggleGroup
+                type="single"
+                value={String(context)}
+                onValueChange={(v) => v && onContextChange(Number(v))}
+                variant="outline"
+                size="sm"
+                aria-label="Context lines"
+                className="w-full"
+              >
+                {CONTEXT_CHOICES.map((n) => (
+                  <ToggleGroupItem key={n} value={String(n)} className="flex-1 text-hint">
+                    {n === 0 ? "None" : `±${n}`}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </OptionField>
+          )}
+
+          {onLensChange && (
+            <OptionField label="Read as" htmlFor="log-read-as">
+              <Select
+                value={lens || "auto"}
+                onValueChange={(v) => onLensChange(v === "auto" ? "" : v)}
+              >
+                <SelectTrigger id="log-read-as" size="sm" className="w-full" aria-label="Read as">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto" hint={detected ? `detected ${detected}` : undefined}>
+                    Auto
+                  </SelectItem>
+                  {LENS_CHOICES.map((choice) => (
+                    <SelectItem key={choice.id} value={choice.id}>
+                      {choice.label}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="none" hint="the text as written">
+                    None
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </OptionField>
+          )}
+
+          {(windowed && hasArchives) || isJournal ? (
+            <div className="space-y-3 border-t border-hairline pt-3">
+              {windowed && hasArchives && (
+                <SwitchRow
+                  checked={archives}
+                  onCheckedChange={onArchivesChange}
+                  label={`Include ${source?.archives} rotated ${source?.archives === 1 ? "file" : "files"}`}
+                  hint={`${bytes(source?.archiveBytes)} of older lines`}
+                />
+              )}
+              {isJournal && (
+                <SwitchRow
+                  checked={boot}
+                  onCheckedChange={onBootChange}
+                  label="This boot only"
+                  hint="Everything since the machine came up"
+                />
+              )}
+            </div>
+          ) : null}
+        </PopoverContent>
+      </Popover>
+    </div>
   )
 }
 
 /**
- * Which levels are shown, with how many of each are on screen.
+ * Which levels are shown, with how many of each there are.
  *
- * The chips carry the counts, so one row answers both "what am I looking at"
- * and "show me only the bad ones". They sit on the strip directly above the
- * lines, beside the view toggles, because that is the row the eye is on while
- * reading — the level column in the lines below uses the same dot colours.
+ * The chips carry the counts, so one group answers both "what am I looking
+ * at" and "show me only the bad ones". Each is keyed by its level's dot — the
+ * colour the level column and the histogram draw it in — and a count above
+ * zero takes that colour too, so "error 238" is red before it is read. They
+ * lead the filter row, with the questions the lens asks after them, so every
+ * narrowing is in one row rather than split across the chart.
  */
 export function LevelChips({
   filter,
@@ -439,7 +419,7 @@ export function LevelChips({
     })
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Levels">
+    <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Levels">
       {LOG_LEVELS.map((level) => (
         <Tooltip key={level}>
           <TooltipTrigger asChild>
@@ -448,62 +428,106 @@ export function LevelChips({
               onClick={() => toggle(level)}
               className="px-2"
             >
-              <span aria-hidden className={cn("size-1.5 rounded-full", LEVEL_DOT[level])} />
+              <span aria-hidden className={cn("size-2 rounded-full", LEVEL_DOT[level])} />
               {LEVEL_LABEL[level]}
-              {counts[level] > 0 && <ChipCount>{counts[level].toLocaleString()}</ChipCount>}
+              {counts[level] > 0 && (
+                <ChipCount className={cn(COUNT_TONE[level], COUNT_TONE[level] && "opacity-100")}>
+                  {counts[level].toLocaleString()}
+                </ChipCount>
+              )}
             </FilterChip>
           </TooltipTrigger>
           <TooltipContent>{LEVEL_HINT[level]}</TooltipContent>
         </Tooltip>
       ))}
-      {filter.levels.length > 0 && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 shrink-0 px-2 text-hint"
-          onClick={() => onFilterChange({ ...filter, levels: [] })}
-        >
-          Every level
-        </Button>
-      )}
     </div>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+const COUNT_TONE: Partial<Record<LogLevel, string>> = {
+  critical: "text-destructive",
+  error: "text-destructive",
+  warn: "text-warning",
+}
+
+function OptionField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string
+  htmlFor?: string
+  children: React.ReactNode
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <Label className="text-hint text-muted-foreground">{label}</Label>
+    <div className="space-y-1.5">
+      <Label htmlFor={htmlFor} className="text-hint text-muted-foreground">
+        {label}
+      </Label>
       {children}
     </div>
   )
 }
 
-function InputToggle({
+function SwitchRow({
+  checked,
+  onCheckedChange,
+  label,
+  hint,
+}: {
+  checked: boolean
+  onCheckedChange: (value: boolean) => void
+  label: string
+  hint: string
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3">
+      <span className="min-w-0">
+        <span className="block text-body">{label}</span>
+        <span className="block text-hint text-muted-foreground">{hint}</span>
+      </span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} className="mt-0.5" />
+    </label>
+  )
+}
+
+/**
+ * A switch on how the words are matched, inside the field's edge: the
+ * editors' own `.*` and `Aa`, which a reader of logs already knows, rather
+ * than a slash that read as the `/` shortcut's hint and a glyph that read as
+ * a "B". On, it takes the pressed ground and the brand ink, `InputGroupToggle`'s
+ * selection.
+ */
+function MatchToggle({
   active,
   onClick,
-  icon: Icon,
+  glyph,
+  label,
   hint,
 }: {
   active: boolean
   onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
+  glyph: string
+  label: string
   hint: string
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
+        <button
           type="button"
-          size="icon"
-          variant={active ? "secondary" : "ghost"}
-          className="size-6"
-          aria-label={hint}
+          aria-label={label}
           aria-pressed={active}
           onClick={onClick}
+          className={cn(
+            "flex h-full w-9 items-center justify-center font-mono text-hint font-medium focus-ring-inset transition-colors",
+            active
+              ? "bg-accent text-brand"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
         >
-          <Icon className="size-3.5" />
-        </Button>
+          {glyph}
+        </button>
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>
     </Tooltip>
@@ -531,11 +555,11 @@ function UnitPicker({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 w-48 justify-between font-normal"
+          className="h-8 w-48 justify-between font-normal max-sm:h-10"
           aria-label="Unit"
         >
-          <span className="truncate">{value || "Every unit"}</span>
-          <ChevronDown className="size-3 opacity-60" />
+          <span className="truncate text-body">{value || "Every unit"}</span>
+          <ChevronDown className="size-3.5 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0" align="start">

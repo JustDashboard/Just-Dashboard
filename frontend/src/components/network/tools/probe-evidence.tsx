@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { FindingList } from "@/components/finding-list"
+import { findingNavigation } from "@/lib/finding-destinations"
 import { Detail, DetailList, Metric, MetricStrip } from "@/components/page"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -72,16 +73,7 @@ export function ProbeEvidence({ result }: { result: DiagnosticResult }) {
               detail: finding.detail,
               advice: finding.action,
               meta: finding.owner,
-              extra: (
-                <>
-                  {finding.owner && <p>Owner: {finding.owner}</p>}
-                  {finding.href && (
-                    <Link href={finding.href} className="underline underline-offset-4">
-                      Open where this is fixed
-                    </Link>
-                  )}
-                </>
-              ),
+              action: finding.href ? findingNavigation(finding.href) : undefined,
             }))}
           />
         </section>

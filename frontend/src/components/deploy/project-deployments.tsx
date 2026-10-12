@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { GitPullRequest, Globe, Pin, RotateCounterClockwise } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { previewURL } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -427,42 +428,54 @@ export function ProjectDeployments() {
   const url = deploymentURL(deployment.endpoint)
   const releaseOf = (run: DeploymentEngineRun) =>
     project.releases.find((candidate) => candidate.id === run.releaseId)
-  const verbsFor = (run: DeploymentEngineRun, busy?: RunVerbKey) => [
-    ...runVerbs({
-      run,
-      release: releaseOf(run),
-      liveReleaseId: deployment.liveReleaseId,
-      url,
-      can,
-      working: busy,
-      stale: driftOf(run)?.changed ?? runPlanIsStale(run, deployment),
-      on: {
-        open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
-        visit: () => window.open(url, "_blank", "noopener,noreferrer"),
-        redeploy: () => void project.start("redeploy"),
-        retry: () => void act(run, "retry"),
-        cancel: () => void act(run, "cancel"),
-        deploy: () => void deployCurrent(run),
-      },
-    }),
-    ...releaseVerbs({
-      release: releaseOf(run),
-      liveReleaseId: deployment.liveReleaseId,
-      can,
-      working: busy,
-      on: {
-        changes: (release) => setCompare({ open: true, releaseId: release.id }),
-        compare: (release) =>
-          setCompare({
-            open: true,
-            releaseId: deployment.liveReleaseId,
-            fromReleaseId: release.id,
-          }),
-        rollback: (release) => setRollback({ open: true, releaseId: release.id }),
-        pin: (release) => void togglePin(run, release),
-      },
-    }),
-  ]
+  // A preview's run is live by its own environment's release and visited at
+  // its own address: production's would read every preview as superseded,
+  // with nowhere to go.
+  const standingOf = (run: DeploymentEngineRun) => {
+    if (run.environmentId === project.environmentId) {
+      return { preview: false, liveReleaseId: deployment.liveReleaseId, url }
+    }
+    const preview = previews.data?.find((entry) => entry.environmentId === run.environmentId)
+    return { preview: true, liveReleaseId: preview?.liveReleaseId, url: previewURL(preview) }
+  }
+  const verbsFor = (run: DeploymentEngineRun, busy?: RunVerbKey) => {
+    const standing = standingOf(run)
+    return [
+      ...runVerbs({
+        run,
+        liveReleaseId: standing.liveReleaseId,
+        url: standing.url,
+        can,
+        working: busy,
+        stale: driftOf(run)?.changed ?? runPlanIsStale(run, deployment),
+        on: {
+          open: () => router.push(`/deploy/${project.projectId}/runs/${run.id}`),
+          visit: () => window.open(standing.url, "_blank", "noopener,noreferrer"),
+          redeploy: standing.preview ? undefined : () => void project.start("redeploy"),
+          retry: () => void act(run, "retry"),
+          cancel: () => void act(run, "cancel"),
+          deploy: () => void deployCurrent(run),
+        },
+      }),
+      ...releaseVerbs({
+        release: releaseOf(run),
+        liveReleaseId: deployment.liveReleaseId,
+        can,
+        working: busy,
+        on: {
+          changes: (release) => setCompare({ open: true, releaseId: release.id }),
+          compare: (release) =>
+            setCompare({
+              open: true,
+              releaseId: deployment.liveReleaseId,
+              fromReleaseId: release.id,
+            }),
+          rollback: (release) => setRollback({ open: true, releaseId: release.id }),
+          pin: (release) => void togglePin(run, release),
+        },
+      }),
+    ]
+  }
   // Where each run came from: the environment's live source, or — before a
   // release has gone live and fixed one — the branch the project follows.
   const source = { ...deployment, sourceRef: deployment.sourceRef || record.branch }
@@ -586,7 +599,8 @@ export function ProjectDeployments() {
                         {group.runs.map((run) => {
                           const release = releaseOf(run)
                           const isLive =
-                            Boolean(release) && release!.id === deployment.liveReleaseId
+                            Boolean(run.releaseId) &&
+                            run.releaseId === standingOf(run).liveReleaseId
                           const pending = pendingOf(run, release)
                           const preview =
                             run.environmentId !== project.environmentId &&

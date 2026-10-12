@@ -174,6 +174,21 @@ new live file, a vanished inode reading as absent.
   navigation, not a source.
 - **Per-path p95**: a bounded sample per path (128 samples, 2,000 paths) so the top-paths table says
   which route the slow tenth belongs to.
+- **Audience** (`Summary.Audience`, `audience.go`): who the traffic was, the people told apart from
+  the programs. A **visitor** is an address and the whole user agent it sent, counted once it has
+  opened a page (`IsPage`, not a probe) with a person's browser — a `Mozilla/` agent that `IsBot`
+  does not claim; a record with no agent at all (Apache's common log) keys by the address alone,
+  since reading it as no visitors would be wrong. `Bots` are the distinct addresses whose agent is a
+  crawler, a scanner or a script, with `BotRequests` and `HumanRequests` beside them (an agent that is
+  neither — `Dalvik/2.1.0` — is in neither, so the two need not sum to the total). `Devices`,
+  `Browsers` and `Systems` count *visitors*, not requests — a phone that fetched forty assets is one
+  phone — read by the same rules as the page's `parseAgent` so the two never disagree, and `Top` is
+  the twelve most active by pages then requests, each with its first and last request, the first page
+  it opened (`Landing`), the outside site that sent it (`Referer`) and up to six distinct pages in the
+  order it first opened them (`Journey`). Each chart column carries `visitors`, the distinct people who
+  opened a page in it. Bounds mirror the facets': the visitor and bot sets stop admitting at
+  `facetCap`, a minute's visitor set at 4,096, and either sets `Truncated`. These are one collector's
+  readings: a visitor in two routes counts in both, so they are never summed across records.
 
 - **Rows** are the newest `Limit`, and the readings are computed over the *whole* window — a table
   showing the last 500 requests must not report a p95 of only those 500.
@@ -283,7 +298,14 @@ tick at the line; its form speaks the rule back before it is saved, and removing
 
 ## Security intel and blocking
 
-The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
+The Insights view opens on the scanners when there are any: a warning `Notice` titled with how many
+addresses and probes, laid out as the lists under it are — each address a ranked row with its probes
+as an amber bar against the busiest and **Block** in a column of its own (a press on the row narrows
+the window to the address), beside the paths they tried, ranked the same way (a press narrows to the
+path). It had been one column of addresses hugging the left of a notice as wide as the pane, each
+Block landing wherever its probe count happened to end. `Notice`'s content now takes the notice's
+width, so content laid out across it is not squeezed to its longest line. The Addresses list names
+scanners too and, for `system.admin`, offers **Block** on each
 address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
 verbs do. This saves a persistent **host firewall rule**, rather than proving an ingress block:
 Docker-published ingress ports can bypass the host's inbound firewall. The scanner notice and the
@@ -499,6 +521,27 @@ a second.
 The socket opens with the window's cursor (`after=`), and rows are keyed by sequence, so a live
 prepend neither remounts the list nor shows a request twice.
 
+Insights opens on who the window's traffic was (`AudienceReadings` in `components/deploy/audience.tsx`),
+because the one number everybody asks of a website's log — how many real people came — was nowhere on
+it, and the lists under the charts named addresses: five figures over the window, each counting up as
+it lands — **Visitors** (the people, with their line across the window), **Page views** (a press
+narrows to them, as the field's switch does), **Bots and scripts** (the addresses, and their share of
+the requests as a meter), **Came from** (the busiest outside site drawn as itself) and **On** (the
+leading device's share over a bar of desktop, phone and tablet in their colours). Rates, failures and
+response times are the page's tiles above the pane and the chart under the band, so they are not said a
+third time. The Requests chart takes a green **Visitors** line on Insights, under the volume on its
+scale: a spike of requests with the line flat under it is one client, not a crowd. The p95 chart is
+**Response time**, captioned in words ("19 in 20 of each point's requests answered faster than the
+line"), and the page's tile took the same name — "Slowest tenth" named a statistic, not what a visitor
+waits for. The first list is **Visitors**: the devices, browsers and systems as coloured `BarList`s with
+their marks, and the most active people as rows — the browser over its system (`BadgedLogo`), the
+device, the address on its network, the site that sent them, the pages they opened as a trail, and how
+many — each narrowing the window to its address. The address list is **Addresses** now, keeping Block. On Insights the readings and both charts scroll with
+the lists under them, in one scroller under the filter bar: pinned above the lists, they left a pane of
+fixed height a strip a few rows tall to scroll the lists in. On Requests the chart stays over the rows,
+which own their scroll.
+The response-time ladder is said in a sentence over it ("Half of the requests were answered within …").
+
 `TrafficFacets` (Insights) draws each reading as a `BarList` — Tremor's BarList pattern rewritten
 onto the tokens as a house primitive in `components/bar-list.tsx`: the meter's own track behind a
 name, the figure at the right in `.numeric`, and a signal segment inside the bar for the failing or
@@ -517,7 +560,11 @@ deployment's requests and a site's are one workspace over two routes; the owner 
 about one request through one inline slot (`renderInline`, called only for the open row: a
 deployment's lines and proxy, a site's error log), an `emptyAction` (a deployment's Add a domain) and a
 section after Insights. The Took band (at least / at most) is offered only where the record carries
-durations, and the agent and referring-site chips clear themselves like the rest. The host Logs page
+durations, and the agent and referring-site chips clear themselves like the rest. The bar's controls
+share one face — the path field, the window, Took, Live and Export each an outline control at the
+field's height, a pressed one on the accent ground — where a filled select, bare chips and a ghost
+Export had stood in one row. The window is the log pane's `TimeWindow`: the presets one press each and
+a span typed as two times with one Apply, its trigger naming the span once one is set. The host Logs page
 reads the same records in its Requests group.
 
 `RequestConsole` draws rows in the log console's own anatomy rather than a `<table>`: a request record
@@ -608,6 +655,10 @@ container itself wins over the one naming its project. `TestLiveDeploymentEvents
 drives the whole path against a real daemon — a labelled container exiting 137 and a named network
 destroyed, read back through the real routes and the real socket — because the one thing the unit
 tests cannot hold is whether Docker still carries an object's labels on its events.
+`internal/accesslog` covers the audience (`audience_test.go`): one visitor per address and browser, a
+crawler, a script and an asset-only browser never one, a probe not a page, an agentless record keyed by
+its address, devices, browsers and systems counted per visitor, the journey's order and bound, the
+landing page and referring site, each column's visitors and the filter respected.
 `internal/accesslog` also covers the agent and referring-site filters, and `internal/api` the filter
 reading them (`TestRequestFilterReadsTheAgentAndTheSiteItCameFrom`) and a site's record read from the
 file its site names, held to the roots, re-resolved when the file moves, streamed and exported
@@ -617,7 +668,8 @@ alert link's moment. `components/deploy/logs-model.test.js` covers the default v
 resolved at `now`, the address round trip, which container answered a moment, the picker's order and
 the restart folding. `tests/browser/deploy-requests.spec.ts`
 covers the five views, the readings, the inline lines and Proxy said for Caddy and nginx, a removed
-release, Output's picker and `?service=`, Builds, the crash loop and Last lines, the agent, referer and
+release, Output's picker (with the proxy that answers last) and `?service=`, Insights' visitors (the
+readings, a person's row drawn as its browser on its system with its trail, narrowing to its address), Builds, the crash loop and Last lines, the agent, referer and
 Took narrowings, the query surviving a reload, the alert's moment, chip narrowing, the opened row, the
 absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links

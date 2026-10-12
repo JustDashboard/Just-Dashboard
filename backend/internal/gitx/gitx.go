@@ -1003,7 +1003,7 @@ func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Durat
 	// :/). Making those literal prevents it from cleaning the work it saved.
 	// Only commands receiving caller-selected paths need literal pathspecs.
 	switch verb {
-	case "diff", "show", "ls-files", "blame", "add", "checkout", "reset", "rm":
+	case "diff", "show", "ls-files", "blame", "add", "checkout", "reset", "rm", "clean":
 		env = append(env, "GIT_LITERAL_PATHSPECS=1")
 	}
 	for key, value := range extra {

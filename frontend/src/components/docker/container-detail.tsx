@@ -21,7 +21,8 @@ import type { ContainerDetail, DockerDiagnosis, FailureDiagnosis, PortRoute } fr
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { dockerSource } from "@/lib/log-sources"
+import { dockerSource, journalSource, stackSource } from "@/lib/log-sources"
+import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { ContainerUsageTab } from "@/components/docker/container-usage-tab"
@@ -445,6 +446,7 @@ function ContainerDetailPanel({
               {tab === "configure" && (
                 <ConfigurationRemedy
                   detail={detail}
+                  onAction={runFix}
                   findings={(health.data?.findings ?? []).filter(
                     (finding) => finding.targetId === detail.id,
                   )}
@@ -579,7 +581,9 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
  * image names (a Postgres container's lines as Postgres events, an nginx
  * one's as requests), the lens's readings above it, and Events — what
  * Docker did to it — as a view of its own beside them, so an exit and the
- * lines that led to it are one page.
+ * lines that led to it are one page. A stack's container also offers the
+ * stack's merged output, and every one the Docker daemon's journal, for what
+ * the runtime did before the container had a log to write.
  *
  * The failure diagnosis's window is the one question worth a chip: a
  * container that is looping or has died is read at the failure, because by
@@ -601,6 +605,7 @@ function ContainerLogs({
   onCrashChange: (on: boolean) => void
 }) {
   const product = containerProduct(detail)
+  const stack = detail.composeStack
   const sources = useMemo<ServiceLogSource[]>(
     () => [
       {
@@ -610,13 +615,36 @@ function ContainerLogs({
         status: detail.state,
         product,
       },
+      // The stack's neighbours explain a container that waits on one, and the
+      // daemon's journal what a container's own output cannot: an image that
+      // would not pull, a start the runtime refused.
+      ...(stack
+        ? [
+            {
+              id: stackSource(stack),
+              label: stack,
+              kind: "stack" as const,
+              product: "docker-compose",
+              detail: "Every container of this stack, merged by time",
+            },
+          ]
+        : []),
+      {
+        id: journalSource("docker.service"),
+        label: "docker.service",
+        kind: "journal",
+        product: "docker",
+        detail: "The Docker daemon's own log",
+      },
     ],
-    [detail.id, detail.name, detail.state, product],
+    [detail.id, detail.name, detail.state, product, stack],
   )
-  const views = useMemo(
-    () => [containerEventsView({ containerId: detail.id, healthcheck: detail.hasHealthcheck })],
-    [detail.id, detail.hasHealthcheck],
-  )
+  // This container's Events know its health check; the others' are the
+  // plain ones.
+  const views = (source: ServiceLogSource) =>
+    source.id === dockerSource(detail.id)
+      ? [containerEventsView({ containerId: detail.id, healthcheck: detail.hasHealthcheck })]
+      : kindViews(source)
   const logWindow = failure?.logWindow
   // A clean exit has a window too — the minutes before it stopped — and
   // calling that a crash would be the page inventing one.

@@ -10,6 +10,7 @@ import { filterQuery, isFilterActive, resolveRange, TIME_RANGES } from "@/lib/lo
 import type { LogFilterState, LogTimeRange } from "@/components/logs/types"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -35,6 +36,7 @@ export function ExportDialog({
   filter,
   boot,
   lens,
+  compact,
 }: {
   sourceId: string
   source: LogSource | null
@@ -42,6 +44,8 @@ export function ExportDialog({
   boot: boolean
   /** The lens the reader forced; the filter's fields are read through it. */
   lens?: string
+  /** The glyph alone, for a log pane's strip, where it sits among the views' tabs. */
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [range, setRange] = useState<LogTimeRange>("all")
@@ -74,12 +78,18 @@ export function ExportDialog({
 
   return (
     <>
-      {/* The glyph alone on a phone, where the strip's width is the
-          source's name's: the word stays the button's name. */}
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Download className="size-4" />
-        <span className="max-sm:sr-only">Export</span>
-      </Button>
+      {compact ? (
+        <IconAction label="Export" onClick={() => setOpen(true)}>
+          <Download />
+        </IconAction>
+      ) : (
+        // The glyph alone on a phone, where the line's width is the source's
+        // name's: the word stays the button's name.
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Download className="size-4" />
+          <span className="max-sm:sr-only">Export</span>
+        </Button>
+      )}
       <Modal
         open={open}
         onOpenChange={setOpen}

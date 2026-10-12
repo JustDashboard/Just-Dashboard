@@ -244,7 +244,7 @@ export function RepoCard({
       {/* Each card lands a beat after the one before it, capped so a shelf
           of forty does not take two seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
-        <SpotlightBorder radius={360} className="h-full">
+        <SpotlightBorder className="h-full">
           <div
             onClick={(event) => {
               // React carries a press inside an open menu — a group label, a

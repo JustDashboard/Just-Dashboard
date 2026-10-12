@@ -1,5 +1,5 @@
 import { bytes, percent } from "@/lib/format"
-import type { SectionId } from "@/components/database/engine"
+import type { SectionId, SectionParams } from "@/components/database/engine"
 import { gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
 import type { RedisServer } from "@/components/database/home/types"
 
@@ -25,6 +25,21 @@ export type Concern = {
 }
 
 const ORDER: Record<Concern["level"], number> = { critical: 0, warning: 1, notice: 2 }
+
+/** Ask the engine before linking to a specialised performance view it may not have. */
+export function concernParams(
+  concern: Pick<Concern, "id">,
+  can: (capability: "memoryAnalysis" | "profiler" | "sessions" | "replication") => boolean,
+): SectionParams | undefined {
+  if (concern.id === "rejecting-connections") return { q: "maxclients" }
+  if (concern.id === "no-memory-limit") return { q: "maxmemory" }
+  if (["memory-near-limit", "evicting"].includes(concern.id) && can("memoryAnalysis"))
+    return { view: "memory" }
+  if (concern.id === "replica-link-down" && can("replication")) return { view: "persistence" }
+  if (["operations-queued", "cache-at-limit"].includes(concern.id) && can("sessions"))
+    return { view: "operations" }
+  return undefined
+}
 
 /** Worst first; within a level, in the order they were found. */
 export function ranked<T extends { level: Concern["level"] }>(concerns: readonly T[]): T[] {
@@ -58,7 +73,7 @@ export function placementConcerns(
     found.push({
       id: "published-everywhere",
       level: "warning",
-      title: "Its port answers to the internet",
+      title: "Database port is published publicly",
       detail: `${input.name} listens on every interface of this server, so anybody who can reach the machine can try to sign in to it.`,
       advice: input.managed
         ? "Restrict it to this server, or to this server and its containers, under Settings."
@@ -73,7 +88,7 @@ export function placementConcerns(
       found.push({
         id: "no-backup",
         level: "warning",
-        title: "No backup of it has been taken from here",
+        title: "No dashboard backup recorded",
         detail:
           "Nothing in this dashboard's dump directory would bring it back after a bad write or a lost disk. A backup made by another tool is not seen here.",
         advice: "Take one now, and schedule them under Backups.",
@@ -256,14 +271,16 @@ export function mongoConcerns(samples: readonly Sample[]): Concern[] {
       about: "locks",
     })
   }
+  // The configured capacity is a hard limit. Lesser occupancy is a
+  // Performance reading, not proof that every query is slow.
   const cache = gauge(samples, "cachePercent")
-  if (cache !== undefined && cache >= 95) {
+  if (cache !== undefined && cache >= 100) {
     found.push({
-      id: "cache-full",
-      level: "warning",
-      title: `The cache is ${percent(cache, 0)} full`,
-      detail:
-        "The storage engine keeps its cache about four-fifths full and evicts behind the work. Past that, the operations themselves are made to evict, and every one of them slows down.",
+      id: "cache-at-limit",
+      level: "critical",
+      title: "WiredTiger cache has reached its limit",
+      detail: `Cache usage is ${percent(cache, 0)} of the configured capacity. Operations can stall until eviction makes room.`,
+      advice: "Inspect current operations and cache eviction before changing the memory settings.",
       section: "performance",
       about: "memory",
     })

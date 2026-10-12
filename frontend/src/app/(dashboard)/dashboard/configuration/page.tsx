@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { External, LockOpen, ShieldCheck, Warning, type Icon } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
@@ -10,11 +10,14 @@ import type { DashboardConfigReport, DashboardSettings, TailscaleIdentity } from
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { configPhaseLabel, useSelfConfig } from "@/hooks/use-self-config"
+import { useSelfUninstall } from "@/hooks/use-self-uninstall"
+import { stackGone } from "@/lib/uninstall"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Allowlist } from "@/components/config/allowlist"
 import { EndpointText, RequestPath } from "@/components/config/request-path"
 import { RestartProgress } from "@/components/config/restart-progress"
+import { UninstallDialog, UninstallProgress, UninstallRow } from "@/components/config/uninstall"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { Disclosure, Field, FieldRow, FormSection, OptionList, OptionRow } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
@@ -75,12 +78,30 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * Two-factor is the Access section's head and the switch under it. Each
  * figure is beside the control that changes it, which is what the tiles could
  * not be.
+ *
+ * **Uninstalling** is last, in the danger rule, and asks in its dialog whether
+ * the deployments and data stay for a reinstall (`config/uninstall.tsx`). An
+ * uninstall in flight takes the page: its record sits under the identity line
+ * and the stack and the settings step aside, since from the moment it starts
+ * they describe what is being taken away. The page stays drawn when the API it
+ * polls goes away with the stack.
  */
 export default function DashboardConfigurationPage() {
+  const landedAccess = useRef(false)
+  useEffect(() => {
+    if (landedAccess.current || window.location.hash !== "#allowlist") return
+    const target = document.getElementById("allowlist")
+    if (!target) return
+    landedAccess.current = true
+    target.scrollIntoView({ block: "start" })
+  })
   const { can } = useAuth()
   const { report, loading, error, restarting, running, apply, restart, issueCertificate, dismiss } =
     useSelfConfig()
   const { confirm, dialog } = useConfirm()
+  const admin = can("system.admin")
+  const removal = useSelfUninstall({ enabled: admin })
+  const [uninstalling, setUninstalling] = useState(false)
   // The unsaved changes are kept for the tab: the page lists them as a diff
   // with Apply beside it, so what was typed before a walk to another page is
   // in plain sight rather than silently gone or silently pending.
@@ -98,10 +119,14 @@ export default function DashboardConfigurationPage() {
   const draft = local ?? saved
   const changes = useMemo(() => (saved && draft ? diff(saved, draft) : []), [saved, draft])
   const dirty = changes.length > 0
-  const admin = can("system.admin")
-  const editable = Boolean(report?.supported) && admin && !running
+  const uninstallRun = removal.report?.run
+  // Once an uninstall is under way the settings are not the page's to change,
+  // and a failing poll is the stack going rather than a page to replace.
+  const removing = removal.running
+  const stopped = Boolean(uninstallRun && stackGone(uninstallRun, removal.lost))
+  const editable = Boolean(report?.supported) && admin && !running && !removing
 
-  if ((loading && !report) || error) {
+  if ((loading && !report) || (error && !(removing && report))) {
     return <PageState eyebrow="Settings" title="Configuration" error={error ?? undefined} />
   }
   if (!report || !draft) return null
@@ -239,7 +264,7 @@ export default function DashboardConfigurationPage() {
       },
     })
 
-  const commands = admin && report.supported
+  const commands = admin && report.supported && !removing
   const cidrs = draft.allowedCidrs
     .split(",")
     .map((entry) => entry.trim())
@@ -315,21 +340,46 @@ export default function DashboardConfigurationPage() {
         aside={
           <span className="flex flex-wrap items-center gap-3">
             <ReadOnlyNote supported={report.supported} admin={admin} running={running} />
-            <Status
-              tone={running ? "warning" : "running"}
-              label={
-                running ? (
-                  <TextShimmer>{restarting ? "Restarting" : "Working"}</TextShimmer>
-                ) : (
-                  "Running"
-                )
-              }
-            />
+            {removing ? (
+              <Status
+                tone={stopped ? "stopped" : "warning"}
+                label={stopped ? "Stopped" : <TextShimmer>Uninstalling</TextShimmer>}
+              />
+            ) : (
+              <Status
+                tone={running ? "warning" : "running"}
+                label={
+                  running ? (
+                    <TextShimmer>{restarting ? "Restarting" : "Working"}</TextShimmer>
+                  ) : (
+                    "Running"
+                  )
+                }
+              />
+            )}
           </span>
         }
       />
 
-      <Panel plain>
+      {uninstallRun && (
+        <Panel plain className="animate-rise">
+          <PanelHeader title={removing ? "Uninstalling" : "Last uninstall"} />
+          <PanelBody>
+            <UninstallProgress
+              run={uninstallRun}
+              log={removal.report?.log}
+              lost={removal.lost}
+              onDismiss={() => {
+                removal
+                  .dismiss()
+                  .catch((err) => notify.error("Could not dismiss", errorMessage(err)))
+              }}
+            />
+          </PanelBody>
+        </Panel>
+      )}
+
+      <Panel plain hidden={removing}>
         <PanelHeader title="Stack" />
         <PanelBody className="space-y-6">
           {/* The path takes the width when there is nothing to put beside it:
@@ -425,7 +475,7 @@ export default function DashboardConfigurationPage() {
           two thirds of a wide screen empty and made the page three screens
           tall. The certificate is first because picking one fills the
           address, the interface and the allowlist under it. */}
-      <Panel plain>
+      <Panel plain hidden={removing}>
         <PanelHeader title="Settings" />
         <PanelBody className="divide-y divide-hairline pt-8">
           <SettingsRow>
@@ -611,6 +661,7 @@ export default function DashboardConfigurationPage() {
             <FormSection
               aside
               title="Access"
+              id="allowlist"
               actions={pending(["allowedCidrs", "require2fa"])}
               className={SECTION}
               hint={
@@ -713,6 +764,22 @@ export default function DashboardConfigurationPage() {
           </SettingsRow>
         </PanelBody>
       </Panel>
+
+      {admin && removal.report?.supported && !removing && !running && (
+        <Panel plain>
+          <PanelHeader title={<span className="text-destructive">Danger zone</span>} />
+          <PanelBody>
+            <UninstallRow onUninstall={() => setUninstalling(true)} />
+          </PanelBody>
+        </Panel>
+      )}
+      {uninstalling && (
+        <UninstallDialog
+          onOpenChange={setUninstalling}
+          loadPlan={removal.plan}
+          onStart={removal.start}
+        />
+      )}
 
       {/*
         The apply bar follows the reader instead of sitting at the bottom of one

@@ -47,24 +47,49 @@ func (s *Service) Fetch(ctx context.Context, path string, prune bool) (*Result, 
 // A merge or rebase here could stop halfway and leave conflict markers in a
 // working tree the operator cannot easily fix from a web page. Refusing is a
 // clear failure they can resolve deliberately; a half-finished merge is not.
+// For the same reason a pull git would refuse for what is in the working
+// tree, or start and fail halfway through, comes back as a *PullBlocked
+// naming what is in the way (see pullblock.go).
 func (s *Service) Pull(ctx context.Context, path string) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
+	pull, fetch, target, err := s.pullPlan(ctx, path)
+	if err != nil {
+		return &Result{Command: "git pull --ff-only", Output: err.Error()}, err
+	}
+	if err := s.pullWritable(ctx, path, fetch, target); err != nil {
+		return &Result{Command: "git pull --ff-only", Output: err.Error()}, err
+	}
+	res, err := s.op(ctx, path, 3*time.Minute, pull...)
+	if err != nil {
+		if blocked := refusedPull(res.Output); blocked != nil {
+			return res, blocked
+		}
+	}
+	return res, err
+}
+
+// pullPlan is the pull Pull runs, with the fetch that brings down what it
+// would merge and the name that commit then has. A detached HEAD pulls
+// whatever git decides and has no fetch to look ahead with.
+func (s *Service) pullPlan(ctx context.Context, path string) (pull, fetch []string, target string, err error) {
 	branch, err := s.CurrentBranch(ctx, path)
 	if err != nil {
-		return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only")
+		return []string{"pull", "--ff-only"}, nil, "", nil
 	}
 	// Read the configured merge ref rather than resolving @{upstream}: a
 	// deleted or unfetched upstream must not be replaced by a different one.
 	merge, err := s.run(ctx, path, "config", "--get-all", "branch."+branch+".merge")
 	if err == nil && strings.TrimSpace(merge) != "" {
-		return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only")
+		return []string{"pull", "--ff-only"}, []string{"fetch"}, "@{upstream}", nil
 	}
 	remote, err := s.pullRemote(ctx, path, branch)
 	if err != nil {
-		return &Result{Command: "git pull --ff-only", Output: err.Error()}, err
+		return nil, nil, "", err
 	}
-	return s.op(ctx, path, 3*time.Minute, "pull", "--ff-only", "--set-upstream", "--", remote, "refs/heads/"+branch)
+	ref := "refs/heads/" + branch
+	return []string{"pull", "--ff-only", "--set-upstream", "--", remote, ref},
+		[]string{"fetch", "--", remote, ref}, "FETCH_HEAD", nil
 }
 
 // A locally created branch may already exist on a remote without tracking it.

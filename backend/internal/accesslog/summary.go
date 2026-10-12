@@ -204,6 +204,11 @@ type Bucket struct {
 	// Bytes is what the column's answers sent, so the page's Served reading
 	// can carry its hour as a line the way the request count does.
 	Bytes int64 `json:"bytes"`
+	// Visitors is the distinct people who opened a page in the column (see
+	// Audience), so the chart can draw people over time beside the requests.
+	// Two columns' visitors are not additive: one person who stayed across
+	// both is in each.
+	Visitors int `json:"visitors"`
 }
 
 // Latency is the distribution, not an average. A mean response time is the one
@@ -252,6 +257,10 @@ type Summary struct {
 	// clients that asked for several of them.
 	Probes   []Facet `json:"probes"`
 	Scanners []Facet `json:"scanners"`
+
+	// Audience is who the traffic was: the people among it, apart from the
+	// crawlers and scanners the tables above count alongside them.
+	Audience Audience `json:"audience"`
 
 	Buckets       []Bucket `json:"buckets"`
 	BucketSeconds int      `json:"bucketSeconds"`
@@ -311,6 +320,7 @@ type Collector struct {
 	// with an id in it is a new key per request.
 	pathLatencies map[string][]float64
 	pages         int
+	audience      audienceTally
 
 	latencies []float64
 	sum       float64
@@ -331,6 +341,9 @@ type minuteBucket struct {
 	total     int
 	bytes     int64
 	latencies []float64
+	// visitors are the ids of the visitors who opened a page this minute,
+	// bounded by minuteVisitorsCap.
+	visitors map[uint32]struct{}
 }
 
 func NewCollector(f Filter) *Collector {
@@ -345,6 +358,7 @@ func NewCollector(f Filter) *Collector {
 		referers: map[string]*Facet{}, probes: map[string]*Facet{},
 		pathLatencies: map[string][]float64{},
 		byMinute:      map[int64]*minuteBucket{},
+		audience:      newAudienceTally(),
 	}
 }
 
@@ -375,15 +389,17 @@ func (c *Collector) Feed(e Entry) {
 	failed := e.Status >= 500
 	refused := e.Status >= 400 && e.Status < 500
 	probe := IsProbe(e)
-	if IsPage(e) && !probe {
+	page := IsPage(e) && !probe
+	if page {
 		c.pages++
 	}
+	source := refererHost(e.Referer, e.Host)
 	c.bump(c.methods, e.Method, e, failed, refused, probe)
 	c.bump(c.paths, e.Path, e, failed, refused, probe)
 	c.bump(c.hosts, e.Host, e, failed, refused, probe)
 	c.bump(c.clients, e.RemoteIP, e, failed, refused, probe)
 	c.bump(c.agents, AgentFamily(e.UserAgent), e, failed, refused, probe)
-	c.bump(c.referers, refererHost(e.Referer, e.Host), e, failed, refused, probe)
+	c.bump(c.referers, source, e, failed, refused, probe)
 	if probe {
 		c.bump(c.probes, e.Path, e, failed, refused, probe)
 	}
@@ -428,6 +444,7 @@ func (c *Collector) Feed(e Entry) {
 	if e.timed && len(bucket.latencies) < 4096 {
 		bucket.latencies = append(bucket.latencies, e.duration)
 	}
+	c.feedAudience(e, page, failed, refused, source, bucket)
 
 	// The rows are the newest N, so the window slides rather than filling up
 	// and then ignoring everything after it — a table that stopped at the
@@ -614,6 +631,7 @@ func (c *Collector) Result() *Result {
 	out.Summary.Referers = rank(c.referers, 10)
 	out.Summary.Probes = rank(c.probes, 10)
 	out.Summary.Scanners = rankScanners(c.clients)
+	out.Summary.Audience = c.audience.reading()
 	out.Summary.Statuses = rankStatuses(c.statuses)
 	out.Summary.Buckets, out.Summary.BucketSeconds = c.histogram()
 	out.Slowest = c.slowest()
@@ -704,6 +722,10 @@ func (c *Collector) histogram() ([]Bucket, int) {
 	// bucket travels to the browser as its p95, and shipping the raw samples
 	// would be a megabyte per chart.
 	samples := make([][]float64, count)
+	// People are unioned rather than summed: a visitor who stays through a
+	// column's several minutes is one person in it. Like the samples, the sets
+	// last for this pass only.
+	people := make([]map[uint32]struct{}, count)
 	for i := range out {
 		out[i] = Bucket{Start: from.Add(time.Duration(i) * width).Format(time.RFC3339), Counts: map[string]int{}}
 	}
@@ -719,8 +741,15 @@ func (c *Collector) histogram() ([]Bucket, int) {
 			out[offset].Counts[class] += n
 		}
 		samples[offset] = append(samples[offset], bucket.latencies...)
+		if len(bucket.visitors) > 0 && people[offset] == nil {
+			people[offset] = make(map[uint32]struct{}, len(bucket.visitors))
+		}
+		for id := range bucket.visitors {
+			people[offset][id] = struct{}{}
+		}
 	}
 	for i := range out {
+		out[i].Visitors = len(people[i])
 		if len(samples[i]) == 0 {
 			continue
 		}

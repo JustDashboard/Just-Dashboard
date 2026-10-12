@@ -5557,6 +5557,18 @@ export type GitResult = {
 }
 
 /**
+ * A pull that did not start, answered as `409 pull_blocked` beside the error:
+ * the files git would not overwrite, or the folders git — running as `owner`
+ * — could not write the pulled files into.
+ */
+export type GitPullBlocked = {
+  changed?: string[]
+  untracked?: string[]
+  unwritable?: { path: string; owner: string }[]
+  owner?: string
+}
+
+/**
  * Who this server is, to GitHub, in one repository.
  *
  * The answer is per repository and not global, and `owner` is why: gh keeps
@@ -6548,6 +6560,89 @@ export type DashboardConfigReport = {
 }
 
 /**
+ * Removing the dashboard from the server. Mirrors internal/uninstall.
+ *
+ * The phases are in the order they run: the first two in the backend while it
+ * still serves this page, the rest in a sibling container that takes the stack
+ * down — which is the moment this page loses the API it is polling.
+ */
+export type UninstallMode = "keep" | "wipe"
+
+export type UninstallPhase = "queued" | "pausing" | "deployments" | "stack" | "files" | "finished"
+
+export type UninstallRun = {
+  id: string
+  status: "pending" | "running" | "success" | "failed"
+  /** Where it is; a failed run keeps the phase it failed in. */
+  phase: UninstallPhase
+  mode: UninstallMode
+  deleteBackups: boolean
+  dir: string
+  compose: string
+  project?: string
+  image: string
+  envPath: string
+  dataDir: string
+  backupDir?: string
+  /** Entries of the data directory a wipe leaves, because a site still uses them. */
+  keep?: string[]
+  container: string
+  /** What could not be removed. None of them stops the run. */
+  warnings?: string[]
+  actor: string
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  error?: string
+}
+
+export type UninstallReport = {
+  /** False on an install with no compose stack to take down. */
+  supported: boolean
+  reason?: string
+  run?: UninstallRun
+  log?: string
+}
+
+export type UninstallItem = { id: string; name: string }
+
+export type DirectoryUsage = {
+  path: string
+  files: number
+  bytes: number
+  /** Counting stopped at its time budget, so the figures are a floor. */
+  partial?: boolean
+}
+
+/** What the deployments own on this host — what a wipe removes. */
+export type DeploymentFootprint = {
+  projects: number
+  containers: UninstallItem[]
+  routes: UninstallItem[]
+  networks: UninstallItem[]
+  volumes: UninstallItem[]
+  paths: UninstallItem[]
+  images: UninstallItem[]
+  ingress?: UninstallItem
+}
+
+/** What the uninstall dialog shows before anything happens. */
+export type UninstallPlan = {
+  /** What a wipe asks to be typed: the server's name. */
+  phrase: string
+  dir: string
+  envPath: string
+  data: DirectoryUsage
+  backups?: DirectoryUsage
+  /** The data directory's nginx-cache, kept by a wipe because a site caches into it. */
+  keptCache?: string
+  deployments: DeploymentFootprint
+  deploymentsError?: string
+  /** Where the transcript survives the stack and, for a wipe, the data directory. */
+  durableLog: string
+}
+
+/**
  * The security verdict. Mirrors netsec.Posture: the same three-field shape as
  * a health finding, because what was measured, what it means and what to do
  * are three different things and the UI renders them differently.
@@ -6788,6 +6883,45 @@ export type RequestBucket = {
   p95?: number
   /** What the column's answers sent, for the Served reading's line. */
   bytes?: number
+  /** The distinct people who opened a page in the column. */
+  visitors?: number
+}
+
+/**
+ * One person in the window: an address and the browser it sent, once it has
+ * opened a page. A script, a crawler or a scanner's probe is never one.
+ */
+export type RequestVisitor = {
+  client: string
+  /** The whole user agent, which the page reads as a browser on a system. */
+  agent?: string
+  requests: number
+  pages: number
+  /** 5xx answers they met, and 4xx. */
+  errors: number
+  refused: number
+  bytes: number
+  first: string
+  last: string
+  /** The first page they opened, and the outside site they came from. */
+  landing?: string
+  referer?: string
+  /** The pages they opened, in order of first opening, at most six. */
+  journey: string[]
+}
+
+/** Who the traffic was: the people, told apart from the programs. */
+export type RequestAudience = {
+  visitors: number
+  /** Distinct addresses whose agent is a crawler, a scanner or a script. */
+  bots: number
+  humanRequests: number
+  botRequests: number
+  /** Counted per visitor, not per request. */
+  devices: RequestFacet[] | null
+  browsers: RequestFacet[] | null
+  systems: RequestFacet[] | null
+  top: RequestVisitor[] | null
 }
 
 /** The distribution, not an average: a p50 of 30ms hides a p99 of nine seconds. */
@@ -6825,6 +6959,7 @@ export type RequestSummary = {
   /** Refused paths that look like scanning, and the clients that asked for several. */
   probes: RequestFacet[]
   scanners: RequestFacet[]
+  audience?: RequestAudience
   buckets: RequestBucket[]
   bucketSeconds: number
   first?: string

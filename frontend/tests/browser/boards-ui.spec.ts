@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { deployment } from "./deploy-fixture"
 
 const now = new Date().toISOString()
 const pixel =
@@ -11,6 +12,12 @@ type Scene = {
 }
 type Put = { name: string; revision: number; scene: Scene }
 type Refusal = { status: number; code: string; message: string }
+type BoardPreview = {
+  background: string
+  count: number
+  elements: Record<string, unknown>[]
+  resources: { kind: string; id?: number }[]
+}
 
 const isObject = (value: unknown) =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -29,10 +36,13 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
     puts: [] as Put[],
     refuse: null as Refusal | null,
     deletedWith: null as string | null,
+    /** What the server derives from the scene on save; the list draws it. */
+    preview: undefined as BoardPreview | undefined,
   }
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request()
-    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(request.url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
     const refuse = ({ status, code, message }: Refusal) =>
@@ -49,7 +59,9 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
       })
     }
     if (path === "/boards/" && request.method() === "GET") {
-      return json(board.deletedWith === null ? [{ ...detail(), updatedAt: now }] : [])
+      return json(
+        board.deletedWith === null ? [{ ...detail(), updatedAt: now, preview: board.preview }] : [],
+      )
     }
     if (path === "/boards/" && request.method() === "POST") {
       return json({ ...detail(), scene: board.scene, updatedAt: now }, 201)
@@ -103,6 +115,9 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
         checkedAt: now,
       })
     }
+    if (path === "/deploy/" && url.searchParams.get("view") === "fleet") {
+      return json({ deployments: [{ ...deployment, id: 4, name: "Storefront" }], activeWork: [] })
+    }
     if (path === "/deploy/") return json([{ id: 4, name: "Storefront", enabled: true }])
     return json([])
   })
@@ -110,8 +125,8 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
 }
 
 async function openBoard(page: Page) {
-  await page.goto("/boards/1")
-  await expect(page.getByLabel("Board name")).toHaveValue("Untitled board")
+  await page.goto("/excalidraw/1")
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
   await expect(page.locator("canvas").first()).toBeVisible()
 }
 
@@ -140,10 +155,10 @@ test("a board opens without saving, keeps its images, and saves inserted server 
     if (request.url().includes("esm.run/@excalidraw")) externalFonts.push(request.url())
   })
 
-  await page.goto("/boards")
-  await page.getByRole("link", { name: /Untitled board/ }).click()
-  await expect(page).toHaveURL(/\/boards\/1$/)
-  await expect(page.getByLabel("Board name")).toHaveValue("Untitled board")
+  await page.goto("/excalidraw")
+  await page.getByRole("button", { name: "Untitled board", exact: true }).click()
+  await expect(page).toHaveURL(/\/excalidraw\/1$/)
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
   await expect(page.locator("canvas").first()).toBeVisible()
   // Opening is not an edit. A save here bumped the revision on every visit, so
   // two people merely looking at one board put the second into a conflict.
@@ -169,7 +184,7 @@ test("a board opens without saving, keeps its images, and saves inserted server 
 
   const saves = board.puts.length
   await page.reload()
-  await expect(page.getByLabel("Board name")).toHaveValue("Untitled board")
+  await expect(page.getByLabel("Drawing name")).toHaveValue("Untitled board")
   await expect(page.locator("canvas").first()).toBeVisible()
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(saves)
@@ -186,11 +201,11 @@ test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete uses 
   const downloads: string[] = []
   page.on("download", (download) => downloads.push(download.suggestedFilename()))
   await openBoard(page)
-  const name = page.getByLabel("Board name")
+  const name = page.getByLabel("Drawing name")
   const status = page.getByRole("status")
 
   await name.fill("")
-  await expect(status).toContainText("Name the board to save it")
+  await expect(status).toContainText("Name the drawing to save it")
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(0)
   await name.blur()
@@ -215,11 +230,11 @@ test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete uses 
   await russian
   await expect.poll(() => board.name).toBe("Ops map 2")
 
-  await page.getByRole("button", { name: "Delete board" }).click()
+  await page.getByRole("button", { name: "Delete drawing" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
-  await dialog.getByRole("button", { name: "Delete board" }).click()
-  await expect(page).toHaveURL(/\/boards$/)
+  await dialog.getByRole("button", { name: "Delete drawing" }).click()
+  await expect(page).toHaveURL(/\/excalidraw$/)
   expect(board.deletedWith).toBe("Ops map 2")
 })
 
@@ -228,18 +243,18 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
 }) => {
   const board = await mockBoards(page)
   await openBoard(page)
-  const name = page.getByLabel("Board name")
+  const name = page.getByLabel("Drawing name")
   const status = page.getByRole("status")
 
   board.refuse = { status: 500, code: "internal", message: "database is locked" }
   await name.fill("Rack layout")
   await expect(status).toContainText("Save failed")
-  await page.getByRole("button", { name: "Back to boards" }).click()
+  await page.getByRole("button", { name: "Back to Excalidraw" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog).toContainText("Leave without saving?")
   await dialog.getByRole("button", { name: "Stay" }).click()
-  await expect(page).toHaveURL(/\/boards\/1$/)
-  const failure = page.getByText("Board was not saved")
+  await expect(page).toHaveURL(/\/excalidraw\/1$/)
+  const failure = page.getByText("Drawing was not saved")
   await expect(failure).toBeVisible()
 
   board.refuse = null
@@ -249,13 +264,59 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
 
   board.refuse = { status: 404, code: "board_not_found", message: "board not found" }
   await name.fill("Rack layout 2")
-  await expect(status).toContainText("This board was deleted")
+  await expect(status).toContainText("This drawing was deleted")
   const attempts = board.puts.length
   await name.fill("Rack layout 3")
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(attempts)
 
-  await page.getByRole("button", { name: "Back to boards" }).click()
+  await page.getByRole("button", { name: "Back to Excalidraw" }).click()
   await page.getByRole("dialog").getByRole("button", { name: "Leave without saving" }).click()
-  await expect(page).toHaveURL(/\/boards$/)
+  await expect(page).toHaveURL(/\/excalidraw$/)
+})
+
+test("the list draws each drawing, names what it links to, and the old address lands on it", async ({
+  page,
+}) => {
+  const board = await mockBoards(page)
+  board.name = "Production map"
+  board.preview = {
+    background: "#ffffff",
+    count: 3,
+    elements: [
+      { type: "rectangle", x: 0, y: 0, w: 240, h: 110, stroke: "#1971c2", fill: "#a5d8ff" },
+      { type: "text", x: 20, y: 40, w: 200, h: 30, text: "api", fontSize: 24, fontFamily: 5 },
+      {
+        type: "arrow",
+        x: 240,
+        y: 55,
+        w: 160,
+        h: 0,
+        endArrow: true,
+        points: [
+          [0, 0],
+          [160, 0],
+        ],
+      },
+    ],
+    resources: [{ kind: "server" }, { kind: "project", id: 4 }, { kind: "database", id: 7 }],
+  }
+  // Boards became Excalidraw; a bookmark to the old page still arrives.
+  await page.goto("/boards")
+  await expect(page).toHaveURL(/\/excalidraw$/)
+  await expect(page.getByRole("link", { name: "Excalidraw", exact: true })).toBeVisible()
+
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity).toContainText("Excalidraw")
+  await expect(identity).toContainText("1 drawing")
+  await expect(identity).toContainText("3 shapes")
+  await expect(identity).toContainText("3 server items linked")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+
+  const card = page.getByRole("list", { name: "Drawings" }).locator(":scope > li")
+  await expect(card.locator("svg text", { hasText: "api" })).toHaveCount(1)
+  await expect(card).toContainText("Links this server, Storefront and Orders")
+
+  await card.getByRole("button", { name: "Production map", exact: true }).click()
+  await expect(page).toHaveURL(/\/excalidraw\/1$/)
 })

@@ -6,6 +6,7 @@ import {
   previewHeld,
   previewOutOfDate,
   previewStatus,
+  previewURL,
   pullChecksTone,
   pullOfPreview,
   unavailableReason,
@@ -171,6 +172,23 @@ describe("whether a preview holds the test verb back", () => {
     expect(cleanupFailed(closing)).toBe(false)
     expect(cleanupFailed(preview({ lastRun: run("failed") }))).toBe(false)
     expect(cleanupFailed(undefined)).toBe(false)
+  })
+})
+
+describe("where a preview can be visited", () => {
+  const url = "https://host.tailnet.ts.net:21000"
+  test("an open preview whose address answers", () => {
+    expect(previewURL(preview({ address: { kind: "tailnet", url, published: true } }))).toBe(url)
+  })
+  test("nowhere while the address is down, once closed, or with no preview", () => {
+    expect(previewURL(preview({ address: { kind: "tailnet", url, published: false } }))).toBe(
+      undefined,
+    )
+    expect(
+      previewURL(preview({ state: "closed", address: { kind: "tailnet", url, published: true } })),
+    ).toBe(undefined)
+    expect(previewURL(preview())).toBe(undefined)
+    expect(previewURL(undefined)).toBe(undefined)
   })
 })
 

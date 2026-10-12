@@ -767,6 +767,9 @@ func TestDetectLens(t *testing.T) {
 		"/var/log/postgresql/postgresql-17-main.log":                "postgres",
 		"/var/log/mysql/error.log":                                  "mysql",
 		"/var/log/mariadb/mariadb.log":                              "mysql",
+		"/var/log/mysql/mysql-slow.log":                             "app",
+		"/var/log/mysql/general.log":                                "app",
+		"/var/log/mariadb/mariadb-slow.log":                         "app",
 		"/var/log/redis/redis-server.log":                           "redis",
 		"/var/log/mongodb/mongod.log":                               "mongodb",
 		"/var/log/clickhouse-server/clickhouse-server.err.log":      "clickhouse",
@@ -849,6 +852,28 @@ func TestDetectLens(t *testing.T) {
 		"apt-daily-upgrade.service":   "packages",
 		"unattended-upgrades.service": "packages",
 		"api.service":                 "app",
+		// The host's own plumbing is read as the manager's, not as an
+		// application that answers requests.
+		"tailscaled.service":                "systemd",
+		"wg-quick@wg0.service":              "systemd",
+		"systemd-resolved.service":          "systemd",
+		"systemd-networkd.service":          "systemd",
+		"NetworkManager.service":            "systemd",
+		"NetworkManager-dispatcher.service": "systemd",
+		"dnsmasq.service":                   "systemd",
+		"unbound.service":                   "systemd",
+		"named.service":                     "systemd",
+		"docker.service":                    "systemd",
+		"containerd.service":                "systemd",
+		"getty@tty1.service":                "systemd",
+		"cloud-init.service":                "systemd",
+		// A name that only looks like a daemon is an application, as is one
+		// that merely begins like a vendor's.
+		"cloud-sync.service":         "app",
+		"worker.service":             "app",
+		"dockerized-api.service":     "app",
+		"tailscale-exporter.service": "app",
+		"headscale.service":          "app",
 	}
 	for unit, want := range units {
 		if got := DetectLens(LensTarget{Kind: KindJournal, Unit: unit}); got != want {
@@ -1017,5 +1042,24 @@ func BenchmarkSearchLens(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// A query log is told from the error log beside it by its name, and an `.err`
+// file is the error log whatever the host it is named after is called.
+func TestIsQueryLogReadsTheNameNotTheHost(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"/var/log/mysql/mysql-slow.log":       true,
+		"/var/log/mysql/general.log":          true,
+		"/var/lib/mysql/db1-slow.log":         true,
+		"/var/log/mysql/error.log":            false,
+		"/var/lib/mysql/general-db1.err":      false,
+		"/var/lib/mysql/slowpoke.example.err": false,
+	}
+	for path, want := range cases {
+		if got := IsQueryLog(path); got != want {
+			t.Errorf("IsQueryLog(%q) = %v, want %v", path, got, want)
+		}
 	}
 }

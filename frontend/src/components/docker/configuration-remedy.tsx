@@ -49,6 +49,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { CODE } from "@/components/deploy/run-evidence"
 import { restartWords } from "@/components/docker/container"
 import type { ConfirmFn } from "./shared"
+import type { FindingAction } from "./attention"
 
 /**
  * A container's configuration, and what to change in it.
@@ -69,11 +70,13 @@ export function ConfigurationRemedy({
   findings,
   confirm,
   onChanged,
+  onAction,
 }: {
   detail: ContainerDetail
   findings: DockerFinding[]
   confirm: ConfirmFn
   onChanged: () => void
+  onAction: FindingAction
 }) {
   const { can } = useAuth()
   if (detail.composeStack) {
@@ -82,7 +85,7 @@ export function ConfigurationRemedy({
   if (!can("system.admin")) {
     return (
       <div className="flex min-w-0 flex-col gap-8 pb-4">
-        <FindingCards findings={findings} detail={detail} />
+        <FindingCards findings={findings} detail={detail} onAction={onAction} />
         <CurrentSettings detail={detail} findings={findings} />
         <Notice title="Administrator required">
           The replacement specification includes environment credentials and host mounts. You can
@@ -98,6 +101,7 @@ export function ConfigurationRemedy({
       findings={findings}
       confirm={confirm}
       onChanged={onChanged}
+      onAction={onAction}
     />
   )
 }
@@ -191,10 +195,14 @@ function Settled({ children }: { children: React.ReactNode }) {
 function FindingCards({
   findings,
   detail,
+  onAction,
 }: {
   findings: DockerFinding[]
   detail: ContainerDetail
+  onAction: FindingAction
 }) {
+  const { can } = useAuth()
+  const [busy, setBusy] = useState(false)
   return (
     <Panel plain>
       <PanelHeader title="What to change" actions={<FindingCount findings={findings} />} />
@@ -207,7 +215,17 @@ function FindingCards({
               <ChoiceRow
                 key={finding.id}
                 index={index}
-                disabled
+                disabled={finding.action !== "set-restart" || !can("service.control")}
+                busy={busy}
+                onSelect={async () => {
+                  if (busy) return
+                  setBusy(true)
+                  try {
+                    await onAction(finding)
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
                 verb={finding.title}
                 className={LEVEL_GROUND[levelOf(finding)]}
                 leading={<SeverityMark finding={finding} />}
@@ -495,11 +513,13 @@ function StandaloneRemedy({
   findings,
   confirm,
   onChanged,
+  onAction,
 }: {
   detail: ContainerDetail
   findings: DockerFinding[]
   confirm: ConfirmFn
   onChanged: () => void
+  onAction: FindingAction
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -679,7 +699,22 @@ function StandaloneRemedy({
                 <ChoiceRow
                   key={finding.id}
                   index={remedies.length + index}
-                  disabled
+                  disabled={
+                    !(
+                      (finding.action === "set-restart" && can("service.control")) ||
+                      (finding.action === "cap-logs" && can("destructive"))
+                    )
+                  }
+                  busy={busy}
+                  onSelect={async () => {
+                    if (busy) return
+                    setBusy(true)
+                    try {
+                      await onAction(finding)
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
                   verb={finding.title}
                   className={LEVEL_GROUND[levelOf(finding)]}
                   leading={<SeverityMark finding={finding} />}
@@ -688,7 +723,7 @@ function StandaloneRemedy({
                   trailing={
                     finding.actionLabel && (
                       <span className="hidden text-hint text-muted-foreground sm:inline">
-                        {finding.actionLabel} from the Overview
+                        {onAction.label?.(finding) ?? finding.actionLabel}
                       </span>
                     )
                   }

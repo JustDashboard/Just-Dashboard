@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { applySiteFix, fixFor, fixLabel, type SiteFix, type TLSFix } from "@/lib/tls-fixes"
@@ -54,17 +55,18 @@ export function useTLSFixes({
   onRescan: () => void
 }) {
   const router = useRouter()
+  const { can } = useAuth()
   const { reloading, reload } = useNginxReload(onRescan)
   const [open, setOpen] = useState<{ finding: ScanFinding; fix: SheetFix; session: number }>()
   const [editor, setEditor] = useState<EditorTarget>()
 
   const actionFor = (finding: ScanFinding): Finding["action"] => {
     const fix = scan ? fixFor(finding, scan) : undefined
-    if (!fix) return undefined
+    if (!fix || !can("system.admin")) return undefined
     const label = fixLabel(fix)
     switch (fix.kind) {
       case "reload":
-        return { label: reloading ? "Reloading…" : label, onClick: () => void reload() }
+        return { label, pending: reloading, disabled: reloading, onClick: reload }
       case "issue":
         return { label, onClick: () => router.push(fix.href) }
       default:

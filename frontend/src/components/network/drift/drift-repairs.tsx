@@ -124,7 +124,7 @@ function RepairCard({
   const changes = item.after ? diffCounts(lineDiff(item.before ?? "", item.after)) : undefined
   return (
     <li className="min-w-0">
-      <SpotlightBorder resting={checked ? "brand" : "border"} radius={320} className="h-full">
+      <SpotlightBorder resting={checked ? "brand" : "border"} className="h-full">
         <label htmlFor={id} className="flex h-full min-w-0 cursor-pointer gap-3 p-3.5">
           <Checkbox
             id={id}

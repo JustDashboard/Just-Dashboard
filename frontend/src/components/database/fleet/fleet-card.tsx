@@ -92,6 +92,12 @@ export function workPages(engine: Engine) {
  * the lock beside the menu, the environment after the engine. In the line of
  * facts an amber `staging` sat beside an amber "never backed up" and nobody
  * could tell which of them was the problem.
+ *
+ * Its edge carries the database's hue, the same as its span on the band's
+ * bars, its dot on the backup runway and its key in a row there, and what it
+ * stores is drawn as a short bar in that hue against the largest database on
+ * the server — so "which one is the big one" is answered across the shelf
+ * without reading a figure.
  */
 export function FleetCard({
   entry,
@@ -100,6 +106,8 @@ export function FleetCard({
   backup,
   feeds,
   stored,
+  hue,
+  largest,
   control,
   index,
 }: {
@@ -110,6 +118,10 @@ export function FleetCard({
   feeds: { products: string[]; count: number } | undefined
   /** What it holds in bytes, where anybody knows: the page's one answer. */
   stored: number | undefined
+  /** The database's own hue (`fleetHues`). */
+  hue: string
+  /** What the largest database on the server stores: the size bar's full width. */
+  largest: number
   control: FleetControl
   index: number
 }) {
@@ -131,12 +143,21 @@ export function FleetCard({
       {/* Each card lands a beat after the one before it, capped so a fleet
           of forty does not take three seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.04} className="h-full">
-        <SpotlightBorder radius={360} className="h-full">
+        <SpotlightBorder className="h-full">
           {busy && (
             <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
               <BorderBeam size={80} duration={4} />
             </span>
           )}
+          <span
+            aria-hidden
+            data-slot="fleet-hue"
+            className={cn(
+              "pointer-events-none absolute inset-y-4 left-0 w-0.75 rounded-r-full",
+              down && "opacity-50",
+            )}
+            style={{ background: hue }}
+          />
           <div
             onClick={(event) => {
               // React carries a press inside the open menu up through its
@@ -145,14 +166,14 @@ export function FleetCard({
               if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
               router.push(href)
             }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
+            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4 pl-5"
           >
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
               <EngineMark engine={engine} className={cn("row-span-2", down && "opacity-60")} />
               <Link
                 href={href}
                 aria-label={`Open ${entry.name}`}
-                className="block max-w-full min-w-0 truncate rounded-sm text-title leading-tight font-medium focus-ring"
+                className="block max-w-full min-w-0 truncate rounded-sm text-title leading-tight font-semibold tracking-tight focus-ring"
               >
                 {entry.name}
               </Link>
@@ -202,7 +223,27 @@ export function FleetCard({
                   down && "opacity-60",
                 )}
               >
-                <Metric label="Stored" value={stored !== undefined ? bytes(stored) : "—"} />
+                <Metric
+                  label="Stored"
+                  value={stored !== undefined ? bytes(stored) : "—"}
+                  hint={
+                    stored !== undefined &&
+                    largest > 0 && (
+                      <span
+                        aria-hidden
+                        className="mt-1.5 block h-1 w-full max-w-20 overflow-hidden rounded-full bg-meter-track"
+                      >
+                        <span
+                          className="block h-full rounded-full transition-[width] duration-700 ease-out"
+                          style={{
+                            width: `${Math.max((stored / largest) * 100, stored > 0 ? 4 : 0)}%`,
+                            background: hue,
+                          }}
+                        />
+                      </span>
+                    )
+                  }
+                />
                 <Metric
                   label={objectsWord(entry)}
                   value={down ? "—" : entry.objects.toLocaleString()}

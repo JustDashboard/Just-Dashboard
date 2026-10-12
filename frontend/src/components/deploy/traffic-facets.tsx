@@ -9,13 +9,13 @@ import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import { latency, latencyShare, latencyTone, statusClass } from "@/lib/requests"
 import { BarList } from "@/components/bar-list"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { FactDot } from "@/components/metrics/host-identity"
 import { DimActions } from "@/components/icon-action"
 import { ProductGlyph } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
+import { Visitors } from "@/components/deploy/audience"
 import { LatencyLadder } from "@/components/deploy/latency-ladder"
 import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import {
@@ -29,10 +29,10 @@ import {
 /**
  * The readings the window already computes, drawn.
  *
- * The rows say what happened; these say what it adds up to: how the response
- * times spread, which page is failing, which client is trying doors, how much
- * of the traffic is a bot, where visitors came from, and which route the slow
- * tenth belongs to. Each list is a plain block — a head, a hairline, rows —
+ * The rows say what happened; these say what it adds up to: who the people
+ * were and what they opened, how the response times spread, which page is
+ * failing, which address is trying doors, how much of the traffic is a bot,
+ * where visitors came from, and which route the slow tenth belongs to. Each list is a plain block — a head, a hairline, rows —
  * because six framed boxes under a chart is six boxes, and the reader is here
  * to compare. The heads are 13px and semibold, a step above the 12px rows
  * they open; as small-caps eyebrows they were the quietest line in each block
@@ -130,12 +130,19 @@ export function TrafficFacets({
             blockState={blockState}
             blockUnavailable={blockUnavailable}
             dockerIngress={dockerIngress}
+            onFilterClient={onFilterClient}
+            onFilterPath={onFilterPath}
           />
         </BlurFade>
       )}
 
+      {summary.audience && (
+        <Visitors audience={summary.audience} onFilterClient={onFilterClient} index={1} />
+      )}
+
       {latencyKnown && summary.latency && (
-        <Facet title="Response times" reading={`mean ${latency(summary.latency.mean)}`} index={1}>
+        <Facet title="Response times" reading={`mean ${latency(summary.latency.mean)}`} index={2}>
+          <LatencySentence latency={summary.latency} />
           <LatencyLadder latency={summary.latency} threshold={threshold} onPick={onFilterSlow} />
         </Facet>
       )}
@@ -240,7 +247,7 @@ export function TrafficFacets({
 
         <div className="flex min-w-0 flex-col gap-8">
           <Facet
-            title="Clients"
+            title="Addresses"
             reading={[
               tally(summary.clients, "address", "addresses"),
               scanners.size > 0 ? plural(scanners.size, "scanner") : null,
@@ -438,6 +445,35 @@ export function Facet({
 }
 
 /**
+ * The ladder's marks in words first: "p50" over a tick is notation, and the
+ * question the reader brought is how long a visitor waits. Each figure past a
+ * second is amber, as on the ladder.
+ */
+function LatencySentence({
+  latency: reading,
+}: {
+  latency: NonNullable<RequestSummary["latency"]>
+}) {
+  const figure = (ms: number) => (
+    <span
+      className={cn(
+        "numeric font-medium text-foreground",
+        latencyTone(ms) === "warning" && "text-warning",
+      )}
+    >
+      {latency(ms)}
+    </span>
+  )
+  return (
+    <p className="mb-2 text-xs text-muted-foreground">
+      Half of the requests were answered within {figure(reading.p50)}, nineteen in twenty within{" "}
+      {figure(reading.p95)}, and the slowest took {figure(reading.max)}. Press a mark to see the
+      requests at least that slow.
+    </p>
+  )
+}
+
+/**
  * A page's two telling figures, in one hint so it reads as one line: its
  * failures in the failure hue and its tail latency in amber once it is past a
  * second.
@@ -528,6 +564,12 @@ function SlowRow({
  * because it asks for a decision — whether to deny them — and it carries its
  * own verb for each (§14: a notice is for what the reader has to act on; a
  * `Notice` that carries its own button, as the Packages page's do).
+ *
+ * Laid out as the lists under it are: the addresses as ranked rows, each with
+ * its probes as an amber bar against the busiest and Block in a column of its
+ * own; and beside them the paths they asked for, ranked the same way. It was one column of addresses hugging the
+ * left of a notice as wide as the pane, each Block landing wherever its probe
+ * count happened to end, and a line of four paths.
  */
 function Scanners({
   summary,
@@ -535,69 +577,112 @@ function Scanners({
   blockState,
   blockUnavailable,
   dockerIngress,
+  onFilterClient,
+  onFilterPath,
 }: {
   summary: RequestSummary
   onBlock?: (ip: string) => void
   blockState?: (ip: string) => RequestBlockState
   blockUnavailable?: string
   dockerIngress?: boolean
+  onFilterClient: (ip: string) => void
+  onFilterPath: (path: string) => void
 }) {
-  const probes = summary.probes.slice(0, 4)
-  const more = summary.probes.length - probes.length
+  const scanners = summary.scanners
+  const probed = scanners.reduce((n, scanner) => n + (scanner.probes ?? 0), 0)
+  const most = Math.max(1, ...scanners.map((scanner) => scanner.probes ?? 0))
   return (
-    <Notice tone="warning" icon={Warning} title="Scanners">
-      <p>
-        {plural(summary.scanners.length, "client")} probed paths commonly tried by scripts. These
-        probes were refused.
-      </p>
-      <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
-        {probes.map((probe, i) => (
-          <span key={probe.value} className="inline-flex items-center gap-1.5">
-            {i > 0 && <FactDot />}
-            <RequestPath path={probe.value} />
+    <Notice
+      tone="warning"
+      icon={Warning}
+      title={
+        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span>
+            <span>Scanners</span>
+            <span className="font-normal text-muted-foreground">
+              {" "}
+              · {plural(scanners.length, "address", "addresses")} · {plural(probed, "probe")}{" "}
+              refused
+            </span>
           </span>
-        ))}
-        {more > 0 && <span className="text-muted-foreground">+{more} more</span>}
-      </p>
-      <ul className="mt-2 flex flex-col gap-1">
-        {summary.scanners.map((scanner) => {
-          const network = networkOf(scanner.value)
-          const Place = NETWORK_GLYPH[network.kind]
-          return (
-            <li key={scanner.value} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              {network.product ? (
+          {onBlock && (blockUnavailable || dockerIngress) && (
+            <span className="text-hint font-normal text-muted-foreground">
+              {blockUnavailable ||
+                "Block saves a host firewall deny. Docker-published ingress ports can bypass it."}{" "}
+              <Link href="/network/firewall" className="text-link hover:underline">
+                Open Firewall
+              </Link>
+            </span>
+          )}
+        </span>
+      }
+    >
+      <p>Addresses that asked for paths only scripts ask for, and were refused.</p>
+      <div className="mt-3 grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <BarList
+          className="-mx-2"
+          items={scanners.map((scanner) => {
+            const network = networkOf(scanner.value)
+            const Place = NETWORK_GLYPH[network.kind]
+            const state = blockState?.(scanner.value)
+            return {
+              key: scanner.value,
+              mark: network.product ? (
                 <ProductGlyph id={network.product} />
               ) : (
-                <Place aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <Address ip={scanner.value} />
-              <span className="numeric text-muted-foreground">
-                {plural(scanner.probes ?? 0, "probe")}
-              </span>
-              {onBlock && !isPrivate(scanner.value) && (
-                <Button
-                  size="xs"
-                  variant="destructive"
-                  disabled={Boolean(blockUnavailable) || blockState?.(scanner.value) === "blocking"}
-                  title={blockUnavailable || undefined}
-                  onClick={() => onBlock(scanner.value)}
-                >
-                  {blockState?.(scanner.value) === "blocking" ? "Blocking…" : "Block"}
-                </Button>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-      {onBlock && (blockUnavailable || dockerIngress) && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {blockUnavailable ||
-            "Block saves a host firewall deny. Docker-published ingress ports can bypass it."}{" "}
-          <Link href="/network/firewall" className="text-link hover:underline">
-            Open Firewall
-          </Link>
-        </p>
-      )}
+                <Place className="size-3.5 text-muted-foreground" />
+              ),
+              label: <Address ip={scanner.value} />,
+              value: (scanner.probes ?? 0).toLocaleString(),
+              share: (scanner.probes ?? 0) / most,
+              signal: 1,
+              tone: "warning" as const,
+              title: `Only the requests from ${scanner.value}`,
+              onClick: () => onFilterClient(scanner.value),
+              trailing: onBlock ? (
+                // As wide as the verb on a phone, where a fixed column took
+                // the width the address needed; a column from `sm`, so the
+                // figures still end on one line.
+                <span className="flex justify-end sm:w-20">
+                  {!isPrivate(scanner.value) && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="text-destructive hover:text-destructive"
+                      disabled={Boolean(blockUnavailable) || state === "blocking"}
+                      title={blockUnavailable || undefined}
+                      onClick={() => onBlock(scanner.value)}
+                    >
+                      {state === "blocking" ? "Blocking…" : "Block"}
+                    </Button>
+                  )}
+                </span>
+              ) : undefined,
+            }
+          })}
+        />
+        <div className="min-w-0">
+          <p className="pb-1 text-hint text-muted-foreground">Paths they tried</p>
+          <BarList
+            className="-mx-2"
+            items={summary.probes.slice(0, 6).map((probe) => ({
+              key: probe.value,
+              label: <RequestPath path={probe.value} />,
+              value: probe.count.toLocaleString(),
+              share: probe.count / Math.max(1, summary.probes[0]?.count ?? 1),
+              signal: 1,
+              tone: "warning" as const,
+              title: `Show every request to ${probe.value}`,
+              onClick: () => onFilterPath(probe.value),
+            }))}
+          />
+          {summary.probes.length > 6 && (
+            <p className="px-0 pt-1 text-hint text-muted-foreground">
+              and {plural(summary.probes.length - 6, "more path")}
+            </p>
+          )}
+        </div>
+      </div>
     </Notice>
   )
 }

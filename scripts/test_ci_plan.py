@@ -20,7 +20,8 @@ BACKEND = {
     "go.sum": "",
     "internal/api/routes.go": f'package api\nimport "{MODULE}/internal/deploy"\nimport "{MODULE}/internal/shell"\n',
     "internal/api/testdata/drivers.json": "{}\n",
-    "internal/deploy/engine.go": f'package deploy\nimport "{MODULE}/internal/store"\n',
+    "internal/deploy/engine.go": f'package deploy\nimport "{MODULE}/internal/store"\nimport "{MODULE}/internal/metrics"\n',
+    "internal/metrics/metrics.go": "package metrics\n",
     "internal/deploy/engine_test.go": (
         "package deploy\n"
         "func TestListStaysWithinItsBudgetAtReferenceScale(t *testing.T) {}\n"
@@ -42,11 +43,16 @@ BACKEND = {
     "scripts/generate.go": "//go:build ignore\n\npackage main\n",
 }
 
-# A deployment page and a files page inside the dashboard's layout, a card
-# only the deployment page draws, and a button the shell draws on every page.
+# A deployment page, a files page and a databases page inside the dashboard's
+# layout, a card only the deployment page draws, a logo both the deployment
+# and the files pages draw, a button the shell draws on every page, and the
+# database engines the shell's rail reads as well as the databases page.
 FRONTEND = {
     "package.json": "{}\n",
     "eslint.config.mjs": "export default []\n",
+    "public/deploy-hero.png": "png\n",
+    "public/logos/acme.svg": "<svg/>\n",
+    "public/unnamed.svg": "<svg/>\n",
     "src/lib/version.ts": 'export const version = "1"\n',
     "src/lib/format.ts": "export const format = 1\n",
     "src/lib/format.test.ts": 'import { format } from "./format"\n',
@@ -56,21 +62,35 @@ FRONTEND = {
     "src/app/(dashboard)/error.tsx": "export default function Error() {}\n",
     "src/app/(dashboard)/deploy/[id]/page.tsx": 'import { Card } from "@/components/deploy/card"\n',
     "src/app/(dashboard)/files/page.tsx": 'import { List } from "@/components/files"\n',
-    "src/components/shell.tsx": 'import { Button } from "@/components/ui/button"\n',
+    "src/app/(dashboard)/databases/page.tsx": 'import { Engines } from "@/components/database/engines"\n',
+    "src/components/shell.tsx": (
+        'import { Button } from "@/components/ui/button"\nimport { Engines } from "@/components/database/engines"\n'
+    ),
     "src/components/ui/button.tsx": "export const Button = 1\n",
-    "src/components/deploy/card.tsx": 'import { Badge } from "./badge"\n',
-    "src/components/deploy/badge.tsx": "export const Badge = 1\n",
-    "src/components/files/index.tsx": "export const List = 1\n",
+    "src/components/product-logo.tsx": 'export const logos = { acme: "acme.svg" }\n',
+    "src/components/database/engines.tsx": "export const Engines = 1\n",
+    "src/components/deploy/card.tsx": 'import { Badge } from "./badge"\nimport { logos } from "@/components/product-logo"\n',
+    "src/components/deploy/badge.tsx": 'export const Badge = "/deploy-hero.png"\n',
+    "src/components/files/index.tsx": 'import { logos } from "@/components/product-logo"\nexport const List = 1\n',
     "tests/browser/design-system.spec.ts": 'test("every page", async () => {})\n',
-    "tests/browser/deploy.spec.ts": 'test("opens", async ({ page }) => { await page.goto(`/deploy/${id}`) })\n',
+    "tests/browser/navigation.spec.ts": 'test("the rail", async () => {})\n',
+    "tests/browser/deploy.spec.ts": (
+        'import { logos } from "@/components/product-logo"\n'
+        'test("opens", async ({ page }) => { await page.goto(`/deploy/${id}`) })\n'
+    ),
     "tests/browser/files.spec.ts": (
         'import { tree } from "./fixtures/files/tree"\n'
         'test("lists", async ({ page }) => { await page.goto("/files?path=/srv") })\n'
     ),
     "tests/browser/fixtures/files/tree.ts": "export const tree = 1\n",
-    "tests/browser/database.spec.ts": 'import { drivers } from "./database-fixture"\ntest("creates", async () => {})\n',
+    "tests/browser/database.spec.ts": (
+        'import { drivers } from "./database-fixture"\n'
+        'test("creates", async ({ page }) => { await page.goto("/databases") })\n'
+    ),
     "tests/browser/database-fixture.ts": 'import catalogue from "../../../backend/internal/api/testdata/drivers.json"\n',
 }
+
+EVERY_SPEC = ["database", "deploy", "design-system", "files", "navigation"]
 
 
 class PlanTest(unittest.TestCase):
@@ -84,21 +104,24 @@ class PlanTest(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
 
-    def plan(self, *changed):
-        return ci_plan.plan(self.root, None if changed == (None,) else list(changed))
+    def plan(self, *changed, pull_request=False):
+        return ci_plan.plan(self.root, None if changed == (None,) else list(changed), pull_request)
 
     def go(self, *changed):
         out = self.plan(*changed)
         return out["go_packages"].split(), out["go_plain"].split(), json.loads(out["race"])
 
-    def specs(self, *changed):
-        out = self.plan(*changed)
+    def specs(self, *changed, pull_request=False):
+        out = self.plan(*changed, pull_request=pull_request)
         jobs = json.loads(out["browser_specs"])
         self.assertEqual(json.loads(out["browser"]), list(range(1, len(jobs))))
         names = sorted(
             name.removeprefix("tests/browser/").removesuffix(".spec.ts") for job in jobs for name in job.split()
         )
-        return "all" if names == ["database", "deploy", "design-system", "files"] else names
+        return "all" if names == EVERY_SPEC else names
+
+    def pull_request_specs(self, *changed):
+        return self.specs(*changed, pull_request=True)
 
     def test_a_package_is_checked_with_everything_that_imports_it(self):
         packages, plain, race = self.go("backend/internal/store/store.go")
@@ -196,6 +219,72 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual((out["go_packages"], out["lint"], out["frontend"]), ("./...", ".", "true"))
                 self.assertEqual(self.specs(*changed), "all")
                 self.assertEqual(len(json.loads(out["live"])), 5)
+
+    def test_a_pull_request_picks_a_one_section_module_as_the_merge_does(self):
+        for changed in ["frontend/src/components/deploy/badge.tsx", "frontend/tests/browser/fixtures/files/tree.ts"]:
+            with self.subTest(changed=changed):
+                self.assertEqual(self.pull_request_specs(changed), self.specs(changed))
+
+    def test_a_pull_request_runs_the_shell_specs_for_what_more_than_one_section_draws(self):
+        # The merge's run follows each to every page it reaches.
+        for changed, merge in [
+            ("frontend/src/components/ui/button.tsx", "all"),
+            ("frontend/src/components/product-logo.tsx", ["deploy", "design-system", "files"]),
+            ("frontend/src/components/shell.tsx", "all"),
+            ("frontend/src/app/(dashboard)/layout.tsx", "all"),
+            ("frontend/src/app/(dashboard)/error.tsx", "all"),
+            ("frontend/src/app/globals.css", "all"),
+        ]:
+            with self.subTest(changed=changed):
+                self.assertEqual(self.pull_request_specs(changed), ["design-system", "navigation"])
+                self.assertEqual(self.specs(changed), merge)
+
+    def test_a_pull_request_keeps_the_home_section_of_a_module_the_shell_reads(self):
+        self.assertEqual(
+            self.pull_request_specs("frontend/src/components/database/engines.tsx"),
+            ["database", "design-system", "navigation"],
+        )
+
+    def test_a_pull_request_follows_a_public_asset_from_the_modules_naming_it(self):
+        self.assertEqual(self.pull_request_specs("frontend/public/deploy-hero.png"), ["deploy", "design-system"])
+        self.assertEqual(self.pull_request_specs("frontend/public/logos/acme.svg"), ["design-system", "navigation"])
+        self.assertEqual(self.pull_request_specs("frontend/public/unnamed.svg"), ["design-system", "navigation"])
+        self.assertEqual(self.specs("frontend/public/deploy-hero.png"), "all")
+
+    def test_a_pull_request_runs_everything_when_the_build_changes(self):
+        for changed in ["frontend/package.json", "frontend/bun.lock", "frontend/next.config.ts"]:
+            with self.subTest(changed=changed):
+                self.assertEqual(self.pull_request_specs(changed), "all")
+
+    def test_a_pull_request_deals_its_specs_into_smaller_jobs(self):
+        for name in ("a", "b"):
+            (self.root / f"frontend/tests/browser/{name}.spec.ts").write_text('test("one", async () => {})\n' * 200)
+        specs = ["frontend/tests/browser/a.spec.ts", "frontend/tests/browser/b.spec.ts"]
+        self.assertEqual(len(ci_plan.shards(self.root, specs)), 2)
+        self.assertEqual(len(ci_plan.shards(self.root, specs, ci_plan.PULL_REQUEST_TESTS_PER_SHARD)), 4)
+        out = self.plan(*specs, pull_request=True)
+        self.assertEqual(json.loads(out["browser"]), [1, 2, 3, 4])
+
+    def test_a_pull_request_runs_the_fixtures_of_the_packages_built_on_the_one_that_changed(self):
+        # The metrics deploy reads, beside a handler: the merge runs every
+        # fixture the change reaches, the pull request only the handler's.
+        changed = ("backend/internal/metrics/metrics.go", "backend/internal/api/routes.go")
+        self.assertEqual(json.loads(self.plan(*changed)["live"])[:1], ["fixtures"])
+        self.assertEqual(len(json.loads(self.plan(*changed)["live"])), 5)
+        out = self.plan(*changed, pull_request=True)
+        self.assertEqual(json.loads(out["live"]), ["fixtures"])
+        self.assertEqual(json.loads(out["live_jobs"])["fixtures"]["packages"], "./internal/api")
+
+        # The store both are built on runs both their fixtures, and still
+        # builds no framework: those follow internal/deploy itself.
+        out = self.plan("backend/internal/store/store.go", pull_request=True)
+        self.assertEqual(json.loads(out["live"]), ["fixtures"])
+        self.assertEqual(json.loads(out["live_jobs"])["fixtures"]["packages"], "./internal/api ./internal/deploy")
+
+    def test_a_pull_request_builds_the_frameworks_when_the_deployment_package_changes(self):
+        for changed in [("backend/internal/deploy/engine.go",), (None,), (".github/workflows/verify.yml",)]:
+            with self.subTest(changed=changed):
+                self.assertEqual(len(json.loads(self.plan(*changed, pull_request=True)["live"])), 5)
 
     def test_specs_are_dealt_into_jobs_by_how_many_tests_they_hold(self):
         # In name order, each to the job holding the fewest so far.

@@ -104,7 +104,12 @@ export type ServiceLogsProps = {
   storageKey?: string
   /** Which of Live, History and Insights are offered; all three unless the page says otherwise. */
   modes?: ("live" | "search" | "insights")[]
-  views?: ServiceLogsView[]
+  /**
+   * The page's own views. A pane that mixes kinds of source — a journal unit
+   * beside a container — hands a function, asked for the source on screen, so
+   * Runs go with the unit and Events with the container.
+   */
+  views?: ServiceLogsView[] | ((source: ServiceLogSource) => ServiceLogsView[])
   /** History on this window, each time it changes; gone again, back to Live. */
   window?: LogWindow
   /**
@@ -279,12 +284,25 @@ export function ServiceLogs(props: ServiceLogsProps) {
     archives: storedArchives,
   }
   const windowed = handed.windowed ?? storedWindowed
-  const offered = [...modes, ...(props.views ?? []).map((v) => v.id)]
+  // The source in effect, settled before the arrival is applied since the
+  // views a page offers may depend on it. A remembered id that went is quietly
+  // the first source again; one the page asked for by name is said to be
+  // gone, because opening another in its place would answer a question
+  // nobody asked.
+  const picked = handed.picked ?? storedPicked
+  const found = sources.find((s) => s.id === picked)
+  const missing = !found && picked !== "" && picked === sourceArrival
+  const given = found ?? (missing ? undefined : sources[0])
+  const sourceId = given?.id ?? ""
+  const viewsOf = (source: ServiceLogSource | undefined) =>
+    typeof props.views === "function" ? (source ? props.views(source) : []) : (props.views ?? [])
+  const views = viewsOf(given)
+  const offeredIn = (among: ServiceLogsView[]) => [...modes, ...among.map((v) => v.id)]
+  const offered = offeredIn(views)
   // Whether a reading shows the filter: a page view that reads none would
   // take a narrowing out of sight.
-  const shows = (mode: LogMode) =>
-    (modes as LogMode[]).includes(mode) ||
-    Boolean(props.views?.find((view) => view.id === mode)?.filtered)
+  const shows = (mode: LogMode, among: ServiceLogsView[]) =>
+    (modes as LogMode[]).includes(mode) || Boolean(among.find((view) => view.id === mode)?.filtered)
   // Out of the window: History on it goes back to Live, and the window's
   // bounds go, so the next History is not the old moment.
   const outOfWindow = (next: Handed) => {
@@ -324,7 +342,10 @@ export function ServiceLogs(props: ServiceLogsProps) {
         setAsking(ask)
         setJump((n) => n + 1)
         const mode = next.mode ?? storedMode
-        if (!shows(offered.includes(mode) ? mode : offered[0])) next.mode = modes[0]
+        const among =
+          next.picked === undefined ? views : viewsOf(sources.find((s) => s.id === next.picked))
+        const here = offeredIn(among)
+        if (!shows(here.includes(mode) ? mode : here[0], among)) next.mode = modes[0]
       }
     }
     setPrev({ source: sourceArrival, view: viewArrival, window: windowKey, ask: askKey })
@@ -358,21 +379,12 @@ export function ServiceLogs(props: ServiceLogsProps) {
     if (handed.archives !== undefined) setArchives(handed.archives)
   }, [handed, setPicked, setMode, setRange, setSince, setUntil, setWindowed, setArchives])
 
-  const picked = handed.picked ?? storedPicked
   const wantedMode = handed.mode ?? storedMode
   const mode = offered.includes(wantedMode) ? wantedMode : offered[0]
   const range = handed.range ?? storedRange
   const since = handed.since ?? storedSince
   const until = handed.until ?? storedUntil
   const archives = handed.archives ?? storedArchives
-
-  // A remembered id that went is quietly the first source again; one the
-  // page asked for by name is said to be gone, because opening another in
-  // its place would answer a question nobody asked.
-  const found = sources.find((s) => s.id === picked)
-  const missing = !found && picked !== "" && picked === sourceArrival
-  const given = found ?? (missing ? undefined : sources[0])
-  const sourceId = given?.id ?? ""
 
   const described = usePoll(
     (signal) => get<unknown>("/logs/source", { source: sourceId }, signal),
@@ -589,7 +601,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   // A page view that reads no filter has its own commands — a request log
   // exports its own rows — and the log's export beside them was a second
   // button saying the same word about other lines.
-  const view = props.views?.find((v) => v.id === mode)
+  const view = views.find((v) => v.id === mode)
   const exportable = !sheet && (!view || view.filtered)
 
   return (
@@ -624,6 +636,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
                     filter={shown}
                     boot={boot}
                     lens={forced}
+                    compact
                   />
                 )}
               </>
@@ -635,7 +648,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
           unit=""
           onUnitChange={() => {}}
           modes={modes}
-          views={props.views?.map((view) => ({ ...view, render: () => view.render(ctx) }))}
+          views={views.map((view) => ({ ...view, render: () => view.render(ctx) }))}
           mode={mode}
           onModeChange={changeMode}
           filter={shown}
@@ -661,14 +674,6 @@ export function ServiceLogs(props: ServiceLogsProps) {
           }}
           since={since}
           until={until}
-          onSinceChange={(value) => {
-            leaveWindow()
-            setSince(value)
-          }}
-          onUntilChange={(value) => {
-            leaveWindow()
-            setUntil(value)
-          }}
           onCustomRange={(from, to) => {
             leaveWindow()
             setRange("custom")

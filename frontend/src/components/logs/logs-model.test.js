@@ -7,7 +7,9 @@ import {
   columnWidthFor,
   emptiedFile,
   eventColumnFor,
+  clockSkew,
   oneService,
+  pulseOf,
   readingFor,
   readingShown,
   sameQuestion,
@@ -195,4 +197,50 @@ test("a unit's journal offers the manager's Failures beside its own lens's views
   expect(unitJournalLens(postgres, "docker", "docker:db")).toBe(postgres)
   const systemd = lensFor("systemd")
   expect(unitJournalLens(systemd, "journal", "journal:cron.service")).toBe(systemd)
+})
+
+describe("pulseOf", () => {
+  const now = Date.parse("2026-10-11T12:00:00Z")
+  const at = (secondsAgo, level = "info", extra = {}) => ({
+    text: "x",
+    level,
+    timestamp: new Date(now - secondsAgo * 1000).toISOString(),
+    ...extra,
+  })
+
+  test("buckets the last minute by each line's own time, newest at the right", () => {
+    const slots = pulseOf([at(59), at(30), at(1), at(0.5, "error")], now)
+    expect(slots).toHaveLength(30)
+    expect(slots[0].total).toBe(1)
+    expect(slots[15].total).toBe(1)
+    expect(slots[29]).toEqual({ total: 2, errors: 1 })
+  })
+
+  test("a replayed tail older than a minute is not counted as arriving now", () => {
+    const slots = pulseOf([at(600), at(120), at(5)], now)
+    expect(slots.reduce((n, s) => n + s.total, 0)).toBe(1)
+  })
+
+  test("continuation lines are part of their record, not lines of their own", () => {
+    const slots = pulseOf([at(1), at(1, "error", { cont: true })], now)
+    expect(slots[29]).toEqual({ total: 1, errors: 0 })
+  })
+
+  test("a line out of order behind an old one is still counted", () => {
+    const slots = pulseOf([at(2), at(300), at(1)], now)
+    expect(slots.reduce((n, s) => n + s.total, 0)).toBe(2)
+  })
+
+  test("the clocks' difference is the smallest gap between writing and arriving", () => {
+    const written = new Date(now).toISOString()
+    expect(clockSkew(undefined, now + 61_000, written)).toBe(61_000)
+    expect(clockSkew(61_000, now + 60_200, written)).toBe(60_200)
+    expect(clockSkew(60_200, now + 90_000, written)).toBe(60_200)
+    expect(clockSkew(5, now, "not a time")).toBe(5)
+  })
+
+  test("a stream with no times draws no pulse rather than a minute of silence", () => {
+    expect(pulseOf([{ text: "x", level: "info" }], now)).toBeNull()
+    expect(pulseOf([], now)).toBeNull()
+  })
 })

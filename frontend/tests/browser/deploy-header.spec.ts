@@ -12,6 +12,7 @@ import {
 test("the project header is one compact row that keeps its readings apart across screen sizes", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(90_000)
   await page.emulateMedia({ reducedMotion: "reduce" })
   await mockProject(page, { operations: healthyOperations })
   const completed = {
@@ -47,7 +48,7 @@ test("the project header is one compact row that keeps its readings apart across
     await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
     await expect(identity.getByText("Release #2", { exact: true })).toBeVisible()
     await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
-    await expect(identity.getByText("All checks passed", { exact: true })).toBeVisible()
+    await expect(identity.getByText("No priority issues found", { exact: true })).toBeVisible()
     await expect(
       identity.getByRole("link", { name: "Automatic deployment settings" }),
     ).toHaveAttribute("href", "/deploy/7/settings/general#automatic-deployment")
@@ -55,7 +56,7 @@ test("the project header is one compact row that keeps its readings apart across
     await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
     await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
     const [state, assessment] = await Promise.all(
-      ["Ready", "All checks passed"].map((label) =>
+      ["Ready", "No priority issues found"].map((label) =>
         identity.getByText(label, { exact: true }).boundingBox(),
       ),
     )

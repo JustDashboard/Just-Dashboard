@@ -9,9 +9,10 @@ import {
 } from "./fixtures/proxy/insights"
 
 /**
- * The overview's Live traffic panel: nginx's stub_status counters with their
- * last hour, and the administrator's switch that puts the status server in
- * conf.d and takes it out again.
+ * The overview's Live traffic panel: the edge's hour added up from every
+ * site's access record, nginx's and the Docker Caddy ingress's alike, then
+ * nginx's own stub_status counters under it, with the administrator's switch
+ * that puts the status server in conf.d and takes it out again.
  */
 
 const METRICS = "**/api/v1/proxy/metrics*"
@@ -30,7 +31,41 @@ function liveTraffic(page: Page) {
 }
 
 function tile(page: Page, label: string) {
-  return liveTraffic(page).locator("[data-slot='stat-tile']").filter({ hasText: label })
+  return liveTraffic(page)
+    .locator("[data-slot='stat-tile']")
+    .filter({ has: page.locator(".eyebrow").getByText(label, { exact: true }) })
+}
+
+function counters(page: Page) {
+  return liveTraffic(page).getByRole("region", { name: "nginx counters" })
+}
+
+/** A minute of a site's hour, `ago` minutes back. */
+function minute(ago: number, total: number, failed = 0) {
+  const start = new Date(Date.now() - ago * 60_000)
+  start.setUTCSeconds(0, 0)
+  return { start: start.toISOString(), total, refused: 0, failed, bytes: total * 1_000 }
+}
+
+/** One site's hour, as GET /proxy/traffic answers it. */
+function hour(
+  site: string,
+  engine: "nginx" | "caddy-ingress",
+  points: ReturnType<typeof minute>[],
+) {
+  const requests = points.reduce((sum, p) => sum + p.total, 0)
+  const failed = points.reduce((sum, p) => sum + p.failed, 0)
+  return {
+    site,
+    file: engine === "nginx" ? `/etc/nginx/sites-available/${site}` : "",
+    engine,
+    status: "available",
+    requests,
+    errorRate: requests ? failed / requests : 0,
+    bytes: requests * 1_000,
+    complete: true,
+    points,
+  }
 }
 
 async function asReader(page: Page) {
@@ -39,30 +74,75 @@ async function asReader(page: Page) {
   )
 }
 
-test("live traffic draws the requests and connections with their last hour", async ({ page }) => {
+test("live traffic adds up every site's minutes, the ingress's routes included", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [
+        hour("app.example.com", "nginx", [minute(2, 30), minute(1, 40, 2), minute(0, 5)]),
+        hour("just-dashboard-env-7.conf", "caddy-ingress", [
+          minute(2, 10),
+          minute(1, 20, 4),
+          minute(0, 1),
+        ]),
+      ],
+    }),
+  )
+  await page.goto("/proxy")
+
+  const panel = liveTraffic(page)
+  await expect(panel).toContainText("Last hour across 2 sites, by the minute")
+  // The last whole minute, not the one still filling.
+  await expect(tile(page, "Requests")).toContainText("60")
+  await expect(tile(page, "This hour")).toContainText("106")
+  await expect(tile(page, "Server errors")).toContainText("5.7%")
+  await expect(tile(page, "Server errors")).toContainText("6 this hour")
+  await expect(
+    panel.getByRole("img", { name: "Requests a minute over the last hour" }),
+  ).toBeVisible()
+  await expect(panel.getByRole("heading", { name: "Requests a minute" })).toBeVisible()
+  // A poll is not a socket: nothing here breathes as live.
+  await expect(panel.locator(".animate-breathe")).toHaveCount(0)
+
+  // The ingress's route is a site like any other, and opens its own page.
+  const traffic = page.getByRole("region", { name: "Traffic", exact: true })
+  await expect(traffic).toContainText("requests this hour")
+  await traffic.getByRole("button", { name: "Open just-dashboard-env-7.conf's requests" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf$/)
+})
+
+test("recent errors are the hour's 5xx by site", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [hour("app.example.com", "nginx", [minute(1, 50, 5)])],
+    }),
+  )
+  await page.goto("/proxy")
+  const errors = page.getByRole("region", { name: "Recent errors" })
+  await expect(errors).toContainText("server errors this hour")
+  await expect(errors.getByRole("list", { name: "Sites answering 5xx" })).toContainText(
+    "app.example.com",
+  )
+})
+
+test("the nginx counters read requests and connections", async ({ page }) => {
   await mockProxy(page, { included: true })
   const samples = steady(metricSeries(60))
   await page.route(METRICS, (route) => json(route, metricsOn(samples)))
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
-  await expect(panel.getByText("On", { exact: true })).toBeVisible()
-  await expect(tile(page, "Requests")).toContainText("4.2")
-  await expect(tile(page, "Requests")).toContainText("a second")
-  // Five minutes of readings: the total says how far back it reaches rather
-  // than claiming an hour.
-  await expect(tile(page, "Requests")).toContainText(/36,914 since \d{2}:\d{2}/)
-  await expect(tile(page, "Connections")).toContainText("31")
-  await expect(tile(page, "Connections")).toContainText("1 reading · 5 writing · 25 idle")
+  const strip = counters(page)
+  await expect(strip.getByText("On", { exact: true })).toBeVisible()
+  await expect(strip).toContainText("4.2 requests a second")
+  await expect(strip).toContainText("31 connections open (1 reading · 5 writing · 25 idle)")
   await expect(
-    panel.getByRole("img", { name: "Requests a second over the last hour" }),
-  ).toBeVisible()
-  await expect(
-    panel.getByRole("img", { name: "Open connections over the last hour" }),
-  ).toBeVisible()
-  await expect(panel).toContainText("127.0.0.1:19081/jd-status, read every 5 seconds")
-  // A poll is not a socket: nothing here breathes as live.
-  await expect(panel.locator(".animate-breathe")).toHaveCount(0)
+    strip.locator("[title*='127.0.0.1:19081/jd-status, read every 5 seconds']"),
+  ).toHaveCount(1)
 })
 
 // The server keeps the hour; each poll after the first asks only for what
@@ -78,14 +158,13 @@ test("the page asks only for the readings it does not hold", async ({ page }) =>
     return json(route, metricsOn(after ? [] : samples, { current: samples.at(-1) }))
   })
   await page.goto("/proxy")
-  await expect(tile(page, "Connections")).toBeVisible()
+  await expect(counters(page)).toContainText("connections open")
   await expect.poll(() => asked.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2)
   expect(asked[0].searchParams.has("after")).toBe(false)
   expect(asked[1].searchParams.get("epoch")).toBe(String(metricsOn([]).epoch))
   expect(asked[1].searchParams.get("after")).toBe("12")
-  // An empty update keeps the hour already drawn.
-  await expect(liveTraffic(page).getByRole("img", { name: /Requests a second/ })).toBeVisible()
-  await expect(tile(page, "Connections")).not.toContainText("—")
+  // An empty update keeps the reading already drawn.
+  await expect(counters(page)).not.toContainText("—")
 })
 
 test("switching on sends the switch, says it is under way and draws the readings", async ({
@@ -106,10 +185,12 @@ test("switching on sends the switch, says it is under way and draws the readings
   })
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
+  const panel = counters(page)
   const toggle = panel.getByRole("switch", { name: "Live metrics" })
   await expect(panel.getByText("Off", { exact: true })).toBeVisible()
-  await expect(panel).toContainText("Switching on adds a loopback-only status server to conf.d")
+  await expect(
+    panel.locator("[title^='Switching on adds a loopback-only status server to conf.d']"),
+  ).toHaveCount(1)
   await expect(toggle).not.toBeChecked()
 
   await toggle.click()
@@ -122,7 +203,7 @@ test("switching on sends the switch, says it is under way and draws the readings
   await expect(page.getByText("nginx answers on 127.0.0.1:19081/jd-status")).toBeVisible()
   await expect(toggle).toBeChecked()
   await expect(panel.getByText("On", { exact: true })).toBeVisible()
-  await expect(tile(page, "Connections")).toContainText("31")
+  await expect(panel).toContainText("31 connections open")
 })
 
 test("switching off takes the readings away", async ({ page }) => {
@@ -139,12 +220,12 @@ test("switching off takes the readings away", async ({ page }) => {
   })
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
-  await expect(tile(page, "Requests")).toBeVisible()
+  const panel = counters(page)
+  await expect(panel).toContainText("requests a second")
   await panel.getByRole("switch", { name: "Live metrics" }).click()
   await expect(page.getByText("Live metrics off")).toBeVisible()
   expect(sent).toEqual([{ enabled: false }])
-  await expect(panel.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(panel).not.toContainText("requests a second")
   await expect(panel.getByText("Off", { exact: true })).toBeVisible()
   await expect(panel.getByRole("switch", { name: "Live metrics" })).not.toBeChecked()
 })
@@ -173,7 +254,7 @@ test("a switch the server refused says why and leaves the metrics off", async ({
   await expect(liveTraffic(page).getByText("Off", { exact: true })).toBeVisible()
 })
 
-test("readings that stopped keep their hour and lose their figure", async ({ page }) => {
+test("readings that stopped lose their figures and say why", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.route(METRICS, (route) =>
     json(
@@ -186,28 +267,22 @@ test("readings that stopped keep their hour and lose their figure", async ({ pag
   )
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
+  const panel = counters(page)
   await expect(panel.getByText("No answer", { exact: true })).toBeVisible()
-  await expect(tile(page, "Requests")).toContainText("—")
-  await expect(tile(page, "Connections")).toContainText("—")
   await expect(panel).toContainText(
     /No answer since .+: nothing is listening on 127\.0\.0\.1:19081/,
   )
-  await expect(
-    panel.getByRole("img", { name: "Open connections over the last hour" }),
-  ).toBeVisible()
+  await expect(panel).not.toContainText("requests a second")
 })
 
-test("connections nginx turned away turn the tile to a warning", async ({ page }) => {
+test("connections nginx turned away are said as a warning", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.route(METRICS, (route) =>
     json(route, metricsOn(metricSeries(20), { hourDropped: 12 })),
   )
   await page.goto("/proxy")
-  await expect(tile(page, "Connections")).toContainText(
-    /12 turned away since \d{2}:\d{2}: worker_connections is full/,
-  )
-  await expect(tile(page, "Connections").locator(".text-warning")).toHaveCount(1)
+  const warning = counters(page).locator(".text-warning")
+  await expect(warning).toHaveText("12 turned away: worker_connections is full")
 })
 
 test("a reader sees the readings and no switch", async ({ page }) => {
@@ -217,13 +292,13 @@ test("a reader sees the readings and no switch", async ({ page }) => {
   await page.route(METRICS, (route) => json(route, on ? metricsOn(metricSeries(10)) : metricsOff()))
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
-  await expect(panel).toContainText("Off. An administrator can switch live metrics on here.")
+  const panel = counters(page)
+  await expect(panel).toContainText("Off. An administrator can switch these counters on.")
   await expect(panel.getByRole("switch")).toHaveCount(0)
 
   on = true
   await page.reload()
-  await expect(tile(page, "Requests")).toBeVisible()
+  await expect(panel).toContainText("requests a second")
   await expect(panel.getByRole("switch")).toHaveCount(0)
 })
 
@@ -267,15 +342,15 @@ test("metrics that cannot be read are an error, not an empty panel", async ({ pa
   )
   await page.goto("/proxy")
 
-  const panel = liveTraffic(page)
+  const panel = counters(page)
   await expect(panel.getByRole("alert").filter({ hasText: "metrics went missing" })).toBeVisible()
-  await expect(panel.getByText(/^Off\./)).toHaveCount(0)
+  await expect(panel.getByText(/^Off —/)).toHaveCount(0)
   fail = false
   await panel.getByRole("button", { name: "Try again" }).click()
-  await expect(panel.getByText(/^Off\./)).toBeVisible()
+  await expect(panel.getByText(/^Off —/)).toBeVisible()
 })
 
-test("a host without nginx has no live traffic to show", async ({ page }) => {
+test("a host with neither nginx nor the ingress has no live traffic to show", async ({ page }) => {
   await mockProxy(page, { included: true })
   await page.route("**/api/v1/proxy/status", (route) =>
     json(route, { ...availability, nginx: false, nginxVersion: "", caddy: true }),
@@ -288,6 +363,12 @@ test("a host without nginx has no live traffic to show", async ({ page }) => {
 test("live traffic fits a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockShowcase(page)
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      sites: [hour("app.example.com", "nginx", [minute(2, 30), minute(1, 40, 2), minute(0, 5)])],
+    }),
+  )
   await page.goto("/proxy")
 
   const panel = liveTraffic(page)
@@ -302,7 +383,7 @@ test("live traffic fits a phone", async ({ page }) => {
   const tiles = await panel
     .locator("[data-slot='stat-tile']")
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width))
-  // Stacked, each the panel's width, so the connection states are not cut.
-  expect(tiles).toHaveLength(2)
+  // Stacked, each the panel's width, so no reading is cut.
+  expect(tiles).toHaveLength(4)
   for (const width of tiles) expect(width).toBeGreaterThan(300)
 })

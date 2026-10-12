@@ -5,6 +5,7 @@ import { get } from "@/lib/api"
 import type { CertbotState, LogSource } from "@/lib/types"
 import { fileSource, journalSource } from "@/lib/log-sources"
 import { usePoll } from "@/hooks/use-poll"
+import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { LoadingRows } from "@/components/state"
@@ -75,6 +76,7 @@ export function RenewalLog({ certbot }: { certbot: CertbotState | undefined }) {
         ) : (
           <ServiceLogs
             sources={sources}
+            views={kindViews}
             storageKey="proxy.certificates.renewals"
             pickerLabel="Renewal log"
             paneClassName="h-[min(60vh,32rem)] min-h-80"

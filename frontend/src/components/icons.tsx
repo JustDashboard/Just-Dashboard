@@ -59,6 +59,8 @@ import {
   ComputerDesktopIcon,
   CpuChipIcon,
   CubeIcon,
+  DevicePhoneMobileIcon,
+  DeviceTabletIcon,
   DocumentArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentIcon,
@@ -94,6 +96,7 @@ import {
   MagnifyingGlassCircleIcon,
   MagnifyingGlassIcon,
   MagnifyingGlassMinusIcon,
+  MagnifyingGlassPlusIcon,
   MapIcon,
   MapPinIcon,
   MinusIcon,
@@ -267,6 +270,7 @@ export const Rocket: Icon = adapt(RocketLaunchIcon, "Rocket")
 export const CloudUpload: Icon = adapt(CloudArrowUpIcon, "CloudUpload")
 export const MagnifyingGlass: Icon = adapt(MagnifyingGlassIcon, "MagnifyingGlass")
 export const MagnifyingGlassMinus: Icon = adapt(MagnifyingGlassMinusIcon, "MagnifyingGlassMinus")
+export const MagnifyingGlassPlus: Icon = adapt(MagnifyingGlassPlusIcon, "MagnifyingGlassPlus")
 export const Filter: Icon = adapt(FunnelIcon, "Filter")
 export const RefreshClockwise: Icon = adapt(ArrowPathIcon, "RefreshClockwise")
 export const RotateClockwise: Icon = adapt(ArrowUturnRightIcon, "RotateClockwise")
@@ -524,6 +528,8 @@ export const UserSettings: Icon = adapt(UserCircleIcon, "UserSettings")
 export const Logout: Icon = adapt(ArrowLeftStartOnRectangleIcon, "Logout")
 export const Home: Icon = adapt(HomeIcon, "Home")
 export const DesktopDevice: Icon = adapt(ComputerDesktopIcon, "DesktopDevice")
+export const PhoneDevice: Icon = adapt(DevicePhoneMobileIcon, "PhoneDevice")
+export const TabletDevice: Icon = adapt(DeviceTabletIcon, "TabletDevice")
 
 /* Appearance and view controls. `BlendMode` is the appearance page: the swatch
    is a light/dark drawing, where a painter's palette promises a colour picker

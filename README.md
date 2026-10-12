@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.1** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.2** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -94,6 +94,7 @@ free.
 - Push to deploy, plus pull-request previews only your tailnet can reach
 - Immutable releases, one-click rollback and health-gated cutover
 - Build logs, runtime, console, request logs and traffic alerts per project
+- Request insights that count real visitors apart from bots, with their devices and pages
 - Notifications to Discord, Slack, Telegram, e-mail, webhooks and GitHub
 
 </td>
@@ -134,7 +135,8 @@ free.
 - A file manager with search, previews, Monaco and image editors
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs
-- Boards: Excalidraw sketches with live cards for the host, projects and databases
+- Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
+- Stickyboard: endless boards of sticky notes you colour, group into sections and link together
 
 </td>
 <td width="50%" valign="top">
@@ -335,8 +337,8 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Two-factor is enforced for every account that has enrolled; `JD_REQUIRE_2FA` decides whether an
   account *must* enrol.
 - Capabilities are checked on every backend route, never in the UI alone.
-- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout
-  asks for a typed phrase checked on the server.
+- Destructive actions are confirmed and audited; deleting a project, database, stack or Git checkout,
+  and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
 
 ### Roles
@@ -352,7 +354,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.1**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.2**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
@@ -467,6 +469,24 @@ printed once in `docker compose logs backend`.
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 </details>
+
+## Uninstalling
+
+**Settings → Configuration → Danger zone → Uninstall** takes the dashboard off the server and asks one
+question first:
+
+- **Keep for a reinstall** removes the dashboard's containers and images and closes its web-terminal
+  sessions. Deployments keep running, and the data in `/var/lib/just-dashboard`, the backups and the
+  `.env` (with a copy of it beside the data) stay where they are. `sudo ./install.sh` in the checkout —
+  or in a fresh clone, which offers to restore the kept `.env` — brings everything back.
+- **Wipe everything** also removes every deployment with its containers, managed volumes and folders,
+  images, networks, routes and the public ingress, and deletes the data directory and every copy of the
+  `.env`. Whether the backups go too is a separate switch, off by default. A wipe asks for the server's
+  name to be typed.
+
+Either way, databases the dashboard created, proxy sites, firewall rules, WireGuard and other network
+settings are left as they are, and so is the checkout. The page follows the uninstall until the
+dashboard stops; the whole transcript is in `/var/log/just-dashboard-uninstall.log`.
 
 ## Backing it up
 

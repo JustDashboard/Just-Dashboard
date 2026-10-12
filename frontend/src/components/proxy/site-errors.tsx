@@ -4,6 +4,9 @@ import { get } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import type { ErrorGroup, ErrorReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
+import { upstreamEndpoint } from "@/components/proxy/site-apps"
+import { portsHref } from "@/components/proxy/ports-list"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ErrorState, LoadingPanel } from "@/components/state"
@@ -13,7 +16,12 @@ function findingLevel(level: string): Finding["level"] {
   if (level === "emerg" || level === "alert" || level === "crit" || level === "error") {
     return level === "error" ? "warning" : "critical"
   }
+  if (level === "warn") return "warning"
   return "notice"
+}
+
+export function isActionableProxyError(group: Pick<ErrorGroup, "level">) {
+  return findingLevel(group.level) !== "notice"
 }
 
 /**
@@ -21,8 +29,25 @@ function findingLevel(level: string): Finding["level"] {
  * server recognises, and the pattern it was grouped by when it is not, so an
  * unexplained line is still shown as nginx wrote it.
  */
-export function errorFinding(group: ErrorGroup): Finding {
+export function errorFinding(
+  group: ErrorGroup,
+  context: { site?: string; mayConfigure?: boolean } = {},
+): Finding {
   const where = group.upstream ? ` · ${group.upstream}` : ""
+  const endpoint = group.upstream ? upstreamEndpoint(group.upstream) : undefined
+  const local =
+    endpoint &&
+    (endpoint.host === "localhost" ||
+      endpoint.host.startsWith("127.") ||
+      endpoint.host === "[::1]" ||
+      endpoint.host === "0.0.0.0")
+  const action = context.site
+    ? { label: "Inspect site", href: `/proxy/sites?site=${encodeURIComponent(context.site)}` }
+    : local
+      ? { label: "Inspect upstream owner", href: portsHref({ q: `port:${endpoint.port}` }) }
+      : context.mayConfigure
+        ? { label: "Inspect nginx configuration", href: "/proxy/config" }
+        : undefined
   return {
     id: `${group.level}:${group.pattern}:${group.upstream ?? ""}`,
     level: findingLevel(group.level),
@@ -31,6 +56,7 @@ export function errorFinding(group: ErrorGroup): Finding {
     advice: group.advice,
     meta: <span className="numeric">{group.count.toLocaleString()}</span>,
     extra: <Well className="break-all whitespace-pre-wrap">{group.sample}</Well>,
+    action,
   }
 }
 
@@ -56,6 +82,7 @@ function ReadNotes({ report }: { report: ErrorReport }) {
  * log, or nginx's narrowed to its names; with no site it reads nginx's whole.
  */
 export function SiteErrors({ site, range }: { site?: string; range: string }) {
+  const { can } = useAuth()
   const errors = usePoll(
     (signal) => get<ErrorReport>("/proxy/errors", { window: range, site }, signal),
     30_000,
@@ -93,7 +120,9 @@ export function SiteErrors({ site, range }: { site?: string; range: string }) {
               </p>
             ) : (
               <FindingList
-                findings={report.groups.map(errorFinding)}
+                findings={report.groups
+                  .filter(isActionableProxyError)
+                  .map((group) => errorFinding(group, { site, mayConfigure: can("system.admin") }))}
                 emptyLabel="nginx logged no errors in this window"
               />
             )}

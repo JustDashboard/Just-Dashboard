@@ -24,6 +24,16 @@ concurrency:
 # to run every suite of whichever half it touched, and a second push that only
 # fixed a comment compared with the first and so hid its failure.
 #
+# Who waits on it. A pull request is waited on before it is merged, so it is
+# checked as its author checks it locally with scripts/test-changed.sh: a
+# module more than one section draws runs the two specs that check the shell
+# and the design system across the sections, and the framework builds run
+# only for a change to internal/deploy itself. The run of the merge, which
+# nobody waits on, follows the change to every page and fixture it reaches,
+# so what the pull request left out is checked one merge later. A pull
+# request from a release branch starts nothing: its commit is the one that
+# branch's push run checks, and GitHub shows that run's checks on it.
+#
 # How many jobs it starts. GitHub runs twenty jobs of a public repository's at
 # once, across every branch, and queues the rest, so a suite split further
 # than one runner's four cores can use only moves its wait into the queue, and
@@ -56,6 +66,10 @@ env:
 
 jobs:
   plan:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      (github.head_ref != 'main' && !startsWith(github.head_ref, 'patch/'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -89,14 +103,16 @@ jobs:
           # first parent is that base. A new branch or a manual run has
           # nothing to compare with, so it runs everything.
           base=""
+          mode=""
           if [ "$EVENT" = pull_request ]; then
             base=$(git rev-parse HEAD^1)
+            mode=--pull-request
           elif [ "$EVENT" = push ] && [ "${BEFORE//0/}" != "" ] &&
             git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             base=$BEFORE
           fi
           # shellcheck disable=SC2086
-          python3 scripts/ci-plan.py $base | tee -a "$GITHUB_OUTPUT"
+          python3 scripts/ci-plan.py $mode $base | tee -a "$GITHUB_OUTPUT"
       - name: Check the planner
         if: steps.plan.outputs.scripts == 'true'
         run: python3 scripts/test_ci_plan.py

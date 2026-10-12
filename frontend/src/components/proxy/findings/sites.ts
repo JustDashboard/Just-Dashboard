@@ -51,7 +51,7 @@ export function siteFindings({ vhosts, defaultSite }: SiteFindingInput): ProxyFi
           ? "Remove the link from Sites, or put the file back where it points."
           : `Enable ${vhost.name} from Sites to point the link back at its file, or remove the link.`,
         meta: "site",
-        href: linkOnly ? `/proxy/sites?site=${encodeURIComponent(vhost.name)}` : "/proxy/sites",
+        href: `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
       })
       continue
     }
@@ -67,7 +67,7 @@ export function siteFindings({ vhosts, defaultSite }: SiteFindingInput): ProxyFi
           ? `Enable ${vhost.name} from Sites to point the link at this file.`
           : `Compare this file with the served copy from Sites, then replace ${link} with a link to this one.`,
         meta: "site",
-        href: "/proxy/sites",
+        href: `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
       })
       continue
     }
@@ -82,7 +82,9 @@ export function siteFindings({ vhosts, defaultSite }: SiteFindingInput): ProxyFi
           ? `Enable it from Sites, or deploy ${owner.project} again, which writes and enables it.`
           : "Enable it from Sites if it is meant to serve, or delete it if it is not.",
         meta: "site",
-        href: `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
+        href: owner
+          ? `/deploy/${owner.projectId}/settings/domains`
+          : `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
         remedy: { kind: "enable-site", site: vhost.name },
       })
       continue
@@ -97,7 +99,9 @@ export function siteFindings({ vhosts, defaultSite }: SiteFindingInput): ProxyFi
           ? `Turn HTTPS on for its domains in ${owner.project}'s domain settings; the next deploy writes it here.`
           : "Issue a certificate from the Certificates page, then turn TLS on in the site's form.",
         meta: "site",
-        href: `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
+        href: owner
+          ? `/deploy/${owner.projectId}/settings/domains`
+          : `/proxy/sites?site=${encodeURIComponent(vhost.name)}`,
       })
     }
   }

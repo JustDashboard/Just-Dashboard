@@ -72,9 +72,12 @@ strategy, and feature ownership behind those rules.
   the SQL workbench, schema and operations, the Redis and MongoDB surfaces, code generation, transfer,
   and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
   mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
-  rollback, Tailscale certificates).
-- [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
-  cards, and board route permissions.
+  rollback, Tailscale certificates) and uninstalling it.
+- [`boards.md`](boards.md) — the Excalidraw page: the embedded editor, server-side drawing storage,
+  the derived preview and the list, save conflicts, resource cards, and route permissions.
+- [`stickyboard.md`](stickyboard.md) — the sticky-note boards: the validated document, its routes and
+  permissions, the list and templates, the canvas (notes, sections, links, formatting, clipboard,
+  history, find) and saving with revision conflicts.
 
 ## Deployments and frontend
 
@@ -110,6 +113,10 @@ strategy, and feature ownership behind those rules.
   screenshots.
 - [`../audits/2026-10-08-docker-overview/README.md`](../audits/2026-10-08-docker-overview/README.md)
   — the Docker overview before and after it lost its tiles: the band, Recent and the container table.
+
+- [`../audits/2026-10-11-log-filters-insights/README.md`](../audits/2026-10-11-log-filters-insights/README.md)
+  — the log panes' one filter row and time window, Insights' readings and request visitors, and the
+  logs each page's pane now offers, with before/after screenshots.
 
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.

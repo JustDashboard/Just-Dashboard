@@ -67,6 +67,13 @@ export function tabClasses(selected: boolean | undefined, height: string) {
  * It used to be a primary tint, so a row of filters and a row of toggles two
  * panels apart disagreed about what "chosen" looks like — and the primary tint
  * is the one thing on the page reserved for a *command*.
+ *
+ * At rest it has an edge, the outline every other control in the row has. A
+ * chip that was bare text until it was chosen sat in the log pane's filter row
+ * beside bordered fields and buttons, and read as a caption: "Errors 238" was
+ * a word with a number, not a thing to press. Chosen, the edge steps up to
+ * `--border-strong` under the accent ground, so a row of them reads chosen
+ * against unchosen at a glance and not by comparing two greys.
  */
 export function FilterChip({
   selected,
@@ -82,8 +89,8 @@ export function FilterChip({
         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap transition-colors",
         "focus-ring",
         selected
-          ? "border-hairline bg-accent text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-row-hover hover:text-foreground",
+          ? "border-border-strong bg-accent text-foreground"
+          : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
         className,
       )}
       {...props}
@@ -106,7 +113,7 @@ export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) 
   return (
     <div
       className={cn(
-        "flex min-w-0 [scrollbar-width:none] items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden",
+        "flex min-w-0 [scrollbar-width:none] items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden",
         "max-sm:-mx-5 max-sm:-my-1 max-sm:px-5 max-sm:py-1",
         "sm:flex-wrap sm:overflow-visible",
         className,

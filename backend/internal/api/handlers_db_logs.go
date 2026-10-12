@@ -372,7 +372,10 @@ func (set *dbLogSet) addFile(path, detail string) {
 	}
 	src.ID = "file:" + path
 	src.Label = filepath.Base(path)
-	if set.lens != "" {
+	// The engine's lens is how its server log reads, wherever the process
+	// was found writing it. A MySQL slow or general log beside it is not in
+	// that format, and keeps the lens its name detects.
+	if set.lens != "" && !(set.lens == "mysql" && logsx.IsQueryLog(path)) {
 		src.Lens = set.lens
 	}
 	src.Detail = detail

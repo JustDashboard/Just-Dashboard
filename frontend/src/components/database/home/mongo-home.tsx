@@ -81,11 +81,7 @@ export function DocumentHome() {
         events={events}
       />
       <Pair>
-        <ConcernAttention
-          concerns={concerns}
-          pending={stats.loading}
-          quiet="Connections, the cache, locks and where it listens are all within limits"
-        />
+        <ConcernAttention concerns={concerns} pending={stats.loading} />
         <UsedBy />
       </Pair>
       <Pair>

@@ -572,10 +572,83 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByText("Requests", { exact: true }).first()).toBeVisible()
     await expect(page.getByText("5xx server error").first()).toBeVisible()
     // The p95 chart lives on Insights, where the readings are, not over the rows.
-    await expect(page.getByText("Slowest tenth", { exact: true })).toHaveCount(1)
+    await expect(page.getByText("Response time", { exact: true })).toHaveCount(1)
     await page.getByRole("button", { name: "Insights", exact: true }).click()
-    await expect(page.getByText("Slowest tenth", { exact: true })).toHaveCount(2)
+    await expect(page.getByText("Response time", { exact: true })).toHaveCount(2)
     await expect.poll(() => page.locator(".recharts-reference-line").count()).toBeGreaterThan(0)
+  })
+
+  test("Insights says how many people came, on what, and who they were", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/requests?*", (route) => {
+      const window = deploymentRequests(new URL(route.request().url()))
+      window.summary = {
+        ...window.summary,
+        buckets: window.summary.buckets.map((bucket, i) => ({ ...bucket, visitors: 2 + (i % 3) })),
+        audience: {
+          visitors: 87,
+          bots: 9,
+          humanRequests: 1097,
+          botRequests: 131,
+          devices: [
+            { value: "desktop", count: 52, errors: 0 },
+            { value: "phone", count: 35, errors: 0 },
+          ],
+          browsers: [{ value: "Chrome", count: 60, errors: 0 }],
+          systems: [{ value: "macOS", count: 40, errors: 0 }],
+          top: [
+            {
+              client: "89.28.56.43",
+              agent:
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+              requests: 41,
+              pages: 4,
+              errors: 0,
+              refused: 0,
+              bytes: 900_000,
+              first: "2026-09-03T11:20:00Z",
+              last: "2026-09-03T11:58:00Z",
+              landing: "/",
+              referer: "www.google.com",
+              journey: ["/", "/pricing", "/signup"],
+            },
+          ],
+        },
+      } as typeof window.summary
+      return json(route, window)
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+
+    // The people first, apart from the bots and scripts the window also served.
+    const visitors = page.locator("[data-slot=stat-tile]").filter({ hasText: "Visitors" })
+    await expect(visitors).toContainText("87")
+    await expect(visitors).toContainText("people")
+    await expect(
+      page.locator("[data-slot=stat-tile]").filter({ hasText: "Bots and scripts" }),
+    ).toContainText("9")
+    await expect(
+      page.locator("[data-slot=stat-tile]").filter({ hasText: "Came from" }),
+    ).toContainText("www.google.com")
+    await expect(page.getByRole("heading", { name: "Visitors", exact: true })).toBeVisible()
+
+    // The readings and both charts scroll with the lists, so the lists have the
+    // pane's height rather than the strip left under two pinned charts.
+    const scroller = page
+      .locator(".overflow-auto")
+      .filter({ has: page.getByRole("heading", { name: "Visitors", exact: true }) })
+      .last()
+    await expect(scroller.getByText("Response time", { exact: true })).toBeVisible()
+    await expect(
+      scroller.locator("[data-slot=stat-tile]").filter({ hasText: "Bots and scripts" }),
+    ).toHaveCount(1)
+
+    // Each person as the browser on its system, with the pages they opened in order.
+    const person = page.getByRole("button", { name: "Show every request from 89.28.56.43" }).first()
+    await expect(person).toContainText("Chrome on macOS")
+    await expect(person).toContainText("/pricing")
+    await expect(person.locator('img[src="/logos/chrome.svg"]')).toBeVisible()
+    await person.click()
+    await expect(page.getByRole("button", { name: "Clear the client filter" })).toBeVisible()
   })
 
   test("a clean exit is a stop, not a failure", async ({ page }) => {
@@ -732,8 +805,9 @@ test.describe("a deployment's traffic", () => {
       page.locator('[data-slot="pane"] [data-slot="pane"]:not([data-flush])'),
     ).toHaveCount(0)
 
-    // The live release's services one at a time, all of them merged, and the
-    // release before it after them; the address follows the choice.
+    // The live release's services one at a time, all of them merged, the
+    // release before it after them, and the proxy that answers for them last;
+    // the address follows the choice.
     await picker.click()
     const options = page.getByRole("option")
     await expect(options).toHaveText([
@@ -741,6 +815,7 @@ test.describe("a deployment's traffic", () => {
       "api-production-postgres",
       "All services",
       "api-production-r19",
+      "Proxy (Caddy)",
     ])
     await page.getByRole("option", { name: "All services" }).click()
     await expect.poll(() => sockets.map((q) => q.get("source"))).toContain("stack:api-production")
@@ -1490,7 +1565,7 @@ test.describe("a deployment's traffic", () => {
         ),
       )
       .toBe(true)
-    await expect(page.getByRole("combobox", { name: "Request window" })).toHaveText(/11:20.*12:20/)
+    await expect(page.getByRole("button", { name: /^Time window: / })).toHaveText(/11:20.*12:20/)
     expect(new URL(page.url()).searchParams.get("since")).toBe("2026-09-03T11:20:00.000Z")
   })
 

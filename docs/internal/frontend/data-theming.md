@@ -356,12 +356,20 @@ are dated evidence, not proof of current attachment ownership.
   did not come up and was undone — because showing that as either success or failure would misreport it.
   The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
   state: a copy refreshed every two seconds would wipe half-typed input during a restart.
+- `hooks/use-self-uninstall.tsx` watches the one run whose API **never comes back**. A failed poll while
+  the run is live is `lost`, not an error, and `lib/uninstall.ts` reads it as the stack having gone
+  whichever phase the page last saw — a keep can finish between two polls. A backend that merely crashed
+  restarts and answers with the run closed as failed, which replaces that reading. Once it is gone,
+  `components/config/uninstall.tsx` stops following: it says the dashboard has stopped and gives the
+  commands for what is left (the transcript in `/var/log/just-dashboard-uninstall.log`, the reinstall or
+  the checkout to delete). While a run is live the configuration page keeps its last report drawn and
+  hides the stack and the settings, which describe what is being taken away.
 - `hooks/use-arrivals.ts` answers which rows of a polled or streamed list were not in it the last time
   it changed, so those rows alone take `animate-rise` (request rows, container events, deliveries,
   players). It is empty on the first render and holds its answer until the keys change again, kept as
   state adjusted during render rather than in an effect, so an arrival costs no second paint and a
   re-render mid-rise does not cut it short.
-- Both runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`, and a
+- The three runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`, and a
   deployment's build console paints its lines with the same row and the same drip
   (`components/transcript-line.tsx`, which both import). The polled
   report carries only the file's last 64 KB; when that tail starts with the server's trimmed marker the

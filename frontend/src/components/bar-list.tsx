@@ -41,6 +41,12 @@ export type BarListItem = {
   share: number
   /** 0–1: the part of this bar to draw in the signal tone. */
   signal?: number
+  /**
+   * The bar's own hue where the rows are kinds rather than one measure — a
+   * device, a browser — so a run of them reads as a legend, not as one grey
+   * column of different lengths.
+   */
+  color?: string
   tone?: Tone
   /** One short reading beside the label — the p95, a scanner's tell. */
   hint?: React.ReactNode
@@ -124,8 +130,11 @@ export function BarList({
                 className="relative block h-1 w-full overflow-hidden rounded-full bg-meter-track"
               >
                 <span
-                  className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width]"
-                  style={{ width: `${Math.max(item.share * 100, 1.5)}%` }}
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-500 ease-out"
+                  style={{
+                    width: `${Math.max(item.share * 100, 1.5)}%`,
+                    backgroundColor: item.color,
+                  }}
                 />
                 {item.signal !== undefined && item.signal > 0 && (
                   <span

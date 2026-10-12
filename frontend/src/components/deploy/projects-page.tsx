@@ -325,7 +325,7 @@ function Fleet() {
             <Panel plain>
               <PanelHeader title="Attention" />
               <PanelBody className="py-0">
-                <FindingList findings={findings} emptyLabel="" />
+                <FindingList emphasize findings={findings} emptyLabel="" />
               </PanelBody>
             </Panel>
           )}

@@ -188,9 +188,32 @@ if docker compose ls --all 2>/dev/null | grep -q '^vps-dashboard'; then
 	ok "old stack stopped"
 fi
 
+# ── a kept uninstall ────────────────────────────────────────────────────────
+
+# Uninstalling from Configuration and keeping the data leaves a copy of the
+# .env beside it, because the key in it is the only thing that can read the
+# secrets that data holds — and a fresh clone has no .env at all. Restoring it
+# is the whole difference between a reinstall that picks up where the last one
+# left off and one that cannot open its own database's credentials.
+KEPT_ENV=/var/lib/just-dashboard/install.env
+RESTORED_ENV=0
+if [ ! -f .env ] && [ -f "$KEPT_ENV" ]; then
+	step "Settings kept by an earlier uninstall"
+	say "  $KEPT_ENV holds the key the kept data is sealed with."
+	if yes_no "Restore them and pick up where that install left off?" y; then
+		install -m 600 "$KEPT_ENV" .env
+		RESTORED_ENV=1
+		ok ".env restored; the dashboard removes the kept copy once it is running on it"
+	else
+		warn "Starting fresh: the kept data's stored secrets stay unreadable to this install."
+	fi
+fi
+
 # ── existing install ────────────────────────────────────────────────────────
 
-if [ -f .env ]; then
+if [ "$RESTORED_ENV" -eq 1 ]; then
+	KEEP_ENV=1
+elif [ -f .env ]; then
 	step "An .env already exists"
 	warn "It holds JD_MASTER_KEY, which encrypts your stored secrets."
 	warn "Replacing it makes every stored TOTP seed, database password and"

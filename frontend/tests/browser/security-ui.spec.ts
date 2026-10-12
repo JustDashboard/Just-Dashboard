@@ -673,7 +673,7 @@ test("the overview reads as readings, findings and how the panel is reached", as
   await expect(ways.locator('img[src="/logos/fail2ban.webp"]')).toHaveCount(1)
 
   // A check's segment narrows the findings to its area, and lets it go.
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
   await checks.getByRole("button", { name: "SSH: 1 warning" }).click()
   await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toHaveAttribute(
     "aria-pressed",
@@ -681,12 +681,25 @@ test("the overview reads as readings, findings and how the panel is reached", as
   )
   await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
   await page.getByRole("button", { name: "Show every area" }).click()
-  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
 
-  // The findings, with the remedy the dashboard can carry out as a button.
+  // The action is visible before expansion and lands on the setting without applying it.
   // The finding's row, not the SSH tile's hint, which quotes the same title.
-  await page.getByRole("button", { name: /SSH accepts passwords/ }).click()
-  await expect(page.getByRole("button", { name: "Turn off passwords" })).toBeVisible()
+  await page.getByRole("button", { name: "Review SSH password login", exact: true }).click()
+  await expect(page).toHaveURL(
+    /\/security\/ssh\?setting=passwordauthentication#ssh-passwordauthentication$/,
+  )
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Password authentication" })
+      .getByRole("radio", { name: "yes", exact: true }),
+  ).toBeFocused()
+  await expect(
+    page
+      .getByRole("radiogroup", { name: "Password authentication" })
+      .getByRole("radio", { name: "yes", exact: true }),
+  ).toBeChecked()
+  await expect(page.getByRole("button", { name: "Apply changes", exact: true })).toHaveCount(0)
 })
 
 for (const path of PAGES) {
@@ -912,9 +925,9 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   expect(socket.get("source")).toBe("file:/var/log/auth.log")
   // auth.log is the auth lens's on the server too, and the page hands the
   // pane the server's own description of it: no lens of its own, nothing
-  // under More, and the file is not asked after a second time.
+  // under Options, and the file is not asked after a second time.
   expect(socket.has("lens")).toBe(false)
-  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Options", exact: true })).not.toContainText(/\d/)
   expect(socket.getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
   // Found by asking after the two files, not by listing everything the
   // logs page could open.
@@ -1088,14 +1101,19 @@ test("with no ufw.log the firewall's drops are read from kern.log, then the kern
   await expect(page.getByRole("button", { name: /^Blocked\b/ })).toBeVisible()
 
   // The page's lens is where the pane starts, not a setting the reader
-  // changed: More is not lit for it, and Auto under Read as lets it go.
-  const more = page.getByRole("button", { name: "More", exact: true })
-  await expect(more).toBeVisible()
-  await more.click()
+  // changed: Options counts nothing for it, and Auto under Read as lets it
+  // go — which the filter row then says, with its way back.
+  const options = page.getByRole("button", { name: "Options", exact: true })
+  await expect(options).not.toContainText(/\d/)
+  await options.click()
   await page.getByRole("combobox", { name: "Read as" }).click()
   await page.getByRole("option", { name: /^Auto/ }).click()
   await expect.poll(() => logs.sockets.at(-1)?.has("lens")).toBe(false)
-  await expect(page.getByRole("button", { name: /^More\s*1$/ })).toBeVisible()
+  await expect(options).toContainText("1")
+  await page.keyboard.press("Escape")
+  await expect(
+    page.getByRole("button", { name: "Stop reading the log as Auto", exact: true }),
+  ).toBeVisible()
 })
 
 test("a host with neither file reads the firewall's drops from the kernel ring", async ({

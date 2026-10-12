@@ -16,7 +16,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { API_BASE, get } from "@/lib/api"
-import { minuteSpan, plural, relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import type { DeploymentRequests, RequestEntry, TrafficAlert } from "@/lib/types"
 import {
@@ -38,7 +38,7 @@ import { NETWORK_GLYPH } from "@/components/client-mark"
 import { FactDot } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import {
@@ -48,16 +48,11 @@ import {
   InputGroupText,
   InputGroupToggle,
 } from "@/components/ui/input-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Field } from "@/components/form"
+import { TimeWindow } from "@/components/logs/time-window"
+import { AudienceReadings } from "@/components/deploy/audience"
 import { useRequestBlocks } from "@/components/deploy/use-request-blocks"
 import { RequestChart, type ChartMarker } from "@/components/deploy/request-chart"
 import { RequestConsole } from "@/components/deploy/request-console"
@@ -291,36 +286,45 @@ export function RequestsWorkspace({
   const threshold = alertLine(alerts)
   const narrowed = isNarrowed(query)
 
+  // On Insights the readings and the charts scroll with the lists under them:
+  // pinned above the lists they left a fixed-height pane a strip of the lists
+  // to scroll. On Requests the chart stays over the rows, which own their scroll.
+  const chart = data.summary.buckets.length > 0 && (
+    <RequestChart
+      key={`chart:${windowKey}`}
+      buckets={data.summary.buckets}
+      bucketSeconds={data.summary.bucketSeconds}
+      latencyKnown={data.latency}
+      showLatency={view === "insights"}
+      markers={markers}
+      alerts={alerts}
+      total={data.summary.total}
+      failed={counts["5xx"] ?? 0}
+      custom={query.range === "custom"}
+      onReset={onReset}
+      onZoom={(from, to) =>
+        onQueryChange({
+          ...query,
+          range: "custom" as RequestRange,
+          since: from.toISOString(),
+          until: to.toISOString(),
+        })
+      }
+    />
+  )
+
   return (
     <>
       {bar}
 
-      {data.summary.buckets.length > 0 && (
-        <RequestChart
-          key={`chart:${windowKey}`}
-          buckets={data.summary.buckets}
-          bucketSeconds={data.summary.bucketSeconds}
-          latencyKnown={data.latency}
-          showLatency={view === "insights"}
-          markers={markers}
-          alerts={alerts}
-          total={data.summary.total}
-          failed={counts["5xx"] ?? 0}
-          custom={query.range === "custom"}
-          onReset={onReset}
-          onZoom={(from, to) =>
-            onQueryChange({
-              ...query,
-              range: "custom" as RequestRange,
-              since: from.toISOString(),
-              until: to.toISOString(),
-            })
-          }
-        />
-      )}
-
       {view === "insights" ? (
         <div key={`insights:${windowKey}`} className="min-h-0 flex-1 animate-rise overflow-auto">
+          <AudienceReadings
+            summary={data.summary}
+            pages={query.pages}
+            onPages={() => onQueryChange({ ...query, pages: !query.pages })}
+          />
+          {chart}
           <TrafficFacets
             summary={data.summary}
             slowest={data.slowest}
@@ -343,52 +347,55 @@ export function RequestsWorkspace({
           <WindowNotes data={data} className="border-t border-hairline px-3 py-2" />
         </div>
       ) : (
-        <RequestConsole
-          entries={rows}
-          summary={data.summary}
-          latencyKnown={data.latency}
-          paused={live ? tail.paused : undefined}
-          onPausedChange={live ? tail.setPaused : undefined}
-          held={tail.held}
-          onFilterPath={(path) => onQueryChange({ ...query, path })}
-          onFilterClient={(client) => onQueryChange({ ...query, client })}
-          onBlock={onBlock}
-          blockState={blocks.state}
-          blockUnavailable={blocks.unavailable}
-          onEventsAround={onEventsAround}
-          outputFor={outputFor}
-          renderInline={renderInline && ((entry) => renderInline(entry, data))}
-          leading={
-            <ClassChips
-              selected={query.classes}
-              counts={counts}
-              onChange={(classes) => onQueryChange({ ...query, classes })}
-            />
-          }
-          // The window's total is the chart's head and the chips' sum, so
-          // the footer starts at what neither says: the stream's state, or
-          // how many of the window were page views.
-          status={
-            live ? (
-              <Status {...socketReading(tail.state)} className="text-hint" />
-            ) : !query.pages ? (
-              <span className="numeric whitespace-nowrap">
-                {plural(data.summary.pages, "page view")}
-              </span>
-            ) : undefined
-          }
-          footer={<WindowNotes data={data} percentiles />}
-          empty={
-            <EmptyState
-              title="No requests in this window"
-              description={
-                narrowed
-                  ? "Nothing matched. Widen the window or clear the filters."
-                  : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
-              }
-            />
-          }
-        />
+        <>
+          {chart}
+          <RequestConsole
+            entries={rows}
+            summary={data.summary}
+            latencyKnown={data.latency}
+            paused={live ? tail.paused : undefined}
+            onPausedChange={live ? tail.setPaused : undefined}
+            held={tail.held}
+            onFilterPath={(path) => onQueryChange({ ...query, path })}
+            onFilterClient={(client) => onQueryChange({ ...query, client })}
+            onBlock={onBlock}
+            blockState={blocks.state}
+            blockUnavailable={blocks.unavailable}
+            onEventsAround={onEventsAround}
+            outputFor={outputFor}
+            renderInline={renderInline && ((entry) => renderInline(entry, data))}
+            leading={
+              <ClassChips
+                selected={query.classes}
+                counts={counts}
+                onChange={(classes) => onQueryChange({ ...query, classes })}
+              />
+            }
+            // The window's total is the chart's head and the chips' sum, so
+            // the footer starts at what neither says: the stream's state, or
+            // how many of the window were page views.
+            status={
+              live ? (
+                <Status {...socketReading(tail.state)} className="text-hint" />
+              ) : !query.pages ? (
+                <span className="numeric whitespace-nowrap">
+                  {plural(data.summary.pages, "page view")}
+                </span>
+              ) : undefined
+            }
+            footer={<WindowNotes data={data} percentiles />}
+            empty={
+              <EmptyState
+                title="No requests in this window"
+                description={
+                  narrowed
+                    ? "Nothing matched. Widen the window or clear the filters."
+                    : "No request arrived in the window you chose. Widen it, or turn Live on and watch for the first one."
+                }
+              />
+            }
+          />
+        </>
       )}
     </>
   )
@@ -707,7 +714,7 @@ function RequestFilterBar({
       : []
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-hairline px-2 py-1.5">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b border-hairline px-3 py-2">
       <InputGroup className="h-10 basis-full sm:h-8 lg:max-w-md lg:min-w-64 lg:flex-1 lg:basis-0">
         <InputGroupAddon className="border-r-0 pr-0">
           <MagnifyingGlass />
@@ -717,7 +724,7 @@ function RequestFilterBar({
           onChange={(event) => onQueryChange({ ...query, path: event.target.value })}
           placeholder="Filter by path — /api, /assets"
           aria-label="Filter requests by path"
-          className="font-mono placeholder:font-sans sm:text-xs"
+          className="font-mono placeholder:font-sans sm:text-body"
         />
         {/* Page views: the number a person means by "visits". Off by default,
             because the honest record is everything the proxy answered. */}
@@ -745,30 +752,29 @@ function RequestFilterBar({
       )}
 
       <div className="ml-auto flex items-center gap-1.5 max-sm:basis-full">
-        <Select
+        <TimeWindow
+          presets={[...REQUEST_RANGES]}
           value={query.range}
-          onValueChange={(value) => onQueryChange({ ...query, range: value as RequestRange })}
-        >
-          <SelectTrigger
-            size="sm"
-            className="w-40 shrink-0 max-sm:w-auto max-sm:flex-1"
-            aria-label="Request window"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REQUEST_RANGES.map((range) => (
-              <SelectItem key={range.id} value={range.id}>
-                {range.label}
-              </SelectItem>
-            ))}
-            {query.range === "custom" && (
-              <SelectItem value="custom">
-                {query.since ? minuteSpan(query.since, query.until) : "Custom range"}
-              </SelectItem>
-            )}
-          </SelectContent>
-        </Select>
+          since={query.since}
+          until={query.until}
+          onPreset={(id) =>
+            onQueryChange({
+              ...query,
+              range: id as RequestRange,
+              since: undefined,
+              until: undefined,
+            })
+          }
+          onCustom={(from, to) =>
+            onQueryChange({
+              ...query,
+              range: "custom",
+              since: from.toISOString(),
+              until: to.toISOString(),
+            })
+          }
+          className="max-sm:flex-1"
+        />
 
         {/* The dot is a claim about the socket (§11): it breathes only once the
             tail is open, sits still in amber while it connects, goes grey when
@@ -776,21 +782,26 @@ function RequestFilterBar({
             not drawn at all while Live is off. */}
         {latencyKnown && <TookFilter query={query} onQueryChange={onQueryChange} />}
 
-        <FilterChip
-          selected={live}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-pressed={live}
           onClick={() => onLiveChange(!live)}
           title="Follow new requests as they arrive, on top of this window"
-          className="shrink-0 max-sm:h-10"
+          className={cn(
+            "h-8 shrink-0 gap-2 px-2.5 font-normal max-sm:h-10",
+            live && "border-border-strong bg-accent",
+          )}
         >
-          {live && <LiveDot state={liveState} />}
-          Live
-        </FilterChip>
+          {live ? <LiveDot state={liveState} /> : <StatusDot tone="stopped" />}
+          <span className="text-body">Live</span>
+        </Button>
 
         {exportHref ? (
           <Button
             size="sm"
-            variant="ghost"
-            className="h-7 shrink-0 px-2 text-xs max-sm:h-10 max-sm:px-3"
+            variant="outline"
+            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
             asChild
           >
             <a
@@ -799,20 +810,20 @@ function RequestFilterBar({
               aria-label="Export"
               title="Download this window as CSV — every matching request, not only the rows shown"
             >
-              <Download className="size-3.5" />
-              <span className="max-sm:hidden">Export</span>
+              <Download className="size-3.5 text-muted-foreground" />
+              <span className="text-body max-sm:hidden">Export</span>
             </a>
           </Button>
         ) : (
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             disabled
             aria-label="Export"
-            className="h-7 shrink-0 px-2 text-xs max-sm:h-10 max-sm:px-3"
+            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
           >
-            <Download className="size-3.5" />
-            <span className="max-sm:hidden">Export</span>
+            <Download className="size-3.5 text-muted-foreground" />
+            <span className="text-body max-sm:hidden">Export</span>
           </Button>
         )}
       </div>
@@ -853,18 +864,26 @@ function TookFilter({
       }}
     >
       <PopoverTrigger asChild>
-        <FilterChip
-          selected={banded}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-pressed={banded}
           title="Only requests that took between two durations"
-          className="shrink-0 max-sm:h-10"
+          className={cn(
+            "h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10",
+            banded && "border-border-strong bg-accent",
+          )}
         >
-          <Stopwatch aria-hidden className="size-3" />
+          <Stopwatch aria-hidden className="size-3.5 text-muted-foreground" />
           {/* Out of sight on a phone rather than gone: the word is the
-              chip's name at every width, so a screen reader hears what the
+              control's name at every width, so a screen reader hears what the
               wider layouts show. */}
-          <span className="max-sm:sr-only">Took</span>
-          <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
-        </FilterChip>
+          <span className="text-body max-sm:sr-only">Took</span>
+          <ChevronDown
+            aria-hidden
+            className="size-3.5 text-muted-foreground transition-transform in-data-[state=open]:rotate-180"
+          />
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">
         <form

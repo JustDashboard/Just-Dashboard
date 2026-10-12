@@ -1,7 +1,8 @@
 import type { ServiceLogSource } from "@/components/logs/service-logs"
 import type { LogFields } from "@/components/logs/types"
-import type { SiteSpec, VHost } from "@/lib/types"
+import type { Listener, SiteSpec, VHost } from "@/lib/types"
 import { dockerSource, fileSource, journalSource } from "@/lib/log-sources"
+import { listenerUnit, upstreamListener, upstreamOwner } from "@/components/proxy/site-overview"
 
 /** Where nginx writes the errors of every site that names no file of its own. */
 export const NGINX_ERROR_LOG = "/var/log/nginx/error.log"
@@ -71,11 +72,63 @@ function hostFields(hosts: string[]): LogFields {
 }
 
 /**
- * The plan for one site. `spec` is the nginx file read back, which says where
- * the site logs; `ingress` is the shared Docker Caddy container, when the host
- * has one.
+ * The application behind a site, read where it writes: the container that
+ * holds the socket an upstream names, or the systemd unit that does. Each
+ * once, since a site's upstreams are often one program's.
+ */
+export function upstreamLogSources(
+  vhost: Pick<VHost, "name" | "upstreams">,
+  listeners: Listener[] | undefined,
+): ServiceLogSource[] {
+  const found = new Map<string, ServiceLogSource>()
+  for (const raw of vhost.upstreams) {
+    const listener = upstreamListener(raw, vhost.name, listeners)
+    if (!listener) continue
+    const product = upstreamOwner(raw, vhost.name, listeners)?.product
+    const unit = listenerUnit(listener)
+    // A scope or a session supervises a program someone started by hand,
+    // which has no journal of its own to read.
+    const source: ServiceLogSource | undefined = listener.container
+      ? {
+          id: dockerSource(listener.container.name),
+          label: listener.container.name,
+          kind: "docker",
+          product,
+          detail: "The application this site proxies to",
+        }
+      : unit?.endsWith(".service")
+        ? {
+            id: journalSource(unit),
+            label: unit,
+            kind: "journal",
+            product,
+            detail: "The application this site proxies to",
+          }
+        : undefined
+    if (source && !found.has(source.id)) found.set(source.id, source)
+  }
+  return [...found.values()]
+}
+
+/**
+ * The plan for one site, and the application's own log after the proxy's.
+ * `spec` is the nginx file read back, which says where the site logs;
+ * `ingress` is the shared Docker Caddy container, when the host has one;
+ * `listeners` are the host's sockets, which say what holds the upstream.
  */
 export function siteLogPlan(
+  vhost: VHost,
+  spec: SiteSpec | undefined,
+  ingress: string | undefined,
+  listeners?: Listener[],
+): SiteLogPlan {
+  const plan = proxyLogPlan(vhost, spec, ingress)
+  if (plan.sources.length === 0) return plan
+  return { ...plan, sources: [...plan.sources, ...upstreamLogSources(vhost, listeners)] }
+}
+
+/** What the proxy writes about one site: the logs of the engine serving it. */
+function proxyLogPlan(
   vhost: VHost,
   spec: SiteSpec | undefined,
   ingress: string | undefined,
@@ -108,6 +161,21 @@ export function siteLogPlan(
       product: "nginx-static",
       detail: own ? undefined : "nginx's own, shared by every site that names none",
     })
+    const unrecorded = access ? undefined : spec && !spec.accessLog ? "off" : "shared"
+    // Where a site writes to nginx.conf's log, that file is where its
+    // requests are, among every other site's: not a record of this one, but
+    // the only place they are.
+    if (unrecorded === "shared" && vhost.accessLog) {
+      sources.push({
+        id: fileSource(vhost.accessLog),
+        label: "nginx access log",
+        kind: "nginx",
+        path: vhost.accessLog,
+        lens: "http-access",
+        product: "nginx-static",
+        detail: "nginx's own, shared by every site that names none",
+      })
+    }
     return {
       sources,
       requests: access ? fileSource(access) : undefined,
@@ -117,7 +185,7 @@ export function siteLogPlan(
         fields: own ? {} : hostFields(hosts),
         shared: !own,
       },
-      unrecorded: access ? undefined : spec && !spec.accessLog ? "off" : "shared",
+      unrecorded,
     }
   }
 

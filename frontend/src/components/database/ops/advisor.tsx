@@ -1,6 +1,10 @@
 "use client"
 
-import type { SectionId, SectionParams } from "@/components/database/engine"
+import {
+  adviceDestination,
+  databaseAdviceTitle,
+  needsDatabaseAttention,
+} from "@/components/database/home/advice"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph, SectionFrame } from "@/components/database/kit"
 import { ApplyDialog, type ApplyRequest } from "@/components/database/ops/advisor-apply"
@@ -28,7 +32,6 @@ import {
   useReturnFocus,
 } from "@/components/database/ops/performance-parts"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { databasePlace } from "@/components/database/shell/routes"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { RefreshClockwise } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -37,6 +40,7 @@ import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
 import { calendarDate, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -51,17 +55,9 @@ export function Advisor() {
   )
 }
 
-/**
- * How many findings a report opens on arrival. A report this short arrives
- * open from top to bottom; a longer one with its worst few open and the rest
- * as a list to choose from, so that the page is never only a list of titles
- * and never a wall either.
- */
-const OPEN_ALL_UP_TO = 6
-const OPEN_WORST = 3
-
 function Report() {
-  const { id, engine, param, select, goto } = useDatabase()
+  const { id, engine, param, select, goto, readOnly } = useDatabase()
+  const { can } = useAuth()
   const report = usePoll(
     (signal) =>
       timed(
@@ -81,7 +77,7 @@ function Report() {
   const focus = useReturnFocus()
 
   const askedLevel = param("level")
-  const level = isLevel(askedLevel) ? askedLevel : null
+  const level = isLevel(askedLevel) && askedLevel !== "notice" ? askedLevel : null
   const askedCategory = param("category")
   const category = isCategory(askedCategory) ? askedCategory : null
 
@@ -89,7 +85,10 @@ function Report() {
   // The chips count what the severity leaves, so a chip never promises rows
   // the severity filter has hidden.
   const categories = useMemo(
-    () => countCategories(keptFindings(data?.findings ?? [], { level })),
+    () =>
+      countCategories(
+        keptFindings((data?.findings ?? []).filter(needsDatabaseAttention), { level }),
+      ),
     [data, level],
   )
 
@@ -127,7 +126,7 @@ function Report() {
     [focus],
   )
 
-  const all = data?.findings ?? []
+  const all = (data?.findings ?? []).filter(needsDatabaseAttention)
   const keys = findingKeys(all)
   const kept = new Set(keptFindings(all, { level, category }))
   const findings: Finding[] = all.flatMap((advice, index) =>
@@ -136,27 +135,33 @@ function Report() {
           {
             id: keys[index],
             level: advice.level,
-            title: advice.title,
+            title: databaseAdviceTitle(advice),
             detail: advice.detail,
             advice: advice.advice,
             meta: <About advice={advice} />,
             extra: <FindingBody advice={advice} maintenance={maintenance} onApply={ask} />,
-            action: linkAction(advice, {
-              id,
-              title: (section) => engine.section(section)?.title,
-              open: goto,
-            }),
+            action: (() => {
+              const destination = adviceDestination(advice, {
+                id,
+                has: (section) => engine.has(section),
+                canQuery: can("service.control") && !readOnly,
+              })
+              return destination
+                ? {
+                    label: destination.label,
+                    onClick: () => goto(destination.section, destination.params),
+                  }
+                : undefined
+            })(),
           },
         ]
       : [],
   )
 
-  // What the page opens on. A report is read for what each finding is about
-  // and what fixes it, and a page of closed one-line rows says neither: a
-  // short report arrives open, a long one with its worst finding open — the
-  // server lists them worst first — and a link to one finding opens that one.
+  // Consequences and navigation are visible already; expand only the finding
+  // a deep link asked for, keeping statements behind the operator's review.
   const asked = param("finding")
-  const arrival = asked ? [asked] : keys.length <= OPEN_ALL_UP_TO ? keys : keys.slice(0, OPEN_WORST)
+  const arrival = asked ? [asked] : []
   const rests = Boolean(data && (data.silences.length > 0 || data.endOfLife))
 
   return (
@@ -246,7 +251,7 @@ function Report() {
                   <FilterChip selected={!level} onClick={() => select({ level: null })}>
                     All severities
                   </FilterChip>
-                  {LEVELS.map((entry) => (
+                  {LEVELS.filter((entry) => entry.id !== "notice").map((entry) => (
                     <FilterChip
                       key={entry.id}
                       selected={level === entry.id}
@@ -257,13 +262,11 @@ function Report() {
                   ))}
                 </ChipStrip>
 
-                {data.findings.length > 0 && (
+                {all.length > 0 && (
                   <ChipStrip role="group" aria-label="Findings by category">
                     <FilterChip selected={!category} onClick={() => select({ category: null })}>
                       All
-                      <ChipCount>
-                        {keptFindings(data.findings, { level }).length.toLocaleString()}
-                      </ChipCount>
+                      <ChipCount>{keptFindings(all, { level }).length.toLocaleString()}</ChipCount>
                     </FilterChip>
                     {CATEGORIES.filter(
                       (entry) => categories[entry.id] > 0 || entry.id === category,
@@ -288,8 +291,8 @@ function Report() {
                   defaultOpen={arrival}
                   anchor={(key) => `finding-${key}`}
                   emptyLabel={
-                    data.findings.length === 0
-                      ? `The advisor checked ${plural(data.tablesChecked, engine.nouns.object)}${data.engineChecks ? " and the server's settings" : ""}, and found nothing to fix`
+                    all.length === 0
+                      ? `No priority issues found in ${plural(data.tablesChecked, engine.nouns.object)}${data.engineChecks ? " and the completed server checks" : ""}`
                       : "No finding of that kind"
                   }
                 />
@@ -372,42 +375,4 @@ function About({ advice }: { advice: DbAdvice }) {
       {advice.category}
     </>
   )
-}
-
-/**
- * The page of this database a finding points at, as its one action. The
- * advisor links by path; only a path that is a page of this database is
- * followed, and by the page's name rather than the path's text — it came from
- * the server, and a press here must not leave for somewhere it merely
- * spelled.
- */
-function linkAction(
-  advice: DbAdvice,
-  tools: {
-    id: number
-    title: (section: SectionId) => string | undefined
-    open: (section: SectionId, params?: SectionParams) => void
-  },
-): Finding["action"] {
-  const place = advice.link ? databasePlace(advice.link) : null
-  if (!place || place.id !== tools.id) return undefined
-  const title = tools.title(place.section)
-  if (!title) return undefined
-  // Performance is several readings: the finding is opened on the one that
-  // lists what it is about.
-  const kinds = new Set((advice.targets ?? []).map((target) => target.kind))
-  const view =
-    place.section !== "performance"
-      ? undefined
-      : kinds.has("slot")
-        ? "replication"
-        : kinds.has("index")
-          ? "indexes"
-          : kinds.has("table")
-            ? "tables"
-            : undefined
-  return {
-    label: `Open ${title}`,
-    onClick: () => tools.open(place.section, view ? { view } : undefined),
-  }
 }

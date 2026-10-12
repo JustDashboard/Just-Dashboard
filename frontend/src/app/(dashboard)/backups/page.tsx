@@ -168,9 +168,10 @@ export default function BackupsPage() {
   })
 
   const findings = useMemo(
-    () => attention(list, open, (job) => runJobNow(job, refresh)),
+    () =>
+      attention(list, open, can("service.control") ? (job) => runJobNow(job, refresh) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list],
+    [list, can],
   )
   const ordered = useMemo(() => [...list].sort((a, b) => rank(a) - rank(b)), [list])
   const stored = list.reduce((sum, j) => sum + j.stored.bytes, 0)
@@ -207,7 +208,7 @@ export default function BackupsPage() {
           <Panel plain>
             <PanelHeader title="Attention" />
             <PanelBody className="py-0">
-              <FindingList findings={findings} emptyLabel="" />
+              <FindingList emphasize findings={findings} emptyLabel="" />
             </PanelBody>
           </Panel>
         )}
@@ -325,7 +326,7 @@ function rank(job: BackupJob) {
 function attention(
   list: BackupJob[],
   open: (job: BackupJob) => void,
-  runNow: (job: BackupJob) => void,
+  runNow?: (job: BackupJob) => void | Promise<unknown>,
 ): Finding[] {
   const out: Finding[] = []
   for (const job of list) {
@@ -340,10 +341,10 @@ function attention(
           ? `Its last good backup is from ${relativeTime(job.lastSuccessAt)}. Read the run log, fix the cause, then run it again.`
           : "It has never succeeded. Read the run log and check the sources and destination.",
         meta: "run failed",
-        action: { label: "Open history", onClick: () => open(job) },
+        action: { label: "Read failed run", onClick: () => open(job) },
       })
     }
-    if (job.overdue) {
+    if (job.overdue && job.enabled && job.lastRun?.status !== "failed") {
       out.push({
         id: `overdue-${job.id}`,
         level: "warning",
@@ -352,9 +353,16 @@ function attention(
           ? `Last good backup ${relativeTime(job.lastSuccessAt)}; it should run ${scheduleLabel(job.schedule).toLowerCase()}.`
           : `It has never succeeded and should run ${scheduleLabel(job.schedule).toLowerCase()}.`,
         advice:
-          "Run it now and watch the log — a run that keeps failing is what usually makes a job go quiet.",
+          job.lastRun?.status === "running"
+            ? "A backup is already running. Open its history to watch the progress."
+            : "Run a backup and watch the log. If it fails, fix the cause before retrying.",
         meta: "overdue",
-        action: { label: "Run now", onClick: () => runNow(job) },
+        action:
+          job.lastRun?.status === "running"
+            ? { label: "Watch backup run", onClick: () => open(job) }
+            : runNow
+              ? { label: "Run backup now", onClick: () => runNow(job) }
+              : { label: "Inspect backup job", onClick: () => open(job) },
       })
     }
   }

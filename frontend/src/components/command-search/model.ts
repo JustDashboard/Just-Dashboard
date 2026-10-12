@@ -12,7 +12,8 @@ export const SEARCH_SCOPES = [
   ["service", "Services"],
   ["app", "PM2 apps"],
   ["backup", "Backups"],
-  ["board", "Boards"],
+  ["board", "Excalidraw drawings"],
+  ["stickyboard", "Stickyboards"],
 ] as const
 
 export type SearchScope = (typeof SEARCH_SCOPES)[number][0]
@@ -39,6 +40,10 @@ const aliases: Record<string, SearchScope> = {
   repository: "repo",
   repositories: "repo",
   pm2: "app",
+  sticky: "stickyboard",
+  excalidraw: "board",
+  drawing: "board",
+  drawings: "board",
   action: "command",
   actions: "command",
 }

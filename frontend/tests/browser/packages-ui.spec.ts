@@ -376,7 +376,7 @@ test("the Log view reads the package manager's own log in place", async ({ page 
   // hands the pane the server's own description: no lens of its own, and no
   // file asked after twice.
   expect(history.has("lens")).toBe(false)
-  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Options", exact: true })).toBeVisible()
   expect(history.has("since")).toBe(false)
   expect(logs.requests).not.toContain("/logs/sources")
   // One for each of the seven files the view asks after (`package-logs.ts`).

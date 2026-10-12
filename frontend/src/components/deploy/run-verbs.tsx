@@ -18,7 +18,8 @@ import { isCancellable, isRetryable } from "@/components/deploy/vocabulary"
 export type RunVerbHandlers = {
   open: () => void
   visit: () => void
-  redeploy: () => void
+  /** Absent on a preview's run, whose pull request is tested again instead. */
+  redeploy?: () => void
   retry: () => void
   cancel: () => void
   /** Deploy again with the settings saved now, for a run whose plan they replaced. */
@@ -52,7 +53,6 @@ export type ReleaseVerbHandlers = {
  */
 export function runVerbs({
   run,
-  release,
   liveReleaseId,
   url,
   can,
@@ -61,10 +61,9 @@ export function runVerbs({
   on,
 }: {
   run: DeploymentEngineRun
-  /** The release this run produced, if it produced one. */
-  release?: DeploymentRelease
+  /** The live release of the run's own environment — a preview's, for a preview's run. */
   liveReleaseId?: number
-  /** The live site's address, for Visit on the live release's run. */
+  /** That environment's address, for Visit on the live release's run. */
   url?: string
   can: (capability: Capability) => boolean
   working?: RunVerbKey
@@ -75,7 +74,7 @@ export function runVerbs({
   stale?: boolean
   on: RunVerbHandlers
 }): Verb[] {
-  const isLive = Boolean(release) && release!.id === liveReleaseId
+  const isLive = Boolean(run.releaseId) && run.releaseId === liveReleaseId
   const verbs: Verb[] = [
     {
       key: "open",
@@ -92,7 +91,7 @@ export function runVerbs({
       run: on.visit,
     })
   }
-  if (isLive && can("service.control")) {
+  if (isLive && on.redeploy && can("service.control")) {
     verbs.push({
       key: "redeploy",
       label: "Redeploy",

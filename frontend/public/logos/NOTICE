@@ -33,6 +33,10 @@ its deno-light variant.
 fail2ban.webp is the collection's fail2ban.png, the project's own mark,
 resized to 96px WebP the way docker-compose.webp was.
 
+The Workspace's drawing editor is drawn as the product it embeds:
+excalidraw.svg is the collection's file, unchanged; its #6965db violet reads
+on a dark ground as it is.
+
 terminal.svg is no product's mark and comes from nowhere: it is drawn for
 this project, as the mark of a terminal window whose program has none.
 

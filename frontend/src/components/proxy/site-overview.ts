@@ -173,16 +173,16 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"])
 export type UpstreamOwner = { product?: string; name: string; pid?: number }
 
 /**
- * Who holds the socket an upstream names, from the host's listening ports:
- * the one the server already ties to this site, else one on this machine at
- * that port. Nothing where the address is another machine's — a socket list
- * of this host says nothing about it.
+ * The socket that holds an upstream's address: the one the server already
+ * ties to this site, else one on this machine at that port. Nothing where
+ * the address is another machine's — a socket list of this host says nothing
+ * about it.
  */
-export function upstreamOwner(
+export function upstreamListener(
   raw: string,
   site: string,
   listeners: Listener[] | undefined,
-): UpstreamOwner | undefined {
+): Listener | undefined {
   const at = upstreamAddress(raw)
   if (!at || !listeners) return undefined
   // A socket on this machine answers a loopback address, or the address it
@@ -193,9 +193,23 @@ export function upstreamOwner(
       l.port === at.port &&
       (LOOPBACK.has(at.host) || l.address === at.host),
   )
-  const listener = tcp.find((l) => l.routes?.some((route) => route.site === site)) ?? tcp[0]
+  return tcp.find((l) => l.routes?.some((route) => route.site === site)) ?? tcp[0]
+}
+
+/** The systemd unit that runs a socket's owner: the service a socket unit starts, else the one supervising it. */
+export function listenerUnit(listener: Listener): string | undefined {
+  return listener.activates || (listener.manager === "systemd" ? listener.managerName : undefined)
+}
+
+/** What holds the socket an upstream names: the program or container, drawn as its product. */
+export function upstreamOwner(
+  raw: string,
+  site: string,
+  listeners: Listener[] | undefined,
+): UpstreamOwner | undefined {
+  const listener = upstreamListener(raw, site, listeners)
   if (!listener) return undefined
-  const unit = listener.activates || (listener.manager === "systemd" ? listener.managerName : "")
+  const unit = listenerUnit(listener)
   const product = listener.container
     ? imageProduct(listener.container.image)
     : (processProduct(listener.displayName || listener.process || "") ??

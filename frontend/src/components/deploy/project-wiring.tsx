@@ -55,8 +55,9 @@ const STRIP = 14
  * image or the template the project is, and what the containers run, on a
  * product's tile with their state as a dot in its corner — where a GitHub
  * repository used to be three connected nodes and every runtime the same box.
- * The release is its number on a neutral disc: the brand is this dashboard,
- * and a reading drawn in it would spend the brand on a number.
+ * The release is its number on the tile every other mark stands on: the brand
+ * is this dashboard, and a reading drawn in it would spend the brand on a
+ * number.
  *
  * Beside each goes only what the identity line over every project page does
  * not already say — it names the commit, its author, who shipped the release
@@ -219,7 +220,7 @@ export function ProjectWiring({
             nodeRef={releaseNode}
             mark={
               liveRelease ? (
-                <WireMark size="md">
+                <WireMark tone="logo" size="md">
                   <span className="numeric text-xs font-semibold">#{liveRelease.number}</span>
                 </WireMark>
               ) : (
@@ -337,7 +338,7 @@ export function ProjectWiring({
             nodeRef={domainNode}
             mark={
               host ? (
-                <WireMark size="md">
+                <WireMark tone="logo" size="md">
                   <Globe />
                 </WireMark>
               ) : (

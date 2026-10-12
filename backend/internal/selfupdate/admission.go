@@ -11,7 +11,8 @@ import (
 )
 
 // LockLifecycle serializes admission before any settings, transcript or run
-// record is replaced. Both restart and update share this lock and state check.
+// record is replaced. Restart, update and uninstall share this lock and state
+// check.
 // The sibling owns its durable run after admission, so this lock need not be
 // inherited across the dashboard's own replacement.
 func LockLifecycle(dataDir string) (func(), error) {
@@ -35,7 +36,7 @@ func LockLifecycle(dataDir string) (func(), error) {
 // CheckLifecycleIdle fails closed for unreadable records. A broken record can
 // be dismissed explicitly, but must not be mistaken for an idle stack.
 func CheckLifecycleIdle(dataDir string) error {
-	for _, name := range []string{StateFile, "self-config.json"} {
+	for _, name := range []string{StateFile, "self-config.json", "self-uninstall.json"} {
 		body, err := os.ReadFile(filepath.Join(dataDir, name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue

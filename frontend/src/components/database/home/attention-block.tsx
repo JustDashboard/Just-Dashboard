@@ -3,13 +3,17 @@
 import { useMemo } from "react"
 import { usePoll } from "@/hooks/use-poll"
 import { FindingList, type Finding } from "@/components/finding-list"
-import type { SectionId } from "@/components/database/engine"
 import { RowsSkeleton, Block, BlockLink, Read, staleOf } from "@/components/database/home/blocks"
-import { ranked, type Concern } from "@/components/database/home/attention"
+import { concernParams, ranked, type Concern } from "@/components/database/home/attention"
+import {
+  adviceDestination,
+  databaseAdviceTitle,
+  needsDatabaseAttention,
+} from "@/components/database/home/advice"
 import { read } from "@/components/database/home/read"
 import type { DbAdvice, DbAdviseReport } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { databasePlace } from "@/components/database/shell/routes"
+import { useAuth } from "@/hooks/use-auth"
 
 /** How many findings the home shows before sending the reader to the page that holds them all. */
 const SHOWN = 5
@@ -22,7 +26,8 @@ const SHOWN = 5
  * Nothing is run from here.
  */
 export function AdvisorAttention() {
-  const { id, engine, href, goto } = useDatabase()
+  const { id, engine, href, goto, readOnly } = useDatabase()
+  const { can } = useAuth()
   const report = usePoll(
     (signal) =>
       read<DbAdviseReport>(
@@ -34,29 +39,38 @@ export function AdvisorAttention() {
     300_000,
     [id],
   )
-  const total = report.data?.findings.length ?? 0
+  const relevant = useMemo(
+    () => (report.data?.findings ?? []).filter(needsDatabaseAttention),
+    [report.data],
+  )
+  const total = relevant.length
   const silences = report.data?.silences ?? []
 
   const findings = useMemo<Finding[]>(
     () =>
-      (report.data?.findings ?? []).slice(0, SHOWN).map((advice, index) => ({
+      relevant.slice(0, SHOWN).map((advice, index) => ({
         // The advisor's ids name the check, and one check can report twice.
         id: `${advice.id}:${index}`,
         level: advice.level,
-        title: advice.title,
+        title: databaseAdviceTitle(advice),
         detail: advice.detail,
         advice: advice.advice,
-        meta: advice.category,
         extra: <Objects advice={advice} />,
-        action: adviceAction(advice, {
-          id,
-          canQuery: engine.has("query"),
-          title: (section) => engine.section(section)?.title,
-          open: (section) => goto(section),
-          review: (sql) => goto("query", { sql }),
-        }),
+        action: (() => {
+          const destination = adviceDestination(advice, {
+            id,
+            has: (section) => engine.has(section),
+            canQuery: can("service.control") && !readOnly,
+          })
+          return destination
+            ? {
+                label: destination.label,
+                onClick: () => goto(destination.section, destination.params),
+              }
+            : { label: "Inspect finding", onClick: () => goto("advisor") }
+        })(),
       })),
-    [report.data, id, engine, goto],
+    [relevant, id, engine, goto, can, readOnly],
   )
 
   return (
@@ -73,8 +87,9 @@ export function AdvisorAttention() {
         {(data) => (
           <>
             <FindingList
+              emphasize
               findings={findings}
-              emptyLabel={`The advisor checked ${data.tablesChecked.toLocaleString()} ${data.tablesChecked === 1 ? engine.nouns.object : engine.nouns.objects} and the server's settings, and found nothing to fix`}
+              emptyLabel={`No priority issues found in ${data.tablesChecked.toLocaleString()} ${data.tablesChecked === 1 ? engine.nouns.object : engine.nouns.objects} and the completed server checks`}
             />
             {silences.length > 0 && (
               <p className="mt-3 text-hint text-muted-foreground">
@@ -104,32 +119,6 @@ function Objects({ advice }: { advice: DbAdvice }) {
   )
 }
 
-function adviceAction(
-  advice: DbAdvice,
-  tools: {
-    id: number
-    canQuery: boolean
-    title: (section: SectionId) => string | undefined
-    open: (section: SectionId) => void
-    review: (sql: string) => void
-  },
-): Finding["action"] {
-  // The advisor links to pages of the dashboard by path. Only one that is a
-  // page of this database is followed, and by its name rather than its text:
-  // the path came from the server, and a press here must not leave for
-  // somewhere it merely spelled.
-  const place = advice.link ? databasePlace(advice.link) : null
-  const title = place?.id === tools.id ? tools.title(place.section) : undefined
-  if (place && title) {
-    return { label: `Open ${title}`, onClick: () => tools.open(place.section) }
-  }
-  if (advice.sql && tools.canQuery) {
-    const sql = advice.sql
-    return { label: "Review the fix in Query", onClick: () => tools.review(sql) }
-  }
-  return undefined
-}
-
 /**
  * The same block for an engine whose server has no advisor: what the home's
  * own readings say has crossed a line. The list is derived from answers the
@@ -139,17 +128,14 @@ function adviceAction(
 export function ConcernAttention({
   concerns,
   pending,
-  quiet,
 }: {
   concerns: readonly Concern[]
   pending: boolean
-  /** What to say when nothing needs anybody. */
-  quiet: string
 }) {
   const { engine, goto } = useDatabase()
   const findings = useMemo<Finding[]>(
     () =>
-      ranked(concerns).map((concern) => {
+      ranked(concerns.filter(needsDatabaseAttention)).map((concern) => {
         const section = concern.section && engine.section(concern.section)
         return {
           id: concern.id,
@@ -157,9 +143,11 @@ export function ConcernAttention({
           title: concern.title,
           detail: concern.detail,
           advice: concern.advice,
-          meta: concern.about,
           action: section
-            ? { label: `Open ${section.title}`, onClick: () => goto(section.id) }
+            ? {
+                label: `Open ${section.title}`,
+                onClick: () => goto(section.id, concernParams(concern, engine.can)),
+              }
             : undefined,
         }
       }),
@@ -171,7 +159,15 @@ export function ConcernAttention({
         <RowsSkeleton mark={false} />
       ) : (
         <div className="animate-rise">
-          <FindingList findings={findings} emptyLabel={quiet} />
+          <FindingList
+            emphasize
+            findings={findings}
+            emptyLabel={
+              pending
+                ? "Reading the current evidence…"
+                : "No priority issues found in the available readings"
+            }
+          />
         </div>
       )}
     </Block>
