@@ -37,7 +37,7 @@ func TestAccountCommandsShareTheStoreAndAuditWithoutSecrets(t *testing.T) {
 		t.Fatalf("users=%v err=%v", users, err)
 	}
 	user := users[0]
-	if user.Username != "alice" || user.Role != auth.RoleReadOnly || !user.MustChangePW {
+	if user.Username != "alice" || user.Role != auth.RoleReadOnly || user.MustChangePW {
 		t.Fatalf("created account=%+v", user)
 	}
 	if !svc.VerifyUserPassword(t.Context(), user.ID, password) {
@@ -59,7 +59,7 @@ func TestAccountCommandsShareTheStoreAndAuditWithoutSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated, err := svc.UserByID(t.Context(), user.ID)
-	if err != nil || !updated.Disabled || !updated.MustChangePW {
+	if err != nil || !updated.Disabled || updated.MustChangePW {
 		t.Fatalf("reset account=%+v err=%v", updated, err)
 	}
 	if err := call([]string{"revoke-sessions", "alice"}, ""); err != nil {

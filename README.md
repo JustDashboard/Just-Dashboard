@@ -307,7 +307,7 @@ while the backend is stopped.
 
 | Script | What it does |
 | --- | --- |
-| `sudo ./scripts/reset-password.sh admin` | Recover an account with a temporary password |
+| `sudo ./scripts/reset-password.sh admin` | Recover an account by setting a new password |
 | `sudo ./scripts/create-user.sh alice limited` | Create an account (`readonly`, `limited` or `admin`) |
 | `sudo ./scripts/manage.sh users` | List accounts, roles and two-factor status |
 | `sudo ./scripts/manage.sh revoke-sessions alice` | Sign out every browser session for an account |
@@ -321,11 +321,13 @@ while the backend is stopped.
 
 <br>
 
-Passwords are entered twice with hidden input and must meet the dashboard's strength rules. New and
-reset passwords are temporary: the account holder changes them at sign-in, after any required
-two-factor step. A reset clears failed-login lockout and revokes that account's sessions and API
-tokens, while keeping two-factor enrolment, recovery codes, role and disabled state. Account changes
-are audited as local root; `revoke-sessions` leaves API tokens unchanged.
+Passwords are entered twice with hidden input and must meet the dashboard's strength rules. The
+password a script sets is the one the account signs in with — the dashboard does not ask for another
+at sign-in. An account an admin creates from Account → Users, and a bootstrap password the backend
+generated, are the ones replaced on first sign-in, after any required two-factor step. A reset
+clears failed-login lockout and revokes that account's sessions and API tokens, while keeping
+two-factor enrolment, recovery codes, role and disabled state. Account changes are audited as local
+root; `revoke-sessions` leaves API tokens unchanged.
 
 For automation, append `--password-stdin` to either password command and pipe one password line from
 a trusted source — never put passwords in arguments or shell history. The scripts find the checkout

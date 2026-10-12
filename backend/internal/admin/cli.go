@@ -26,8 +26,8 @@ const Usage = `Local dashboard account tools:
   --admin revoke-sessions USER
 
 Run through scripts/manage.sh on the host. Password commands read one line
-from stdin; never supply passwords in command arguments. New and reset
-passwords must be changed at sign-in. Existing two-factor enrollment is kept.
+from stdin; never supply passwords in command arguments. The password set here
+is the one used to sign in. Existing two-factor enrollment is kept.
 `
 
 func Run(ctx context.Context, dataDir string, args []string, in io.Reader, out, errOut io.Writer) error {
@@ -93,13 +93,15 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 			if len(args) == 3 {
 				role = auth.Role(args[2])
 			}
-			user, err := svc.CreateUser(ctx, args[1], password, role, true)
+			// Typed twice at a root shell, so it is already chosen: the
+			// dashboard does not ask for another one at first sign-in.
+			user, err := svc.CreateUser(ctx, args[1], password, role, false)
 			if err != nil {
 				return err
 			}
 			entry.Target = user.Username
-			entry.Detail = audit.Detail(map[string]any{"role": role, "mustChangePassword": true})
-			fmt.Fprintf(out, "Created dashboard user %q (%s). Change the temporary password at sign-in.\n", user.Username, role)
+			entry.Detail = audit.Detail(map[string]any{"role": role})
+			fmt.Fprintf(out, "Created dashboard user %q (%s). Sign in with the password you just set.\n", user.Username, role)
 			return nil
 		}
 		users, err := svc.ListUsers(ctx)
@@ -125,7 +127,7 @@ func run(ctx context.Context, dataDir string, args []string, in io.Reader, out, 
 			if err := svc.ResetPassword(ctx, target.ID, password); err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Reset password for %q. Sessions and API tokens revoked; two-factor enrollment preserved.\nChange the temporary password at sign-in.\n", target.Username)
+			fmt.Fprintf(out, "Reset password for %q. Sessions and API tokens revoked; two-factor enrollment preserved.\nSign in with the password you just set.\n", target.Username)
 			if target.Disabled {
 				fmt.Fprintln(out, "This account is disabled and remains unable to sign in.")
 			}

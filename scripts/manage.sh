@@ -13,7 +13,7 @@ Usage: sudo ./scripts/manage.sh COMMAND [ARGUMENTS]
 Accounts (dashboard accounts, not Linux users)
   users                              List accounts, roles and two-factor status
   create-user USER [ROLE]             Create an account (default: readonly)
-  reset-password USER                Set a temporary password and clear lockout
+  reset-password USER                Set a new password and clear lockout
   revoke-sessions USER                Sign out every browser session for USER
 
 Stack
@@ -24,9 +24,10 @@ Stack
 Roles: readonly, limited, admin
 Password commands prompt twice with hidden input. For automation, append
 --password-stdin and pipe one password line from a trusted source. Passwords
-never belong in command arguments. New and reset passwords must be changed
-at sign-in. Resetting preserves two-factor and disabled state, and revokes
-browser sessions and API tokens. Account changes are audited as local root.
+never belong in command arguments. The password you set is the one you sign
+in with; it is not asked for again. Resetting preserves two-factor and disabled
+state, and revokes browser sessions and API tokens. Account changes are
+audited as local root.
 
 Examples:
   sudo ./scripts/create-user.sh alice limited
@@ -96,7 +97,7 @@ case "$command" in
 			exec "${compose[@]}" run --rm --no-deps -T backend --admin "$command" "$@"
 		fi
 		[ -t 0 ] || die "Interactive password input needs a terminal; use --password-stdin for piped input."
-		printf 'Temporary password: at least 12 characters, mixing three of uppercase, lowercase, digits and symbols.\n' >&2
+		printf 'New password: at least 12 characters, mixing three of uppercase, lowercase, digits and symbols.\n' >&2
 		IFS= read -r -s -p 'Password: ' password || die "Password input cancelled."
 		printf '\n' >&2
 		IFS= read -r -s -p 'Confirm password: ' confirmation || die "Password input cancelled."
