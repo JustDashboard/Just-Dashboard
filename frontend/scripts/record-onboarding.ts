@@ -88,7 +88,7 @@ try {
     "2 · What is this server for?",
     "Asked once, straight after sign-in. What the server already runs is chosen for you.",
   )
-  await page.screenshot({ path: resolve(output, "purpose-1280.png") })
+  await page.screenshot({ path: resolve(output, "0.7.4-question-1280.png") })
   await pause(2600)
   const purposes = page.getByRole("group", { name: "Purposes" })
   await purposes.getByRole("button", { name: "Run databases" }).hover()
@@ -96,74 +96,56 @@ try {
   await purposes.getByRole("button", { name: "Run databases" }).click()
   await caption(page, "2 · What is this server for?", "Pick any number — here, just shipping apps")
   await pause(1400)
-  await purposes.getByRole("button", { name: "Manage containers" }).hover()
-  await pause(700)
   await page.getByRole("button", { name: "Continue" }).hover()
   await pause(400)
   await page.getByRole("button", { name: "Continue" }).click()
 
-  const tile = (name: string) => page.getByRole("button", { name, exact: true })
-  await expect(tile("Deployments")).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("heading", { level: 1, name: "Your server is ready" })).toBeVisible()
   await caption(
     page,
-    "3 · Which sections should the sidebar show?",
-    "The answer picks the sections; the preview is the sidebar you will get",
+    "3 · The answer",
+    "Saved to the account: the server, wired to what it is for. One button left.",
   )
-  await pause(2600)
-  const proxy = tile("Proxy & TLS")
-  await proxy.scrollIntoViewIfNeeded()
-  await proxy.hover()
-  await pause(600)
-  await proxy.click()
-  await caption(
-    page,
-    "3 · Which sections should the sidebar show?",
-    "Proxy & TLS off — it leaves the preview at once",
-  )
-  await pause(1800)
-  const terminal = tile("Terminal")
-  await terminal.scrollIntoViewIfNeeded()
-  await terminal.hover()
-  await pause(500)
-  await terminal.click()
-  await caption(page, "3 · Which sections should the sidebar show?", "Terminal on — it arrives")
-  await page.screenshot({ path: resolve(output, "sidebar-1280.png") })
-  await pause(1800)
-  await page.getByRole("button", { name: "Finish" }).click()
-
-  await expect(page.getByRole("heading", { level: 1, name: "Your sidebar is ready" })).toBeVisible()
-  await caption(
-    page,
-    "4 · Ready",
-    "Saved to the account. Hidden means out of the sidebar, never out of reach.",
-  )
-  await pause(1200)
-  await page.screenshot({ path: resolve(output, "ready-1280.png") })
+  await pause(1600)
+  await page.screenshot({ path: resolve(output, "0.7.4-answer-1280.png") })
   await pause(2400)
-  await page.getByRole("button", { name: "Open the dashboard" }).click()
+  await page.getByRole("button", { name: "Go to dashboard" }).click()
 
   await expect(page).toHaveURL(/\/$/)
   const rail = page.getByRole("navigation", { name: "Sidebar", exact: true })
   await expect(rail.getByRole("link", { name: "Deployments" })).toBeVisible()
   await caption(
     page,
-    "5 · The dashboard",
+    "4 · The dashboard",
     "The sidebar and the Overview hold only what this account uses",
   )
-  await pause(1500)
-  await page.screenshot({ path: resolve(output, "overview-1280.png") })
-  await pause(1800)
+  await pause(3000)
+
+  // Sections are chosen one by one after the fact, on Workspace — here,
+  // Proxy & TLS goes, so the next step can follow a link into it.
+  const tile = (name: string) => page.getByRole("button", { name, exact: true })
+  await page.goto("/account/workspace")
+  await expect(tile("Proxy & TLS")).toBeVisible()
+  await caption(
+    page,
+    "5 · Change it any time",
+    "Account → Workspace: the sections one by one, or the question again",
+  )
+  await pause(1600)
+  await tile("Proxy & TLS").hover()
+  await pause(500)
+  await tile("Proxy & TLS").click()
+  await pause(900)
+  await page.getByRole("button", { name: "Save changes" }).click()
+  await pause(1600)
+  await page.screenshot({ path: resolve(output, "0.7.4-workspace-1280.png") })
 
   await caption(
     page,
     "6 · A link into a hidden section",
     "A project's domain links to its proxy site — and Proxy & TLS is hidden",
   )
-  await page.getByRole("link", { name: "api-production" }).first().click()
-  await expect(page).toHaveURL(/\/deploy\/7$/)
-  await pause(1600)
-  await rail.getByRole("link", { name: "Domains" }).click()
-  await expect(page).toHaveURL(/\/deploy\/7\/settings\/domains$/)
+  await page.goto("/deploy/7/settings/domains")
   const site = page.getByRole("link", { name: "just-dashboard-env-12.conf" })
   await expect(site).toBeVisible()
   await site.hover()
@@ -179,7 +161,6 @@ try {
     "The rail goes into Proxy & TLS to say where you are, and that it is hidden",
   )
   await pause(1200)
-  await page.screenshot({ path: resolve(output, "hidden-section-1280.png") })
   await note.getByRole("button", { name: "Show it" }).hover()
   await pause(2400)
 
@@ -192,26 +173,11 @@ try {
   await input.pressSequentially("certificates", { delay: 70 })
   await pause(2200)
   await page.keyboard.press("Escape")
-
-  await page.goto("/account/workspace")
-  await expect(tile("Network")).toBeVisible()
-  await caption(
-    page,
-    "9 · Change it any time",
-    "Account → Workspace: the same sections, or the question again",
-  )
-  await page.screenshot({ path: resolve(output, "workspace-1280.png") })
-  await pause(1600)
-  const network = tile("Network")
-  await network.scrollIntoViewIfNeeded()
-  await network.click()
-  await pause(900)
-  await page.getByRole("button", { name: "Save changes" }).click()
-  await pause(2400)
+  await pause(600)
 } finally {
   const video = page.video()
   await context.close()
-  if (video) await rename(await video.path(), resolve(output, "onboarding.webm"))
+  if (video) await rename(await video.path(), resolve(output, "0.7.4-onboarding.webm"))
   await rm(raw, { recursive: true, force: true })
   await browser.close()
 }

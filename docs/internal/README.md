@@ -117,7 +117,8 @@ strategy, and feature ownership behind those rules.
 
 - [`../audits/2026-10-12-onboarding/README.md`](../audits/2026-10-12-onboarding/README.md)
   — the first-run question: why a hidden section leaves the sidebar but never becomes unreachable,
-  the three steps, and the recording from sign-in to a deployment's domain opening a hidden proxy.
+  the three steps 0.7.3 shipped (two since 0.7.4), and the recording from sign-in to a deployment's
+  domain opening a hidden proxy.
 
 - [`../audits/2026-10-11-log-filters-insights/README.md`](../audits/2026-10-11-log-filters-insights/README.md)
   — the log panes' one filter row and time window, Insights' readings and request visitors, and the

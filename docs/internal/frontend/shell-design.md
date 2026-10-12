@@ -106,32 +106,34 @@ are on purpose — wrapping them in "can I go here?" checks would make every mis
 `app/welcome/page.tsx` sits outside the shell — the rail is what it decides — and the shell's layout
 sends an account whose session says `needsOnboarding` there from any address, after sign-in, two-factor
 and any forced password change; answering or skipping clears the flag server-side, and it is never
-asked again. It is a flow page (design system §16, `components/onboarding/welcome-flow.tsx`) in three
-steps, each the one surface being decided beside a picture of what it makes, so the answer is seen
-rather than read — the words are the question, the names and the counts:
+asked again. It is a flow page (design system §16, `components/onboarding/welcome-flow.tsx`) of two
+screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the one sign-in stands on:
 
-1. **The purposes** as `ChoiceCard`s, any number of them, each drawn as the three products it means
-   (`PURPOSES[].products` in `lib/sidebar-sections.ts`) and its name. On a server that already has
-   projects or saved databases those purposes start chosen, with the count on their card. Beside
-   them `ServerPicture` (`components/onboarding/server-picture.tsx`) draws this server — the wiring
-   pictures' rack, named and marked with its distribution — with an `AnimatedBeam` running to each
-   purpose chosen, drawn as its first product; nothing chosen is the dashed ring of a place not
-   filled. The lines are the picture's own children rather than the marks', because a mark's row
-   rises in on a transform and a line inside it would be positioned against the row.
-2. **The sections** as `SectionTiles` (`section-tiles.tsx`): one compact `ChoiceCard` per section under
-   the rail's group names, with the rail's glyph and name and nothing else, beside `SidebarPreview`,
-   the rail drawn from the same registry with the same rule. This is the screen that decides.
-3. **The outcome**: the wired server beside three one-line facts — links still open hidden sections,
-   ⌘K finds every page, Account → Workspace changes it — and one foot holding the count of sections
-   and the command, with *Change sections* back to step two. The command used to have a row of its
-   own under the facts, with the count in a header above the picture, which made the outcome three
-   bands of white space around one button.
+1. **The question**: the purposes as big `ChoiceCard`s and nothing beside them — any number, each
+   drawn as the three products it means (`PURPOSES[].products` in `lib/sidebar-sections.ts`) and its
+   name. On a server that already has projects or saved databases those purposes start chosen, with
+   the count on their card. *Continue* saves the sidebar they keep (`hiddenFor`); *Show me
+   everything* hides nothing and goes straight to the dashboard.
+2. **The answer**: `ServerPicture` (`components/onboarding/server-picture.tsx`) filling the screen —
+   this server's rack in the middle, named and marked with its distribution, each purpose chosen a
+   card of its products around it on an ellipse, with an `AnimatedBeam` running out to each — and one
+   centred command, *Go to dashboard*, over a line saying how many sections the sidebar keeps and
+   that Account → Workspace changes them. The picture is capped by the window's height so the command
+   is on screen at 800px; no card sits straight below the server, where its name hangs. On a phone
+   the cards sit in two columns under the server.
 
-The screen stands on arrival's ground (`.auth-backdrop`, design system §16), the one sign-in stands on.
-On a phone each step is one column: the purposes are rows rather than tiles, the rail preview is left
-out because the tiles already say what is in and out, and the panel's command bar sticks to the foot of
-the window (`max-xl:sticky` on `FlowActions`, with the panel's clip lifted below `xl` so the bar sticks
-to the page's scroll rather than to the panel).
+Until 0.7.4 it was three steps: the purposes beside a small picture of the server, then the sections
+as fifteen tiles beside a preview of the rail, then the outcome. Choosing sections one by one is
+Account → Workspace's job — the same tiles and preview, after the fact — and the first sign-in no
+longer asks for it. On a phone the question's cards are rows and its command is held at the foot of
+the window.
+
+Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is where sections are
+chosen one by one, in the reading register: `SectionTiles` (`section-tiles.tsx`), one compact
+`ChoiceCard` per section the role can see under the rail's group names, beside `SidebarPreview`, the rail
+drawn from the same registry with the same rule — unlabelled, since drawn as the rail it is it needs no
+name — with *Ask me again* back to `/welcome`. Accounts that predate the question default to answered
+with nothing hidden, so an upgrade changes nobody's rail.
 
 ### Signing in
 
@@ -146,11 +148,6 @@ is not drawn before that answer: it used to promise *Verify* to every account. *
 password change does not ask again for the current password the page already holds, reads the server's
 rule as the reader types (`lib/password.ts`), and signs straight back in with the new password once the
 change has ended the session.
-
-Nothing is saved until Finish or *Show me everything* (which hides nothing). Only the sections the role
-can see are offered. `/account/workspace` is the same tiles and preview after the fact, in the reading
-register, with *Ask me again* back to `/welcome`. Accounts that predate the question default to answered
-with nothing hidden, so an upgrade changes nobody's rail.
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: one database's layout

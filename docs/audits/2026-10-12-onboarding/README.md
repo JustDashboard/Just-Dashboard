@@ -1,5 +1,15 @@
 # The first-run question
 
+> **0.7.4 cut the flow to two screens.** The question is the purpose cards alone; *Continue* saves and
+> opens the answer — the server wired to each purpose, filling the screen — with one centred *Go to
+> dashboard*. The sections screen is gone from the first sign-in (Account → Workspace keeps it), and
+> Workspace's rail preview lost its label. This audit describes 0.7.3; the current design is in
+> [`shell-design.md`](../../internal/frontend/shell-design.md#the-first-run-question). Screenshots:
+> [question at 1280](0.7.4-question-1280.png), [at 390](0.7.4-question-390.png),
+> [answer at 1280](0.7.4-answer-1280.png), [1720 with three](0.7.4-answer-1720.png),
+> [390](0.7.4-answer-390.png), [Workspace](0.7.4-workspace-1280.png); the walk as
+> `frontend/scripts/record-onboarding.ts` now records it: [0.7.4-onboarding.webm](0.7.4-onboarding.webm).
+
 The operator asked for an onboarding step after sign-in that learns what an account uses the
 dashboard for and gives it only the pages it needs. They also warned that many pages have buttons
 that lead into other sections, and those sections might be among the ones hidden. This change
