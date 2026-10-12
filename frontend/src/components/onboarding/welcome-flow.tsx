@@ -3,23 +3,19 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Box,
-  Database,
+  Check,
   Link,
   Logout,
   MagnifyingGlass,
-  Rocket,
   SettingsSliders,
-  Shield,
-  Terminal,
-  Topology,
   type Icon,
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import type { DbConnection, DeploymentFleet } from "@/lib/types"
-import { PURPOSES, hiddenFor, type PurposeKey, type SectionKey } from "@/lib/sidebar-sections"
+import { PURPOSES, hiddenFor, type PurposeKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { usePoll } from "@/hooks/use-poll"
@@ -33,17 +29,21 @@ import {
   FlowSteps,
 } from "@/components/flow"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { sectionEntry } from "@/components/nav"
+import { ProductLogo } from "@/components/product-logo"
+import { Status } from "@/components/status-dot"
 import { displayNameOf } from "@/components/account/user-avatar"
 import { useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo } from "@/components/logo"
+import { ServerPicture } from "@/components/onboarding/server-picture"
 import {
-  SectionSwitches,
+  SectionTiles,
   SidebarPreview,
   useSectionCount,
-} from "@/components/onboarding/section-switches"
+} from "@/components/onboarding/section-tiles"
+import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
+import { NumberTicker } from "@/components/ui/number-ticker"
 
 const STEPS = [
   { key: "purpose", label: "Purpose" },
@@ -57,26 +57,24 @@ const QUESTIONS = [
   "Your sidebar is ready",
 ]
 
-const PURPOSE_MARKS: Record<PurposeKey, Icon> = {
-  ship: Rocket,
-  databases: Database,
-  containers: Box,
-  network: Topology,
-  secure: Shield,
-  workspace: Terminal,
-}
+// Two columns from `xl`: the thing being decided, and the picture it draws.
+const COLUMNS =
+  "grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]"
 
 /**
  * The first thing a new account sees after signing in: what the server is
- * for, which sections that keeps in the sidebar, and what hiding one means.
+ * for, which sections that keeps in the sidebar, and the outcome.
  *
- * A flow page (§16): a sequence with an outcome, the account's sidebar. The
- * purposes are a first draft of the answer, not the answer — the second
- * screen is the switches themselves beside the rail they draw, so a choice
- * that picked Network for somebody who only wanted the proxy is undone in a
- * press rather than by finding Account → Workspace later. Nothing is saved
- * until Finish, or Show me everything, and either one is the end of the
- * question: the shell never sends this account here again.
+ * A flow page (§16): a sequence with an outcome, the account's sidebar. Each
+ * screen is one surface being decided beside a picture of what it makes —
+ * the server wired to its purposes, then the sidebar itself — so the answer
+ * is seen rather than read. The words are the question, the names and the
+ * counts; what a section is for is on its page.
+ *
+ * The purposes are a first draft, not the answer: the second screen is the
+ * sections themselves, so a choice that brought Network to somebody who only
+ * wanted the proxy is undone in a press. Nothing is saved until Finish or
+ * Show me everything, and either one ends the question for good.
  */
 export function WelcomeFlow() {
   const router = useRouter()
@@ -84,13 +82,15 @@ export function WelcomeFlow() {
   const { save } = useHiddenSections()
   const [step, setStep] = useState(0)
   // Null until the reader presses a purpose: until then the choice is what
-  // the server suggests. Held here so Back returns to the cards as they were.
-  const [purposes, setPurposes] = useState<PurposeKey[] | null>(null)
+  // the server already runs. Held here so Back returns to the cards as they were.
+  const [picked, setPicked] = useState<PurposeKey[] | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState<"finish" | "skip" | null>(null)
   const confetti = useRef<ConfettiRef>(null)
   const page = useRef<HTMLDivElement>(null)
   const name = status?.user ? displayNameOf(status.user) : ""
+  const found = useFound()
+  const purposes = picked ?? found.purposes
 
   // Each step is a new screen. Stacked on a phone the command is at the foot
   // of a long page, and the next question would otherwise open scrolled to
@@ -136,112 +136,147 @@ export function WelcomeFlow() {
       />
       <div className="min-w-0 xl:min-h-0 xl:flex-1">
         {step === 0 && (
-          <PurposeStep
-            picked={purposes}
-            onPick={setPurposes}
-            skipping={saving === "skip"}
-            onSkip={() => commit(new Set(), "skip")}
-            onContinue={(chosen) => {
-              setHidden(new Set(hiddenFor(chosen)))
-              setStep(1)
-            }}
-          />
+          <div className={COLUMNS}>
+            <PurposeStep
+              chosen={purposes}
+              readings={found.readings}
+              onPick={setPicked}
+              skipping={saving === "skip"}
+              onSkip={() => commit(new Set(), "skip")}
+              onContinue={() => {
+                setHidden(new Set(hiddenFor(purposes)))
+                setStep(1)
+              }}
+            />
+            <Beside label="Your server">
+              <ServerPicture purposes={purposes} />
+            </Beside>
+          </div>
         )}
         {step === 1 && (
-          <SidebarStep
-            hidden={hidden}
-            onChange={setHidden}
-            saving={saving === "finish"}
-            onBack={() => setStep(0)}
-            onFinish={() => commit(hidden, "finish")}
-          />
+          <div className={COLUMNS}>
+            <SidebarStep
+              hidden={hidden}
+              onChange={setHidden}
+              saving={saving === "finish"}
+              onBack={() => setStep(0)}
+              onFinish={() => commit(hidden, "finish")}
+            />
+            <Beside label="Your sidebar">
+              <SidebarPreview hidden={hidden} />
+            </Beside>
+          </div>
         )}
-        {step === 2 && <ReadyStep hidden={hidden} onOpen={() => router.replace("/")} />}
+        {step === 2 && (
+          <div className={COLUMNS}>
+            <ReadyStep purposes={purposes} hidden={hidden} onOpen={() => router.replace("/")} />
+            <Beside label="Your sidebar">
+              <SidebarPreview hidden={hidden} />
+            </Beside>
+          </div>
+        )}
       </div>
     </Page>
   )
 }
 
+/** The column beside the focused surface: a picture of what it makes, named. */
+function Beside({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0 space-y-2 xl:min-h-0 xl:overflow-y-auto">
+      <p className="eyebrow px-1">{label}</p>
+      {children}
+    </div>
+  )
+}
+
 /**
- * What the server is for, as cards you pick any number of. Each says which
- * sections it keeps, drawn as the rail draws them, so the reader is choosing
- * a sidebar and can see it.
- *
- * On a server that already has projects or databases — an account made for a
- * second person on a working machine — those purposes start chosen, and the
- * head says why. A fresh install has neither and starts with nothing chosen.
+ * What the server already runs, read once: its deployment projects and saved
+ * databases. An account made for a second person on a working machine starts
+ * with those purposes chosen and the count on their cards; a fresh install
+ * has neither and starts with nothing chosen.
+ */
+function useFound() {
+  const fleet = usePoll((signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal), 0)
+  const databases = usePoll((signal) => get<DbConnection[]>("/databases/", undefined, signal), 0)
+  const projects = fleet.data?.deployments.length ?? 0
+  const connections = databases.data?.length ?? 0
+  const readings: Partial<Record<PurposeKey, string>> = {
+    ...(projects > 0 && { ship: `${plural(projects, "project")} here` }),
+    ...(connections > 0 && { databases: `${plural(connections, "database")} here` }),
+  }
+  return { purposes: Object.keys(readings) as PurposeKey[], readings }
+}
+
+/**
+ * What the server is for, as cards you pick any number of, each drawn as the
+ * products it means. Pressing one wires it to the server in the picture
+ * beside.
  */
 function PurposeStep({
-  picked,
+  chosen,
+  readings,
   onPick,
   skipping,
   onSkip,
   onContinue,
 }: {
-  picked: PurposeKey[] | null
+  chosen: PurposeKey[]
+  readings: Partial<Record<PurposeKey, string>>
   onPick: (purposes: PurposeKey[]) => void
   skipping: boolean
   onSkip: () => void
-  onContinue: (purposes: PurposeKey[]) => void
+  onContinue: () => void
 }) {
-  const fleet = usePoll((signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal), 0)
-  const databases = usePoll((signal) => get<DbConnection[]>("/databases/", undefined, signal), 0)
-  const projects = fleet.data?.deployments.length ?? 0
-  const connections = databases.data?.length ?? 0
-  const found: PurposeKey[] = [
-    ...(projects > 0 ? (["ship"] as const) : []),
-    ...(connections > 0 ? (["databases"] as const) : []),
-  ]
-  // Untouched, the choice is whatever the server suggests; the first press
-  // makes it the reader's, and a read landing after that changes nothing.
-  const chosen = picked ?? found
-
   const toggle = (key: PurposeKey) =>
     onPick(chosen.includes(key) ? chosen.filter((k) => k !== key) : [...chosen, key])
 
-  const readings = [
-    projects > 0 && plural(projects, "project"),
-    connections > 0 && plural(connections, "database"),
-  ].filter(Boolean)
-
   return (
-    <FlowPanel className="xl:max-h-full xl:min-h-0">
-      <FlowPanelHeader
-        title="Choose everything that applies"
-        actions={
-          readings.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              {readings.join(" and ")} already on this server
-            </span>
-          )
-        }
-      />
-      <FlowPanelBody className="min-h-0 overflow-y-auto">
+    <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
+      <FlowPanelBody className="min-h-0 overflow-y-auto p-5 xl:flex-1">
         <ChoiceGrid role="group" aria-label="Purposes">
-          {PURPOSES.map((purpose, index) => (
-            <ChoiceCard
-              key={purpose.key}
-              index={index}
-              verb={purpose.title}
-              title={purpose.title}
-              description={purpose.hint}
-              mark={PURPOSE_MARKS[purpose.key]}
-              selected={chosen.includes(purpose.key)}
-              onClick={() => toggle(purpose.key)}
-              trailing={<SectionsLine sections={purpose.sections} />}
-            />
-          ))}
+          {PURPOSES.map((purpose, index) => {
+            const on = chosen.includes(purpose.key)
+            const reading = readings[purpose.key]
+            return (
+              <BlurFade key={purpose.key} delay={index * 0.04} className="h-full">
+                <ChoiceCard
+                  selected={on}
+                  onClick={() => toggle(purpose.key)}
+                  className="min-h-32 justify-between gap-5 p-4"
+                >
+                  <span className="flex w-full items-start justify-between gap-3">
+                    <span className="flex gap-1.5">
+                      {purpose.products.map((product) => (
+                        <ProductLogo key={product} id={product} size="sm" />
+                      ))}
+                    </span>
+                    <Check
+                      aria-hidden
+                      className={cn(
+                        "size-4 shrink-0 text-brand transition-opacity",
+                        on ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                  </span>
+                  <span className="grid gap-1">
+                    <span className="text-title leading-tight font-semibold">{purpose.title}</span>
+                    {reading && <Status tone="running" label={reading} className="text-hint" />}
+                  </span>
+                </ChoiceCard>
+              </BlurFade>
+            )
+          })}
         </ChoiceGrid>
       </FlowPanelBody>
       <FlowActions
-        note="This decides what your sidebar shows, not what you can do. Every page stays one search away."
         secondary={
           <Button variant="ghost" onClick={onSkip} pending={skipping}>
             Show me everything
           </Button>
         }
       >
-        <Button disabled={chosen.length === 0 || skipping} onClick={() => onContinue(chosen)}>
+        <Button disabled={chosen.length === 0 || skipping} onClick={onContinue}>
           Continue
         </Button>
       </FlowActions>
@@ -249,28 +284,7 @@ function PurposeStep({
   )
 }
 
-/** The sections a purpose keeps, each with the glyph its row has in the rail. */
-function SectionsLine({ sections }: { sections: readonly SectionKey[] }) {
-  return (
-    <span className="mt-auto flex flex-wrap gap-x-3 gap-y-1 pt-1.5 text-hint text-muted-foreground">
-      {sections.map((key) => {
-        const entry = sectionEntry(key)
-        if (!entry) return null
-        return (
-          <span key={key} className="inline-flex items-center gap-1">
-            <entry.icon aria-hidden className="size-3 shrink-0" />
-            {entry.title}
-          </span>
-        )
-      })}
-    </span>
-  )
-}
-
-/**
- * The purposes' answer as switches, beside the rail it will draw. This is the
- * screen that decides; the first one only filled it in.
- */
+/** The purposes' answer as the sections themselves: the screen that decides. */
 function SidebarStep({
   hidden,
   onChange,
@@ -286,96 +300,74 @@ function SidebarStep({
 }) {
   const { shown, total } = useSectionCount(hidden)
   return (
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
-      <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
-        <FlowPanelHeader
-          title="Sections"
-          actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {shown} of {total} shown
-            </span>
-          }
-        />
-        <FlowPanelBody className="min-h-0 overflow-y-auto xl:flex-1">
-          <SectionSwitches hidden={hidden} onChange={onChange} />
-        </FlowPanelBody>
-        <FlowActions
-          note="A hidden section still opens from any link to it, and search finds every page."
-          secondary={
-            <Button variant="ghost" onClick={onBack} disabled={saving}>
-              Back
-            </Button>
-          }
-        >
-          <Button onClick={onFinish} pending={saving}>
-            Finish
+    <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
+      <FlowPanelHeader
+        title="Sections"
+        actions={
+          <span className="numeric text-hint text-muted-foreground">
+            {shown} of {total} shown
+          </span>
+        }
+      />
+      <FlowPanelBody className="min-h-0 overflow-y-auto p-5 xl:flex-1">
+        <SectionTiles hidden={hidden} onChange={onChange} />
+      </FlowPanelBody>
+      <FlowActions
+        secondary={
+          <Button variant="ghost" onClick={onBack} disabled={saving}>
+            Back
           </Button>
-        </FlowActions>
-      </FlowPanel>
-      <div className="min-w-0 space-y-2 xl:min-h-0 xl:overflow-y-auto">
-        <p className="eyebrow px-1">Your sidebar</p>
-        <SidebarPreview hidden={hidden} />
-      </div>
-    </div>
+        }
+      >
+        <Button onClick={onFinish} pending={saving}>
+          Finish
+        </Button>
+      </FlowActions>
+    </FlowPanel>
   )
 }
 
-/** The outcome, said once, with what hiding a section does and does not do. */
-function ReadyStep({ hidden, onOpen }: { hidden: ReadonlySet<string>; onOpen: () => void }) {
+/** The outcome: the server wired to its purposes, the count, and three facts. */
+function ReadyStep({
+  purposes,
+  hidden,
+  onOpen,
+}: {
+  purposes: PurposeKey[]
+  hidden: ReadonlySet<string>
+  onOpen: () => void
+}) {
   const { shown, total } = useSectionCount(hidden)
   const keys = useLauncherKeys()
-  const afterwards: { icon: Icon; title: string; text: string }[] = [
-    {
-      icon: Link,
-      title: "Links still lead where they did",
-      text: "A deployment's domain still opens its site in the proxy. The sidebar shows a hidden section while you are in it, with a way to keep it.",
-    },
-    {
-      icon: MagnifyingGlass,
-      title: "Search reaches every page",
-      text: `${keys} finds hidden pages as soon as you type, with every container, site and database.`,
-    },
-    {
-      icon: SettingsSliders,
-      title: "Change it whenever you like",
-      text: "Account → Workspace has the same switches, and can ask you this again.",
-    },
+  const facts: { icon: Icon; text: string }[] = [
+    { icon: Link, text: "Links still open hidden sections" },
+    { icon: MagnifyingGlass, text: `${keys} finds every page` },
+    { icon: SettingsSliders, text: "Change it in Account → Workspace" },
   ]
 
   return (
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-      <FlowPanel className="min-w-0 xl:self-start">
-        <FlowPanelHeader
-          title={`${shown} of ${total} sections in your sidebar`}
-          actions={
-            total > shown && (
-              <span className="numeric text-hint text-muted-foreground">
-                {total - shown} hidden
-              </span>
-            )
-          }
-        />
-        <FlowPanelBody>
-          <ul className="grid gap-4">
-            {afterwards.map((item) => (
-              <li key={item.title} className="flex min-w-0 items-start gap-3">
-                <item.icon aria-hidden className="mt-0.5 size-4 shrink-0 text-brand" />
-                <div className="min-w-0 space-y-0.5">
-                  <p className="text-body font-medium">{item.title}</p>
-                  <p className="text-hint leading-relaxed text-muted-foreground">{item.text}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </FlowPanelBody>
-        <FlowActions>
-          <Button onClick={onOpen}>Open the dashboard</Button>
-        </FlowActions>
-      </FlowPanel>
-      <div className="min-w-0 space-y-2">
-        <p className="eyebrow px-1">Your sidebar</p>
-        <SidebarPreview hidden={hidden} />
-      </div>
-    </div>
+    <FlowPanel className="min-w-0 xl:self-start">
+      <FlowPanelHeader
+        title={
+          <span>
+            <NumberTicker value={shown} className="numeric" /> of {total} sections in your sidebar
+          </span>
+        }
+      />
+      <FlowPanelBody className="p-0">
+        <ServerPicture purposes={purposes} className="py-8" />
+        <ul className="grid gap-3 border-t border-hairline px-5 py-4 sm:grid-cols-3">
+          {facts.map((fact) => (
+            <li key={fact.text} className="flex min-w-0 items-center gap-2 text-hint">
+              <fact.icon aria-hidden className="size-4 shrink-0 text-brand" />
+              <span className="min-w-0">{fact.text}</span>
+            </li>
+          ))}
+        </ul>
+      </FlowPanelBody>
+      <FlowActions>
+        <Button onClick={onOpen}>Open the dashboard</Button>
+      </FlowActions>
+    </FlowPanel>
   )
 }

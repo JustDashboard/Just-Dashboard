@@ -82,7 +82,7 @@ try {
   await page.getByRole("button", { name: "Continue" }).click()
 
   await expect(page).toHaveURL(/\/welcome$/)
-  await expect(page.getByText("already on this server")).toBeVisible()
+  await expect(page.getByText("4 databases here")).toBeVisible()
   await caption(
     page,
     "2 · What is this server for?",
@@ -102,14 +102,15 @@ try {
   await pause(400)
   await page.getByRole("button", { name: "Continue" }).click()
 
-  await expect(page.getByRole("switch", { name: "Deployments" })).toBeChecked()
+  const tile = (name: string) => page.getByRole("button", { name, exact: true })
+  await expect(tile("Deployments")).toHaveAttribute("aria-pressed", "true")
   await caption(
     page,
     "3 · Which sections should the sidebar show?",
-    "The answer fills in the switches; the preview is the sidebar you will get",
+    "The answer picks the sections; the preview is the sidebar you will get",
   )
   await pause(2600)
-  const proxy = page.getByRole("switch", { name: "Proxy & TLS" })
+  const proxy = tile("Proxy & TLS")
   await proxy.scrollIntoViewIfNeeded()
   await proxy.hover()
   await pause(600)
@@ -120,7 +121,7 @@ try {
     "Proxy & TLS off — it leaves the preview at once",
   )
   await pause(1800)
-  const terminal = page.getByRole("switch", { name: "Terminal" })
+  const terminal = tile("Terminal")
   await terminal.scrollIntoViewIfNeeded()
   await terminal.hover()
   await pause(500)
@@ -193,15 +194,15 @@ try {
   await page.keyboard.press("Escape")
 
   await page.goto("/account/workspace")
-  await expect(page.getByRole("switch", { name: "Network" })).toBeVisible()
+  await expect(tile("Network")).toBeVisible()
   await caption(
     page,
     "9 · Change it any time",
-    "Account → Workspace: the same switches, or the question again",
+    "Account → Workspace: the same sections, or the question again",
   )
   await page.screenshot({ path: resolve(output, "workspace-1280.png") })
   await pause(1600)
-  const network = page.getByRole("switch", { name: "Network" })
+  const network = tile("Network")
   await network.scrollIntoViewIfNeeded()
   await network.click()
   await pause(900)

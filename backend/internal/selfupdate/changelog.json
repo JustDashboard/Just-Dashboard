@@ -10,12 +10,12 @@
         {
           "kind": "added",
           "text": "New accounts are asked what the server is for after their first sign-in",
-          "detail": "Shipping apps, running databases, containers, the network, security or working on the box: any number of them, with what the server already runs chosen in advance. The answer becomes switches beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing."
+          "detail": "Shipping apps, running databases, containers, the network, security or working on the box, each drawn as the products it means: any number of them, with what the server already runs chosen in advance and the server drawn wired to each one picked. The answer becomes the sections themselves beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing."
         },
         {
           "kind": "added",
           "text": "Account → Workspace chooses which sections the sidebar shows",
-          "detail": "The same switches and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered."
+          "detail": "The same sections and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered."
         },
         {
           "kind": "changed",

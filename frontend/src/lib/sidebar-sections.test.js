@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { PURPOSES, SECTION_HINTS, SECTION_KEYS, hiddenFor, sectionOf } from "./sidebar-sections"
+import { PURPOSES, SECTION_KEYS, hiddenFor, sectionOf } from "./sidebar-sections"
 
 describe("sectionOf", () => {
   test("names the section a page is inside, at any depth and with a query", () => {
@@ -49,6 +49,5 @@ describe("hiddenFor", () => {
     for (const purpose of PURPOSES) {
       for (const key of purpose.sections) expect(SECTION_KEYS).toContain(key)
     }
-    expect(Object.keys(SECTION_HINTS).sort()).toEqual([...SECTION_KEYS].sort())
   })
 })

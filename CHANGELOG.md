@@ -13,9 +13,9 @@ Every new account is now asked, once, what it will use the server for, and its s
 ### Added
 
 - New accounts are asked what the server is for after their first sign-in
-  - Shipping apps, running databases, containers, the network, security or working on the box: any number of them, with what the server already runs chosen in advance. The answer becomes switches beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing.
+  - Shipping apps, running databases, containers, the network, security or working on the box, each drawn as the products it means: any number of them, with what the server already runs chosen in advance and the server drawn wired to each one picked. The answer becomes the sections themselves beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing.
 - Account → Workspace chooses which sections the sidebar shows
-  - The same switches and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered.
+  - The same sections and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered.
 
 ### Changed
 

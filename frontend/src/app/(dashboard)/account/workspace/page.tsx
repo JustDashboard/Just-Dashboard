@@ -7,16 +7,16 @@ import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import {
-  SectionSwitches,
+  SectionTiles,
   SidebarPreview,
   useSectionCount,
-} from "@/components/onboarding/section-switches"
+} from "@/components/onboarding/section-tiles"
 import { Button } from "@/components/ui/button"
 
 /**
  * The first-run answer, after the first run: which sections this account
- * keeps in its sidebar, as the same switches beside the same preview, and a
- * way to be asked the question again.
+ * keeps in its sidebar, as the same tiles beside the same preview, and a way
+ * to be asked the question again.
  *
  * A reading of the account's own setting that happens to be editable, so it
  * is drawn in the reading register — the welcome screen is the flow.
@@ -64,13 +64,9 @@ export default function AccountWorkspacePage() {
             }
           />
           <PanelBody>
-            <SectionSwitches hidden={current} onChange={setDraft} />
+            <SectionTiles hidden={current} onChange={setDraft} />
           </PanelBody>
-          <PanelFooter>
-            <p className="mr-auto min-w-0 text-hint text-muted-foreground">
-              Hiding a section changes your sidebar, not what you can do: its pages still open from
-              links and search.
-            </p>
+          <PanelFooter className="justify-end">
             {dirty && (
               <Button size="sm" variant="ghost" onClick={() => setDraft(null)} disabled={saving}>
                 Discard

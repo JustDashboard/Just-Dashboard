@@ -35,9 +35,13 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(page.getByText("Welcome, Ion · Step 1 of 3")).toBeVisible()
 
   // The server already runs a project and four databases, so those two start
-  // chosen and the head says why.
+  // chosen and their cards say why.
   const purposes = page.getByRole("group", { name: "Purposes" })
-  await expect(page.getByText("1 project and 4 databases already on this server")).toBeVisible()
+  await expect(purposes.getByText("1 project here")).toBeVisible()
+  await expect(purposes.getByText("4 databases here")).toBeVisible()
+  // Each chosen purpose is wired to the server in the picture beside the cards.
+  const server = page.getByRole("list", { name: "What this server is for" })
+  await expect(server.getByRole("listitem")).toHaveText(["Ship apps", "Run databases"])
   await expect(purposes.getByRole("button", { name: "Ship apps" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -51,28 +55,33 @@ test("a new account is asked what the server is for, and the answer shapes the s
     "aria-pressed",
     "false",
   )
+  await expect(server.getByRole("listitem")).toHaveText(["Ship apps"])
   await page.getByRole("button", { name: "Continue" }).click()
 
-  // The purposes filled the switches in; the switches decide, beside the rail
+  // The purposes filled the sections in; the sections decide, beside the rail
   // they will draw.
   await expect(
     page.getByRole("heading", { level: 1, name: "Which sections should your sidebar show?" }),
   ).toBeVisible()
   const preview = page.getByRole("navigation", { name: "Sidebar preview" })
-  await expect(page.getByRole("switch", { name: "Deployments" })).toBeChecked()
-  await expect(page.getByRole("switch", { name: "Network" })).not.toBeChecked()
+  const tile = (name: string) => page.getByRole("button", { name, exact: true })
+  await expect(tile("Deployments")).toHaveAttribute("aria-pressed", "true")
+  await expect(tile("Network")).toHaveAttribute("aria-pressed", "false")
   await expect(preview.getByText("Proxy & TLS")).toBeVisible()
-  await page.getByRole("switch", { name: "Proxy & TLS" }).click()
+  await tile("Proxy & TLS").click()
   await expect(preview.getByText("Proxy & TLS")).toHaveCount(0)
   await expect(page.getByText("5 of 15 shown")).toBeVisible()
-  // Overview, Monitoring and Settings cannot be switched off, and are drawn.
+  // Overview, Monitoring and Settings cannot be hidden, and are drawn.
   for (const always of ["Overview", "Monitoring", "Settings"]) {
     await expect(preview.getByText(always, { exact: true })).toBeVisible()
   }
   await page.getByRole("button", { name: "Finish" }).click()
 
   await expect(page.getByRole("heading", { level: 1, name: "Your sidebar is ready" })).toBeVisible()
-  await expect(page.getByText("5 of 15 sections in your sidebar")).toBeVisible()
+  await expect(page.getByText(/of 15 sections in your sidebar/)).toBeVisible()
+  await expect(page.getByRole("list", { name: "What this server is for" })).toContainText(
+    "Ship apps",
+  )
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
     [
@@ -176,17 +185,18 @@ test("hidden pages stay out of the palette's list and one word away", async ({ p
   await expect(dialog.getByRole("option", { name: /^Firewall/ }).first()).toBeVisible()
 })
 
-test("Workspace keeps the same switches and saves them", async ({ page }) => {
+test("Workspace keeps the same tiles and saves them", async ({ page }) => {
   const { saved } = await mockOnboarding(page, {
     needsOnboarding: false,
     hiddenSections: ["network"],
   })
   await page.goto("/account/workspace")
-  await expect(page.getByRole("switch", { name: "Network" })).not.toBeChecked()
+  const tile = (name: string) => page.getByRole("button", { name, exact: true })
+  await expect(tile("Network")).toHaveAttribute("aria-pressed", "false")
   const save = page.getByRole("button", { name: "Save changes" })
   await expect(save).toBeDisabled()
-  await page.getByRole("switch", { name: "Network" }).click()
-  await page.getByRole("switch", { name: "Excalidraw" }).click()
+  await tile("Network").click()
+  await tile("Excalidraw").click()
   await save.click()
   await expect(save).toBeDisabled()
   expect(saved).toEqual([["excalidraw"]])

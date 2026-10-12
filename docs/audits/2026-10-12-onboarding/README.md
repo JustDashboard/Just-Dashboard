@@ -36,16 +36,20 @@ are. It adds one line, *"Proxy & TLS is hidden from your sidebar. Show it"*, whi
 decides. The shell sends an account there after sign-in, two-factor and any forced password change,
 until the account answers.
 
-1. **What will you use this server for?** Six purposes, any number of them. Each card lists the
-   sections it keeps, with the sidebar's own glyphs. On a server that already has deployment projects
-   or saved databases, those purposes start chosen, and the panel's head says how many there are.
-2. **Which sections should your sidebar show?** The purposes fill in the switches, and the switches
-   decide. Beside them is a preview of the sidebar drawn from the same registry and rule the real one
-   uses. The account is offered only sections its role can see.
-3. **Your sidebar is ready.** What hiding does and does not do, and how to change it.
+Each step pairs the thing being decided with a picture of what it makes, so there is little to read:
+
+1. **What will you use this server for?** Six cards, pick any number. Each shows three real product
+   logos and a name, with no description. On a server that already has deployment projects or saved
+   databases, those purposes start chosen, with a count on their card. Beside the cards, this
+   server's rack is wired with pulsing beams to each purpose as it is chosen.
+2. **Which sections should your sidebar show?** The purposes pick the sections, shown as compact
+   tiles with the sidebar's own glyphs. The tiles decide. Beside them is a preview of the sidebar
+   drawn from the same registry and rule the real one uses. The account is offered only sections its
+   role can see.
+3. **Your sidebar is ready.** The wired server again, the count, and three one-line facts.
 
 *Show me everything* on the first screen hides nothing, and it also ends the question. Account →
-Workspace offers the same switches and preview afterwards, plus *Ask me again*.
+Workspace offers the same tiles and preview afterwards, plus *Ask me again*.
 
 The answer is stored on the account, not in the browser, so it follows the person:
 
@@ -60,7 +64,7 @@ The answer is stored on the account, not in the browser, so it follows the perso
 | --- | --- |
 | The whole walk: sign-in, the three steps, the dashboard, a project's domain opening the hidden proxy, search, Workspace | [Recording (mp4)](onboarding.mp4) · [GIF](onboarding.gif) |
 | Step 1 at 1280 / 1720 / 390 | [1280](purpose-1280.png), [1720](purpose-1720.png), [390](purpose-390.png) |
-| Step 2, switches beside the preview, at 1280 / 1720 | [1280](sidebar-1280.png), [1720](sidebar-1720.png) |
+| Step 2, section tiles beside the preview, at 1280 / 1720 | [1280](sidebar-1280.png), [1720](sidebar-1720.png) |
 | Step 3 at 1280 / 390 | [1280](ready-1280.png), [390](ready-390.png) |
 | The Overview with Proxy, Network, Security and the rest hidden | [1280](overview-1280.png) |
 | A deployment's domain opening the hidden proxy, the rail's note | [1280](hidden-section-1280.png), [1720](hidden-section-1720.png) |

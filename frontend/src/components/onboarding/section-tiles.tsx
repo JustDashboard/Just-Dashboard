@@ -1,21 +1,23 @@
 "use client"
 
-import { ChevronRight } from "@/components/icons"
+import { Check, ChevronRight } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { SECTION_HINTS, type SectionKey } from "@/lib/sidebar-sections"
+import type { SectionKey } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
 import { NAV, hideableSections, shownFor } from "@/components/nav"
-import { OptionList, OptionRow } from "@/components/form"
+import { ChoiceCard } from "@/components/choice-card"
 
 /**
- * One switch per section the account may keep out of its sidebar, under the
- * rail's own group names and in its order — so the list reads as the sidebar
- * it is deciding rather than as a settings form.
+ * One tile per section the account may keep out of its sidebar, under the
+ * rail's own group names, in its order and with its own glyphs — so picking
+ * reads as building the sidebar rather than filling in a settings form. A
+ * tile is the section's name and nothing else: what Docker is for is on its
+ * page, and a sentence under each of fifteen names was a wall of grey.
  *
- * Only the sections the role can see are offered: a switch for Terminal on an
+ * Only the sections the role can see are offered: a tile for Terminal on an
  * account that cannot open a terminal would decide nothing.
  */
-export function SectionSwitches({
+export function SectionTiles({
   hidden,
   onChange,
 }: {
@@ -23,9 +25,9 @@ export function SectionSwitches({
   onChange: (hidden: Set<string>) => void
 }) {
   const { can } = useAuth()
-  const toggle = (key: SectionKey, shown: boolean) => {
+  const toggle = (key: SectionKey) => {
     const next = new Set(hidden)
-    if (shown) next.delete(key)
+    if (next.has(key)) next.delete(key)
     else next.add(key)
     onChange(next)
   }
@@ -33,24 +35,37 @@ export function SectionSwitches({
   return (
     <div className="space-y-5">
       {hideableSections(can).map((group) => (
-        <section key={group.label} aria-label={group.label} className="space-y-1.5">
+        <section key={group.label} aria-label={group.label} className="space-y-2">
           <p className="eyebrow">{group.label}</p>
-          <OptionList>
-            {group.sections.map(({ key, entry }) => (
-              <OptionRow
-                key={key}
-                title={
-                  <span className="flex items-center gap-2">
-                    <entry.icon className="size-4 shrink-0 text-muted-foreground" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:grid-cols-4">
+            {group.sections.map(({ key, entry }) => {
+              const shown = !hidden.has(key)
+              return (
+                <ChoiceCard
+                  key={key}
+                  selected={shown}
+                  onClick={() => toggle(key)}
+                  className="min-h-11 flex-row items-center gap-2.5 px-3 py-2"
+                >
+                  <entry.icon
+                    className={cn(
+                      "size-4 shrink-0",
+                      shown ? "text-brand" : "text-muted-foreground",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-body font-medium",
+                      !shown && "text-muted-foreground",
+                    )}
+                  >
                     {entry.title}
                   </span>
-                }
-                hint={SECTION_HINTS[key]}
-                checked={!hidden.has(key)}
-                onCheckedChange={(shown) => toggle(key, shown)}
-              />
-            ))}
-          </OptionList>
+                  {shown && <Check aria-hidden className="size-3.5 shrink-0 text-brand" />}
+                </ChoiceCard>
+              )
+            })}
+          </div>
         </section>
       ))}
     </div>
@@ -65,13 +80,13 @@ export function useSectionCount(hidden: ReadonlySet<string>) {
 }
 
 /**
- * The rail as it will be drawn, beside the switches that decide it.
+ * The rail as it will be drawn, beside the tiles that decide it.
  *
  * It walks the same registry the sidebar does with the same rule, so what
  * this shows is what the account will get — Overview, Monitoring and
  * Settings included, because they are always there and a preview without
  * them would promise a shorter rail than the one that arrives. A row that a
- * switch brings back rises into place, which is what ties the two together.
+ * tile brings back rises into place, which is what ties the two together.
  */
 export function SidebarPreview({
   hidden,

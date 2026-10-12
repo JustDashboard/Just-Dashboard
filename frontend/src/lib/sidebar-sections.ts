@@ -45,25 +45,6 @@ export function sectionOf(pathname: string): SectionKey | null {
   return KEYS.has(first) ? (first as SectionKey) : null
 }
 
-/** What each section is for, in the words the question uses beside its switch. */
-export const SECTION_HINTS: Record<SectionKey, string> = {
-  deploy: "Ship projects from Git, an image, a template or a compose file.",
-  databases: "Connect, browse, query and back up the databases on this server.",
-  docker: "Containers, compose stacks, images, volumes and networks.",
-  excalidraw: "Drawings kept on the server, with cards for what runs on it.",
-  stickyboard: "Sticky-note boards for plans and checklists.",
-  terminal: "A shell on the server, in the browser.",
-  files: "Browse, edit, upload and archive the server's files.",
-  git: "Working copies, branches, commits and pull requests.",
-  network: "Interfaces, routes, firewall, gateway, VPN and DNS.",
-  proxy: "Sites, certificates, streams and ports in front of your apps.",
-  security: "SSH, intrusion prevention and sign-ins to the server.",
-  backups: "Scheduled backups of files, volumes and databases, and restores.",
-  packages: "System packages and their updates.",
-  "system-users": "Linux accounts and their SSH keys.",
-  audit: "Every change made through the dashboard, and by whom.",
-}
-
 /**
  * The answers to "what will you use this server for?", each the sections it
  * needs. They overlap on purpose: Backups belongs to shipping apps and to
@@ -73,43 +54,44 @@ export const PURPOSES = [
   {
     key: "ship",
     title: "Ship apps",
-    hint: "Deploy from Git, an image or a template, with domains, databases and backups.",
+    products: ["github", "docker", "lets-encrypt"],
     sections: ["deploy", "docker", "proxy", "databases", "git", "backups"],
   },
   {
     key: "databases",
     title: "Run databases",
-    hint: "Start, connect, query and back up PostgreSQL, MySQL, Redis, MongoDB and more.",
+    products: ["postgres", "mongodb", "redis"],
     sections: ["databases", "backups", "docker"],
   },
   {
     key: "containers",
     title: "Manage containers",
-    hint: "Run and inspect containers and compose stacks, with their files and a shell.",
+    products: ["docker", "docker-compose", "terminal"],
     sections: ["docker", "files", "terminal"],
   },
   {
     key: "network",
     title: "Route the network",
-    hint: "Use the server as a router or gateway: interfaces, firewall, VPN, DNS and the proxy.",
+    products: ["wireguard", "tailscale", "nginx"],
     sections: ["network", "proxy", "security"],
   },
   {
     key: "secure",
-    title: "Secure and audit",
-    hint: "Harden SSH, stop intrusions, keep packages current and see every change.",
+    title: "Secure the server",
+    products: ["crowdsec", "fail2ban", "netfilter"],
     sections: ["security", "network", "packages", "audit", "backups", "system-users"],
   },
   {
     key: "workspace",
     title: "Work on the server",
-    hint: "A terminal, the files, Git, and boards for notes and drawings.",
+    products: ["terminal", "git", "excalidraw"],
     sections: ["terminal", "files", "git", "excalidraw", "stickyboard"],
   },
 ] as const satisfies readonly {
   key: string
   title: string
-  hint: string
+  /** Drawn as themselves on the purpose's card and in the picture of the server. */
+  products: readonly string[]
   sections: readonly SectionKey[]
 }[]
 
