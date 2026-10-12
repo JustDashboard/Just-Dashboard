@@ -24,7 +24,7 @@ async function mockDockerRemedies(page: Page, compose = false) {
     createdAt: iso(now),
     memoryLimit: 0,
   }
-  const finding = {
+  const recommendation = {
     id: "container.norestart.web-id",
     severity: "recommendation",
     class: "configuration",
@@ -35,6 +35,16 @@ async function mockDockerRemedies(page: Page, compose = false) {
     scope: "container",
     action: "set-restart",
     actionLabel: "Set a restart policy",
+  }
+  const finding = {
+    ...recommendation,
+    id: "container.logs.web-id",
+    severity: "warning",
+    class: "storage",
+    title: "web has written 500 MB of logs",
+    detail: "An unrotated 500 MB log file is using this host's disk.",
+    action: "cap-logs",
+    actionLabel: "Cap the log size",
   }
   await page.route("**/api/v1/docker/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
@@ -48,11 +58,11 @@ async function mockDockerRemedies(page: Page, compose = false) {
     }
     if (path === "/docker/health")
       return json(route, {
-        status: "notice",
+        status: "warning",
         checked: 1,
         checkedAt: iso(now),
-        findings: [finding],
-        attention: { total: 1, issues: 0, recommendations: 1, critical: 0, warning: 0, info: 0 },
+        findings: [finding, recommendation],
+        attention: { total: 2, issues: 1, recommendations: 1, critical: 0, warning: 1, info: 0 },
         runtime: {
           status: "ok",
           total: 1,
@@ -70,6 +80,20 @@ async function mockDockerRemedies(page: Page, compose = false) {
         },
       })
     if (path === "/docker/containers/") return json(route, [container])
+    if (path === "/docker/containers/web-id/failure")
+      return json(route, {
+        containerId: "web-id",
+        name: "web",
+        checkedAt: new Date().toISOString(),
+        state: "running",
+        headline: "web is running",
+        confidence: "observed",
+        evidence: [],
+        restarts: { count: 0, recent: 0, looping: false },
+        suggestions: [],
+      })
+    if (path === "/docker/containers/web-id/spec")
+      return json(route, { name: "web", image: "nginx:1.27", start: true })
     if (path === "/docker/containers/web-id")
       return json(route, {
         ...container,
@@ -101,41 +125,71 @@ async function mockDockerRemedies(page: Page, compose = false) {
   return mutations
 }
 
-test("Docker overview applies a restart policy in place and singleton dismissal works", async ({
+test("Docker overview reviews log rotation and singleton dismissal works", async ({ page }) => {
+  const mutations = await mockDockerRemedies(page)
+  await page.goto("/docker")
+  await expect(
+    page.getByRole("button", { name: "web has no restart policy", exact: true }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }).click()
+  await page.getByRole("button", { name: "Cap the log size", exact: true }).click()
+  const confirmation = page.getByRole("dialog", { name: "Cap the log size", exact: true })
+  await expect(confirmation.getByText(/writable layer are permanently lost/)).toBeVisible()
+  expect(mutations).toHaveLength(0)
+  await confirmation.getByRole("button", { name: "Replace container" }).click()
+  await expect.poll(() => mutations.length).toBe(1)
+  expect(mutations[0]).toEqual({
+    method: "POST",
+    path: "/docker/containers/web-id/recreate",
+    body: {
+      spec: {
+        name: "web",
+        image: "nginx:1.27",
+        start: true,
+        logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
+      },
+    },
+  })
+  await page.getByRole("button", { name: "Dismiss web has written 500 MB of logs" }).click()
+  await expect(
+    page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "Rescan", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }),
+  ).toBeVisible()
+})
+
+test("routine restart advice stays in Configure and its in-place remedy remains available", async ({
   page,
 }) => {
   const mutations = await mockDockerRemedies(page)
   await page.goto("/docker")
-  await page.getByRole("button", { name: "web has no restart policy", exact: false }).click()
-  await page.getByRole("button", { name: "Set a restart policy", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "web has no restart policy", exact: true }),
+  ).toHaveCount(0)
+  await page.goto("/docker/containers/web-id?tab=configure")
+  await page.getByRole("button", { name: "web has no restart policy", exact: true }).click()
   const confirmation = page.getByRole("dialog", { name: "Set a restart policy", exact: true })
   await expect(
     confirmation.getByText(/keeping its writable layer and current process/),
   ).toBeVisible()
   expect(mutations).toHaveLength(0)
-  await confirmation.getByRole("button", { name: "Apply policy" }).click()
+  await confirmation.getByRole("button", { name: "Apply policy", exact: true }).click()
   await expect.poll(() => mutations.length).toBe(1)
   expect(mutations[0]).toEqual({
     method: "PATCH",
     path: "/docker/containers/web-id/restart-policy",
     body: { policy: "unless-stopped" },
   })
-  await page.getByRole("button", { name: "Dismiss finding" }).click()
-  await expect(
-    page.getByRole("button", { name: "web has no restart policy", exact: false }),
-  ).toHaveCount(0)
-  await page.getByRole("button", { name: "Rescan", exact: true }).click()
-  await expect(
-    page.getByRole("button", { name: "web has no restart policy", exact: false }),
-  ).toBeVisible()
 })
 
 test("Docker findings direct Compose configuration changes to their owner", async ({ page }) => {
   const mutations = await mockDockerRemedies(page, true)
   await page.goto("/docker")
-  await page.getByRole("button", { name: "web has no restart policy", exact: false }).click()
-  await page.getByRole("button", { name: "Set a restart policy", exact: true }).click()
-  await expect(page).toHaveURL(/\/docker\/stacks\/website\?tab=compose&remedy=set-restart$/)
+  await page.getByRole("button", { name: "web has written 500 MB of logs", exact: true }).click()
+  await page.getByRole("button", { name: "Cap the log size", exact: true }).click()
+  await expect(page).toHaveURL(/\/docker\/stacks\/website\?tab=compose&remedy=cap-logs$/)
   expect(mutations).toHaveLength(0)
 })
 

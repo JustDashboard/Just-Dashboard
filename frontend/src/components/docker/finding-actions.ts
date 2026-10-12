@@ -3,7 +3,7 @@
 import { useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { get, patch, post } from "@/lib/api"
-import { dockerRemedyKind } from "@/lib/docker-remedies"
+import { DOCKER_REMEDIES, dockerRemedyKind } from "@/lib/docker-remedies"
 import { notify } from "@/lib/toast"
 import { prune, pruneSummary, RECLAIM_SAFE } from "@/lib/docker-prune"
 import type { ContainerDetail, ContainerSpec, DockerFinding } from "@/lib/types"
@@ -46,7 +46,7 @@ export function useDockerFindingActions({
       const id = finding.targetId
       const action = finding.action
       if (id && dockerRemedyKind(finding)) {
-        navigate(id, "configure")
+        navigate(id, can("system.admin") ? "configure" : "inspect")
         return
       }
       if (TABS[action ?? ""] && id) {
@@ -87,7 +87,7 @@ export function useDockerFindingActions({
         (action === "unpause" && can("service.control"))
       ) {
         if (!id) return
-        void get<ContainerDetail>(`/docker/containers/${id}`)
+        return get<ContainerDetail>(`/docker/containers/${id}`)
           .then(async (detail) => {
             if (action !== "unpause" && detail.composeStack) {
               router.push(
@@ -167,7 +167,11 @@ export function useDockerFindingActions({
         return "Inspect log configuration"
       if (finding.action === "prune" && !can("destructive")) return "Inspect Docker storage"
       if (finding.action === "unpause" && !can("service.control")) return "Inspect paused container"
-      if (dockerRemedyKind(finding)) return "Review configuration remedy"
+      const kind = dockerRemedyKind(finding)
+      if (kind)
+        return can("system.admin")
+          ? DOCKER_REMEDIES[kind].label
+          : DOCKER_REMEDIES[kind].label.replace(/^Review /, "Inspect ")
       if (finding.action === "stack.up") return "Open stack controls"
       return finding.actionLabel ?? "Review container configuration"
     },

@@ -957,6 +957,8 @@ including symlink resolution; custom PM2 log directories require explicit admini
 ## Actionable Docker findings
 
 Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
+Attention keeps observed warning and critical findings; routine recommendations remain actionable
+in the container's Configure tab.
 Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
 interruption and loss of logs/writable-layer data. Compose configuration remedies open the owning stack
 so the source configuration can be changed durably. Storage and reachability actions focus the relevant
@@ -976,7 +978,9 @@ the URL's initial selection. Paths still pass through the existing file service 
 
 Standalone Configuration offers local preparation for readiness commands, image version/digest pins,
 port bindings, privileged mode and Docker socket mounts, plus the full supported replacement spec.
-Only administrators edit it because it includes credentials and host settings. Preview renders the
+Only administrators edit the replacement specification because it includes credentials and host
+settings. Restart-policy changes remain available to operators with `service.control`, through the
+existing in-place remedy and confirmation. Preview renders the
 reviewed spec; application readiness is not promised. Applying requires destructive capability and
 reviewed confirmation, reports Engine warnings and navigates to the returned replacement ID. Auto-remove
 containers cannot use this replacement path. Supported settings are carried through; Inspect remains the

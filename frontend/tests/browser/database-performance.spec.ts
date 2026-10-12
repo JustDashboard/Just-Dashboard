@@ -2159,6 +2159,12 @@ const findings = (page: Page) => region(page, "Findings")
 const finding = (page: Page, title: string | RegExp) =>
   findings(page).getByRole("button", { name: title })
 
+async function openFindingEvidence(page: Page) {
+  await findings(page).locator("[data-finding]").first().waitFor()
+  for (const row of await findings(page).locator("[data-slot=accordion-trigger]").all())
+    if ((await row.getAttribute("aria-expanded")) === "false") await row.click()
+}
+
 test("the advisor counts its findings by severity and by category, and each narrows the list", async ({
   page,
 }) => {
@@ -2168,10 +2174,10 @@ test("the advisor counts its findings by severity and by category, and each narr
 
   const chips = findings(page).getByRole("group", { name: "Findings by category" })
   await expect(chips.getByRole("button")).toHaveText([
-    /All\s*6/,
+    /All\s*5/,
     /Reliability\s*2/,
     /Performance\s*2/,
-    /Maintenance\s*2/,
+    /Maintenance\s*1/,
   ])
   // A row names what it is about.
   await expect(finding(page, /1 table with no primary key/)).toContainText("public.audit_log")
@@ -2199,27 +2205,28 @@ test("the advisor counts its findings by severity and by category, and each narr
   await expect(rests).toContainText("768 days from now")
 })
 
-test("a report arrives open: every finding of a short one, the worst of a long one", async ({
-  page,
-}) => {
+test("a report exposes priority actions and opens evidence only on request", async ({ page }) => {
   await mockOps(page)
   await visit(page, "/databases/1/advisor")
-  // Six findings: the page is what each is about and what fixes it, not a list of titles.
   const open = findings(page).locator("[data-slot=accordion-item][data-state=open]")
-  await expect(open).toHaveCount(6)
+  await expect(open).toHaveCount(0)
+  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(5)
+  await expect(findings(page).getByRole("button", { name: "Notices", exact: true })).toHaveCount(0)
+  await expect(
+    findings(page).getByRole("button", { name: "Open Backups", exact: true }),
+  ).toBeVisible()
+  await finding(page, /2 foreign keys with no index/).click()
+  await expect(open).toHaveCount(1)
   await expect(findings(page)).toContainText('CREATE INDEX "orders_customer_id_idx"')
 
-  // A finding the reader closed stays closed, and one left open stays open,
-  // when a filter that hid them is taken off again.
-  await finding(page, /No backup/).click()
-  await expect(open).toHaveCount(5)
-  await page.getByRole("button", { name: "Notices" }).click()
-  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(1)
-  await page.getByRole("button", { name: "Notices" }).click()
-  await expect(open).toHaveCount(5)
-  await expect(finding(page, /No backup/)).toHaveAttribute("aria-expanded", "false")
+  // Hiding a row with a filter preserves the evidence the operator already opened.
+  const chips = findings(page).getByRole("group", { name: "Findings by category" })
+  await chips.getByRole("button", { name: /Reliability/ }).click()
+  await expect(open).toHaveCount(0)
+  await chips.getByRole("button", { name: /^All/ }).click()
+  await expect(open).toHaveCount(1)
+  await expect(finding(page, /No dashboard backup/)).toHaveAttribute("aria-expanded", "false")
 
-  // A long report opens on its worst three; the server lists them worst first.
   const many = Array.from({ length: 9 }, (_, n) =>
     advice(`check-${n}`, n === 0 ? "critical" : "warning", "performance", {
       title: `Finding number ${n}`,
@@ -2228,11 +2235,8 @@ test("a report arrives open: every finding of a short one, the worst of a long o
   await mockOps(page, { answers: { "GET 1/advisor": { ...ADVISOR, findings: many } } })
   await visit(page, "/databases/1/advisor")
   await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(9)
-  await expect(open).toHaveCount(3)
-  await expect(finding(page, "Finding number 0")).toHaveAttribute("aria-expanded", "true")
-  await expect(finding(page, "Finding number 3")).toHaveAttribute("aria-expanded", "false")
-
-  // A link to one finding opens that one.
+  await expect(open).toHaveCount(0)
+  await expect(finding(page, "Finding number 0")).toHaveAttribute("aria-expanded", "false")
   await visit(page, "/databases/1/advisor?finding=check-7")
   await expect(open).toHaveCount(1)
   await expect(finding(page, "Finding number 7")).toHaveAttribute("aria-expanded", "true")
@@ -2264,6 +2268,7 @@ test("a fix the server classes as safe is applied behind a confirmation that nam
     },
   })
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
 
   const body = findings(page)
   const about = body
@@ -2320,6 +2325,7 @@ test("a fix the server classes as safe is applied behind a confirmation that nam
 test("one object's fix is applied on its own, from its row", async ({ page }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   await page.getByRole("button", { name: "Apply the fix to public.order_items" }).click()
   await expect(dialog(page)).toContainText("public.order_items")
   // The plain build is the reader's to choose, with what it costs said first.
@@ -2362,6 +2368,7 @@ test("an engine with one way of building an index is offered no choice of two", 
     },
   })
   await visit(page, "/databases/7/advisor")
+  await openFindingEvidence(page)
   await findings(page).getByRole("button", { name: "Apply", exact: true }).click()
   await expect(dialog(page)).toContainText("Building an index reads the whole table")
   await expect(dialog(page).getByRole("radio")).toHaveCount(0)
@@ -2376,6 +2383,7 @@ test("a fix the server classes as destructive is only handed to Query, and says 
 }) => {
   await mockOps(page)
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   const body = findings(page)
     .locator("[data-slot=accordion-item]")
     .filter({ hasText: "1 table with no primary key" })
@@ -2393,6 +2401,7 @@ test("a fix that is the engine's own maintenance is run as maintenance, with its
 }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   const apply = findings(page).getByRole("button", { name: "Apply: vacuum and analyze" })
   await apply.click()
   // The question names the table and the engine's action. It prints no
@@ -2446,7 +2455,8 @@ test("a finding with a page of this database to act on opens it, and no other", 
     },
   })
   await visit(page, "/databases/1/advisor")
-  // All three arrive open: only the one that names a page of this database has a way to it.
+  await openFindingEvidence(page)
+  // Reviewed evidence stays readable; only the connection-local destination gets an action.
   await expect(findings(page).getByText("What to do about elsewhere.")).toBeVisible()
   await expect(findings(page).getByText("What to do about outside.")).toBeVisible()
   await expect(findings(page).getByRole("button", { name: /^Open / })).toHaveCount(1)
@@ -2461,12 +2471,13 @@ test("a report that did not cover everything says how far it got", async ({ page
   await visit(page, "/databases/1/advisor")
   await expect(page.getByText("Part of this database was not checked")).toBeVisible()
   await expect(page.getByText(/the structure checks covered the first 300/)).toBeVisible()
-  await expect(page.getByText(/found nothing to fix/)).toBeVisible()
+  await expect(page.getByText(/No priority issues found/)).toBeVisible()
 })
 
 test("no fix is applied on a protected connection, or by a role that may not", async ({ page }) => {
   const ops = await mockOps(page, { rows: { 1: { readOnly: true } } })
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   await expect(findings(page)).toContainText("This connection is protected")
   await expect(findings(page).getByRole("button", { name: /^Apply/ })).toHaveCount(0)
   // Nothing was asked of the classifier either.
@@ -2474,6 +2485,7 @@ test("no fix is applied on a protected connection, or by a role that may not", a
 
   await mockOps(page, { viewer: true })
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   await expect(findings(page)).toContainText("Your role may read the fix and not run it")
   await expect(findings(page).getByRole("button", { name: /^(Apply|Open in Query)/ })).toHaveCount(
     0,
@@ -2515,6 +2527,7 @@ test("a statement fix that fails part way says where it stopped", async ({ page 
     },
   })
   await visit(page, "/databases/1/advisor")
+  await openFindingEvidence(page)
   await findings(page).getByRole("button", { name: "Apply all 2" }).click()
   await dialog(page).getByRole("button", { name: "Apply 2 statements" }).click()
   await expect(page.getByText("The fix stopped after 1 statement")).toBeVisible()
@@ -2793,6 +2806,7 @@ for (const [label, viewport] of [
     await page.setViewportSize(viewport)
     await mockOps(page)
     await visit(page, "/databases/1/advisor")
+    await openFindingEvidence(page)
     await expect(findings(page).getByRole("button", { name: "Open Backups" })).toBeVisible()
     await expect(findings(page).getByRole("button", { name: "Apply all 2" })).toBeVisible()
     await page.waitForLoadState("networkidle")
@@ -2803,7 +2817,7 @@ for (const [label, viewport] of [
     await page.keyboard.press("Escape")
 
     await visit(page, "/databases/7/advisor")
-    await expect(page.getByText(/found nothing to fix/)).toBeVisible()
+    await expect(page.getByText(/No priority issues found/)).toBeVisible()
     await keepsTheRules(page, "an advisor with nothing to say")
 
     const failure = failing("pq: canceling statement due to statement timeout")

@@ -100,7 +100,7 @@ describe("site findings", () => {
       ],
     })
     expect(ghost.href).toBe("/proxy/sites?site=ghost")
-    expect(own.href).toBe("/proxy/sites")
+    expect(own.href).toBe("/proxy/sites?site=app")
   })
 
   test("the distribution's untouched default site is not a notice, an edited one is", () => {

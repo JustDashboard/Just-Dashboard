@@ -446,6 +446,7 @@ function ContainerDetailPanel({
               {tab === "configure" && (
                 <ConfigurationRemedy
                   detail={detail}
+                  onAction={runFix}
                   findings={(health.data?.findings ?? []).filter(
                     (finding) => finding.targetId === detail.id,
                   )}

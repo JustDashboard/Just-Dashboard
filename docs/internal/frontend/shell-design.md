@@ -364,10 +364,13 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
 - `components/finding-list.tsx` — `FindingList`, the one list of verdict findings in the product. A row
-  is a severity dot, a title and a short right-hand qualifier; the measurement, the reasoning and any
-  one-click remedy are behind the row rather than printed under it. Metrics' health, Security's posture
-  and Docker's attention all render through it, because they are the same shape of fact —
-  what was measured, what it means, what to do.
+  shows its severity, problem and measured consequence, with a named action beside the disclosure or
+  below it in a narrow panel. Extended evidence folds away; the action stays visible. Expanded
+  evidence does not repeat the header's text. Security, Docker, databases, deployments, network
+  evidence, proxy reports and backup failures share it.
+  Attention lists retain warnings and critical findings. Routine recommendations stay in configuration
+  or inventory; an unavailable check states its limits. Actions land on the actual resource or control,
+  retain capability and confirmation checks, and show progress while an async action runs.
 
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`

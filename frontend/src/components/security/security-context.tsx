@@ -12,11 +12,9 @@ import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/t
  * sheet offers the caller's own address to the allowlist — so the layout polls
  * each once and the pages read them here rather than each starting its own.
  *
- * `applyFix` lives here too, not copied into each page: it is the whole
- * difference between a warning and a remedy, and the two on it that can cost
- * access to the machine (enabling the firewall, changing sshd) go through the
- * ordinary confirmation. A second copy is where one of them quietly stops
- * asking.
+ * `applyFix` hands findings to the owning page. SSH and firewall changes use
+ * that page's complete preview, confirmation and recovery flow.
+
  */
 export type SecurityContextValue = {
   posture: Posture | undefined
@@ -28,7 +26,7 @@ export type SecurityContextValue = {
   exposure: Exposure | undefined
   refreshPosture: () => void
   refreshFirewall: () => void
-  /** A finding's server-named remedy, wrapped in the confirmation it deserves. */
+  /** Review a finding at the controls responsible for it. */
   applyFix: (finding: SecurityFinding) => void
 }
 

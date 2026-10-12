@@ -1,4 +1,5 @@
 import type { Finding } from "@/components/finding-list"
+import { findingNavigation } from "@/lib/finding-destinations"
 import {
   certificateFindings,
   type CertificateFindingInput,
@@ -44,7 +45,9 @@ export function foldProxyFindings(
     ...frontDoorFindings(input),
     ...engineFindings(input),
     ...insightFindings(input),
-  ].sort((a, b) => RANK[b.level] - RANK[a.level])
+  ]
+    .filter((finding) => finding.level === "critical" || finding.level === "warning")
+    .sort((a, b) => RANK[b.level] - RANK[a.level])
 }
 
 /** The pages a finding can lead to, named as its button reads them. */
@@ -62,13 +65,14 @@ const PLACE: Record<string, string> = {
  * which left any meta added later with a wrench and no name. The href is the
  * one thing every finding has: a finding about one site or one certificate
  * opens that one, the rest open the page that lists what they are about, and
- * a page not named here is still a button that says it opens something.
+ * only a recognised dashboard destination is offered as an action.
  */
-export function findingAction(finding: ProxyFinding): string {
+export function findingAction(finding: ProxyFinding): string | undefined {
   // Any origin will do: only the path and the query are read.
   const { pathname, searchParams } = new URL(finding.href, "http://proxy.invalid")
   if (pathname === "/proxy/sites" && searchParams.has("site")) return "Open site"
   if (pathname === "/proxy/certificates" && searchParams.has("cert")) return "Open certificate"
+  if (/^\/deploy\/\d+\/settings\/domains$/.test(pathname)) return "Review domains and HTTPS"
   const place = PLACE[pathname]
-  return place ? `Open ${place}` : "Open"
+  return place ? `Open ${place}` : findingNavigation(finding.href)?.label
 }

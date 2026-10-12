@@ -20,7 +20,7 @@ import {
 } from "@/components/proxy/finding-snooze"
 
 function remedyLabel(remedy: ProxyRemedy): string {
-  return remedy.kind === "enable-site" ? "Enable and reload" : `Turn on ${remedy.unit}`
+  return remedy.kind === "enable-site" ? "Enable site and reload" : "Enable automatic renewal"
 }
 
 /**
@@ -121,19 +121,16 @@ export function ProxyFindings({
     if (!fix && spans.length === 0) return finding
     return {
       ...finding,
+      action: fix
+        ? {
+            label: remedyLabel(fix),
+            pending: busy === finding.id,
+            disabled: busy !== "",
+            onClick: () => remedy(finding.id, fix),
+          }
+        : finding.action,
       extra: (
         <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-          {fix && (
-            <Button
-              size="xs"
-              variant="outline"
-              pending={busy === finding.id}
-              disabled={busy !== ""}
-              onClick={() => remedy(finding.id, fix)}
-            >
-              {remedyLabel(fix)}
-            </Button>
-          )}
           {spans.length > 0 && <span className="ml-1">Snooze</span>}
           {spans.map((span) => (
             <Button
@@ -154,6 +151,7 @@ export function ProxyFindings({
   return (
     <div className="space-y-3">
       <FindingList
+        emphasize
         findings={triaged}
         emptyLabel={
           snoozed.length > 0 ? "Nothing needs attention beyond what is snoozed" : emptyLabel

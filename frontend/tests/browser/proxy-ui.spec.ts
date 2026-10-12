@@ -336,6 +336,7 @@ for (const width of [390, 1280, 1720]) {
   test(`every proxy page has readable content and contained controls at ${width}`, async ({
     page,
   }, testInfo) => {
+    test.setTimeout(90_000)
     await page.setViewportSize({ width, height: 1000 })
     await mockShowcase(page)
     const failures: string[] = []

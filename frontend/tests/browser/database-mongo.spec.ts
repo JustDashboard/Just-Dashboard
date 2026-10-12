@@ -1571,11 +1571,11 @@ test.describe("documents", () => {
     await expect(documents(page).first().getByLabel("Value of age")).toBeFocused()
     await page.keyboard.type("23")
     await page.keyboard.press("Enter")
-    expect(await focused()).toBe("age: 23, changed")
+    await expect.poll(focused).toBe("age: 23, changed")
     // Escape out of the form does the same.
     await page.keyboard.press("Enter")
     await page.keyboard.press("Escape")
-    expect(await focused()).toBe("age: 23, changed")
+    await expect.poll(focused).toBe("age: 23, changed")
 
     // From the row, Tab reaches its own controls, then the document's, then leaves the list.
     await page.keyboard.press("Tab")

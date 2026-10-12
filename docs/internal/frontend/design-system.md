@@ -2439,6 +2439,18 @@ The passes, in order. Each one is a diff you can review on its own.
 8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
    is its own row.
+
+   A finding's consequence is measured data, so `FindingList` shows it below the problem's title
+   before the evidence disclosure. Expanding shows the full evidence once rather than repeating
+   the same text in the header and body. Its action stays visible beside the disclosure button,
+   never nested inside it. Titles wrap; narrow panels put the action below the text using the
+   container's width, including paired panels on a desktop. Attention lists retain critical and
+   warning findings, with the first offered remedy using the command face (`emphasize`); diagnostic
+   reports keep secondary actions. Routine preferences stay in their owning configuration or
+   inventory. Findings rise when they arrive, and a poll never claims to be a live socket reading.
+   Name the action and land on the actual resource or control; a review never silently executes a
+   fix. Viewers get inspection or explicit administrator guidance, and async actions show progress
+   and prevent repeat submission.
 9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; every
    tile in a row, the first included, keeps the same inset.
 10. **Verify.** `scripts/test-changed.sh` (it runs `tests/browser/design-system.spec.ts` for any

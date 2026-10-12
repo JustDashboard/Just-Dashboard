@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -23,6 +22,7 @@ import type {
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { FindingList, type Finding } from "@/components/finding-list"
+import { needsProjectAttention, projectFindingNavigation } from "@/components/deploy/attention"
 import { ChoiceList } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Tag } from "@/components/tag"
@@ -81,7 +81,6 @@ import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
  */
 export function ProjectOverview() {
   const project = useProject()
-  const router = useRouter()
   const { can } = useAuth()
   const { deployment, project: record, runtime } = project.detail
   const [rollbackOpen, setRollbackOpen] = useState(false)
@@ -114,7 +113,7 @@ export function ProjectOverview() {
     refresh: pullRequests.refresh,
   })
 
-  const findings = useFindings(project.operations?.diagnosis, router)
+  const findings = useFindings(project.operations?.diagnosis, project.projectId)
   const runs = project.runs.filter((run) => run.environmentId === project.environmentId)
   // The run in flight is the page's first block; it is not listed a second
   // time under it.
@@ -273,9 +272,28 @@ export function ProjectOverview() {
       <Panel key="attention" plain id="attention" className="scroll-mt-6">
         <PanelHeader title="Needs attention" />
         <PanelBody>
-          <FindingList findings={findings} />
+          <FindingList emphasize findings={findings} />
         </PanelBody>
       </Panel>,
+    ])
+
+  const silences = project.operations?.diagnosis?.silences ?? []
+  if (silences.length > 0)
+    blocks.push([
+      "unavailable-evidence",
+      <details key="unavailable-evidence" className="text-hint text-muted-foreground">
+        <summary className="cursor-pointer rounded-sm focus-ring">
+          {silences.length} {silences.length === 1 ? "check could" : "checks could"} not be
+          completed
+        </summary>
+        <ul className="mt-2 space-y-1">
+          {silences.map((silence, index) => (
+            <li key={`${silence.subject}:${index}`}>
+              {silence.subject}: {silence.reason}
+            </li>
+          ))}
+        </ul>
+      </details>,
     ])
 
   const info = pullRequests.data
@@ -549,52 +567,22 @@ function useCelebration(deployment: DeploymentSummary) {
  * `operations.diagnosis.findings` read through `FindingList`'s vocabulary:
  * severity is already the shared level, `measured` is the detail, `means` and
  * `action` join into the advice, a `deepLink` becomes "Open {owner}", and the
- * owner is the tag at the row's edge (§4). Owners the diagnosis could not read
- * at all are folded into one notice-level row rather than counted as healthy.
+ * owner is the tag at the row's edge (§4). Unavailable checks stay in their own
+ * disclosure, separate from the faults and from any claim of health.
  */
-function useFindings(
-  diagnosis: DeploymentDiagnosis | undefined,
-  router: ReturnType<typeof useRouter>,
-): Finding[] {
+function useFindings(diagnosis: DeploymentDiagnosis | undefined, projectId: number): Finding[] {
   return useMemo(() => {
     if (!diagnosis) return []
-    const findings: Finding[] = diagnosis.findings.map((finding) => ({
+    return diagnosis.findings.filter(needsProjectAttention).map((finding): Finding => ({
       id: `${finding.code}:${finding.owner}:${finding.title}`,
       level: finding.severity,
       title: finding.title,
       detail: finding.measured,
       advice: [finding.means, finding.action].filter(Boolean).join(" "),
       meta: finding.owner ? <Tag>{finding.owner}</Tag> : undefined,
-      action: finding.deepLink
-        ? {
-            label: `Open ${finding.owner}`,
-            onClick: () =>
-              finding.external
-                ? window.open(finding.deepLink, "_blank", "noopener,noreferrer")
-                : router.push(finding.deepLink!),
-          }
-        : undefined,
+      action: projectFindingNavigation(finding, projectId),
     }))
-    if (diagnosis.silences.length > 0) {
-      const n = diagnosis.silences.length
-      findings.push({
-        id: "silences",
-        level: "notice",
-        title: `${n} owner${n === 1 ? "" : "s"} could not be read`,
-        detail: "Their most recent evidence is shown instead of a fresh reading.",
-        extra: (
-          <ul className="space-y-1">
-            {diagnosis.silences.map((silence, index) => (
-              <li key={silence.subject + index}>
-                <span className="font-medium capitalize">{silence.subject}</span>: {silence.reason}
-              </li>
-            ))}
-          </ul>
-        ),
-      })
-    }
-    return findings
-  }, [diagnosis, router])
+  }, [diagnosis, projectId])
 }
 
 const TILE_HOVER = "h-full transition-colors group-hover:bg-row-hover"

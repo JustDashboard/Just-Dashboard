@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
 import { Connection, LockClosed, ShieldCheck, Topology } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
@@ -16,6 +15,7 @@ import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FindingList } from "@/components/finding-list"
+import { findingNavigation } from "@/lib/finding-destinations"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { HostIdentity, HostFact, FactDot } from "@/components/metrics/host-identity"
@@ -80,7 +80,6 @@ const axisRate = (value: number) => `${bytes(value, 0)}/s`
  * with the live ring's newest rates over the overview's own.
  */
 export default function NetworkOverviewPage() {
-  const router = useRouter()
   const overview = usePoll<NetworkOverview>(
     (signal) => get("/network/overview", undefined, signal),
     15_000,
@@ -105,6 +104,9 @@ export default function NetworkOverviewPage() {
     )
   }
   const data = overview.data
+  const findings = data.findings.filter(
+    (finding) => finding.level === "critical" || finding.level === "warning",
+  )
   const nodeOf = (id: string) => flowNode(id, data, links)
   return (
     <Page className="animate-rise">
@@ -156,23 +158,32 @@ export default function NetworkOverviewPage() {
         <PanelHeader
           title="Attention"
           actions={
-            data.findings.length > 0 ? (
+            findings.length > 0 ? (
               <span className="text-hint text-muted-foreground">
-                {plural(data.findings.length, "finding")}
+                {plural(findings.length, "finding")}
               </span>
             ) : undefined
           }
         />
         <PanelBody>
           <FindingList
-            findings={data.findings.map((f) => ({
+            emphasize
+            findings={findings.map((f) => ({
               id: f.id,
               level: f.level,
               title: f.title,
               detail: f.detail,
-              action: { label: "Open", onClick: () => router.push(f.href) },
+              action:
+                f.id === "persistence.unit"
+                  ? {
+                      label: "Review network restore service",
+                      href: "/processes/services?unit=just-dashboard-network.service",
+                    }
+                  : f.href !== "/network"
+                    ? findingNavigation(f.href)
+                    : undefined,
             }))}
-            emptyLabel="Nothing on the network needs attention"
+            emptyLabel="No priority issues found in the completed network checks"
           />
           <IncidentHistory incidents={data.incidents} error={data.incidentsError} />
         </PanelBody>

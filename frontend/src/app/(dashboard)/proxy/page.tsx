@@ -325,7 +325,7 @@ export default function ProxyOverviewPage() {
       ["sites", vhosts.error],
       ["certificates", certs.error],
       ["renewal", certbotGone ? undefined : certbot.error],
-      ["streams", streams.error],
+      ["streams", streamDirError ? undefined : streams.error],
       ["ports", ports.error],
     ]
     return failed.flatMap(([source, error]): UnreadableSource[] =>
@@ -339,6 +339,7 @@ export default function ProxyOverviewPage() {
     certbot.error,
     certbotGone,
     streams.error,
+    streamDirError,
     ports.error,
   ])
   const lastTest = configTest.last
@@ -736,6 +737,7 @@ export default function ProxyOverviewPage() {
                   <ProxyFindings
                     findings={findings.map((f) => {
                       const source = unreadableSource(f)
+                      const label = findingAction(f)
                       return {
                         ...f,
                         action: source
@@ -747,10 +749,12 @@ export default function ProxyOverviewPage() {
                                   label: drift.reloading ? "Reloading nginx…" : "Reload nginx",
                                   onClick: drift.reload,
                                 }
-                              : { label: findingAction(f), onClick: () => router.push(f.href) },
+                              : label
+                                ? { label, onClick: () => router.push(f.href) }
+                                : undefined,
                       }
                     })}
-                    emptyLabel="Certificates, renewal, sites, upstreams, streams and exposed ports all within limits"
+                    emptyLabel="No priority problems found in the completed proxy checks"
                     onRemedied={(remedy) =>
                       remedy.kind === "enable-site" ? refreshAll() : certbot.refresh()
                     }

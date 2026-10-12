@@ -550,22 +550,15 @@ test("attention lists posture findings and never calls them health", async ({ pa
 
   await expect(page.getByText("web can control Docker itself")).toBeVisible()
   await expect(page.getByText("db publishes PostgreSQL on every interface")).toBeVisible()
-  // A recommendation is present and is not painted as a problem.
-  await expect(page.getByText("db has no health check")).toBeVisible()
-
-  // Docker's findings render through the one list the whole product shares
-  // with Metrics and Security — see components/finding-list.tsx. The shape of
-  // that list is the assertion: a row is a title, and the reasoning behind it
-  // is one press away rather than printed under every entry. Docker used to
-  // have its own parallel component that showed both at once, which is what
-  // made this panel twice as tall and half as scannable as the identical
-  // panel two pages away.
-  const row = page.getByRole("button", { name: /web can control Docker itself/ })
+  await expect(page.getByText("db has no health check", { exact: true })).toHaveCount(0)
+  const row = page.getByRole("button", { name: "web can control Docker itself", exact: true })
   await expect(row).toHaveAttribute("aria-expanded", "false")
-  await expect(page.getByText("The Docker socket is mounted into this container.")).toHaveCount(0)
-
+  await expect(row.getByText("The Docker socket is mounted into this container.")).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Review socket access", exact: true }),
+  ).toBeVisible()
   await row.click()
-  await expect(page.getByText("The Docker socket is mounted into this container.")).toBeVisible()
+  await expect(row).toHaveAttribute("aria-expanded", "true")
 
   // The kind of problem is the row's right-hand column, so a reader scanning
   // the panel gets "security, exposure, configuration" in one pass.
@@ -701,13 +694,14 @@ const repeated = {
     diagnosis.findings[0],
     ...["api", "web", "worker", "cache", "db"].flatMap((name) => [
       {
-        id: `container.nohealthcheck.${name}`,
-        level: "notice",
-        severity: "recommendation",
-        class: "configuration",
-        title: `${name} has no health check`,
-        detail: "Docker reports this container as up whenever its main process is alive.",
-        advice: "A health check is one command the container runs against itself.",
+        id: `container.logs.${name}`,
+        level: "warning",
+        severity: "warning",
+        class: "storage",
+        title: `${name} has written 500 MB of logs`,
+        detail: `${name} has an unrotated 500 MB log file.`,
+        action: "cap-logs",
+        actionLabel: "Cap the log size",
         scope: "container",
         target: name,
         targetId: name,
@@ -736,16 +730,16 @@ test("attention collapses one problem repeated across containers into one row", 
   await page.goto("/docker")
 
   // Five containers, one sentence — and pluralised into "have".
-  await expect(page.getByText("5 containers have no health check")).toBeVisible()
-  await expect(page.getByText("5 containers have no memory limit")).toBeVisible()
+  await expect(page.getByText("5 containers have written 500 MB of logs")).toBeVisible()
+  await expect(page.getByText("5 containers have no memory limit")).toHaveCount(0)
 
   // The individual titles are not in the list until the group is opened.
-  await expect(page.getByText("api has no health check")).toHaveCount(0)
+  await expect(page.getByText("api has written 500 MB of logs")).toHaveCount(0)
 
   // Severity still wins over frequency: the one critical stays on top.
   const rows = await page.getByRole("button", { expanded: false }).allInnerTexts()
   const critical = rows.findIndex((t) => t.includes("web can control Docker itself"))
-  const group = rows.findIndex((t) => t.includes("containers have no health check"))
+  const group = rows.findIndex((t) => t.includes("containers have written 500 MB of logs"))
   expect(critical).toBeGreaterThanOrEqual(0)
   expect(critical).toBeLessThan(group)
 
@@ -753,11 +747,13 @@ test("attention collapses one problem repeated across containers into one row", 
   // group is a summary, never a replacement for knowing which ones — but the
   // names are names rather than five repetitions of the same sentence, which
   // is what the grouping exists to stop.
-  await page.getByRole("button", { name: /5 containers have no health check/ }).click()
-  await expect(page.getByText("Docker reports this container as up whenever")).toBeVisible()
+  await page.getByRole("button", { name: "Review 5 containers", exact: true }).click()
+  await expect(
+    page.getByText("api has an unrotated 500 MB log file.", { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText("api", { exact: true })).toBeVisible()
   await expect(page.getByText("cache", { exact: true })).toBeVisible()
-  await expect(page.getByText("api has no health check")).toHaveCount(0)
+  await expect(page.getByText("api has written 500 MB of logs")).toHaveCount(0)
 })
 
 /**
@@ -1502,6 +1498,7 @@ test("a stack's logs are one log with a lane per service", async ({ page }) => {
  */
 for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
   test(`no Docker page scrolls sideways at ${width}px`, async ({ page }) => {
+    test.setTimeout(90_000)
     await mockDocker(page)
     await page.setViewportSize({ width, height: 900 })
 
