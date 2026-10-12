@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "private": true,
   "scripts": {
     "dev": "node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next dev",
