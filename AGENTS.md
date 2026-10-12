@@ -100,5 +100,7 @@ explicitly rather than silently changing the contract.
 
 - Never edit `CHANGELOG.md` directly. Add release notes to
   `backend/internal/selfupdate/changelog.json`, then run `scripts/release.sh <version>`.
+- Do not create Git tags or GitHub releases by hand. Once Verify passes on a merge into `main` that
+  bumps the version, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
 - Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing licence headers or adding dependencies. The
   project is AGPL-3.0 with an additional contributor grant to the owner.
