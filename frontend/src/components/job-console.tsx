@@ -260,7 +260,11 @@ export function RecentJobs({
         )
         .catch(() => {})
     load()
-    const timer = setInterval(load, 5000)
+    // Skipped while the tab is hidden, as usePoll does; this list is the one
+    // poller on these pages that kept fetching in a background tab.
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load()
+    }, 5000)
     return () => {
       cancelled = true
       clearInterval(timer)

@@ -13,19 +13,43 @@ import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
 import { BoundaryChanges } from "@/components/security/boundary-view"
 
+/**
+ * How often an administrator's every page asks whether a change is pending.
+ *
+ * This banner is mounted in the shell, so at a flat 2 s it was thirty requests
+ * a minute from each open tab, nearly all of them answering "nothing". Quick
+ * reads are needed only while a change is under way. A change this tab applies
+ * announces itself at once through the X-JD-Network-Change header, and a tab
+ * that comes back into view asks on arrival. The slow read covers only a change
+ * applied from somewhere else, and 15 s leaves most of the 90-second window to
+ * confirm it.
+ */
+const ACTIVE_POLL_MS = 2_000
+const IDLE_POLL_MS = 15_000
+
+/** The phases the host journal treats as finished (netx changeTerminal). */
+const SETTLED_PHASES: ReadonlySet<NetworkChangeStatus["phase"]> = new Set([
+  "saved",
+  "confirmed",
+  "recovered",
+  "boot_degraded",
+])
+
 /** The pending change survives navigation, polling failures and backend restarts in the host journal. */
 export function NetworkChangeConfirmation() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const inNetwork = usePathname().startsWith("/network")
   const [observed, setObserved] = useState<string>()
+  const [active, setActive] = useState(false)
   const state = usePoll(
     async (signal) => {
       const view = await get<NetworkConfirmationView>("/network/changes/current", undefined, signal)
       if (view.change?.phase === "awaiting_confirmation") setObserved(view.change.id)
+      setActive(Boolean(view.change && !SETTLED_PHASES.has(view.change.phase)))
       return view
     },
-    2000,
+    active ? ACTIVE_POLL_MS : IDLE_POLL_MS,
     [],
     { enabled: admin },
   )
@@ -61,11 +85,23 @@ export function NetworkChangeConfirmation() {
   useEffect(() => {
     const changed = (event: Event) => {
       setObserved((event as CustomEvent<string>).detail)
+      setActive(true)
       refresh()
     }
     window.addEventListener("jd:network-change", changed)
     return () => window.removeEventListener("jd:network-change", changed)
   }, [refresh])
+
+  // A hidden tab skips its reads, so without this one coming back would show
+  // the state from before it was hidden until the idle read came round.
+  useEffect(() => {
+    if (!admin) return
+    const shown = () => {
+      if (document.visibilityState === "visible") refresh()
+    }
+    document.addEventListener("visibilitychange", shown)
+    return () => document.removeEventListener("visibilitychange", shown)
+  }, [admin, refresh])
 
   useEffect(() => {
     if (!pending) return

@@ -31,6 +31,15 @@ func (s *OrchestrationStore) ClaimNext(
 	budget QueueBudget,
 	ttl time.Duration,
 ) (*QueueLease, error) {
+	// The engine asks four times a second and the queue is nearly always
+	// empty. The claim below opens an IMMEDIATE transaction, the database's
+	// one write lock, to learn that; this read answers it without making a
+	// concurrent writer wait. A run queued after this read is claimed on the
+	// next pass, as one queued just after the transaction would have been. A
+	// failed read falls through to the claim, which reports its own errors.
+	if idle, err := s.queueIdle(ctx); err == nil && idle {
+		return nil, nil
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	var lastErr error
@@ -49,6 +58,16 @@ func (s *OrchestrationStore) ClaimNext(
 		}
 	}
 	return nil, lastErr
+}
+
+// queueIdle reports whether no run is waiting to be claimed, using the
+// (state, priority, requested_at, id) index.
+func (s *OrchestrationStore) queueIdle(ctx context.Context) (bool, error) {
+	var waiting bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM deploy_runs WHERE state = ? AND cancel_requested = 0)`,
+		RunQueued).Scan(&waiting)
+	return !waiting, err
 }
 
 func (s *OrchestrationStore) claimNextOnce(

@@ -191,7 +191,9 @@ are dated evidence, not proof of current attachment ownership.
   working-session counts are the recorded active count minus the recorded waiting count, while live
   session filters use the current session list. SQLite has no activity chart or recording poll.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
-  ref so a fresh closure does not rebuild the socket.
+  ref so a fresh closure does not rebuild the socket. The delay doubles from 1 s to a 15 s ceiling with
+  half of each step random (`retryDelay`), and resets only after a connection has stayed open for 10 s:
+  an endpoint that accepts, reports an error and closes is not redialled every second.
 - Persisted view/session values use individual Web Storage entries, so changing a small filter does not
   serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
   documents migrate on first read, with restoration and the old persistence path if splitting exceeds
@@ -322,7 +324,9 @@ are dated evidence, not proof of current attachment ownership.
   component threw it away on navigation, and pushing a 2 s frame through a context above the router
   re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its
   chart, with points older than `STALE_MS` dropped on the way back in — a graph silently stitching this
-  minute onto one from an hour ago is worse than one that starts empty.
+  minute onto one from an hour ago is worse than one that starts empty. While the tab is hidden the store
+  keeps taking frames but does not notify its readers; one notification on `visibilitychange` brings them
+  up to date, so a background tab does not redraw charts nobody can see.
 - `lib/metrics-range.ts` defines the windows (`live`, `1h`, `6h`, `24h`, `7d`), their buckets and cadence,
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of

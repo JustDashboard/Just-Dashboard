@@ -11,7 +11,11 @@ import { cn } from "@/lib/utils"
  * removed so it inherits the tile it sits in — it is a figure, and the tile
  * already says how a figure is set.
  *
- * The spring is overdamped, so a count of two never shows three on the way.
+ * The spring is critically damped, the quickest that does not overshoot, so a
+ * count of two never shows three on the way. It settles in under a second. It
+ * was overdamped (damping 60) and took about three and a half, which on a live
+ * figure read every two seconds meant it never stopped: the Overview rewrote
+ * its readings and laid the page out again on every frame while idle.
  * Reduced motion writes the value at once.
  */
 export function NumberTicker({
@@ -30,7 +34,7 @@ export function NumberTicker({
   const ref = useRef<HTMLSpanElement>(null)
   const reduced = useReducedMotion()
   const motionValue = useMotionValue(reduced ? value : startValue)
-  const springValue = useSpring(motionValue, { damping: 60, stiffness: 100 })
+  const springValue = useSpring(motionValue, { damping: 20, stiffness: 100 })
   const isInView = useInView(ref, { once: true, margin: "0px" })
 
   useEffect(() => {
@@ -39,10 +43,15 @@ export function NumberTicker({
     return () => clearTimeout(timer)
   }, [motionValue, isInView, delay, value])
 
+  // Written only when the figure changes at the precision shown: every write
+  // is a DOM mutation the browser answers with style and layout.
   useEffect(
     () =>
       springValue.on("change", (latest) => {
-        if (ref.current) ref.current.textContent = figure(latest, decimalPlaces)
+        const node = ref.current
+        if (!node) return
+        const next = figure(latest, decimalPlaces)
+        if (node.textContent !== next) node.textContent = next
       }),
     [springValue, decimalPlaces],
   )
@@ -57,9 +66,17 @@ export function NumberTicker({
   )
 }
 
+/** Built once per precision rather than on every frame of every ticker. */
+const formatters = new Map<number, Intl.NumberFormat>()
+
 function figure(value: number, decimalPlaces: number) {
-  return Intl.NumberFormat("en-US", {
-    minimumFractionDigits: decimalPlaces,
-    maximumFractionDigits: decimalPlaces,
-  }).format(Number(value.toFixed(decimalPlaces)))
+  let format = formatters.get(decimalPlaces)
+  if (!format) {
+    format = new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: decimalPlaces,
+      maximumFractionDigits: decimalPlaces,
+    })
+    formatters.set(decimalPlaces, format)
+  }
+  return format.format(Number(value.toFixed(decimalPlaces)))
 }

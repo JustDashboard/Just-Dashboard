@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stackports"
 )
 
@@ -113,7 +114,9 @@ func applyStack(ctx context.Context, store *Store, run *Run, out io.Writer) erro
 		compose = "docker-compose.yml"
 	}
 	if run.Action == ActionRebuild {
-		if err := stream(ctx, run.Dir, out, "docker", "compose", "-f", compose, "build"); err != nil {
+		if err := selfupdate.BuildEachService(ctx, run.Dir, compose, func(args ...string) error {
+			return stream(ctx, run.Dir, out, "docker", args...)
+		}); err != nil {
 			return err
 		}
 	}
