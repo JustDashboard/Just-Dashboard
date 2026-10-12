@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.1** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.2** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -354,7 +354,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.1**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.2**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.

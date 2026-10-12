@@ -4,6 +4,39 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.2 — 12 October 2026
+
+**Stickyboard, an uninstaller, and findings that lead to their fix**
+
+Stickyboard adds endless boards of sticky notes that link, group into sections and autosave, beside Excalidraw's drawings. Configuration can now uninstall the dashboard, keeping its deployments and data for a reinstall or wiping them. Findings across Docker, Databases, Deployments, Network and Proxy keep only what needs attention and each action opens the control that fixes it. A pull blocked by local changes or root-owned folders offers the ways past it, log panes share one filter row and time window, and the dashboard spends far less work in idle and hidden tabs.
+
+### Added
+
+- Stickyboard: endless boards of sticky notes that link, group into sections and autosave
+  - A new Workspace page lists every board as a picture of itself and creates boards blank or from a Kanban, retrospective or mind-map template. Notes take Markdown with tickable tasks, nine colours, sizes and typefaces, links are dragged between notes with labels and arrows, and sections carry their notes, with undo, find, clipboard and keyboard shortcuts. Each save is checked by the server and guarded by a revision.
+- Uninstall the dashboard from its Configuration page
+  - The Danger zone asks one question: keep the deployments, data, backups and key for a reinstall, or wipe the deployments and the dashboard's data, and the backups only when asked and after the server's name is typed. The stack is taken down by a sibling container that writes its transcript to /var/log/just-dashboard-uninstall.log, and a kept install is restored by install.sh on a fresh clone.
+- A blocked pull offers the ways past it
+  - When local changes or folders owned by another account stop a pull, Git shows what is in the way and offers to stash, discard or give the folders back, each as one step that pulls afterwards. A self-update hands back to the checkout's owner whatever it wrote as root, so the next pull is not blocked by it.
+
+### Changed
+
+- Findings keep what needs attention and lead to the control that fixes it
+  - Attention lists on Docker, Databases, Deployments, Network, Proxy and Security keep critical and warning findings, show the problem and its consequence before the evidence, and name each action by where it goes. Routine advice stays in the settings or reports it belongs to, and certificate, backup and MongoDB cache wording says only what is known.
+- Every log pane has one filter row and one time window
+  - Search, Live or a typed span, levels, fields and quick views share one row, and a pane's commands sit after its views as icons. Request Insights counts distinct visitors apart from bots and scripts, and Network DNS, VPN and Interfaces, a deployment's output and a site's upstream gain the logs that belong to them.
+- Databases, Boards and Proxy open on what they hold
+  - The Databases control center opens on the server's databases as one line, a band of storage, sessions and backups, and cards in each database's hue. Boards is named after Excalidraw, with /boards redirecting to /excalidraw, and its cards are previews of each drawing. The proxy overview counts the Docker Caddy ingress's requests, so Traffic and Live traffic are no longer empty on a host where it holds ports 80 and 443.
+- Notable moments group into incidents that pin the charts
+  - Metrics gathers notable moments into incidents that pin the charts to their window, with zoom as its own action, and the scanners notice ranks the addresses and the paths they tried, with Block in a column of its own.
+- The dashboard does less work while idle, and builds its images one at a time
+  - The network-change banner, live metrics, RecentJobs and reconnecting sockets stop spending requests and renders in idle or hidden tabs, sign-in hashes use far less memory, and an idle job queue no longer takes the database's write lock. install.sh, the updater and Settings' rebuild build one service at a time, so the frontend's and backend's compile peaks no longer add up.
+
+### Fixed
+
+- A live preview offers Visit at its own address
+  - A preview run was compared with production's live release, so every live preview read as superseded with no address. It now reads its own live release and address, and the run header names its PR environment.
+
 ## 0.7.1 — 10 October 2026
 
 **A Network section, every database as its own engine, and every page redrawn**
