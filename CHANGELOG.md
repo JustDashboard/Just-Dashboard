@@ -4,6 +4,24 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.3 — 12 October 2026
+
+**A first sign-in that fits the sidebar to what you use**
+
+Every new account is now asked, once, what it will use the server for, and its sidebar, Overview and search keep only those sections. A hidden section is out of the sidebar, never out of reach: links from other pages still open it, search still finds it, and the role still decides what the account may do. Account → Workspace changes the answer or asks the question again, and accounts that existed before this release keep every section.
+
+### Added
+
+- New accounts are asked what the server is for after their first sign-in
+  - Shipping apps, running databases, containers, the network, security or working on the box: any number of them, with what the server already runs chosen in advance. The answer becomes switches beside a preview of the sidebar they draw, and Finish saves it to the account, so it follows the person to every browser. Show me everything hides nothing.
+- Account → Workspace chooses which sections the sidebar shows
+  - The same switches and preview after the fact, and Ask me again goes back to the question. Overview, Monitoring and Settings are always shown, and a section the role cannot open is not offered.
+
+### Changed
+
+- A hidden section stays one link or one search away
+  - A link into a hidden section, such as a deployment's domain opening its proxy site, still opens it; the sidebar shows the section while you are in it and offers to keep it. Search lists hidden pages as soon as you type, and the Overview leaves out a hidden section's tiles and the reads behind them.
+
 ## 0.7.2 — 12 October 2026
 
 **Stickyboard, an uninstaller, and findings that lead to their fix**
