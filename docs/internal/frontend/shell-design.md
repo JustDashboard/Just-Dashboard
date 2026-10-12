@@ -121,8 +121,31 @@ rather than read — the words are the question, the names and the counts:
 2. **The sections** as `SectionTiles` (`section-tiles.tsx`): one compact `ChoiceCard` per section under
    the rail's group names, with the rail's glyph and name and nothing else, beside `SidebarPreview`,
    the rail drawn from the same registry with the same rule. This is the screen that decides.
-3. **The outcome**: the wired server again, the count of sections, and three one-line facts — links
-   still open hidden sections, ⌘K finds every page, Account → Workspace changes it.
+3. **The outcome**: the wired server beside three one-line facts — links still open hidden sections,
+   ⌘K finds every page, Account → Workspace changes it — and one foot holding the count of sections
+   and the command, with *Change sections* back to step two. The command used to have a row of its
+   own under the facts, with the count in a header above the picture, which made the outcome three
+   bands of white space around one button.
+
+The screen stands on arrival's ground (`.auth-backdrop`, design system §16), the one sign-in stands on.
+On a phone each step is one column: the purposes are rows rather than tiles, the rail preview is left
+out because the tiles already say what is in and out, and the panel's command bar sticks to the foot of
+the window (`max-xl:sticky` on `FlowActions`, with the panel's clip lifted below `xl` so the bar sticks
+to the page's scroll rather than to the panel).
+
+### Signing in
+
+`app/login/page.tsx` is one `FlowPanel` card: the form, and from `lg` a picture half drawing
+`ProductOrbit` (`components/onboarding/product-orbit.tsx`) — the same server rack, ringed by the
+products the dashboard drives with a beam running out to each, so sign-in and the first-run question
+are one drawing. Nothing in it is read from the server, because nobody has signed in. On a phone the
+picture is a strip across the top of the card. The spine names only the steps the account has, from
+the server's answer (`needsTotp`, `needsEnrollment`, `user.totpEnabled`, `user.mustChangePassword`), and
+is not drawn before that answer: it used to promise *Verify* to every account. *Forgot it?* shows
+`scripts/reset-password.sh` with the typed name filled in, since recovery happens on the host. A forced
+password change does not ask again for the current password the page already holds, reads the server's
+rule as the reader types (`lib/password.ts`), and signs straight back in with the new password once the
+change has ended the session.
 
 Nothing is saved until Finish or *Show me everything* (which hides nothing). Only the sections the role
 can see are offered. `/account/workspace` is the same tiles and preview after the fact, in the reading

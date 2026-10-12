@@ -34,7 +34,8 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature
 routes and API tokens return `password_change_required`. Changing the password requires the current
-password and revokes existing sessions; the client returns to sign-in. Password change has its own
+password and revokes existing sessions; the sign-in page then signs straight back in with the new
+password, through any required second factor. Password change has its own
 authentication middleware so it cannot bypass an outstanding second factor.
 
 Two deliberate exceptions: `/healthz` (unauthenticated, fixed body, no version or hostname) and

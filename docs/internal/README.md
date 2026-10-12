@@ -93,8 +93,8 @@ strategy, and feature ownership behind those rules.
 - [`frontend/design-system.md`](frontend/design-system.md) — the design system's rules in full: one mode,
   no lift, the colour roles, the component vocabulary, and which surface to reach for.
 - [`frontend/shell-design.md`](frontend/shell-design.md) — App Router shell, navigation, the sections an
-  account keeps out of its sidebar and the first-run question, layout primitives, accessibility, Monaco,
-  and charts.
+  account keeps out of its sidebar, the first-run question and sign-in, layout primitives,
+  accessibility, Monaco, and charts.
 - [`frontend/features-terminal.md`](frontend/features-terminal.md) — Docker/security/package feature UX and
   the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
 - [`frontend/feature-map.md`](frontend/feature-map.md) — every route area, its user-facing

@@ -3023,6 +3023,15 @@ exception. What §16 buys is depth on one surface, a mandatory command face, and
 `--flow-surface`, `--flow-lit`, `--flow-lit-soft` and the `flow-rule` utility are register B's whole
 palette, and a reading page must not grow a use for them.
 
+**One ground is not flat: arrival's.** Sign-in, `/welcome` and the shell's splash between them are the
+only full-bleed screens in the product and the first a new account sees, and they stand on
+`.auth-backdrop` — three washes, the signal from the top edge and the chart ramp's blue and violet from
+the lower corners (never `--brand`, which is near white and washes to grey). The sign-in card's picture
+half is the same lights closer (`.auth-art`), pooled behind the server it draws. The operator asked for
+these screens to have colour and life, and for the line grid that used to sit under the washes to go;
+the exception is the ground of those screens and nothing else — no page in either register takes a
+wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
+
 ## 17. Redesigning a flow page
 
 §15 is the reading register's ordered passes. This is the other one. The reference is `/deploy/new`.

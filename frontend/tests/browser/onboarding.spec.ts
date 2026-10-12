@@ -79,6 +79,11 @@ test("a new account is asked what the server is for, and the answer shapes the s
 
   await expect(page.getByRole("heading", { level: 1, name: "Your sidebar is ready" })).toBeVisible()
   await expect(page.getByText(/of 15 sections in your sidebar/)).toBeVisible()
+  // The count and the command share the foot: the command on a row of its own
+  // under the facts was a band of nothing around one button.
+  const count = await page.getByText(/of 15 sections in your sidebar/).boundingBox()
+  const open = await page.getByRole("button", { name: "Open the dashboard" }).boundingBox()
+  expect(Math.abs(count!.y + count!.height / 2 - (open!.y + open!.height / 2))).toBeLessThan(12)
   await expect(page.getByRole("list", { name: "What this server is for" })).toContainText(
     "Ship apps",
   )
@@ -134,6 +139,21 @@ test("showing everything is an answer too, and nothing is hidden", async ({ page
   for (const name of ["Network", "Proxy & TLS", "Security", "Terminal"]) {
     await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
   }
+})
+
+test("on a phone each step's command stays at the foot of the window", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOnboarding(page)
+  await page.goto("/welcome")
+  await expect(page.getByRole("button", { name: "Continue" })).toBeInViewport()
+  await page.getByRole("button", { name: "Continue" }).click()
+  // Fifteen tiles are taller than the phone; Finish is held in reach over them.
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Which sections should your sidebar show?" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Finish" })).toBeInViewport()
+  await page.getByRole("button", { name: "Finish" }).click()
+  await expect(page.getByRole("button", { name: "Open the dashboard" })).toBeInViewport()
 })
 
 test("an account that has answered is never sent to the question", async ({ page }) => {

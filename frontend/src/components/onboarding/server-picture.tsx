@@ -42,7 +42,6 @@ export function ServerPicture({
 
   return (
     <div data-slot="server-picture" className={cn("relative min-w-0 py-6", className)}>
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={container} className="relative flex flex-col items-center gap-12">
         {/* The lines are the container's own children: a mark's row rises
             into place on a transform, and a line drawn inside it would be

@@ -931,40 +931,60 @@
  * `--control-active` on the neutral ones, nothing at all on the controls that
  * have no face. */
 
-/* The sign-in screen is the only full-bleed surface in the app, and a flat
- * rectangle of one colour is a poor first impression. Two washes of whatever
- * the theme's primary happens to be — one from the top edge, one drifting in
- * from the lower left — plus a faint grid so the plane has a scale to it. */
+/* The ground of arrival — sign-in, the first-run question and the splash
+ * between them — and nowhere else. These are the only full-bleed screens in
+ * the product and the first it shows, so they get colour the reading pages
+ * deliberately do without: the signal blue from the top edge, the chart ramp's
+ * blue from the lower left and its violet from the lower right. Not the brand:
+ * it is a near-white blue, and a wash of it reads as grey. There was a line
+ * grid under the washes too; it read as graph paper behind a form, and the
+ * screen is livelier with the colour alone. `fixed` so a long first-run screen
+ * scrolls over the light rather than carrying it away. */
 .auth-backdrop {
   background-image:
     radial-gradient(
-      52% 40% at 50% -4%,
-      color-mix(in oklab, var(--brand) 16%, transparent),
+      55% 42% at 50% -6%,
+      color-mix(in oklab, var(--signal) 20%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      46% 52% at 0% 100%,
+      color-mix(in oklab, var(--chart-2) 18%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      42% 48% at 100% 96%,
+      color-mix(in oklab, var(--chart-4) 18%, transparent),
+      transparent 72%
+    );
+  background-attachment: fixed;
+}
+
+/* The picture half of the sign-in card: the same lights, closer and brighter,
+ * with the signal pooled behind the server so the orbit stands on colour
+ * rather than on the card. */
+.auth-art {
+  background-image:
+    radial-gradient(
+      42% 36% at 50% 36%,
+      color-mix(in oklab, var(--signal) 22%, transparent),
+      transparent 75%
+    ),
+    radial-gradient(
+      70% 55% at 100% 0%,
+      color-mix(in oklab, var(--chart-2) 20%, transparent),
       transparent 70%
     ),
     radial-gradient(
-      44% 44% at 8% 104%,
-      color-mix(in oklab, var(--signal) 9%, transparent),
+      65% 60% at 0% 100%,
+      color-mix(in oklab, var(--chart-4) 30%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      50% 45% at 100% 100%,
+      color-mix(in oklab, var(--chart-3) 14%, transparent),
       transparent 72%
     );
-}
-
-/* The grid itself, as its own layer so it can sit under the washes above and
- * fade out towards the edges rather than stopping at a hard line. */
-.auth-grid {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--foreground) 6%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--foreground) 6%, transparent) 1px,
-      transparent 1px
-    );
-  background-size: 44px 44px;
-  mask-image: radial-gradient(72% 60% at 50% 40%, black, transparent 100%);
 }
 
 /* The ground a wiring picture is drawn on: the ER diagram's dot grid, as a

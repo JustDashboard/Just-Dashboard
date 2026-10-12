@@ -12,7 +12,8 @@ import { WelcomeFlow } from "@/components/onboarding/welcome-flow"
  *
  * Its own scroll container, as the shell's `SidebarInset` is for every other
  * page, so a flow screen held to the window (`<Page fill="xl">`) has a
- * definite height to hold to.
+ * definite height to hold to. It stands on sign-in's ground, the screen it
+ * follows.
  */
 export default function WelcomePage() {
   const { status, loading } = useAuth()
@@ -25,7 +26,7 @@ export default function WelcomePage() {
   }, [loading, status, router])
 
   return (
-    <div className="h-svh overflow-y-auto bg-background">
+    <div className="auth-backdrop h-svh overflow-y-auto bg-background">
       {!loading && status?.authenticated && <WelcomeFlow />}
     </div>
   )
