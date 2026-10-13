@@ -144,7 +144,9 @@ test("a socket on one address can be taken to the firewall", async ({ page }) =>
   await expect(page).toHaveURL(/\/network\/firewall$/)
 })
 
-test("the overview counts services and names a public database critical", async ({ page }) => {
+test("the overview counts observed internet-facing services without advisory findings", async ({
+  page,
+}) => {
   await mockHost(page)
   await page.goto("/proxy")
 
@@ -157,13 +159,7 @@ test("the overview counts services and names a public database critical", async 
   await expect(internet).toBeVisible()
   await expect(internet).toHaveAttribute("title", "2 on private networks")
 
-  const finding = page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ })
-  await expect(finding.locator(".bg-destructive")).toHaveCount(1)
-  await finding.click()
-  await expect(
-    page.getByText("6379/tcp redis-server on 203.0.113.5 (Public address · ens3)"),
-  ).toBeVisible()
-  await expect(page.getByText(/answers on every interface/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Redis answers/ })).toHaveCount(0)
 
   // The fact opens on the rows it counts.
   await internet.click()
@@ -195,9 +191,7 @@ test("a port Docker publishes in both families is one row and one count", async 
   ).toBeVisible()
 })
 
-test("a database behind a firewall denying inbound is the posture's warning everywhere", async ({
-  page,
-}) => {
+test("the ports view retains observed firewall attribution", async ({ page }) => {
   await mockHost(page, firewalledDatabases)
   await page.goto("/proxy/ports")
 
@@ -212,19 +206,6 @@ test("a database behind a firewall denying inbound is the posture's warning ever
   await expect(
     tile(page, "Dangerous services exposed").getByText("2", { exact: true }),
   ).toHaveClass(/text-warning/)
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^2 dangerous services answer off this machine/,
-  })
-  await expect(finding.locator(".bg-warning")).toHaveCount(1)
-  await expect(finding.locator(".bg-destructive")).toHaveCount(0)
-  await finding.click()
-  await expect(
-    page.getByText(
-      "6379/tcp redis-server, 5432/tcp postgres on 57.131.21.87 (Public address · ens3), though the firewall's inbound default is deny",
-    ),
-  ).toBeVisible()
 })
 
 test("a database Docker publishes or a rule admits stays critical behind a firewall denying inbound", async ({
@@ -249,38 +230,6 @@ test("a database Docker publishes or a rule admits stays critical behind a firew
   await expect(
     tile(page, "Dangerous services exposed").getByText("3", { exact: true }),
   ).toHaveClass(/text-destructive/)
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^3 dangerous services answer on every interface/,
-  })
-  await expect(finding.locator(".bg-destructive")).toHaveCount(1)
-  await finding.click()
-  await expect(
-    page.getByText(
-      "5432/tcp docker-proxy (published by Docker past the firewall), 6379/tcp redis-server (firewall rule 10 admits it from anywhere), 27017/tcp mongod (the firewall's inbound default is deny)",
-    ),
-  ).toBeVisible()
-  await expect(page.getByText(/, though the firewall's inbound default is deny/)).toHaveCount(0)
-
-  // On a phone the reasons sit whole under each reach, inside the screen.
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto("/proxy/ports")
-  const list = page.getByRole("list")
-  for (const text of [
-    "Published by Docker past the firewall",
-    "Firewall rule 10 admits it from anywhere",
-    "Firewall's inbound default: deny",
-  ]) {
-    const line = list.getByText(text)
-    await expect(line).toBeVisible()
-    const box = await line.boundingBox()
-    expect(box && box.x + box.width).toBeLessThanOrEqual(390)
-  }
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  )
-  expect(overflow).toBe(false)
 })
 
 test("a socket on the private uplink is not said to be out of the internet's reach", async ({
@@ -395,12 +344,6 @@ test("a database is coloured by who can connect, and counted once however it is 
   await expect(
     tile(page, "Dangerous services exposed").getByText("3", { exact: true }),
   ).toBeVisible()
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^3 dangerous services answer off this machine/,
-  })
-  await expect(finding.locator(".bg-destructive")).toHaveCount(1)
 })
 
 test("databases only a bridge can reach are a warning everywhere", async ({ page }) => {
@@ -412,19 +355,6 @@ test("databases only a bridge can reach are a warning everywhere", async ({ page
   await expect(
     tile(page, "Dangerous services exposed").getByText("2", { exact: true }),
   ).toHaveClass(/text-warning/)
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", {
-    name: /^2 dangerous services answer off this machine/,
-  })
-  await expect(finding.locator(".bg-warning")).toHaveCount(1)
-  await finding.click()
-  await expect(
-    page.getByText(
-      "6379/tcp redis-server on 10.0.0.1 (Docker bridge · docker0), 10.0.2.1 (Docker bridge · br-b05f8e098ad7)",
-      { exact: false },
-    ),
-  ).toBeVisible()
 })
 
 test("the tiles' hints and the longest reach fit a phone", async ({ page }) => {
@@ -803,35 +733,11 @@ test("a host with no sockets, and a filter with no match, each say which it is",
   await expect(page).toHaveURL(/\/proxy\/ports$/)
 })
 
-test("the attention finding opens the ports page on its ports alone", async ({ page }) => {
+test("the internet-facing fact resets remembered socket filters", async ({ page }) => {
   await mockHost(page)
-  await page.goto("/proxy/ports?q=sshd&reach=internet")
+  await page.goto("/proxy/ports?q=port:6379")
   await expect(rowsOf(page)).toHaveCount(1)
-
   await page.goto("/proxy")
-  await page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ }).click()
-  await page.getByRole("button", { name: "Open ports" }).click()
-  await expect(page).toHaveURL(/\/proxy\/ports\?q=port:6379$/)
-  await expect(page.getByLabel("Search sockets")).toHaveValue("port:6379")
-  await expect(
-    page.getByRole("group", { name: "Reach" }).getByRole("button", { name: "All 1" }),
-  ).toHaveAttribute("aria-pressed", "true")
-  await expect(rowsOf(page)).toHaveCount(1)
-  await expect(rowsOf(page).first()).toContainText("redis-server")
-})
-
-test("the internet-facing fact opens on what it counts, not the ports a finding opened", async ({
-  page,
-}) => {
-  await mockHost(page)
-  await page.goto("/proxy")
-  await page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ }).click()
-  await page.getByRole("button", { name: "Open ports" }).click()
-  await expect(page).toHaveURL(/\/proxy\/ports\?q=port:6379$/)
-  await expect(rowsOf(page)).toHaveCount(1)
-
-  // The tab now remembers `port:6379`; the fact asks for its own rows anyway.
-  await page.goBack()
   const internet = page
     .locator("[data-slot='host-identity']")
     .getByRole("link", { name: "3 ports internet-facing" })

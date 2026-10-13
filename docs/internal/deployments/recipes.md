@@ -46,7 +46,7 @@ pointing at the setting it names), `build_root_missing` when the root directory 
   except for what the operator supplies (a start command) or chooses (a package manager among competing
   lockfiles, while any one of them prepares), which preflight asks for instead;
 - at Review, over the commit the draft's detection read, with the draft's own settings;
-- in the advisory check and in `analyze_plan`, over the commit a deployment builds, with the saved plan.
+- in `analyze_plan`, over the commit a deployment builds, with the saved plan.
 
 Where it ran, it replaces the candidate's `recipeIssue`, which was decided with detection's settings
 rather than the plan's; a refusal already named by a more precise finding (`package_manager_*`,

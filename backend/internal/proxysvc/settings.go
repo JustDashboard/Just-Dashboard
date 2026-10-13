@@ -36,12 +36,6 @@ type Setting struct {
 	// again, where this value does not apply.
 	Overrides int    `json:"overrides"`
 	Default   string `json:"default"`
-	// Level is "ok", "notice" or "warning".
-	Level  string `json:"level"`
-	Advice string `json:"advice"`
-	// Recommended is the value Apply would write, empty when there is no one
-	// value to recommend.
-	Recommended string `json:"recommended,omitempty"`
 	// Choices are the values the directive takes, for a closed choice.
 	Choices []string `json:"choices,omitempty"`
 }
@@ -66,7 +60,6 @@ type settingDef struct {
 	def     string
 	valid   func(string) bool
 	choices []string
-	judge   func(value string, rep *SettingsReport) (level, advice, recommended string)
 }
 
 var (
@@ -88,33 +81,18 @@ var settingDefs = []settingDef{
 	{
 		name: "server_tokens", context: "http", def: "on",
 		valid: oneOf("on", "off", "build"), choices: []string{"on", "off", "build"},
-		judge: func(v string, _ *SettingsReport) (string, string, string) {
-			if v == "off" {
-				return "ok", "Error pages and the Server header say nginx without its version.", ""
-			}
-			return "notice", "Every error page and Server header names nginx's version, which tells a scanner which advisories apply. off leaves only the word nginx.", "off"
-		},
 	},
 	{
 		name: "client_max_body_size", context: "http", def: "1m",
 		valid: sizeValue.MatchString,
-		judge: func(string, *SettingsReport) (string, string, string) {
-			return "ok", "A request body larger than this is refused with 413. A site that takes uploads is better raised on its own than every site here.", ""
-		},
 	},
 	{
 		name: "keepalive_timeout", context: "http", def: "75s",
 		valid: keepValue.MatchString,
-		judge: func(string, *SettingsReport) (string, string, string) {
-			return "ok", "How long an idle client connection stays open. Each one holds a worker connection while it waits.", ""
-		},
 	},
 	{
 		name: "gzip", context: "http", def: "off",
 		valid: oneOf("on", "off"), choices: []string{"on", "off"},
-		judge: func(string, *SettingsReport) (string, string, string) {
-			return "ok", "Compressing a response over TLS that mixes a secret with text a visitor chose is what the BREACH attack reads; gzip_types decides which responses are compressed.", ""
-		},
 	},
 	{
 		name: "ssl_protocols", context: "http", def: "TLSv1.2 TLSv1.3",
@@ -128,39 +106,14 @@ var settingDefs = []settingDef{
 			}
 			return len(seen) > 0 && strings.Join(strings.Fields(v), " ") == v
 		},
-		judge: func(v string, _ *SettingsReport) (string, string, string) {
-			for _, p := range strings.Fields(v) {
-				if p != "TLSv1.2" && p != "TLSv1.3" {
-					return "warning", p + " is broken or deprecated (RFC 8996) and no current browser needs it. Servers that set ssl_protocols themselves are not changed by this.", "TLSv1.2 TLSv1.3"
-				}
-			}
-			return "ok", "Only TLS 1.2 and 1.3. A server block that sets ssl_protocols itself keeps its own.", ""
-		},
 	},
 	{
 		name: "server_names_hash_bucket_size", context: "http", def: "32, 64 or 128 (the CPU's cache line)",
 		valid: numberValue.MatchString,
-		judge: func(string, *SettingsReport) (string, string, string) {
-			return "ok", "nginx refuses to start when a server name does not fit and says so in its test; raise it then, to the next power of two.", ""
-		},
 	},
 	{
 		name: "worker_connections", context: "events", def: "512",
 		valid: numberValue.MatchString,
-		judge: func(v string, rep *SettingsReport) (string, string, string) {
-			n, _ := strconv.Atoi(v)
-			if rep.OpenFiles == 0 {
-				return "ok", "Connections each worker may hold, clients and upstreams together. The open-file limit it is measured against could not be read.", ""
-			}
-			limit := strconv.Itoa(rep.OpenFiles)
-			switch {
-			case n > rep.OpenFiles:
-				return "warning", "More than the " + limit + " files a worker may open, so a busy worker runs out of descriptors before it reaches this. Raise worker_rlimit_nofile or lower this.", limit
-			case 2*n > rep.OpenFiles:
-				return "notice", "A proxied request holds two descriptors, client and upstream, so a worker proxying runs out near " + strconv.Itoa(rep.OpenFiles/2) + " connections of its " + limit + " open files.", ""
-			}
-			return "ok", "Connections each worker may hold, clients and upstreams together, within its " + limit + " open files.", ""
-		},
 	},
 }
 
@@ -203,14 +156,6 @@ func (s *Service) Settings(ctx context.Context) (*SettingsReport, error) {
 		}
 		if def.context == "http" {
 			set.Overrides = countNested(tree, def.name)
-		}
-		value := set.Value
-		if !set.Set && def.name == "server_names_hash_bucket_size" {
-			value = ""
-		}
-		set.Level, set.Advice, set.Recommended = def.judge(value, rep)
-		if set.Recommended == set.Value {
-			set.Recommended = ""
 		}
 		rep.Settings = append(rep.Settings, set)
 	}

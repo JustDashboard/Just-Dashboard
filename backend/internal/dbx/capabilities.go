@@ -104,7 +104,6 @@ var (
 var capabilityTable = []Capability{
 	// A statement runner over database/sql, and the forms built on it.
 	{"sql", sqlEngines},
-	{"advisor", sqlEngines},
 	{"orm", sqlEngines},
 	// Something to type a statement or a command into: the SQL editor, the
 	// Redis console, MongoDB's command runner.

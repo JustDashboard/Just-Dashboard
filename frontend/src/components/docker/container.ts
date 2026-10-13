@@ -3,7 +3,6 @@ import type {
   Container,
   ContainerDetail,
   ContainerHistoryPoint,
-  FailureDiagnosis,
   PortExposure,
   PortRoute,
 } from "@/lib/types"
@@ -55,17 +54,13 @@ export function crashed(code: number) {
 /**
  * What the container is doing, as one verdict. Docker's state alone calls a
  * container failing its health check "running" and a crash loop
- * "restarting", the word a deliberate restart also gets; the failure
- * diagnosis is what tells a loop from a restart.
+ * "restarting". The verdict keeps the native state and health result.
  */
 export function containerVerdict(
   detail: Pick<ContainerDetail, "state" | "health" | "hasHealthcheck" | "exitCode">,
-  failure?: Pick<FailureDiagnosis, "state" | "restarts">,
 ): Verdict {
-  const looping = failure?.state === "looping" || failure?.restarts.looping === true
   switch (detail.state) {
     case "running":
-      if (looping) return { tone: "danger", word: "Restarting in a loop", live: true }
       if (detail.health === "unhealthy")
         return { tone: "danger", word: "Failing its health check", live: true }
       if (detail.health === "starting")
@@ -82,14 +77,7 @@ export function containerVerdict(
         live: true,
       }
     case "restarting":
-      return looping
-        ? {
-            tone: "danger",
-            word: "Restarting in a loop",
-            detail: exitWords(detail.exitCode),
-            live: true,
-          }
-        : { tone: "warning", word: "Restarting", live: true }
+      return { tone: "warning", word: "Restarting", live: true }
     case "paused":
       return { tone: "warning", word: "Paused", detail: "frozen in memory", live: false }
     case "created":

@@ -9,7 +9,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import type {
   BlueprintDetail,
-  DeploymentCheckResult,
   DeploymentEngineRun,
   DeploymentEnvironmentConfiguration,
   DeploymentGitWatch,
@@ -27,7 +26,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProjectStart } from "@/components/deploy/project-verbs"
 import { projectProduct } from "@/components/deploy/vocabulary"
 import { OverviewSkeleton } from "@/components/deploy/overview-skeleton"
-import { useDeploymentCheck } from "@/components/deploy/deploy-check"
 
 /**
  * One project, read once for every page under it.
@@ -100,15 +98,6 @@ export type ProjectContextValue = {
   liveRelease?: DeploymentRelease
   refresh: () => void
   refreshOperations: () => void
-  /**
-   * Preflight for the saved plan against the commit a deployment would build
-   * now (`POST …/check`), asked when the project opens and after each save
-   * that left changes waiting. Undefined until it answers about the revision
-   * now saved.
-   */
-  check?: DeploymentCheckResult
-  checking: boolean
-  recheck: () => void
   /**
    * Enqueues a run and opens its page, asking "Ready to deploy?" first when
    * the check found what a build should not go past unasked. Resolves once
@@ -241,27 +230,13 @@ export function ProjectProvider({
     refreshDetail()
   }, [refreshDetail])
 
-  const { can } = useAuth()
-  const check = useDeploymentCheck({
-    projectId,
-    environmentId,
-    desiredRevision,
-    pending: Boolean(detail.data?.deployment.pendingChanges),
-    enabled:
-      valid &&
-      !archived &&
-      can("service.control") &&
-      detail.data !== undefined &&
-      detail.data.deployment.buildMethod !== "legacy_compose",
-  })
-  const recheck = check.recheck
+  const {} = useAuth()
   // The same request the projects grid's cards make, so a refused start is
   // worded once — and re-reads the detail, since a stop or start refused as
   // already done means this copy of `stopped` disagrees with the server.
   const { start, starting, gate } = useProjectStart(
     detail.data?.deployment ?? { id: projectId, environmentId },
     refreshDetail,
-    { result: check.result, recheck: check.recheck, checking: check.checking },
   )
 
   const value = useMemo<ProjectContextValue | null>(() => {
@@ -302,9 +277,6 @@ export function ProjectProvider({
       liveRelease,
       refresh,
       refreshOperations: operations.refresh,
-      check: check.result,
-      checking: check.checking,
-      recheck: () => void recheck(),
       start,
       starting,
     }
@@ -323,9 +295,6 @@ export function ProjectProvider({
     archived,
     markUnarchived,
     refresh,
-    check.result,
-    check.checking,
-    recheck,
     start,
     starting,
   ])

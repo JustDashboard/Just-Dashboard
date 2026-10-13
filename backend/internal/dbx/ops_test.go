@@ -693,19 +693,7 @@ func TestVersionEndOfLife(t *testing.T) {
 			t.Errorf("%s %q: past %v with %d days left", c.driver, c.version, got.Past, got.DaysLeft)
 		}
 	}
-	// Past its date is a warning; within half a year of it, a notice.
-	eol, _ := VersionEndOfLife(DriverPostgres, "PostgreSQL 14.11", now)
-	if finding, ok := adviseEndOfLife(eol); !ok || finding.ID != "version-end-of-life-soon" || finding.Level != "notice" {
-		t.Errorf("42 days before the date: %+v %v", finding, ok)
-	}
-	eol, _ = VersionEndOfLife(DriverPostgres, "PostgreSQL 13.14", now)
-	if finding, ok := adviseEndOfLife(eol); !ok || finding.ID != "version-end-of-life" || finding.Level != "warning" || finding.Category != AdviceSecurity {
-		t.Errorf("a year after the date: %+v %v", finding, ok)
-	}
-	eol, _ = VersionEndOfLife(DriverPostgres, "PostgreSQL 16.15", now)
-	if finding, ok := adviseEndOfLife(eol); ok {
-		t.Errorf("two years before the date produced %+v", finding)
-	}
+
 }
 
 func TestSessionRowsAreFinishedTheSameWay(t *testing.T) {
@@ -792,12 +780,7 @@ func TestOracleSessionHandles(t *testing.T) {
 			t.Errorf("cancel accepted the handle %q", bad)
 		}
 	}
-	if stmt, ok := oracleCompileSQL(d, "APP", "PACKAGE BODY", "BILLING"); !ok || stmt != `ALTER PACKAGE "APP"."BILLING" COMPILE BODY;` {
-		t.Errorf("compile: %q %v", stmt, ok)
-	}
-	if _, ok := oracleCompileSQL(d, "APP", "SYNONYM", "S"); ok {
-		t.Error("a synonym was given a COMPILE statement")
-	}
+
 }
 
 // What each engine offers is read off the interfaces it implements, so the
@@ -813,19 +796,17 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 	}
 	want := map[Driver]map[string]bool{
 		DriverPostgres: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
-			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
-			"advisor", "engineAdvisor"),
+			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
 		DriverMySQL: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
-			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
-			"advisor", "engineAdvisor"),
+			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
 		DriverSQLite: on("stats", "tableStats", "indexStats", "maintenance", "settings", "settingsWrite",
-			"advisor", "engineAdvisor", "sqliteFile"),
+			"sqliteFile"),
 		DriverClickHouse: on("stats", "sessions", "kill", "tableStats", "indexStats", "maintenance", "settings",
-			"roles", "privileges", "statements", "advisor", "engineAdvisor", "clickhouseViews"),
+			"roles", "privileges", "statements", "clickhouseViews"),
 		DriverMSSQL: on("stats", "sessions", "kill", "locks", "tableStats", "indexStats", "maintenance", "settings",
-			"settingsWrite", "roles", "privileges", "statements", "advisor", "engineAdvisor"),
+			"settingsWrite", "roles", "privileges", "statements"),
 		DriverOracle: on("stats", "sessions", "kill", "cancel", "locks", "tableStats", "indexStats", "maintenance",
-			"settings", "settingsWrite", "statements", "advisor", "engineAdvisor"),
+			"settings", "settingsWrite", "statements"),
 	}
 	for driver, expected := range want {
 		got := OpsCapabilities(driver, "")
@@ -1067,86 +1048,5 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 		t.Error("Oracle sorted by a maximum it does not keep")
 	} else if _, ok := err.(ErrBadStatementsOption); !ok {
 		t.Errorf("%v is not an option refusal", err)
-	}
-}
-
-// A finding carries the statement that fixes it wherever one can be written
-// without a decision only the operator can make.
-func TestAdvisorFixStatements(t *testing.T) {
-	pg, my, ms, ora := postgresDialect{}, mysqlDialect{}, mssqlDialect{}, oracleDialect{}
-	columns := []Column{{Name: "code", Nullable: false}, {Name: "tenant", Nullable: false}, {Name: "note", Nullable: true}}
-	unique := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true},
-		{Name: "t_plain", Columns: []string{"code"}},
-		{Name: "t_code", Columns: []string{"tenant", "code"}, Unique: true}}
-	for _, c := range []struct {
-		d    Dialect
-		rel  string
-		want string
-	}{
-		{pg, `"s"."t"`, `ALTER TABLE "s"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY USING INDEX "t_code";`},
-		{my, "`s`.`t`", "ALTER TABLE `s`.`t` ADD PRIMARY KEY (`tenant`, `code`);"},
-		{ms, `[s].[t]`, `ALTER TABLE [s].[t] ADD PRIMARY KEY ([tenant], [code]);`},
-		{ora, `"S"."T"`, `ALTER TABLE "S"."T" ADD PRIMARY KEY ("tenant", "code");`},
-	} {
-		got, detail := primaryKeyStatement(c.d, c.rel, "t", columns, unique)
-		if got != c.want || !strings.Contains(detail, "t_code") {
-			t.Errorf("%s: %q (%s), want %q", c.d.Driver(), got, detail, c.want)
-		}
-	}
-	// No unique index that can be a key: a new column, where adding one does
-	// not break an INSERT that names no columns — and never a second "id".
-	nullable := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true}, {Name: "t_expr", Columns: []string{"lower(code)"}, Unique: true}}
-	if got, _ := primaryKeyStatement(pg, `"s"."t"`, "t", columns, nullable); got != `ALTER TABLE "s"."t" ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;` {
-		t.Errorf("postgres identity: %q", got)
-	}
-	if got, _ := primaryKeyStatement(ms, `[s].[t]`, "t", columns, nil); got != `ALTER TABLE [s].[t] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;` {
-		t.Errorf("sql server identity: %q", got)
-	}
-	for _, d := range []Dialect{my, ora} {
-		if got, _ := primaryKeyStatement(d, "t", "t", columns, nullable); got != "" {
-			t.Errorf("%s was offered %q", d.Driver(), got)
-		}
-	}
-	if got, _ := primaryKeyStatement(pg, `"t"`, "t", append(columns, Column{Name: "ID", Nullable: true}), nil); got != "" {
-		t.Errorf("a table that has an id column was offered %q", got)
-	}
-
-	// A sequence and the column it feeds are widened together; a bigint
-	// sequence with a ceiling set by hand loses the ceiling; one at bigint's
-	// own maximum has no fix.
-	if got := pgSequenceFix(pg, "public", "orders_id_seq", "integer", 2147483647, "orders", "id", "integer"); got !=
-		"ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"public\".\"orders_id_seq\" AS bigint;" {
-		t.Errorf("serial: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "s", "integer", 2147483647, "orders", "id", "bigint"); got != `ALTER SEQUENCE "public"."s" AS bigint;` {
-		t.Errorf("a sequence narrower than its column: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "loose", "smallint", 32767, "", "", ""); got != `ALTER SEQUENCE "public"."loose" AS bigint;` {
-		t.Errorf("a sequence no column owns: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "capped", "bigint", 1000, "", "", ""); got != `ALTER SEQUENCE "public"."capped" NO MAXVALUE;` {
-		t.Errorf("a capped bigint sequence: %q", got)
-	}
-	if got := pgSequenceFix(pg, "public", "full", "bigint", 1<<63-1, "t", "id", "bigint"); got != "" {
-		t.Errorf("a bigint sequence at its ceiling was offered %q", got)
-	}
-
-	for current, want := range map[int]int{100: 150, 20: 50, 151: 250, 500: 750, 1: 50} {
-		if got := raisedConnectionLimit(current); got != want {
-			t.Errorf("raisedConnectionLimit(%d) = %d, want %d", current, got, want)
-		}
-	}
-	if got := mysqlConnectionLimitFix(false, 151); got != "SET PERSIST max_connections = 250;" {
-		t.Errorf("mysql: %q", got)
-	}
-	if got := mysqlConnectionLimitFix(true, 151); got != "SET GLOBAL max_connections = 250;" {
-		t.Errorf("mariadb: %q", got)
-	}
-	if got := oracleAutoextendSQL([]string{"/u01/app/users01.dbf", "/u01/it's.dbf"}); got !=
-		"ALTER DATABASE DATAFILE '/u01/app/users01.dbf' AUTOEXTEND ON;\nALTER DATABASE DATAFILE '/u01/it''s.dbf' AUTOEXTEND ON;" {
-		t.Errorf("autoextend: %q", got)
-	}
-	if got := oracleAutoextendSQL(nil); got != "" {
-		t.Errorf("a tablespace with no fixed-size file was offered %q", got)
 	}
 }

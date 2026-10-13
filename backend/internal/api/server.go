@@ -176,9 +176,6 @@ func (s *Server) Start(ctx context.Context) error {
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
 	s.modules.network.Start(ctx)
-	// The attention list is judged on a schedule too, so its history holds
-	// what happened while nobody had the Overview open.
-	s.startNetworkIncidents(ctx)
 	// A block made from the connection table with an end is lifted when it
 	// ends, whether or not anybody has the page open.
 	go s.expireBlocks(ctx)

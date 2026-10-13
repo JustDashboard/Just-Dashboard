@@ -43,7 +43,6 @@ type OperationsSummary struct {
 	Storage      StorageSummary    `json:"storage"`
 	Backups      BackupSummary     `json:"backups"`
 	Dependencies DependencySummary `json:"dependencies"`
-	Diagnosis    Diagnosis         `json:"diagnosis"`
 }
 
 type DomainSummary struct {
@@ -138,23 +137,11 @@ func (s *OrchestrationStore) Operations(
 		Backups:      BackupSummary{Status: statusUnavailable, Jobs: []BackupJob{}},
 		Dependencies: DependencySummary{Status: statusUnavailable, Items: []DependencyObservation{}},
 	}
-	input := DiagnosisInput{
-		ProjectID: summary.ID, LiveReleaseID: summary.LiveReleaseID, PendingChanges: summary.PendingChanges,
-		DesiredRevision: summary.DesiredRevision, LivePlanRevision: summary.LivePlanRevision,
-		Runtime: result.Runtime,
-	}
-	if summary.LastRun != nil && summary.LastRun.EnvironmentID == summary.EnvironmentID {
-		input.LastRun = summary.LastRun
-	}
-	if watch, err := s.GitWatchStatus(ctx, summary.ID, summary.EnvironmentID); err == nil {
-		input.GitWatch = &watch
-	}
 	if summary.LiveReleaseID <= 0 {
 		result.Reason = "This deployment has no live release. Deploy it to record the runtime, domain and storage evidence this page reads."
 		noEvidence := "No live release names them."
 		result.Domains.Reason, result.Storage.Reason = noEvidence, noEvidence
 		result.Backups.Reason, result.Dependencies.Reason = noEvidence, noEvidence
-		result.Diagnosis = Diagnose(input)
 		return result, nil
 	}
 	release, err := s.Release(ctx, summary.LiveReleaseID)
@@ -170,7 +157,6 @@ func (s *OrchestrationStore) Operations(
 		unreadable := "The live release runtime snapshot could not be read."
 		result.Domains.Reason, result.Storage.Reason = unreadable, unreadable
 		result.Backups.Reason, result.Dependencies.Reason = unreadable, unreadable
-		result.Diagnosis = Diagnose(input)
 		return result, nil
 	}
 	result.Evidence, result.ReleaseID = "release", summary.LiveReleaseID
@@ -179,16 +165,7 @@ func (s *OrchestrationStore) Operations(
 	result.Storage = storageSummary(snapshot, observed)
 	result.Backups = backupSummary(snapshot, observed)
 	result.Dependencies = otherDependencySummary(snapshot, observed)
-	input.Domains, input.Storage = result.Domains, result.Storage
-	input.Backups, input.Dependencies = result.Backups, result.Dependencies
-	input.RuntimeRecorded = s.releaseRuntimeRecorded(ctx, summary.LiveReleaseID)
-	result.Diagnosis = Diagnose(input)
 	return result, nil
-}
-
-func (s *OrchestrationStore) releaseRuntimeRecorded(ctx context.Context, releaseID int64) bool {
-	runtime, err := s.RuntimeForRelease(ctx, releaseID)
-	return err == nil && runtime.State == "live"
 }
 
 type dependencyObservations struct {

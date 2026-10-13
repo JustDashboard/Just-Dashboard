@@ -371,7 +371,6 @@ function destinationLine(place: Destination): Line {
   const active = jobs.filter((job) => job.enabled || !job.schedule)
   if (active.length === 0) return { still: true, tone: "default" }
   if (active.some((job) => job.lastRun?.status === "failed")) return { still: true, tone: "danger" }
-  if (active.some((job) => job.overdue)) return { still: true, tone: "warning" }
   if (active.every((job) => !job.lastRun)) return { still: true, dashed: true, tone: "default" }
   return { still: true, tone: "success" }
 }

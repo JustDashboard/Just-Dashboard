@@ -63,7 +63,6 @@ const LEGACY_PAGES: Record<string, SectionId> = {
   query: "query",
   find: "search",
   monitor: "performance",
-  advisor: "advisor",
   server: "access",
   backups: "backups",
   logs: "logs",

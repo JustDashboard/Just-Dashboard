@@ -1,4 +1,4 @@
-import type { Container, DockerEvent, DockerFinding } from "@/lib/types"
+import type { Container, DockerEvent } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
 
 /**
@@ -73,13 +73,13 @@ export function overviewOrder(containers: Container[]): Container[] {
  * the same as a stop that timed out; the runtime finding is what tells them
  * apart.
  */
-export function stoppedWords(container: Container, findings: DockerFinding[] = []): string {
+export function stoppedWords(container: Container): string {
   const exit = exitOf(container)
   if (!exit) {
     if (container.state === "created") return "never started"
     return container.status.replace(/^(Up|Exited|Created|Restarting|Paused|Dead)\s*/i, "").trim()
   }
-  const oom = findings.some((f) => f.targetId === container.id && f.id.startsWith("container.oom."))
+  const oom = false
   const how = oom
     ? "killed for memory"
     : exit.code === 0

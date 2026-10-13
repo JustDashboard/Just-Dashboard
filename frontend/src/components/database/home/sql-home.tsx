@@ -1,8 +1,6 @@
 "use client"
 
 import { Activity } from "@/components/database/home/activity"
-import { placementConcerns } from "@/components/database/home/attention"
-import { AdvisorAttention, ConcernAttention } from "@/components/database/home/attention-block"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
@@ -30,7 +28,7 @@ import type { DbOverview } from "@/lib/types"
 import { useMemo } from "react"
 
 export function SqlHome() {
-  const { id, conn, engine, summary } = useDatabase()
+  const { id, engine } = useDatabase()
   const file = engine.can("fileBased")
   const analytic = engine.can("clickhouseViews")
   const stats = useSamples<DbServerStats>(
@@ -44,9 +42,6 @@ export function SqlHome() {
 
   const answer = stats.answer
   const samples = stats.samples
-  // Ages are measured against the newest reading the page holds — the
-  // server's, then the summary's — not against a clock read while drawing.
-  const now = samples[samples.length - 1]?.at ?? Date.parse(summary?.checkedAt ?? conn.createdAt)
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
   const refused = answer && !answer.supported ? answer : undefined
 
@@ -77,26 +72,7 @@ export function SqlHome() {
           events={events}
         />
       )}
-      <Pair>
-        {engine.can("advisor") ? (
-          <AdvisorAttention />
-        ) : (
-          <ConcernAttention
-            pending={false}
-            concerns={placementConcerns(
-              {
-                name: conn.name,
-                exposure: summary?.exposure ?? "unknown",
-                lastBackup: summary?.lastBackup,
-                dumps: engine.can("dump"),
-                managed: Boolean(summary?.managed),
-              },
-              now,
-            )}
-          />
-        )}
-        <UsedBy />
-      </Pair>
+      <UsedBy />
       <Pair>
         {engine.can("statements") ? (
           <BusiestStatements />

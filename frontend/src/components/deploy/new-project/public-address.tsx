@@ -95,7 +95,7 @@ export function PublicAddress({
         ? { tone: "running" as const, label: "HTTPS ready" }
         : current.certificateMethod
           ? { tone: "notice" as const, label: "Certificate on deploy" }
-          : { tone: "warning" as const, label: "HTTPS needs attention" }
+          : { tone: "warning" as const, label: "HTTPS unavailable" }
 
   const recheck = async (value: string) => {
     const trimmed = value.trim().toLowerCase()
@@ -241,7 +241,7 @@ export function PublicAddress({
               blocks spending a tinted box each on an outcome nobody has to do
               anything about. */}
           {https && matches && current && !current.covered && !current.certificateMethod && (
-            <Notice tone="warning" icon={Warning} title="Automatic HTTPS needs attention">
+            <Notice tone="warning" icon={Warning} title="Automatic HTTPS unavailable">
               {current.certificateIssue ?? "Certificate readiness could not be confirmed."} Review
               certificate options on the{" "}
               <Link href="/proxy/certificates" className="underline underline-offset-2">

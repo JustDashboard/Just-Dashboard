@@ -16,7 +16,7 @@ import (
 // writes nothing; Detect again reads the source for Build settings and
 // carries a settings write's capability. A source change answers with what
 // detection read there, compared with the plan.
-func TestDeploymentCheckAndDetectRoutes(t *testing.T) {
+func TestDeploymentSourceDetectionRoute(t *testing.T) {
 	s := testServer(t)
 	checkout := localCheckoutFixture(t)
 	wireDeployPlanningAndSources(t, s, []string{filepath.Dir(checkout)})
@@ -34,29 +34,6 @@ func TestDeploymentCheckAndDetectRoutes(t *testing.T) {
 	base := "/api/v1/deploy/" + strconv.FormatInt(projectID, 10) + "/environments/" + strconv.FormatInt(environmentID, 10)
 	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	limited := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "check-limited", auth.RoleLimited)}
-	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "check-viewer", auth.RoleReadOnly)}
-
-	if response := viewer.do(http.MethodPost, base+"/check", `{}`, nil); response.Code != http.StatusForbidden {
-		t.Fatalf("read-only check = %d %s, want 403", response.Code, response.Body.String())
-	}
-	checked := limited.do(http.MethodPost, base+"/check", `{}`, nil)
-	if checked.Code != http.StatusOK {
-		t.Fatalf("check = %d %s", checked.Code, checked.Body.String())
-	}
-	var result deploy.DeploymentCheckResult
-	decodeDeployResponse(t, checked.Body.Bytes(), &result)
-	if result.PlanRevision != 1 || result.SourceRevision != strings.TrimSpace(string(head)) || result.Findings == nil {
-		t.Fatalf("check result = %#v", result)
-	}
-	if response := limited.do(http.MethodPost, base+"/check", `{"ref":"main"}`, nil); response.Code != http.StatusBadRequest ||
-		!strings.Contains(response.Body.String(), "ref_not_applicable") {
-		t.Fatalf("a ref for a local checkout = %d %s", response.Code, response.Body.String())
-	}
-	var audited int
-	// A refused attempt is still recorded; an answered check is a read.
-	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE path LIKE '%/check' AND status < 400`).Scan(&audited); err == nil && audited != 0 {
-		t.Fatalf("the advisory check wrote %d audit entries", audited)
-	}
 
 	if response := limited.do(http.MethodPost, base+"/detect", `{}`, nil); response.Code != http.StatusForbidden {
 		t.Fatalf("limited detect = %d %s, want 403", response.Code, response.Body.String())

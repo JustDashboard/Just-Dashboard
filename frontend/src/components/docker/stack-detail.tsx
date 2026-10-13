@@ -18,7 +18,6 @@ import {
   Warning,
   Wrench,
 } from "@/components/icons"
-import { composeRemedy } from "@/lib/docker-remedies"
 import { dedupeEvents } from "@/lib/docker-events"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
@@ -573,18 +572,6 @@ function StackBody({ name }: { name: string }) {
           )}
         </div>
 
-        {query.get("remedy") && (
-          <Notice title="Review the owning service">
-            <p>
-              Change only the affected service, validate and save the file, then bring the stack up
-              to apply it. Replacing a container discards its writable layer and old logs; retained
-              volumes keep their data.
-            </p>
-            <pre className="mt-2 font-mono text-hint whitespace-pre-wrap">
-              {composeRemedy(query.get("remedy") ?? "")}
-            </pre>
-          </Notice>
-        )}
         {error && <ErrorState error={error} />}
         {loading && !data && <LoadingRows />}
 

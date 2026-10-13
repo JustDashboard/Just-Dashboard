@@ -1,8 +1,6 @@
 "use client"
 
 import { Activity } from "@/components/database/home/activity"
-import { placementConcerns, redisConcerns } from "@/components/database/home/attention"
-import { ConcernAttention } from "@/components/database/home/attention-block"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestCommands } from "@/components/database/home/busiest"
 import { REDIS_VIEWS } from "@/components/database/home/charts"
@@ -28,7 +26,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMemo } from "react"
 
 export function KeyValueHome() {
-  const { id, conn, engine, summary } = useDatabase()
+  const { id, engine } = useDatabase()
   // One bounded walk of the keyspace when the page opens. Never on a timer:
   // it costs the server a SCAN and a TYPE for every key it covers.
   const walks = engine.can("keyTree")
@@ -67,24 +65,10 @@ export function KeyValueHome() {
   const backups = useBackups(engine.can("dump"))
 
   const samples = stats.samples
-  const now = samples[samples.length - 1]?.at ?? Date.parse(summary?.checkedAt ?? conn.createdAt)
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
   const loading = stats.loading || !walked
   const dumps = backups.data?.files
   const events = useMemo(() => chartEvents(samples, "uptime_in_seconds", dumps), [samples, dumps])
-  const concerns = [
-    ...redisConcerns(server.data, samples),
-    ...placementConcerns(
-      {
-        name: conn.name,
-        exposure: summary?.exposure ?? "unknown",
-        lastBackup: backups.data?.files[0]?.takenAt ?? summary?.lastBackup,
-        dumps: engine.can("dump"),
-        managed: Boolean(summary?.managed),
-      },
-      now,
-    ),
-  ]
 
   return (
     <>
@@ -103,10 +87,7 @@ export function KeyValueHome() {
         error={stats.error}
         events={events}
       />
-      <Pair>
-        <ConcernAttention concerns={concerns} pending={loading || server.loading} />
-        <UsedBy />
-      </Pair>
+      <UsedBy />
       <Pair>
         {engine.can("commandStats") && <BusiestCommands />}
         {walks && <LargestNamespacesBlock poll={tree} />}

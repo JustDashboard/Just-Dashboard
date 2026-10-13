@@ -203,39 +203,6 @@ export type MongoProfiler = {
   }[]
 }
 
-export type DbAdviceTarget = {
-  kind: string
-  schema?: string
-  name: string
-  table?: string
-  detail?: string
-  sql?: string
-}
-
-/** One finding of `GET /databases/{id}/advisor`. */
-export type DbAdvice = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  category: "security" | "performance" | "reliability" | "maintenance"
-  title: string
-  detail: string
-  advice?: string
-  objects?: string[]
-  targets?: DbAdviceTarget[]
-  sql?: string
-  /** A page of the dashboard that acts on it, as an absolute path. */
-  link?: string
-}
-
-export type DbAdviseReport = {
-  checkedAt: string
-  /** What was not assessed, in sentences. */
-  silences: string[]
-  findings: DbAdvice[]
-  tablesChecked: number
-  truncated: boolean
-}
-
 export type DbStatement = {
   id: string
   /** A shape with its literals removed, never one execution. */

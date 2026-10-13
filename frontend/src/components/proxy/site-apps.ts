@@ -9,7 +9,7 @@ import type {
   VHost,
 } from "@/lib/types"
 import { siteCert, type SiteChip } from "./site-filters"
-import { isBroken, isParked, isPlain } from "./site-order"
+import { isPlain } from "./site-order"
 
 /**
  * The Sites page's readings of the whole host, as pure functions of the
@@ -244,58 +244,15 @@ export type SitesVerdict = {
  * not run, and only then that nothing needs anyone.
  */
 export function sitesVerdict({
-  attention,
-  isDown,
   stopped,
   engine,
   total,
 }: {
-  attention: VHost[]
-  /** The site's application refuses connections, by the last health check. */
-  isDown: (v: VHost) => boolean
   stopped: boolean
   engine: string
   total: number
 }): SitesVerdict {
-  if (attention.length > 0) {
-    // Each site is said once, by the worst thing about it.
-    const cause = (v: VHost) =>
-      isBroken(v)
-        ? "broken"
-        : isDown(v)
-          ? "down"
-          : isPlain(v)
-            ? "plain"
-            : isParked(v)
-              ? "parked"
-              : "notLive"
-    const count = (key: string) => attention.filter((v) => cause(v) === key).length
-    const broken = count("broken")
-    const down = count("down")
-    const plain = count("plain")
-    const parked = count("parked")
-    const notLive = count("notLive")
-    const detail = [
-      broken > 0 && (broken === 1 ? "1 broken link" : `${broken} broken links`),
-      down > 0 && (down === 1 ? "1 application refusing" : `${down} applications refusing`),
-      plain > 0 && `${plain} on plain HTTP`,
-      parked > 0 && `${parked} disabled`,
-      notLive > 0 && `${notLive} not live`,
-    ]
-      .filter(Boolean)
-      .join(" · ")
-    return {
-      tone: broken + down > 0 ? "danger" : "warning",
-      label:
-        attention.length === 1
-          ? "1 site needs attention"
-          : `${attention.length} sites need attention`,
-      detail,
-      chip: "attention",
-    }
-  }
-  // The notice above the line says why; the verdict says what it means.
   if (stopped) return { tone: "stopped", label: `No ${engine} site is served` }
   if (total === 0) return { tone: "stopped", label: "No sites yet" }
-  return { tone: "running", label: "Nothing needs attention" }
+  return { tone: "running", label: `${total} sites` }
 }

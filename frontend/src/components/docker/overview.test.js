@@ -82,11 +82,11 @@ test("overviewOrder puts failing first and keeps names together", () => {
 })
 
 describe("stoppedWords", () => {
-  test("names an OOM kill rather than its bare status", () => {
+  test("reports the exit code without an inferred cause", () => {
     const worker = container({ id: "w", state: "exited", status: "Exited (137) 12 minutes ago" })
     expect(stoppedWords(worker)).toBe("exit 137 · 12 minutes ago")
     expect(stoppedWords(worker, [{ id: "container.oom.w", targetId: "w" }])).toBe(
-      "killed for memory · 12 minutes ago",
+      "exit 137 · 12 minutes ago",
     )
     expect(stoppedWords(container({ state: "exited", status: "Exited (0) 2 days ago" }))).toBe(
       "finished · 2 days ago",

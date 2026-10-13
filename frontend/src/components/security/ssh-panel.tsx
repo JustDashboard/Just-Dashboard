@@ -8,14 +8,7 @@ import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/co
 import { plural } from "@/lib/format"
 import { get, post } from "@/lib/api"
 import { lensFor } from "@/lib/log-lenses"
-import type {
-  Job,
-  NetworkConfirmationView,
-  Posture,
-  SecurityFinding,
-  SSHDConfig,
-  SSHSetting,
-} from "@/lib/types"
+import type { Job, NetworkConfirmationView, SSHDConfig, SSHSetting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -29,7 +22,6 @@ import { Row, RowList } from "@/components/row-list"
 import { StatGrid } from "@/components/stat-tile"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { AreaFindings } from "@/components/security/posture-panel"
 import { AUTH_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,
@@ -38,7 +30,6 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
-import { Status, StatusDot } from "@/components/status-dot"
 import { BASTION_PROFILE, JUMP_KEYS, JumpHost } from "@/components/security/bastion"
 import { SSHPicture } from "@/components/security/ssh-picture"
 import { boundaryVerdict } from "@/components/security/boundary"
@@ -86,13 +77,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * than a page away from it. An attacker's address in it is blocked from the
  * line it is on.
  */
-export function SSHPanel({
-  posture,
-  onFix,
-}: {
-  posture: Posture | undefined
-  onFix?: (finding: SecurityFinding) => void
-}) {
+export function SSHPanel() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const admin = can("system.admin")
@@ -103,10 +88,7 @@ export function SSHPanel({
     { enabled: admin },
   )
   const [pending, setPending] = useState<Record<string, string>>({})
-  const [only, setOnly] = useSessionState<"all" | "attention" | "edited">(
-    "security.ssh.only",
-    "all",
-  )
+  const [only, setOnly] = useSessionState<"all" | "edited">("security.ssh.only", "all")
   const [busy, setBusy] = useState(false)
   const wanted = useSearchParams().get("setting")
   useEffect(() => {
@@ -213,7 +195,6 @@ export function SSHPanel({
   }
 
   const valueOf = (setting: SSHSetting) => pending[setting.key] ?? setting.value
-  const insecure = data.settings.filter((s) => !s.secure).length
   const changed = (setting: SSHSetting) =>
     pending[setting.key] !== undefined && pending[setting.key] !== setting.value
   const setting = (key: string) => data.settings.find((s) => s.key === key)
@@ -224,15 +205,9 @@ export function SSHPanel({
   const jumpRows = JUMP_KEYS.map(setting).filter((s) => s !== undefined)
   const jumpable = setting("allowtcpforwarding") !== undefined
   const general = jumpable ? data.settings.filter((s) => !JUMP_KEYS.includes(s.key)) : data.settings
-  const generalInsecure = general.filter((s) => !s.secure).length
   const generalEdited = general.filter(changed).length
   const noKeys = data.keyedAccounts.length === 0
-  const shown =
-    only === "attention"
-      ? general.filter((s) => !s.secure || changed(s))
-      : only === "edited"
-        ? general.filter(changed)
-        : general
+  const shown = only === "edited" ? general.filter(changed) : general
   const draft = (key: string) => {
     const s = setting(key)
     return s ? valueOf(s) : undefined
@@ -343,11 +318,6 @@ export function SSHPanel({
         aside={
           <span className="flex flex-wrap items-center gap-3">
             <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
-            <Status
-              verdict={insecure === 0 ? "ok" : "warning"}
-              label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
-              className="text-body"
-            />
           </span>
         }
       />
@@ -395,8 +365,6 @@ export function SSHPanel({
         </StatGrid>
       )}
 
-      <AreaFindings posture={posture} area="ssh" onFix={onFix} />
-
       {/* The one banner left standing. It is not background: it is the
           reason the control below it will refuse, so it belongs above the
           control rather than in a footnote. */}
@@ -422,10 +390,6 @@ export function SSHPanel({
             <FilterChip selected={only === "all"} onClick={() => setOnly("all")}>
               All <ChipCount>{general.length}</ChipCount>
             </FilterChip>
-            <FilterChip selected={only === "attention"} onClick={() => setOnly("attention")}>
-              <StatusDot tone={generalInsecure ? "warning" : "running"} />
-              Below recommendation <ChipCount>{generalInsecure}</ChipCount>
-            </FilterChip>
             {generalEdited > 0 && (
               <FilterChip selected={only === "edited"} onClick={() => setOnly("edited")}>
                 <span style={{ color: "var(--git-modified)" }}>Edited</span>
@@ -443,7 +407,6 @@ export function SSHPanel({
             {SSH_GROUPS.map((group) => {
               const settings = shown.filter((setting) => sshGroup(setting.key) === group.title)
               if (settings.length === 0) return null
-              const warnings = settings.filter((setting) => !setting.secure).length
               const edited = settings.some(changed)
               return (
                 <FormSection
@@ -454,10 +417,6 @@ export function SSHPanel({
                   actions={edited && <Tag style={{ color: "var(--git-modified)" }}>Edited</Tag>}
                   hint={
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <Status
-                        verdict={warnings ? "warning" : "ok"}
-                        label={warnings ? `${warnings} below recommendation` : "At recommendation"}
-                      />
                       <span className="numeric">{plural(settings.length, "directive")}</span>
                     </span>
                   }
@@ -484,9 +443,7 @@ export function SSHPanel({
               )
             })}
           </div>
-          {shown.length === 0 && (
-            <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
-          )}
+          {shown.length === 0 && <EmptyNote>No settings match this filter.</EmptyNote>}
         </PanelBody>
       </Panel>
 
@@ -691,7 +648,6 @@ function SettingRow({
   note?: string
   onChange: (value: string) => void
 }) {
-  const below = !setting.secure
   const segmented =
     setting.kind === "choice" && setting.options?.length === 2 && setting.options.includes(value)
 
@@ -714,19 +670,9 @@ function SettingRow({
             {setting.detail}
             {note && ` ${note}`}
           </InfoTip>
-          {changed ? (
-            <Tag style={{ color: "var(--git-modified)" }}>edited</Tag>
-          ) : (
-            below && <Status verdict="warning" label="below recommendation" />
-          )}
+          {changed ? <Tag style={{ color: "var(--git-modified)" }}>edited</Tag> : null}
         </div>
         <code className="block font-mono text-hint text-muted-foreground">{setting.key}</code>
-        {below && (
-          <p className="max-w-md text-hint leading-relaxed text-warning">
-            Recommended <span className="font-mono">{setting.recommended}</span>.
-            {setting.risk && <span className="text-muted-foreground"> {setting.risk}</span>}
-          </p>
-        )}
       </div>
 
       <div className="min-w-0">

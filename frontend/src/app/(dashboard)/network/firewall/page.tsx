@@ -8,16 +8,8 @@ import { handoffFromParams } from "@/components/security/rule-form"
 import { useSecurity } from "@/components/security/security-context"
 
 export default function NetworkFirewallPage() {
-  const {
-    firewall,
-    firewallLoading,
-    firewallError,
-    firewallLastSuccess,
-    refreshFirewall,
-    refreshPosture,
-    posture,
-    applyFix,
-  } = useSecurity()
+  const { firewall, firewallLoading, firewallError, firewallLastSuccess, refreshFirewall } =
+    useSecurity()
   // Read once: the link is where the reader arrived, and the dialog it opens
   // is theirs from then on. Taken out of the address bar so a reload does
   // not open the same rule again.
@@ -32,15 +24,12 @@ export default function NetworkFirewallPage() {
     <Page className="animate-rise">
       <FirewallPanel
         status={firewall}
-        posture={posture}
         loading={firewallLoading}
         error={firewallError}
         lastSuccess={firewallLastSuccess}
-        onFix={applyFix}
         handoff={handoff}
         refresh={() => {
           refreshFirewall()
-          refreshPosture()
         }}
       />
     </Page>

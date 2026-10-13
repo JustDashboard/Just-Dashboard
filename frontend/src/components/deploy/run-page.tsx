@@ -67,7 +67,6 @@ import {
   runPlanIsStale,
 } from "@/components/deploy/failure-cause"
 import { RollbackDialog } from "@/components/deploy/rollback-dialog"
-import { useCheckedDeploy } from "@/components/deploy/deploy-check"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 
 /**
@@ -120,7 +119,6 @@ export function RunPage() {
   const [working, setWorking] = useState<
     "cancel" | "retry" | "redeploy" | "start" | "deploy" | "pin"
   >()
-  const checkedDeploy = useCheckedDeploy(projectId)
   // The transcript line a failure's cause points at, and a count so pressing
   // "Show the line" twice scrolls to it twice.
   const [focusLine, setFocusLine] = useState<{ seq: number; nonce: number }>()
@@ -377,13 +375,7 @@ export function RunPage() {
         setWorking(undefined)
       }
     }
-    const asked = await checkedDeploy.start(
-      run.environmentId,
-      "sourceRevision" in request ? { sourceRevision: request.sourceRevision } : {},
-      deploy,
-    )
-    // A check that asks leaves the press to its dialog.
-    if (asked) setWorking(undefined)
+    await deploy()
   }
 
   const enqueue = async (operation: "redeploy" | "start") => {
@@ -550,7 +542,6 @@ export function RunPage() {
   return (
     <Page className="animate-rise pt-4 md:pt-5">
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
-      {checkedDeploy.gate}
       {/* The name is for assistive technology alone (§15): the header is the
           first thing drawn. */}
       <PageContext title={`Deployment #${run.runNumber}`} />

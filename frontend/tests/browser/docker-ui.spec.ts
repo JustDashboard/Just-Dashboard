@@ -521,7 +521,7 @@ async function mockDocker(page: Page) {
  * were two of four tiles until the overview took §15's exit; they are the two
  * verdicts at the end of its identity line now.
  */
-test("the overview separates runtime health from attention", async ({ page }) => {
+test("the overview keeps native runtime health without advisory counts", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
@@ -531,7 +531,7 @@ test("the overview separates runtime health from attention", async ({ page }) =>
   await expect(identity.getByText("Nothing failing")).toBeVisible()
 
   // And, at the same time, that something needs attention.
-  await expect(identity.getByText("2 issues to look at")).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toHaveCount(0)
 
   // The word that used to sit above a page of warnings must not appear, and
   // nor do the tiles.
@@ -542,27 +542,6 @@ test("the overview separates runtime health from attention", async ({ page }) =>
     fullPage: true,
     animations: "disabled",
   })
-})
-
-test("attention lists posture findings and never calls them health", async ({ page }) => {
-  await mockDocker(page)
-  await page.goto("/docker")
-
-  await expect(page.getByText("web can control Docker itself")).toBeVisible()
-  await expect(page.getByText("db publishes PostgreSQL on every interface")).toBeVisible()
-  await expect(page.getByText("db has no health check", { exact: true })).toHaveCount(0)
-  const row = page.getByRole("button", { name: "web can control Docker itself", exact: true })
-  await expect(row).toHaveAttribute("aria-expanded", "false")
-  await expect(row.getByText("The Docker socket is mounted into this container.")).toBeVisible()
-  await expect(
-    page.getByRole("button", { name: "Review socket access", exact: true }),
-  ).toBeVisible()
-  await row.click()
-  await expect(row).toHaveAttribute("aria-expanded", "true")
-
-  // The kind of problem is the row's right-hand column, so a reader scanning
-  // the panel gets "security, exposure, configuration" in one pass.
-  await expect(row.getByText("Security")).toBeVisible()
 })
 
 /** "0/0 up" is not a state. */
@@ -646,7 +625,7 @@ test("published ports say what their binding means", async ({ page }) => {
   await expect(web.getByRole("link")).toHaveCount(0)
 })
 
-test("the containers table keeps status runtime-only and counts issues apart", async ({ page }) => {
+test("the containers table keeps native status without issue badges", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
 
@@ -657,7 +636,7 @@ test("the containers table keeps status runtime-only and counts issues apart", a
   await expect(db.getByText("db publishes PostgreSQL on every interface")).toHaveCount(0)
   // The finding is a count of its own beside the name, held apart from the status.
   await expect(db.getByRole("cell").nth(1).getByText("1", { exact: true })).toHaveCount(0)
-  await expect(db.getByRole("cell").first().getByText("1", { exact: true })).toBeVisible()
+  await expect(db.getByRole("cell").first().getByText("1", { exact: true })).toHaveCount(0)
 })
 
 /**
@@ -675,85 +654,6 @@ test("memory says no limit rather than inventing one", async ({ page }) => {
   // A container that really is limited still shows the fraction.
   const web = page.getByRole("row").filter({ hasText: "nginx:alpine" })
   await expect(web.getByText(/512\.0 MB/)).toBeVisible()
-})
-
-/**
- * Twenty-six findings that are four habits.
- *
- * A server with eight containers none of which set a memory limit produced
- * eight separate rows saying so, and the panel read as a list of eight
- * problems. The reader had to hold every container name in their head to spot
- * that it was one. Repeats of a kind now collapse to a single row that says
- * how many, and opens to name them.
- */
-const repeated = {
-  ...diagnosis,
-  checked: 5,
-  attention: { critical: 1, warning: 0, recommendations: 10, info: 0, issues: 1, total: 11 },
-  findings: [
-    diagnosis.findings[0],
-    ...["api", "web", "worker", "cache", "db"].flatMap((name) => [
-      {
-        id: `container.logs.${name}`,
-        level: "warning",
-        severity: "warning",
-        class: "storage",
-        title: `${name} has written 500 MB of logs`,
-        detail: `${name} has an unrotated 500 MB log file.`,
-        action: "cap-logs",
-        actionLabel: "Cap the log size",
-        scope: "container",
-        target: name,
-        targetId: name,
-      },
-      {
-        id: `container.nomemorylimit.${name}`,
-        level: "notice",
-        severity: "recommendation",
-        class: "configuration",
-        title: `${name} has no memory limit`,
-        detail: "It can use as much of this server's memory as it asks for.",
-        scope: "container",
-        target: name,
-        targetId: name,
-      },
-    ]),
-  ],
-}
-
-test("attention collapses one problem repeated across containers into one row", async ({
-  page,
-}) => {
-  await mockDocker(page)
-  // Registered after mockDocker, so it wins for this one path.
-  await page.route("**/api/v1/docker/health", (route) => json(route, repeated))
-  await page.goto("/docker")
-
-  // Five containers, one sentence — and pluralised into "have".
-  await expect(page.getByText("5 containers have written 500 MB of logs")).toBeVisible()
-  await expect(page.getByText("5 containers have no memory limit")).toHaveCount(0)
-
-  // The individual titles are not in the list until the group is opened.
-  await expect(page.getByText("api has written 500 MB of logs")).toHaveCount(0)
-
-  // Severity still wins over frequency: the one critical stays on top.
-  const rows = await page.getByRole("button", { expanded: false }).allInnerTexts()
-  const critical = rows.findIndex((t) => t.includes("web can control Docker itself"))
-  const group = rows.findIndex((t) => t.includes("containers have written 500 MB of logs"))
-  expect(critical).toBeGreaterThanOrEqual(0)
-  expect(critical).toBeLessThan(group)
-
-  // Opening it names the containers and states the shared reasoning once. The
-  // group is a summary, never a replacement for knowing which ones — but the
-  // names are names rather than five repetitions of the same sentence, which
-  // is what the grouping exists to stop.
-  await page.getByRole("button", { name: "Review 5 containers", exact: true }).click()
-  await expect(
-    page.getByText("api has an unrotated 500 MB log file.", { exact: true }),
-  ).toBeVisible()
-  await expect(page.getByText("api", { exact: true })).toBeVisible()
-  await expect(page.getByText("cache", { exact: true })).toBeVisible()
-  await expect(page.getByText("api has written 500 MB of logs")).toHaveCount(0)
 })
 
 /**
@@ -793,7 +693,7 @@ test("on a phone the containers are a list rather than a table with columns remo
   await expect(list.getByText(/no limit/)).toBeVisible()
   // Each container's findings are a count beside its name.
   const db = list.getByRole("listitem").filter({ hasText: "postgres:16" })
-  await expect(db.getByText("1", { exact: true })).toBeVisible()
+  await expect(db.getByText("1", { exact: true })).toHaveCount(0)
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -889,16 +789,9 @@ test("the state filters narrow the list and carry their own counts", async ({ pa
   await expect(page.getByRole("button", { name: /^Stopped/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Failing/ })).toHaveCount(0)
 
-  await page.getByRole("button", { name: /^Needs attention/ }).click()
-  await expect(page.getByRole("row").filter({ hasText: "nginx:alpine" })).toBeVisible()
-  await expect(page.getByRole("row").filter({ hasText: "postgres:16" })).toBeVisible()
-
-  // Pressing it again lets it go.
-  await page.getByRole("button", { name: /^Needs attention/ }).click()
-  await expect(page.getByRole("button", { name: /^Needs attention/ })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  )
+  await expect(page.getByRole("button", { name: /^Needs attention/ })).toHaveCount(0)
+  await running.click()
+  await expect(running).toHaveAttribute("aria-pressed", "false")
 })
 
 /**
@@ -1145,10 +1038,6 @@ type ServiceLogMocks = {
   eventSockets: URLSearchParams[]
 }
 
-/** The pane's own History searches: bounded at both ends, unlike a reading's, and not a last-lines one. */
-const historySearches = (mocks: ServiceLogMocks) =>
-  mocks.searches.filter((s) => s.has("until") && s.get("limit") !== LAST_LINES_LIMIT)
-
 /**
  * The service logs a container's and a stack's Logs tab embed, over the
  * database container and the running-app stack: `/logs/source` describes
@@ -1325,125 +1214,7 @@ test("a container's events fold its restart loop under its health check", async 
   const last = before.find((s) => Date.parse(s.get("since")!) === exit - 60_000)
   expect(last?.get("until")).toBe(dbEvents[0].time)
 
-  // The failure's window: History on it, in the pane, named as what it is.
-  await page.getByRole("button", { name: "Crash window" }).click()
-  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect
-    .poll(() => mocks.searches.at(-1)?.get("since"))
-    .toBe(new Date(dbFailure.logWindow.since).toISOString())
-  expect(mocks.searches.at(-1)?.get("until")).toBe(
-    new Date(dbFailure.logWindow.until).toISOString(),
-  )
-})
-
-/**
- * The Crash window chip says what the pane is reading, and nothing else: it
- * is on while the pane reads the window, and off the moment the reader moves
- * to Live, to "Open in History" on an exit, or anywhere else — with the
- * strip's "Crash window" going with it. Pressed again, it opens the window
- * again.
- */
-test("the crash window chip and the pane stay in step", async ({ page }) => {
-  await mockDocker(page)
-  const mocks = await mockServiceLogs(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto(`/docker/containers/${DB}?tab=logs`)
-  const chip = page.getByRole("button", { name: "Crash window" })
-  const live = page.getByRole("button", { name: "Live", exact: true })
-  const history = page.getByRole("button", { name: "History", exact: true })
-  const eventsView = page.getByRole("button", { name: "Events", exact: true })
-  const named = page.getByText(/^Crash window · /)
-  const windowSince = new Date(dbFailure.logWindow.since).toISOString()
-
-  // On, then to Events and back to Live: Live, with the chip off.
-  await chip.click()
-  await expect(history).toHaveAttribute("aria-pressed", "true")
-  await expect(chip).toHaveAttribute("aria-pressed", "true")
-  await expect(named).toBeVisible()
-  await eventsView.click()
-  await live.click()
-  await expect(live).toHaveAttribute("aria-pressed", "true")
-  await expect(chip).toHaveAttribute("aria-pressed", "false")
-  await expect(named).toHaveCount(0)
-
-  // On, then an exit's own minutes from Events: that range, not the window's.
-  await chip.click()
-  await expect(chip).toHaveAttribute("aria-pressed", "true")
-  await eventsView.click()
-  await page
-    .getByRole("region", { name: "Container events" })
-    .getByRole("button", { name: "Open in History" })
-    .first()
-    .click()
-  await expect(history).toHaveAttribute("aria-pressed", "true")
-  await expect
-    .poll(() => historySearches(mocks).at(-1)?.get("since"))
-    .toBe(new Date(Date.parse(dbEvents[0].time) - 5 * 60_000).toISOString())
-  await expect(chip).toHaveAttribute("aria-pressed", "false")
-  await expect(named).toHaveCount(0)
-
-  // And pressed again, the window again.
-  await chip.click()
-  await expect(chip).toHaveAttribute("aria-pressed", "true")
-  await expect(named).toBeVisible()
-  await expect.poll(() => historySearches(mocks).at(-1)?.get("since")).toBe(windowSince)
-})
-
-/**
- * The Overview's account of a failure reads the lines it names in one press:
- * the Logs tab, on the failure's window.
- */
-test("the failure's notice opens the logs on its window", async ({ page }) => {
-  await mockDocker(page)
-  const mocks = await mockServiceLogs(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto(`/docker/containers/${DB}?tab=overview`)
-
-  await page.getByRole("button", { name: "Read those lines" }).click()
-  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
-  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(page.getByRole("button", { name: "Crash window" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(page.getByText(/^Crash window · /)).toBeVisible()
-  await expect
-    .poll(() => historySearches(mocks).at(-1)?.get("since"))
-    .toBe(new Date(dbFailure.logWindow.since).toISOString())
-})
-
-/**
- * The pane keeps its reading for the tab, and a window it was handed is the
- * page's: gone by the time the page is back, it is not restored as an old
- * moment with nothing naming it.
- */
-test("a crash window let go of while the page was away is not what it opens on", async ({
-  page,
-}) => {
-  await mockDocker(page)
-  await mockServiceLogs(page)
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto(`/docker/containers/${DB}?tab=logs`)
-  const chip = page.getByRole("button", { name: "Crash window" })
-  await chip.click()
-  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-
-  await page.reload()
-  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(chip).toHaveAttribute("aria-pressed", "false")
-  await expect(page.getByText(/^Crash window · /)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Crash window" })).toHaveCount(0)
 })
 
 /**

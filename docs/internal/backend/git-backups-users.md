@@ -277,3 +277,9 @@ Removal matches a fingerprint and retains comments and unrecognised lines. Reads
 
 The current host-execution implementation and its relationship to the documented invariant are recorded in
 [`../reference/verification-findings.md`](../reference/verification-findings.md).
+
+## Backup presentation in 0.7.5
+
+Backups displays schedules, next runs, recorded outcomes, coverage and recovery controls. The automatic
+attention list and overdue recommendation detector are removed, including the `overdue` response field.
+The scheduler, retained run history, retention and restore safeguards are unchanged.

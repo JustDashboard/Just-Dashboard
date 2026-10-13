@@ -36,7 +36,7 @@ export function NetworkChange({ change }: { change: NetworkChangeStatus }) {
         </p>
         {Boolean(change.recoveryErrors?.length) && (
           <div role="alert">
-            <Notice tone="danger" title="Recovery needs attention">
+            <Notice tone="danger" title="Recovery incomplete">
               <ul className="list-inside list-disc space-y-1">
                 {change.recoveryErrors?.map((error, index) => (
                   <li key={index}>{error}</li>

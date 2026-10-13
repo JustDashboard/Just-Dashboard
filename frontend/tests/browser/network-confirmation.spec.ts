@@ -139,7 +139,7 @@ test("an unavailable dashboard response retains pending status and cannot enable
     phase: "degraded",
     recoveryErrors: ["Could not restore the captured queue"],
   } as typeof state.change
-  await expect(banner(page)).toContainText("Network recovery needs attention")
+  await expect(banner(page)).toContainText("Network recovery incomplete")
   await expect(banner(page)).toContainText("Could not restore the captured queue")
 })
 

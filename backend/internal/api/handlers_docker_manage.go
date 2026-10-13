@@ -1124,17 +1124,6 @@ func requireComposePhraseWS(w http.ResponseWriter, r *http.Request, action docke
 
 // ---------------------------------------------------- events & diagnosis ---
 
-func (s *Server) handleDockerDiagnose(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := timeoutCtx(r, 60*time.Second)
-	defer cancel()
-	d, err := s.modules.docker.Diagnose(ctx)
-	if err != nil {
-		return s.dockerErr(err)
-	}
-	httpx.JSON(w, http.StatusOK, d)
-	return nil
-}
-
 // eventFilterFrom reads the feed's question from a request: the kinds and
 // text the host feed narrows by, and the one container or compose project a
 // container's or a stack's page is about.

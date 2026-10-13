@@ -23,14 +23,12 @@ import {
   certbotRunning,
   certMatches,
   certSource,
-  certState,
   expiredAgo,
   renewIfDueLabel,
   replacingTestCertificate,
   sslDirectives,
   type CertSort,
   type CertSource,
-  type CertState,
 } from "@/lib/certificates"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
@@ -86,17 +84,6 @@ const SOURCE_LABELS: Record<CertSource, string> = {
   stream: "stream file",
 }
 
-const STATE_LABELS: Record<Exclude<CertState, "valid">, string> = {
-  expiring: "Expiring",
-  expired: "Expired",
-  test: "Test",
-  unreadable: "Unreadable",
-}
-
-type StateFilter = "all" | "attention" | Exclude<CertState, "valid">
-
-const needsAttention = (cert: Certificate) => certState(cert) !== "valid"
-
 /** One inventory with a detail surface, so paths and every SAN remain readable at any width. */
 export function CertificateInventory({
   certs,
@@ -150,10 +137,6 @@ export function CertificateInventory({
     "proxy.certificates.source",
     "all",
   )
-  const [stateFilter, setStateFilter] = useSessionState<StateFilter>(
-    "proxy.certificates.state",
-    "all",
-  )
   const [sort, setSort] = useSessionState<CertSort>("proxy.certificates.sort", "urgency")
   const [view, setView] = useViewState<"cards" | "table">("proxy.certificates.view", "cards")
   const [selected, select] = useQuerySelection("cert")
@@ -204,21 +187,10 @@ export function CertificateInventory({
   const sources = (Object.keys(SOURCE_LABELS) as CertSource[])
     .map((key) => ({ key, count: count((cert) => certSource(cert) === key) }))
     .filter((s) => s.count > 0)
-  const states = (Object.keys(STATE_LABELS) as Exclude<CertState, "valid">[])
-    .map((key) => ({ key, count: count((cert) => certState(cert) === key) }))
-    .filter((s) => s.count > 0)
-  const attention = count(needsAttention)
   const ordered = certs
-    .filter(
-      (cert) =>
-        (source === "all" || certSource(cert) === source) &&
-        (stateFilter === "all" ||
-          (stateFilter === "attention" ? needsAttention(cert) : certState(cert) === stateFilter)) &&
-        certMatches(cert, query),
-    )
+    .filter((cert) => (source === "all" || certSource(cert) === source) && certMatches(cert, query))
     .sort(CERT_SORTS[sort])
   const selectedCert = certs.find((cert) => cert.path === selected)
-  const toggleState = (next: StateFilter) => setStateFilter(stateFilter === next ? "all" : next)
 
   // A verb that starts a job or opens a dialog closes the sheet, so what it
   // starts is on screen.
@@ -427,26 +399,6 @@ export function CertificateInventory({
               </FilterChip>
             ))}
         </ChipStrip>
-        {attention > 0 && (
-          <ChipStrip aria-label="State">
-            <FilterChip
-              selected={stateFilter === "attention"}
-              onClick={() => toggleState("attention")}
-            >
-              Needs attention <ChipCount>{attention}</ChipCount>
-            </FilterChip>
-            {states.length > 1 &&
-              states.map((s) => (
-                <FilterChip
-                  key={s.key}
-                  selected={stateFilter === s.key}
-                  onClick={() => toggleState(s.key)}
-                >
-                  {STATE_LABELS[s.key]} <ChipCount>{s.count}</ChipCount>
-                </FilterChip>
-              ))}
-          </ChipStrip>
-        )}
       </div>
       <PemDecoder open={decoding} onOpenChange={setDecoding} />
       {ordered.length === 0 ? (

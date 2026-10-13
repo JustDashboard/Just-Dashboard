@@ -14,7 +14,6 @@ import type {
   Container,
   ContainerSparkline,
   ContainerStats,
-  DockerDiagnosis,
   DockerEngineInfo,
   DockerEvent,
 } from "@/lib/types"
@@ -33,8 +32,6 @@ import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
-import { useDockerFindingActions } from "@/components/docker/finding-actions"
-import { AttentionPanel } from "@/components/docker/attention"
 import { ExplainIcon } from "@/components/docker/explain"
 import { ContainerBand } from "@/components/docker/containers-band"
 import { ContainerRows } from "@/components/docker/containers-table"
@@ -87,7 +84,7 @@ import { Button } from "@/components/ui/button"
  * which containers they are about, so the list comes first.
  */
 
-type StateFilter = ContainerBucket | "attention"
+type StateFilter = ContainerBucket
 
 /** The state chips, in the order they are asked about; the toned ones only while there is one. */
 const STATES: { value: StateFilter; label: string; tone?: "danger" | "warning" }[] = [
@@ -96,7 +93,6 @@ const STATES: { value: StateFilter; label: string; tone?: "danger" | "warning" }
   { value: "starting", label: "Starting", tone: "warning" },
   { value: "paused", label: "Paused" },
   { value: "stopped", label: "Stopped" },
-  { value: "attention", label: "Needs attention", tone: "warning" },
 ]
 
 const FILTERS = new Set<string>(STATES.map((s) => s.value))
@@ -107,7 +103,6 @@ const DOT: Record<StateFilter, string> = {
   starting: "bg-warning",
   paused: "bg-muted-foreground",
   stopped: "bg-muted-foreground/50",
-  attention: "bg-warning",
 }
 
 /** The stack chip for the containers no compose project owns; brackets are not a project name. */
@@ -137,7 +132,7 @@ export default function ContainersPage() {
   const [events, setEvents] = useState<DockerEvent[]>([])
   const [socketError, setSocketError] = useState<string>()
   const [query, setQuery] = useSessionState("docker.containers.query", "")
-  const [remembered, setFilter] = useSessionState<string>("docker.containers.state", "")
+  const [remembered, setFilter] = useSessionState<string>("docker.containers.state.075", "")
   // A remembered "all" from before the chips were toggles is no filter.
   const filter = (FILTERS.has(remembered) ? remembered : "") as StateFilter | ""
   const [stack, setStack] = useSessionState<string>("docker.containers.stack", "")
@@ -168,11 +163,6 @@ export default function ContainersPage() {
     for (const line of trends.data ?? []) map.set(line.name, line)
     return map
   }, [trends.data])
-
-  const health = usePoll<DockerDiagnosis>(
-    (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
-    60_000,
-  )
   // The engine's name and its storage are facts, not readings: read once a
   // few minutes, and a host that refuses the call still lists its containers.
   const info = usePoll<DockerEngineInfo>(
@@ -213,7 +203,7 @@ export default function ContainersPage() {
   const oomKilled = useMemo(() => oomKilledIds(entries), [entries])
 
   // `refresh` is stable, so the verbs a row memoises stay stable with it.
-  const { pending, act } = useContainerControl(health.refresh)
+  const { pending, act } = useContainerControl(trends.refresh)
 
   /** Goes to one container, optionally straight at a tab. */
   const open = useCallback(
@@ -248,18 +238,6 @@ export default function ContainersPage() {
     if (legacy) router.replace(`/docker/containers/${encodeURIComponent(legacy)}`)
   }, [legacy, router])
 
-  const runFix = useDockerFindingActions({ confirm, onChanged: health.refresh, open })
-
-  const flagged = useMemo(() => {
-    const ids = new Set<string>()
-    for (const finding of health.data?.findings ?? []) {
-      if (finding.targetId && (finding.severity === "critical" || finding.severity === "warning")) {
-        ids.add(finding.targetId)
-      }
-    }
-    return ids
-  }, [health.data])
-
   const bucketOf = useCallback(
     (c: Container) => containerBucket(c, oomKilled.has(c.id)),
     [oomKilled],
@@ -272,14 +250,12 @@ export default function ContainersPage() {
       starting: 0,
       paused: 0,
       stopped: 0,
-      attention: 0,
     }
     for (const c of containers) {
       out[bucketOf(c)]++
-      if (flagged.has(c.id)) out.attention++
     }
     return out
-  }, [containers, bucketOf, flagged])
+  }, [containers, bucketOf])
 
   const stacks = useMemo(() => {
     const out = new Map<string, number>()
@@ -297,8 +273,7 @@ export default function ContainersPage() {
   const matching = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const rows = containers.filter((c) => {
-      if (filter === "attention" ? !flagged.has(c.id) : filter && bucketOf(c) !== filter)
-        return false
+      if (filter && bucketOf(c) !== filter) return false
       if (stackFilter && (c.composeStack || STANDALONE) !== stackFilter) return false
       if (!needle) return true
       return (
@@ -308,7 +283,7 @@ export default function ContainersPage() {
       )
     })
     return sortContainers(rows, sort, stats, bucketOf)
-  }, [containers, query, filter, stackFilter, flagged, bucketOf, sort, stats])
+  }, [containers, query, filter, stackFilter, bucketOf, sort, stats])
 
   const inspection = useInspectionOrder(
     matching,
@@ -344,7 +319,7 @@ export default function ContainersPage() {
     <Workspace
       name="Docker"
       refresh={() => {
-        health.refresh()
+        trends.refresh()
         trends.refresh()
         void get<Container[]>("/docker/containers/")
           .then(setContainers)
@@ -489,7 +464,6 @@ export default function ContainersPage() {
                     key={value}
                     selected={filter === value}
                     onClick={() => toggleFilter(value)}
-                    className={cn(value === "attention" && "text-warning hover:text-warning")}
                   >
                     <span aria-hidden className={cn("size-1.5 rounded-full", DOT[value])} />
                     {label}
@@ -584,13 +558,12 @@ export default function ContainersPage() {
                 stats={stats}
                 rates={rates}
                 trends={trendByName}
-                diagnosis={health.data}
                 oomKilled={oomKilled}
                 pending={pending}
                 confirm={confirm}
                 act={act}
                 onOpen={open}
-                onChanged={health.refresh}
+                onChanged={trends.refresh}
                 onStack={(name) => toggleStack(name || STANDALONE)}
               />
             )}
@@ -607,9 +580,6 @@ export default function ContainersPage() {
 
         {/* Under the table rather than over it: each row already counts what
             was found about it, and this is the reasoning behind the counts. */}
-        {(health.data?.attention.total ?? 0) > 0 && (
-          <AttentionPanel diagnosis={health.data} onAction={runFix} onRescan={health.refresh} />
-        )}
 
         {dialog}
       </Page>

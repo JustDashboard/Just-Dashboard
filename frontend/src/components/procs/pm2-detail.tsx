@@ -36,13 +36,7 @@ import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { usePM2Control, usePM2Verbs } from "@/components/procs/pm2-actions"
-import {
-  isCluster,
-  memoryLimitShare,
-  pm2AppKey,
-  pm2Failing,
-  pm2Key,
-} from "@/components/procs/pm2-shared"
+import { isCluster, memoryLimitShare, pm2AppKey, pm2Key } from "@/components/procs/pm2-shared"
 import { MiniBar } from "@/components/procs/process-table"
 import { cpuTone, reach } from "@/components/procs/shared"
 
@@ -55,9 +49,6 @@ const AFTER_START = 60_000
 
 /** An open sheet reads its process this often: the figures are the point of opening it. */
 const DETAIL_POLL = 2000
-
-/** A start this recent is the restart the counter just counted, and the sheet says so. */
-const RECENT_START = 5 * 60
 
 /**
  * One PM2 application, opened: what it is doing now, how it is run, and what
@@ -316,8 +307,6 @@ function PM2Overview({
         {process.watching && <Tag tone="warning">watching</Tag>}
       </p>
 
-      <Attention process={process} uptime={uptime} onLogs={onLogs} />
-
       {online && (
         <StatGrid columns={4} dense className="-mx-5 border-y border-hairline">
           <Readings process={process} row={row} uptime={uptime} />
@@ -516,60 +505,6 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
       <dd className="truncate text-right text-xs">{children}</dd>
     </div>
   )
-}
-
-/**
- * What is wrong with it, if anything, said once at the top: an application
- * PM2 gave up on, one stopped on purpose, and one that restarted in the last
- * few minutes — each with the way to its log, which is where the reason is.
- */
-function Attention({
-  process,
-  uptime,
-  onLogs,
-}: {
-  process: PM2Process
-  uptime: number
-  onLogs: () => void
-}) {
-  const read = (
-    <Button size="xs" variant="outline" className="mt-2" onClick={onLogs}>
-      Read the log
-    </Button>
-  )
-  if (pm2Failing(process)) {
-    return (
-      <Notice tone="danger" title="PM2 stopped restarting it">
-        {process.unstableRestarts > 0
-          ? `It died within moments of starting ${plural(process.unstableRestarts, "time")} in a row, and PM2 gives up after that. It stays down until it is started again; what it printed before each crash is in its log.`
-          : `PM2 reports it as ${process.status}. It stays down until it is started again; what it printed is in its log.`}
-        <div>{read}</div>
-      </Notice>
-    )
-  }
-  if (process.status === "stopped") {
-    return (
-      <Notice title="Stopped">
-        Registered with PM2 and not running. It serves again once started; nothing about it was
-        removed.
-      </Notice>
-    )
-  }
-  if (process.status === "online" && process.restarts > 0 && uptime < RECENT_START) {
-    return (
-      <Notice tone="warning" title={`Restarted ${duration(uptime)} ago`}>
-        {`That is its ${ordinal(process.restarts)} restart${process.autorestart ? ", most likely after a crash" : ""}. The minutes around it are in its log.`}
-        <div>{read}</div>
-      </Notice>
-    )
-  }
-  return null
-}
-
-function ordinal(n: number) {
-  const rem = n % 100
-  if (rem >= 11 && rem <= 13) return `${n}th`
-  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`
 }
 
 /**
@@ -966,3 +901,5 @@ function PM2Logs({ process }: { process: PM2Process }) {
     </>
   )
 }
+
+const RECENT_START = 5 * 60

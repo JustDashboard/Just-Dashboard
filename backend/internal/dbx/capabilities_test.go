@@ -28,6 +28,11 @@ func TestCapabilityTableIsCoherent(t *testing.T) {
 	for _, d := range Drivers() {
 		for _, flavor := range Flavors(d) {
 			caps := Capabilities(d, flavor)
+			for _, retired := range []string{"advisor", "engineAdvisor"} {
+				if _, present := caps[retired]; present {
+					t.Errorf("%s/%s advertises retired %s", d, flavor, retired)
+				}
+			}
 			if len(caps) != len(seen) {
 				t.Errorf("%s/%s reads %d flags, %d are declared", d, flavor, len(caps), len(seen))
 			}
@@ -124,8 +129,6 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"privileges":      "postgres -cockroachdb mysql sqlserver clickhouse",
 		"statements":      "postgres -cockroachdb mysql -tidb clickhouse sqlserver oracle",
 		"statementsReset": "postgres -cockroachdb mysql -tidb",
-		"advisor":         "sql",
-		"engineAdvisor":   sqlStats,
 		"queryLog":        "postgres mysql clickhouse mongodb redis",
 		"clickhouseViews": "clickhouse",
 		"sqliteFile":      "sqlite",

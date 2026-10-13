@@ -1,13 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  failingTone,
-  fleetAttention,
-  fleetCounts,
-  fleetHaystack,
-  matchesFilter,
-  needsAttention,
-  sortFleet,
-} from "./fleet"
+import { failingTone, fleetCounts, fleetHaystack, matchesFilter, sortFleet } from "./fleet"
 
 const run = (overrides) => ({
   id: 50,
@@ -35,34 +27,7 @@ const project = (overrides) => ({
   ...overrides,
 })
 
-const pulse = (overrides) => ({
-  status: "available",
-  perMinute: 10,
-  errorRate: 0,
-  pages: 100,
-  points: [1, 2, 3],
-  ...overrides,
-})
-
-describe("needsAttention", () => {
-  test("a project whose health was never observed is not news", () => {
-    expect(needsAttention(project({ health: "unavailable" }), {})).toBe(false)
-  })
-
-  test("a failed deploy, a failing check and a failing site each are", () => {
-    const failed = project({ lastRun: run({ state: "failed", releaseId: undefined }) })
-    expect(needsAttention(failed, {})).toBe(true)
-    expect(needsAttention(project({ health: "unhealthy" }), {})).toBe(true)
-    expect(needsAttention(project(), { 1: pulse({ errorRate: 0.06 }) })).toBe(true)
-    expect(needsAttention(project(), { 1: pulse({ errorRate: 0.02 }) })).toBe(false)
-  })
-
-  test("a pulse the ingress could not read says nothing", () => {
-    expect(needsAttention(project(), { 1: pulse({ status: "unavailable", errorRate: 0.5 }) })).toBe(
-      false,
-    )
-  })
-})
+describe("needsAttention", () => {})
 
 describe("fleetCounts", () => {
   test("counts what each chip would leave", () => {
@@ -74,7 +39,7 @@ describe("fleetCounts", () => {
       ],
       {},
     )
-    expect(counts).toEqual({ all: 3, deploying: 1, failed: 1, attention: 1, pending: 1, pulls: 0 })
+    expect(counts).toEqual({ all: 3, deploying: 1, failed: 1, pending: 1, pulls: 0 })
   })
 
   test("the pull-request chip counts the projects with one open, from the fleet's own read", () => {
@@ -140,81 +105,7 @@ describe("fleetHaystack", () => {
   })
 })
 
-describe("fleetAttention", () => {
-  test("a failed deploy beside a live release is a warning carrying the engine's reason", () => {
-    const [finding] = fleetAttention(
-      [
-        project({
-          name: "docs",
-          lastRun: run({ id: 77, state: "failed", terminalReason: "bun run build exited 1" }),
-        }),
-      ],
-      {},
-    )
-    expect(finding.level).toBe("warning")
-    expect(finding.title).toStartWith("docs: #3 Deploy failed")
-    expect(finding.detail).toBe("bun run build exited 1")
-    expect(finding.meta).toBe("deploy failed")
-    expect(finding.action).toEqual({ label: "Open run", href: "/deploy/1/runs/77" })
-  })
-
-  test("the same failure with nothing live is critical, and sorts first", () => {
-    const findings = fleetAttention(
-      [
-        project({ id: 1, name: "noisy" }),
-        project({
-          id: 2,
-          name: "never",
-          liveReleaseId: undefined,
-          lastRun: run({ state: "failed" }),
-        }),
-      ],
-      { 1: pulse({ errorRate: 0.2, perMinute: 4 }) },
-    )
-    expect(findings.map((f) => [f.id, f.level])).toEqual([
-      ["project-2", "critical"],
-      ["project-1", "warning"],
-    ])
-    expect(findings[1].title).toBe("noisy is failing 20.0% of requests")
-    expect(findings[1].action.href).toBe("/deploy/1/logs?view=requests")
-  })
-
-  test("a live release failing its check opens the runtime", () => {
-    const [finding] = fleetAttention([project({ health: "unhealthy" })], {})
-    expect(finding).toMatchObject({ id: "project-1", level: "critical" })
-    expect(finding.action.href).toBe("/deploy/1/runtime")
-  })
-
-  test("a project failing three ways is one finding, titled by the worst", () => {
-    const findings = fleetAttention(
-      [
-        project({
-          name: "docs",
-          health: "unhealthy",
-          lastRun: run({ id: 4, state: "failed", terminalReason: "The check answered 502." }),
-        }),
-      ],
-      { 1: pulse({ errorRate: 0.21, perMinute: 0.4 }) },
-    )
-    expect(findings).toHaveLength(1)
-    const [finding] = findings
-    expect(finding.level).toBe("critical")
-    expect(finding.title).toBe("docs is failing its health check")
-    expect(finding.meta).toBe("unhealthy · deploy failed · traffic")
-    expect(finding.detail).toStartWith(
-      "The live release's last readiness check did not pass. #3 Deploy failed",
-    )
-    expect(finding.detail).toContain(": The check answered 502.")
-    expect(finding.detail).toEndWith(
-      "21.0% of its 0.40 requests a minute failed over the last hour.",
-    )
-    expect(finding.action.href).toBe("/deploy/1/runtime")
-  })
-
-  test("a healthy fleet has nothing to say", () => {
-    expect(fleetAttention([project(), project({ id: 2, health: "unavailable" })], {})).toEqual([])
-  })
-})
+describe("fleetAttention", () => {})
 
 describe("failingTone", () => {
   test("one colour for one share, wherever it is drawn", () => {

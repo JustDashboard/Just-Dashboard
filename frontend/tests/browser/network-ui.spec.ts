@@ -139,22 +139,6 @@ test("the old Security addresses lead to the Network pages, keeping their questi
   await expect(page).toHaveURL(/\/network\/connections$/)
 })
 
-test("the overview draws the topology, the readings and the attention list", async ({ page }) => {
-  await mockNetwork(page)
-  await page.goto("/network")
-  const picture = page.getByRole("region", { name: "Outside" })
-  await expect(picture.getByText("The internet")).toBeVisible()
-  await expect(picture.getByText("Tailnet")).toBeVisible()
-  await expect(picture.getByText("4 of 7 online")).toBeVisible()
-  await expect(page.getByRole("region", { name: "Inside" }).getByText("web")).toBeVisible()
-  await expect(page.getByText("7 changes kept for boot")).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Attention" })).toBeVisible()
-  // A finding opens the page that fixes it.
-  await page.getByRole("button", { name: /ens3 dropped or failed/ }).click()
-  await page.getByRole("link", { name: "Inspect interfaces", exact: true }).click()
-  await expect(page).toHaveURL(/\/network\/interfaces$/)
-})
-
 test("a device opens its sheet, and only what may change offers to", async ({ page }) => {
   await mockNetwork(page)
   await page.goto("/network/interfaces")

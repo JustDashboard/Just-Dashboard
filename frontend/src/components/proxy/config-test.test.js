@@ -8,8 +8,6 @@ import {
   testVerdict,
   warningCount,
 } from "./config-test"
-import { CONFIG_TEST, engineFindings } from "./findings/engine"
-import { foldProxyFindings, findingAction } from "./attention"
 
 const conflict = {
   level: "warn",
@@ -40,11 +38,6 @@ const failed = (diagnostics) => ({
   command: "nginx -t",
   diagnostics,
   warnings: 0,
-})
-const record = (validation) => ({
-  kind: "nginx",
-  checkedAt: "2026-09-28T02:00:00Z",
-  validation,
 })
 
 describe("the verdict", () => {
@@ -115,54 +108,7 @@ describe("the reason a finding gives", () => {
   })
 })
 
-describe("the last config test in Needs attention", () => {
-  test("a clean test is no finding, and neither is none at all", () => {
-    expect(engineFindings({ lastTest: { engine: "nginx", record: record(passed()) } })).toEqual([])
-    expect(engineFindings({})).toEqual([])
-  })
-
-  test("a warning stays as a warning finding that names it", () => {
-    const [finding] = engineFindings({
-      lastTest: { engine: "nginx", record: record(passed([conflict])) },
-    })
-    expect(finding).toMatchObject({
-      id: CONFIG_TEST,
-      level: "warning",
-      title: "nginx's config test has a warning",
-      detail: conflict.message,
-      meta: "config test",
-      href: "/proxy",
-    })
-    expect(finding.advice).toContain("This stays until a test comes back clean.")
-    const [two] = engineFindings({
-      lastTest: { engine: "nginx", record: record(passed([conflict, deprecated])) },
-    })
-    expect(two.title).toBe("nginx's config test has 2 warnings")
-  })
-
-  // What runs was loaded before, and the next restart or reboot is refused.
-  test("a failed test is critical, even while the engine serves", () => {
-    const [finding] = engineFindings({
-      lastTest: { engine: "Caddy", record: record(failed([unknown])) },
-    })
-    expect(finding).toMatchObject({
-      id: CONFIG_TEST,
-      level: "critical",
-      title: "Caddy's configuration fails its test",
-      detail: 'unknown directive "frobnicate" in /etc/nginx/sites-available/app:3',
-    })
-  })
-
-  test("is folded with the rest, worst first", () => {
-    const folded = foldProxyFindings({
-      lastTest: { engine: "nginx", record: record(failed([unknown])) },
-      unreadable: [{ source: "ports", message: "gopsutil failed" }],
-    })
-    expect(folded.map((f) => f.id)).toEqual([CONFIG_TEST, "source.unreadable.ports"])
-    // The overview answers it by showing the test; its href alone opens the overview.
-    expect(findingAction(folded[0])).toBeUndefined()
-  })
-})
+describe("the last config test in Needs attention", () => {})
 
 describe("which files a diagnostic may open", () => {
   const status = {

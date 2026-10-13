@@ -810,7 +810,7 @@ async function testNginx() {
     const warnings = warningCount(validation)
     if (!validation.valid) {
       notify.error("nginx's config test failed", undefined, {
-        description: "Needs attention on the proxy overview names the lines it failed on.",
+        description: "Configuration tests name the file and line they failed on.",
       })
     } else {
       notify.success(

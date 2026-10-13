@@ -19,7 +19,6 @@ import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { PeerIdentity, ProcessList } from "@/components/security/marks"
 import { addressVerbs } from "@/components/security/address-verbs"
-import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 import { ProductLogo, processProduct } from "@/components/product-logo"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -73,7 +72,7 @@ import {
  */
 export function ConnectionsPanel() {
   const { can } = useAuth()
-  const { posture, applyFix, firewall } = useSecurity()
+  const { firewall } = useSecurity()
   const router = useRouter()
   const [filters, setFilters] = useFilterHistory("security.connections.filters", {
     q: "",
@@ -241,7 +240,6 @@ export function ConnectionsPanel() {
       {/* The "ports" findings are about listeners, which live on the proxy's
           Ports page; they are shown here because this is the page somebody
           opens to ask what is reachable. */}
-      <AreaFindings posture={posture} area="ports" onFix={applyFix} />
 
       {admin && (
         <ToggleGroup

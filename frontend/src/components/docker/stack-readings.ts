@@ -25,27 +25,15 @@ export function stackLane(stack: string) {
 }
 
 /** Where a stack sits for the page's state chips. Every stack is in exactly one. */
-export type StackBucket = "attention" | "running" | "stopped" | "undeployed"
-
-/** A stack the dashboard has something to act on: a bad service, a part down, or a leftover. */
-export function needsAttention(stack: ComposeStack) {
-  return (
-    stack.orphans.length > 0 ||
-    stack.services.some((s) => s.health === "unhealthy") ||
-    stack.state === "degraded" ||
-    stack.state === "partial"
-  )
-}
+export type StackBucket = "running" | "stopped" | "undeployed"
 
 export function stackBucket(stack: ComposeStack): StackBucket {
-  if (needsAttention(stack)) return "attention"
   if (stack.running > 0) return "running"
   if (stack.deployed) return "stopped"
   return "undeployed"
 }
 
 const BUCKET_RANK: Record<StackBucket, number> = {
-  attention: 0,
   running: 1,
   stopped: 2,
   undeployed: 3,

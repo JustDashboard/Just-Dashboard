@@ -48,36 +48,6 @@ func TestPruneCandidatesKeepsByCountAndAgeButNeverTheNewest(t *testing.T) {
 	}
 }
 
-func TestJobIsOverdueAfterTwoMissedIntervals(t *testing.T) {
-	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
-	yesterday := now.Add(-26 * time.Hour)
-	threeDaysAgo := now.Add(-72 * time.Hour)
-	cases := []struct {
-		name string
-		job  Job
-		want bool
-	}{
-		{"nightly, ran last night", Job{Enabled: true, Schedule: "0 3 * * *", LastSuccessAt: &yesterday}, false},
-		{"nightly, three days silent", Job{Enabled: true, Schedule: "0 3 * * *", LastSuccessAt: &threeDaysAgo}, true},
-		{"nightly, never ran, created three days ago", Job{Enabled: true, Schedule: "0 3 * * *", CreatedAt: threeDaysAgo}, true},
-		{"nightly, never ran, created today", Job{Enabled: true, Schedule: "0 3 * * *", CreatedAt: now.Add(-time.Hour)}, false},
-		{"weekly, three days silent", Job{Enabled: true, Schedule: "0 3 * * 1", LastSuccessAt: &threeDaysAgo}, false},
-		{"paused", Job{Enabled: false, Schedule: "0 3 * * *", LastSuccessAt: &threeDaysAgo}, false},
-		{"manual only", Job{Enabled: true, Schedule: "", LastSuccessAt: &threeDaysAgo}, false},
-	}
-	for _, c := range cases {
-		if got := c.job.IsOverdue(now); got != c.want {
-			t.Errorf("%s: overdue=%v, want %v", c.name, got, c.want)
-		}
-	}
-	if got := ScheduleInterval("0 3 * * *", now); got != 24*time.Hour {
-		t.Fatalf("nightly interval %v", got)
-	}
-	if got := ScheduleInterval("@hourly", now); got != time.Hour {
-		t.Fatalf("hourly interval %v", got)
-	}
-}
-
 func TestValidateRejectsBadSchedulesAndContainerNames(t *testing.T) {
 	job := Job{Name: "x", Sources: []string{"/srv"}, TargetKind: TargetLocal, Target: TargetConfig{Path: "/b"}}
 	job.Schedule = "not cron"

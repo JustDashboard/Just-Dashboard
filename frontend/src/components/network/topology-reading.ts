@@ -1,7 +1,6 @@
 import type {
   NetworkEgressIdentity,
   NetworkFlowEdge,
-  NetworkIncident,
   NetworkLink,
   NetworkLivePoint,
 } from "@/lib/types"
@@ -110,10 +109,4 @@ export function windowBreakdown(
     if (bytes > 0) out.push({ name: link.name, role: link.role, bytes })
   }
   return out.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name))
-}
-
-/** How long an incident lasted, or has lasted, in words. */
-export function incidentSpan(incident: NetworkIncident, nowMs: number): string {
-  const end = incident.resolvedAt ? Date.parse(incident.resolvedAt) : nowMs
-  return ageWords(Math.max(0, Math.round((end - Date.parse(incident.openedAt)) / 1000)))
 }

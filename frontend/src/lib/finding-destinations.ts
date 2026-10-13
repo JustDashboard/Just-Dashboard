@@ -68,7 +68,7 @@ export function findingNavigation(href: string): { href: string; label: string }
     label = "Review project settings"
   if (/^\/proxy\/sites\/[^/]+$/.test(url.pathname)) label = "Open site"
   if (
-    /^\/databases\/\d+(\/(data|query|search|schema|diagram|generate|performance|advisor|logs|access|backups|settings))?$/.test(
+    /^\/databases\/\d+(\/(data|query|search|schema|diagram|generate|performance|logs|access|backups|settings))?$/.test(
       url.pathname,
     )
   )
