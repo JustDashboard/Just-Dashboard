@@ -213,7 +213,8 @@ Deployments open the second group because shipping something is the reason most 
 
 Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
 there is something to say: a newer version, an update running, or one that finished and has not been
-dismissed. It is a card on arrival's light (`.update-art`, design system §16) with the dashboard's J,
+dismissed. It is the account card's container (the same edge and ground, tinted green or red only
+once a run has finished) with the dashboard's J,
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
 an install that updates in place gets *Update now*, which opens the update's own dialog

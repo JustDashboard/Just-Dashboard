@@ -23,8 +23,7 @@ import { Button } from "@/components/ui/button"
  * breaking notes and what the updater does was too much to read for a yes or
  * a no; all of that is on the Version page, where the notice's *View patch
  * notes* goes. What is left is the picture: the installed version wired to
- * the newest on arrival's light (`.update-art`, design system §16), the way
- * the sidebar notice draws it.
+ * the newest, the way the sidebar notice draws it, on the dialog's own ground.
  *
  * No phrase to type: the route is destructive, but installing an update is
  * not one of the unrecoverable acts that require one (security invariant 3).
@@ -76,7 +75,7 @@ export function UpdateDialog({
     >
       <div
         aria-hidden
-        className="update-art grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-5 py-6"
+        className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-5 py-6"
       >
         <VersionMark />
         <UpdateWire />

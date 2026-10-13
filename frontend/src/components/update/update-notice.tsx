@@ -34,14 +34,14 @@ import { Spinner } from "@/components/state"
  * The version an operator wants to know casually is already beside the
  * wordmark at the top of the same rail.
  *
- * When it does speak it is the liveliest thing in the shell, on purpose. It
- * stands on arrival's light (`.update-art`, design system §16) — the one
- * element of the shell that does, because it is the one that announces
- * something arriving — and it draws the update as what it is: the installed
+ * When it does speak it is the account card's container — the same edge and
+ * ground as the card under it, tinted green or red only once a run has
+ * finished — and the life is in what it draws, not behind it: the installed
  * version wired to the newest with a pulse running toward it, and a band of
  * everything the releases between them bring, in the kinds' own colours.
  * While it installs, the beam runs round the card and the stage is lit; when
- * an install watched here succeeds, paper.
+ * an install watched here succeeds, paper. The washes of the sign-in screens
+ * were tried here and read as out of place in the shell.
  *
  * The notes are the Version page's (`/dashboard`), not a panel of their own:
  * that page already is the history, searchable, with the update in its
@@ -105,12 +105,11 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
             <Link
               href="/dashboard"
               aria-label={label}
-              data-tone={tone}
               className={cn(
-                "update-art relative flex size-8 items-center justify-center rounded-lg border focus-ring transition-colors",
-                tone === "brand" && "border-rule-brand text-brand hover:bg-sidebar-accent",
-                tone === "success" && "border-rule-success text-success",
-                tone === "danger" && "border-rule-danger text-destructive",
+                "relative flex size-8 items-center justify-center rounded-lg focus-ring transition-colors",
+                tone === "brand" && "bg-plot-brand text-brand hover:bg-plot-brand-hover",
+                tone === "success" && "bg-plot-success text-success hover:bg-plot-success-hover",
+                tone === "danger" && "bg-plot-danger text-destructive hover:bg-plot-danger-hover",
               )}
             >
               {mode === "running" && <BorderBeam size={24} duration={2.5} />}
@@ -142,12 +141,11 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
       {celebrate}
       <section
         aria-label="Dashboard update"
-        data-tone={tone}
         className={cn(
-          "update-art relative isolate min-w-0 animate-rise overflow-hidden rounded-xl border bg-card",
-          tone === "brand" && "border-rule-brand",
-          tone === "success" && "border-rule-success",
-          tone === "danger" && "border-rule-danger",
+          "relative isolate min-w-0 animate-rise overflow-hidden rounded-lg border",
+          tone === "brand" && "border-sidebar-border bg-card",
+          tone === "success" && "border-rule-success bg-wash-success",
+          tone === "danger" && "border-rule-danger bg-wash-danger",
         )}
       >
         {mode === "running" && <BorderBeam size={72} duration={4} />}

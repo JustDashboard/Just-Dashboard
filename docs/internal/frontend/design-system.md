@@ -3043,14 +3043,11 @@ these screens to have colour and life, and for the line grid that used to sit un
 the exception is the ground of those screens and nothing else — no page in either register takes a
 wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
 
-**One element of the shell stands on the same light: the update notice.** The operator asked for the
-notice above the account card to be as alive as these screens, and the argument is the same one —
-it is the one thing in the shell that announces something arriving. `.update-art` is `.auth-art` at
-a 240px card's scale, its main light in the notice's tone: the signal while a version is on its way,
-`--success` once it has landed, `--destructive` if it did not (`data-tone`), over the violet and
-blue of the lower corners. The dialog that installs the update (`components/update/update-dialog.tsx`)
-opens its body on the same ground, behind the picture of the two versions. Nothing else takes it: not
-the account card beside it, not the Version page the notice leads to, which is a reading page.
+The update notice above the account card was tried on `.auth-art`'s light at card scale and taken
+back off at the operator's request: in the shell the washes read as the sign-in screen pasted into a
+dashboard. It is the account card's own container (`border-sidebar-border`, `bg-card`), tinted with
+`bg-wash-success` or `bg-wash-danger` only once a run has finished, and its life is the wire, the
+kind band and the beam (§11) rather than a ground. Arrival's light stays on arrival's screens.
 
 ## 17. Redesigning a flow page
 
