@@ -10,6 +10,7 @@ export type ConfettiRef = { fire: (options?: Options) => void }
  * A burst of paper. Magic UI's `confetti`, from the shadcn registry, cut
  * down to a canvas and a `fire` handle: the one thing it does here is
  * celebrate a release that went live while somebody was watching it build,
+ * an update of the dashboard itself that finished while its tab was open,
  * and the account's first sidebar landing at the end of the first-run
  * question; it is never fired on arrival at a page. The pieces are the
  * palette's own colours, read at the moment of firing so they follow the

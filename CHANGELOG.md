@@ -10,6 +10,11 @@ Every release of Just Dashboard, newest first.
 
 Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.
 
+### Changed
+
+- Show updates in a compact notice and a dedicated installation dialog
+  - The update notice compares the installed and available versions, opens the installation progress in its own dialog, and leaves the complete patch notes on the Version page.
+
 ### Removed
 
 - Remove automatic attention panels, issue badges and settings recommendations

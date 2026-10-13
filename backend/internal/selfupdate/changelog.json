@@ -16,6 +16,11 @@
           "kind": "removed",
           "text": "Retire advisory detectors and their API endpoints",
           "detail": "Docker diagnosis/anomalies, security posture, database Advisor, optional project checks, certificate hygiene and proxy finding snoozes are removed. Network attention collection no longer runs in the background. Existing database migration entries and historical records remain compatible with upgrades."
+        },
+        {
+          "kind": "changed",
+          "text": "Show updates in a compact notice and a dedicated installation dialog",
+          "detail": "The update notice compares the installed and available versions, opens the installation progress in its own dialog, and leaves the complete patch notes on the Version page."
         }
       ]
     },
