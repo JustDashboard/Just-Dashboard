@@ -86,6 +86,14 @@ func (u *Upgrader) checkOrigin(r *http.Request) bool {
 	return false
 }
 
+// SameSite is checkOrigin for a request that must come from a page: one
+// with no Origin at all is refused too. It guards routes that take a
+// browser's cookie without the CSRF header, which a page they serve cannot
+// know to send.
+func (u *Upgrader) SameSite(r *http.Request) bool {
+	return r.Header.Get("Origin") != "" && u.checkOrigin(r)
+}
+
 func parseOrigin(raw string) (origin, bool) {
 	u, err := url.Parse(raw)
 	if err != nil {

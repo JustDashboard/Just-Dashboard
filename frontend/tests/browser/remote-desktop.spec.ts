@@ -1,11 +1,14 @@
 import { expect, test } from "@playwright/test"
 import {
+  BRIDGE,
   ENGINE,
   instruction,
   mockRemoteDesktop,
   overview,
   OFFICE,
   MAC,
+  PAIRED,
+  streamView,
 } from "./remote-desktop-fixture"
 
 test("the overview draws the computers as the picture, the band and cards, without tiles", async ({
@@ -29,6 +32,7 @@ test("the overview draws the computers as the picture, the band and cards, witho
     `/remote-desktop/${OFFICE}`,
   )
   await expect(picture).toContainText("Screen Sharing not answering")
+  await expect(picture).toContainText("guacd 1.6.0 · Moonlight Web 2.10.0")
 
   const band = page.locator("[data-slot=remote-band]")
   await expect(band.getByRole("region", { name: "Reach" })).toContainText("of 4 ready")
@@ -39,6 +43,12 @@ test("the overview draws the computers as the picture, the band and cards, witho
   await expect(cards).toHaveCount(4)
   await expect(cards.filter({ hasText: "studio-mac" })).toContainText("macOS · Screen Sharing")
   await expect(cards.filter({ hasText: "office-pc" })).toContainText("In a session")
+  // Paired with Sunshine, the Mac offers Stream beside Connect; the others do not.
+  await expect(page.getByRole("link", { name: "Stream studio-mac with Sunshine" })).toHaveAttribute(
+    "href",
+    `/remote-desktop/${MAC}?mode=stream`,
+  )
+  await expect(page.getByRole("link", { name: /^Stream .* with Sunshine$/ })).toHaveCount(1)
 
   // A desktop on the tailnet that is not added yet is one press from the flow;
   // the phone on the same tailnet is not offered.
@@ -258,4 +268,83 @@ test("removing a computer asks first and leaves the computer itself alone", asyn
     .getByRole("button", { name: "Remove" })
     .click()
   await expect.poll(() => calls.deleted).toEqual([MAC])
+})
+
+test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, then frames the stream", async ({
+  page,
+}) => {
+  const { calls, state } = await mockRemoteDesktop(page)
+  let sessions = 0
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      sessions += 1
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+    },
+  )
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.getByText("Pair with Sunshine on studio-mac")).toBeVisible()
+  // Stream mode closes Control: no Guacamole session is opened under it.
+  expect(sessions).toBe(0)
+
+  await page.getByRole("button", { name: "Pair", exact: true }).click()
+  await expect(page.getByLabel("PIN 4 8 2 1")).toBeVisible()
+  expect(calls.pairs).toEqual([MAC])
+  await expect(page.getByText("Type this PIN into Sunshine on studio-mac")).toBeVisible()
+
+  await page.getByRole("button", { name: "Type it through Control" }).click()
+  await expect(page).not.toHaveURL(/mode=stream/)
+  await expect.poll(() => sessions).toBe(1)
+  const card = page.getByRole("status").filter({ hasText: "Sunshine PIN" })
+  await expect(card.getByLabel("PIN 4 8 2 1")).toBeVisible()
+
+  // Sunshine takes the PIN: the card goes on its own, and Stream frames the bridge's page.
+  state.stream = streamView(PAIRED)
+  await expect(card).toBeHidden({ timeout: 15_000 })
+  await page.getByRole("radio", { name: "Stream" }).click()
+  const frame = page.locator('iframe[data-slot="remote-stream"]')
+  await expect(frame).toHaveAttribute(
+    "src",
+    "/api/v1/remote-desktop/bridge/stream.html?hostId=41&appId=3",
+  )
+  await expect(
+    page.frameLocator('iframe[data-slot="remote-stream"]').getByText("The bridge's stream page"),
+  ).toBeVisible()
+  const settings = async () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("mlSettings") ?? "{}"))
+  expect(await settings()).toMatchObject({
+    dataTransport: "websocket",
+    videoCodec: "h264",
+    videoSize: "1080p",
+    fps: 60,
+    bitrate: 20000,
+  })
+
+  await page.getByRole("radio", { name: "Sharp" }).click()
+  await expect.poll(async () => (await settings()).videoSize).toBe("1440p")
+  expect((await settings()).bitrate).toBe(40000)
+})
+
+test("Stream installs its bridge as a job on a server that has none", async ({ page }) => {
+  const { calls } = await mockRemoteDesktop(page, {
+    stream: streamView({ bridge: { ...BRIDGE, state: "missing", address: undefined } }),
+  })
+  await page.goto(`/remote-desktop/${OFFICE}?mode=stream`)
+  await page.getByRole("button", { name: "Install Stream mode" }).click()
+  await expect(page.getByText("Pair with Sunshine on office-pc")).toBeVisible()
+  expect(calls.streamInstalls).toBe(1)
+})
+
+test("Stream says where Sunshine is turned on, in the computer's own system's words", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, {
+    stream: streamView({ sunshine: { state: "closed", error: "refused", checkedAt: 0 } }),
+  })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.getByText("Turn on Sunshine on studio-mac")).toBeVisible()
+  await expect(page.getByText("100.101.12.40:47989 (refused)", { exact: false })).toBeVisible()
+  await expect(page.getByText("brew install lizardbyte/homebrew/sunshine")).toBeVisible()
+  await page.getByRole("button", { name: "Do it through Control" }).click()
+  await expect(page).not.toHaveURL(/mode=stream/)
 })

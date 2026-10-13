@@ -38,10 +38,12 @@ type Tailnet struct {
 }
 
 type Options struct {
-	DB      *sql.DB
-	Seal    func(string) (string, error)
-	Open    func(string) (string, error)
-	Engine  Engine
+	DB     *sql.DB
+	Seal   func(string) (string, error)
+	Open   func(string) (string, error)
+	Engine Engine
+	// Bridge is the stream bridge's container, beside the engine.
+	Bridge  Engine
 	Tailnet func(ctx context.Context) (Tailnet, error)
 	// Dial reaches guacd and probes computers; tests swap it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
@@ -53,13 +55,18 @@ type Options struct {
 type Service struct {
 	store   *store
 	engine  Engine
+	bridge  Engine
 	tailnet func(ctx context.Context) (Tailnet, error)
 	dial    func(ctx context.Context, network, address string) (net.Conn, error)
 	lookup  func(ctx context.Context, host string) ([]net.IPAddr, error)
 	now     func() time.Time
 
-	mu   sync.Mutex
-	live map[string]int
+	mu          sync.Mutex
+	live        map[string]int
+	pairs       map[string]*pairing
+	streams     int
+	bridgeAt    string
+	bridgeUntil time.Time
 }
 
 func New(o Options) *Service {
@@ -79,11 +86,13 @@ func New(o Options) *Service {
 	return &Service{
 		store:   &store{db: o.DB, seal: o.Seal, open: o.Open, now: o.Now},
 		engine:  o.Engine,
+		bridge:  o.Bridge,
 		tailnet: o.Tailnet,
 		dial:    o.Dial,
 		lookup:  o.Lookup,
 		now:     o.Now,
 		live:    map[string]int{},
+		pairs:   map[string]*pairing{},
 	}
 }
 
@@ -91,10 +100,13 @@ func New(o Options) *Service {
 func (s *Service) Reconcile(ctx context.Context) error { return s.store.interruptSessions(ctx) }
 
 func (s *Service) Close() error {
-	if s.engine == nil {
-		return nil
+	var errs []error
+	for _, e := range []Engine{s.engine, s.bridge} {
+		if e != nil {
+			errs = append(errs, e.Close())
+		}
 	}
-	return s.engine.Close()
+	return errors.Join(errs...)
 }
 
 func (s *Service) Engine(ctx context.Context) EngineStatus { return s.engine.Status(ctx) }
@@ -179,6 +191,7 @@ type ComputerView struct {
 
 type Overview struct {
 	Engine    EngineStatus    `json:"engine"`
+	Stream    EngineStatus    `json:"stream"`
 	Tailnet   Tailnet         `json:"tailnet"`
 	Computers []ComputerView  `json:"computers"`
 	Sessions  []SessionRecord `json:"sessions"`
@@ -195,10 +208,14 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	}
 	o := Overview{Layouts: Layouts}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		o.Engine = s.engine.Status(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		o.Stream = s.bridge.Status(ctx)
 	}()
 	go func() {
 		defer wg.Done()

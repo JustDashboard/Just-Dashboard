@@ -26,7 +26,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { put, wsUrl } from "@/lib/api"
+import { Segments } from "@/components/deploy/settings/segments"
+import { del, put, wsUrl } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import {
   combosFor,
@@ -39,8 +40,13 @@ import {
   REMOTE_DESKTOP_HREF,
   sessionHref,
   sessionProblem,
+  STREAM_QUALITIES,
+  streamStage,
   type KeyCombo,
   type RdComputerView,
+  type RdStream,
+  type SessionMode,
+  type StreamQuality,
 } from "@/lib/remote-desktop"
 import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
@@ -48,6 +54,7 @@ import { cn } from "@/lib/utils"
 import { ComputerMark, HueKey, reachTone } from "@/components/remote-desktop/marks"
 import { draftOf, inputOf } from "@/components/remote-desktop/computer-form"
 import { useRemoteDesktop } from "@/components/remote-desktop/use-remote-desktop"
+import { PinCard, StreamPane, useStream } from "@/components/remote-desktop/stream"
 
 type Phase =
   | { kind: "connecting" }
@@ -94,8 +101,21 @@ const DISCONNECTED = 5
  * Keys go to the computer while the screen has focus; fullscreen also asks
  * the browser for the keyboard, so Alt+Tab and the Windows key reach the
  * computer instead of this one.
+ *
+ * Stream mode puts Sunshine's video in the screen's place, through the
+ * bridge, and the Control session is closed while it is up. Pairing is
+ * typed into Sunshine on the computer, usually through Control, so a PIN
+ * that is waiting stays over the Control screen until Sunshine takes it.
  */
-export function RemoteSession({ id }: { id: string }) {
+export function RemoteSession({
+  id,
+  mode,
+  onMode,
+}: {
+  id: string
+  mode: SessionMode
+  onMode: (mode: SessionMode) => void
+}) {
   const { data, hueOf, refresh } = useRemoteDesktop(15_000)
   const computer = data?.computers.find((candidate) => candidate.id === id)
   const workspace = useRef<HTMLDivElement>(null)
@@ -112,7 +132,16 @@ export function RemoteSession({ id }: { id: string }) {
   const [drive, setDrive] = useState(false)
   const [transfers, setTransfers] = useState<Transfer[]>([])
   const [startedAt, setStartedAt] = useState<number>()
+  const [quality, setQuality] = useViewState<StreamQuality>(
+    "remote-desktop.stream-quality",
+    "smooth",
+  )
+  const [streamAttempt, setStreamAttempt] = useState(0)
+  const streamPoll = useStream(id, mode === "stream")
+  const stream = streamPoll.data
+  const pin = stream?.pairing ? stream.pin : undefined
   const known = computer !== undefined
+  const control = mode === "control"
 
   const track = useCallback((key: string, change: Partial<Transfer>) => {
     setTransfers((held) =>
@@ -121,7 +150,7 @@ export function RemoteSession({ id }: { id: string }) {
   }, [])
 
   useEffect(() => {
-    if (!known) return
+    if (!known || !control) return
     let cancelled = false
     let teardown = () => {}
     void (async () => {
@@ -259,7 +288,7 @@ export function RemoteSession({ id }: { id: string }) {
       cancelled = true
       teardown()
     }
-  }, [id, known, attempt, track])
+  }, [id, known, control, attempt, track])
 
   useEffect(() => {
     const onChange = () => {
@@ -284,6 +313,13 @@ export function RemoteSession({ id }: { id: string }) {
     // so Alt+Tab and the Windows key switch windows on the computer.
     await keyboard?.lock?.().catch(() => {})
     viewport.current?.focus()
+  }
+
+  const switchMode = (next: SessionMode) => {
+    if (next === mode) return
+    // The Control session is closed in Stream and opened afresh on the way back.
+    if (next === "control") setPhase({ kind: "connecting" })
+    onMode(next)
   }
 
   const signIn = async (values: Record<string, string>, remember: boolean) => {
@@ -419,13 +455,24 @@ export function RemoteSession({ id }: { id: string }) {
               <span className="flex min-w-0 items-center gap-2 px-1">
                 <ComputerMark os={computer.os} size="sm" className="scale-75" />
                 <span className="truncate text-body font-medium">{computer.name}</span>
-                <span className="hidden truncate text-hint text-muted-foreground sm:inline">
-                  {protocolLabel(computer.protocol, computer.os)}
-                </span>
               </span>
             )}
+            <Segments
+              label="How the screen is drawn"
+              value={mode}
+              onChange={switchMode}
+              options={[
+                {
+                  value: "control",
+                  label: computer ? protocolLabel(computer.protocol, computer.os) : "Control",
+                },
+                { value: "stream", label: "Stream" },
+              ]}
+            />
             <span className="flex-1" />
-            {phase.kind === "connected" ? (
+            {!control ? (
+              <StreamStatus stream={stream} />
+            ) : phase.kind === "connected" ? (
               <Status
                 tone="running"
                 live
@@ -443,7 +490,7 @@ export function RemoteSession({ id }: { id: string }) {
                 className="px-2"
               />
             )}
-            {computer && phase.kind === "connected" && (
+            {computer && control && phase.kind === "connected" && (
               <VerbMenu
                 label="Send keys"
                 trigger={
@@ -458,6 +505,11 @@ export function RemoteSession({ id }: { id: string }) {
                   run: () => send(combo),
                 }))}
               />
+            )}
+            {!control && stream && streamStage(stream) === "ready" && (
+              <IconAction label="Reload the stream" onClick={() => setStreamAttempt((n) => n + 1)}>
+                <RefreshClockwise />
+              </IconAction>
             )}
             <IconAction
               label={tools ? "Hide the session tools" : "Show the session tools"}
@@ -477,83 +529,108 @@ export function RemoteSession({ id }: { id: string }) {
             </Button>
           </PaneHeader>
 
-          <div
-            className="relative min-h-0 flex-1 bg-surface-sunken"
-            onDragOver={(event) => {
-              if (drive) event.preventDefault()
-            }}
-            onDrop={(event) => {
-              if (!drive) return
-              event.preventDefault()
-              upload(event.dataTransfer.files)
-            }}
-          >
-            <div
-              ref={viewport}
-              tabIndex={0}
-              role="application"
-              aria-label={computer ? `The screen of ${computer.name}` : "The remote screen"}
-              onPointerDown={() => {
-                wake()
-                viewport.current?.focus()
-              }}
-              className={cn(
-                "absolute inset-0 flex items-center justify-center overflow-hidden outline-none",
-                phase.kind !== "connected" && "invisible",
-              )}
-            >
-              <div ref={stage} data-slot="remote-screen" className="relative" />
+          {!control && computer ? (
+            <div className="relative min-h-0 flex-1 bg-surface-sunken">
+              <StreamPane
+                computer={computer}
+                stream={stream}
+                quality={quality}
+                attempt={streamAttempt}
+                onRefresh={streamPoll.refresh}
+                onControl={() => switchMode("control")}
+              />
             </div>
-            {computer && phase.kind !== "connected" && (
-              <div className="absolute inset-0 flex items-center justify-center p-6">
-                <div className="flex max-w-md min-w-0 flex-col items-center gap-4 text-center">
-                  <ComputerMark os={computer.os} size="lg" reach={reach} />
-                  {phase.kind === "sign-in" ? (
-                    <SignIn computer={computer} fields={phase.fields} onSubmit={signIn} />
-                  ) : phase.kind === "connecting" ? (
-                    <>
-                      <TextShimmer className="text-title font-semibold">{`Connecting to ${computer.name}…`}</TextShimmer>
-                      <p className="text-hint text-muted-foreground">
-                        Through guacd on this server, to {computer.host}:{computer.port}
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="space-y-1.5">
-                        <p className="text-title font-semibold">
-                          {problem ? problem.title : "The session ended"}
-                        </p>
-                        <p className="text-body text-muted-foreground">
-                          {problem
-                            ? problem.detail
-                            : `${computer.name} is still there; connect again whenever you need it.`}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setPhase({ kind: "connecting" })
-                            setAttempt((held) => held + 1)
-                            refresh()
-                          }}
-                        >
-                          <RefreshClockwise className="size-3.5" />
-                          Connect again
-                        </Button>
-                        <Button size="sm" variant="outline" asChild>
-                          <Link href={REMOTE_DESKTOP_HREF}>Back to the computers</Link>
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </div>
+          ) : (
+            <div
+              className="relative min-h-0 flex-1 bg-surface-sunken"
+              onDragOver={(event) => {
+                if (drive) event.preventDefault()
+              }}
+              onDrop={(event) => {
+                if (!drive) return
+                event.preventDefault()
+                upload(event.dataTransfer.files)
+              }}
+            >
+              <div
+                ref={viewport}
+                tabIndex={0}
+                role="application"
+                aria-label={computer ? `The screen of ${computer.name}` : "The remote screen"}
+                onPointerDown={() => {
+                  wake()
+                  viewport.current?.focus()
+                }}
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center overflow-hidden outline-none",
+                  phase.kind !== "connected" && "invisible",
+                )}
+              >
+                <div ref={stage} data-slot="remote-screen" className="relative" />
               </div>
-            )}
-          </div>
+              {computer && pin && (
+                <PinCard computer={computer} pin={pin} onStream={() => switchMode("stream")} />
+              )}
+              {computer && phase.kind !== "connected" && (
+                <div className="absolute inset-0 flex items-center justify-center p-6">
+                  <div className="flex max-w-md min-w-0 flex-col items-center gap-4 text-center">
+                    <ComputerMark os={computer.os} size="lg" reach={reach} />
+                    {phase.kind === "sign-in" ? (
+                      <SignIn computer={computer} fields={phase.fields} onSubmit={signIn} />
+                    ) : phase.kind === "connecting" ? (
+                      <>
+                        <TextShimmer className="text-title font-semibold">{`Connecting to ${computer.name}…`}</TextShimmer>
+                        <p className="text-hint text-muted-foreground">
+                          Through guacd on this server, to {computer.host}:{computer.port}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="space-y-1.5">
+                          <p className="text-title font-semibold">
+                            {problem ? problem.title : "The session ended"}
+                          </p>
+                          <p className="text-body text-muted-foreground">
+                            {problem
+                              ? problem.detail
+                              : `${computer.name} is still there; connect again whenever you need it.`}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setPhase({ kind: "connecting" })
+                              setAttempt((held) => held + 1)
+                              refresh()
+                            }}
+                          >
+                            <RefreshClockwise className="size-3.5" />
+                            Connect again
+                          </Button>
+                          <Button size="sm" variant="outline" asChild>
+                            <Link href={REMOTE_DESKTOP_HREF}>Back to the computers</Link>
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {tools && !immersive && computer && (
+        {tools && !immersive && computer && !control && (
+          <StreamTools
+            computer={computer}
+            stream={stream}
+            quality={quality}
+            onQuality={setQuality}
+            onUnpaired={streamPoll.refresh}
+          />
+        )}
+        {tools && !immersive && computer && control && (
           <Tools
             computer={computer}
             connected={phase.kind === "connected"}
@@ -807,6 +884,129 @@ function Tools({
             ))}
           </div>
         </section>
+      </div>
+    </aside>
+  )
+}
+
+function StreamStatus({ stream }: { stream: RdStream | undefined }) {
+  if (!stream) return <TextShimmer className="px-2 text-xs font-medium">reading…</TextShimmer>
+  const stage = streamStage(stream)
+  if (stage === "ready")
+    return (
+      <Status
+        tone="running"
+        live
+        label={latency(stream.sunshine.latencyMs) ?? "streaming"}
+        className="px-2"
+      />
+    )
+  if (stage === "pin") return <Status tone="notice" label="waiting for the PIN" className="px-2" />
+  return (
+    <Status
+      tone="warning"
+      label={
+        stage === "bridge"
+          ? "bridge not running"
+          : stage === "sunshine"
+            ? "Sunshine not answering"
+            : "not paired"
+      }
+      className="px-2"
+    />
+  )
+}
+
+/**
+ * Stream mode's side of the tools: where the picture comes from, how sharp
+ * it is asked to be, and pairing again. The keyboard, mouse modes and the
+ * stream's own statistics are in the stream's menu, at its left edge.
+ */
+function StreamTools({
+  computer,
+  stream,
+  quality,
+  onQuality,
+  onUnpaired,
+}: {
+  computer: RdComputerView
+  stream: RdStream | undefined
+  quality: StreamQuality
+  onQuality: (quality: StreamQuality) => void
+  onUnpaired: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const preset = STREAM_QUALITIES.find((q) => q.key === quality) ?? STREAM_QUALITIES[0]
+  const unpair = async () => {
+    setBusy(true)
+    try {
+      await del(`/remote-desktop/computers/${computer.id}/stream`)
+      onUnpaired()
+    } catch (err) {
+      notify.error(`Could not unpair ${computer.name}`, err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <aside
+      aria-label="Stream tools"
+      className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-hairline xl:flex"
+    >
+      <div className="flex h-10 shrink-0 items-center border-b border-hairline px-4 text-body font-medium">
+        Stream
+      </div>
+      <div className="flex flex-col gap-6 p-4">
+        <section aria-label="Connection" className="flex flex-col gap-2 text-hint">
+          <p className="eyebrow">Connection</p>
+          <Fact label="From">Sunshine{stream?.address ? ` at ${stream.address}` : ""}</Fact>
+          <Fact label="Through">Moonlight Web on this server</Fact>
+          <Fact label="Picture">H.264 over this dashboard</Fact>
+          <Fact label="Round trip">{latency(stream?.sunshine.latencyMs) ?? "—"}</Fact>
+          <Fact label="Paired">{stream?.paired ? "yes" : "not yet"}</Fact>
+        </section>
+
+        <section aria-label="Quality" className="flex flex-col gap-2">
+          <p className="eyebrow">Quality</p>
+          <Segments
+            label="Stream quality"
+            value={quality}
+            onChange={onQuality}
+            fill
+            options={STREAM_QUALITIES.map((q) => ({ value: q.key, label: q.label }))}
+          />
+          <p className="text-hint text-muted-foreground">
+            {preset.detail}, up to {preset.bitrate / 1000} Mb/s. Sunshine scales the screen to it; a
+            change reloads the stream.
+          </p>
+        </section>
+
+        <section aria-label="In the stream" className="flex flex-col gap-2">
+          <p className="eyebrow">In the stream</p>
+          <p className="text-hint text-muted-foreground">
+            The arrow at the stream&apos;s left edge opens its menu: the on-screen keyboard, the
+            mouse&apos;s modes, its statistics and leaving fullscreen.
+          </p>
+        </section>
+
+        {stream?.hostId ? (
+          <section aria-label="Pairing" className="flex flex-col gap-2">
+            <p className="eyebrow">Pairing</p>
+            <p className="text-hint text-muted-foreground">
+              Unpairing forgets {computer.name} on the bridge; it is paired again with a new PIN.
+              Remove the device from Sunshine&apos;s Clients list too to revoke it there.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="self-start"
+              pending={busy}
+              onClick={() => void unpair()}
+            >
+              Unpair
+            </Button>
+          </section>
+        ) : null}
       </div>
     </aside>
   )

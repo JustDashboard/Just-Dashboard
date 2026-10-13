@@ -22,8 +22,9 @@ import { ComputerMark, HueKey } from "@/components/remote-desktop/marks"
 const noSubscribe = () => () => {}
 
 /**
- * The way a session travels, drawn: this browser, this server running guacd,
- * and every computer the server can open a screen on.
+ * The way a session travels, drawn: this browser, this server running guacd
+ * (and Stream mode's bridge once it is installed), and every computer the
+ * server can open a screen on.
  *
  * A wire to a computer pulses while a session to it is open, is a still line
  * while its port answers, and is dashed — amber where the computer is on but
@@ -131,7 +132,11 @@ export function ComputerPicture({
               title={hostname ?? "This server"}
               hint={
                 running ? (
-                  `guacd ${engine.version}`
+                  overview.stream.state === "running" ? (
+                    `guacd ${engine.version} · Moonlight Web ${overview.stream.version}`
+                  ) : (
+                    `guacd ${engine.version}`
+                  )
                 ) : (
                   <span className="text-warning">engine not running</span>
                 )

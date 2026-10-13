@@ -31,7 +31,8 @@ import { ComputerMark, reachTone } from "@/components/remote-desktop/marks"
  * Top to bottom it answers what the reader asks before connecting: which
  * machine and whether it can be reached now; how far it is, by which path,
  * and when it was last used; and the quiet facts — its address and how the
- * dashboard signs in to it — with Connect at the foot. A press anywhere on
+ * dashboard signs in to it — with Connect at the foot, and Stream beside it
+ * once the computer is paired with Sunshine. A press anywhere on
  * the card opens the session, except on a control of its own. A computer in
  * a session runs a light round its edge.
  */
@@ -91,6 +92,12 @@ export function ComputerCard({
                 <VerbMenu
                   label={`Actions for ${computer.name}`}
                   verbs={[
+                    {
+                      key: "stream",
+                      label: "Stream with Sunshine",
+                      icon: Play,
+                      run: () => router.push(`${href}?mode=stream`),
+                    },
                     { key: "edit", label: "Edit", icon: Pencil, run: onEdit },
                     { key: "remove", label: "Remove", icon: Trash, run: onRemove, danger: true },
                   ]}
@@ -138,17 +145,24 @@ export function ComputerCard({
                 <span className="min-w-0 truncate pr-0.5 font-mono" title={computer.host}>
                   {computer.host}:{computer.port}
                 </span>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  className="-my-1 shrink-0 text-foreground"
-                  asChild
-                >
-                  <Link href={href} aria-label={`Connect to ${computer.name}`}>
-                    <Play className="size-3" />
-                    Connect
-                  </Link>
-                </Button>
+                <span className="-my-1 flex shrink-0 items-center gap-1.5">
+                  {computer.streamHostId > 0 && (
+                    <Button size="xs" variant="ghost" className="text-foreground" asChild>
+                      <Link
+                        href={`${href}?mode=stream`}
+                        aria-label={`Stream ${computer.name} with Sunshine`}
+                      >
+                        Stream
+                      </Link>
+                    </Button>
+                  )}
+                  <Button size="xs" variant="outline" className="text-foreground" asChild>
+                    <Link href={href} aria-label={`Connect to ${computer.name}`}>
+                      <Play className="size-3" />
+                      Connect
+                    </Link>
+                  </Button>
+                </span>
               </div>
             </div>
           </div>

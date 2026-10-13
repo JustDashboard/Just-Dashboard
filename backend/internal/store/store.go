@@ -1438,6 +1438,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	// A board gained a thumbnail derived from its scene on every save. Boards
 	// saved before it hold '' until the list first sees them.
 	{"boards", "preview", "TEXT NOT NULL DEFAULT ''"},
+	// A computer paired with Remote Desktop's stream bridge keeps the
+	// bridge's id for it; 0 is a computer that streams nothing yet.
+	{"remote_desktop_computers", "stream_host_id", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

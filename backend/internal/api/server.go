@@ -38,6 +38,10 @@ type Server struct {
 	loginLim *httpx.Limiter
 	apiLim   *httpx.Limiter
 	destrLim *httpx.Limiter
+	// streamLim is Remote Desktop's stream bridge, whose page loads a
+	// hundred of its own files at once; on apiLim that one page would spend
+	// the whole dashboard's burst.
+	streamLim *httpx.Limiter
 	// Disk usage recursively visits client-selected trees. Two concurrent
 	// scans are enough for the UI without letting requests multiply host I/O.
 	diskScans chan struct{}
@@ -117,6 +121,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		// Destructive routes get their own budget so a scripted delete loop
 		// cannot run away even with a valid admin token.
 		destrLim:  httpx.NewLimiter(30, 10),
+		streamLim: httpx.NewLimiter(3000, 600),
 		diskScans: make(chan struct{}, 2),
 	}
 	s.initModules()

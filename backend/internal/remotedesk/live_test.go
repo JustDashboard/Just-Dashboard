@@ -2,6 +2,8 @@ package remotedesk
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -117,5 +119,55 @@ func TestLiveSessionsDrawADesktop(t *testing.T) {
 			}
 			t.Logf("%s drew its first frame: %v", d.protocol, seen)
 		})
+	}
+}
+
+// TestLiveBridgeServesTheStreamPage installs the real stream bridge with its
+// seeded configuration and reads its stream page and account the way the
+// proxy does, under the dashboard's prefix and account header.
+//
+//	JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run LiveBridge -v
+func TestLiveBridgeServesTheStreamPage(t *testing.T) {
+	if os.Getenv("JD_REMOTE_DESKTOP_LIVE") != "1" {
+		t.Skip("set JD_REMOTE_DESKTOP_LIVE=1 to run against Docker")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	host := os.Getenv("JD_DOCKER_HOST")
+	if host == "" {
+		host = "unix:///var/run/docker.sock"
+	}
+	bridge := NewDockerStreamBridge(host)
+	defer bridge.Close()
+	if err := bridge.Install(ctx, func(line string) { t.Log(line) }); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("JD_REMOTE_DESKTOP_KEEP") != "1" {
+		defer func() {
+			if err := bridge.Remove(context.Background()); err != nil {
+				t.Errorf("remove the bridge: %v", err)
+			}
+		}()
+	}
+	st := bridge.Status(ctx)
+	if st.State != EngineRunning || !strings.HasPrefix(st.Address, "127.0.0.1:") {
+		t.Fatalf("bridge after install: %#v", st)
+	}
+	get := func(path string) (int, string) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+st.Address+BridgePrefix+path, nil)
+		req.Header.Set(BridgeUserHeader, BridgeAccount)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+	if code, body := get("/stream.html"); code != http.StatusOK || !strings.Contains(body, "stream.js") {
+		t.Fatalf("stream page: %d %.200s", code, body)
+	}
+	if code, body := get("/api/user"); code != http.StatusOK || !strings.Contains(body, `"name":"`+BridgeAccount+`"`) {
+		t.Fatalf("account: %d %s", code, body)
 	}
 }

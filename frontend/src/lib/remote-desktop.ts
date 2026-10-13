@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/api"
 import { LANES } from "@/lib/hue"
 import { duration, plural } from "@/lib/format"
 
@@ -28,6 +29,8 @@ export type RdComputer = {
   createdAt: number
   updatedAt: number
   lastSessionAt: number
+  /** The stream bridge's id for the computer once it is paired with Sunshine; 0 before. */
+  streamHostId: number
 }
 
 export type RdReach = {
@@ -75,6 +78,8 @@ export type RdSession = {
 
 export type RdOverview = {
   engine: RdEngine
+  /** The stream bridge, Moonlight Web, beside the engine. */
+  stream: RdEngine
   tailnet: RdTailnet
   computers: RdComputerView[]
   sessions: RdSession[]
@@ -93,6 +98,21 @@ export type RdComputerInput = {
   security: string
   layout: string
   peerId: string
+}
+
+export type RdStreamApp = { id: number; title: string }
+
+/** A computer's stream: the bridge, Sunshine's port on the computer, and its pairing. */
+export type RdStream = {
+  bridge: RdEngine
+  address?: string
+  sunshine: RdReach
+  hostId: number
+  paired: boolean
+  pairing: boolean
+  pin?: string
+  error?: string
+  apps: RdStreamApp[]
 }
 
 export const REMOTE_DESKTOP_HREF = "/remote-desktop"
@@ -345,4 +365,92 @@ export const KEY_COMBOS: KeyCombo[] = [
 
 export function combosFor(os: RdOS) {
   return KEY_COMBOS.filter((combo) => !combo.os || combo.os.includes(os))
+}
+
+/**
+ * How a session draws the computer. Control is guacd's RDP or VNC, which
+ * works with nothing installed on the computer; Stream is Sunshine's video
+ * through the bridge, smooth at the computer's own frame rate.
+ */
+export type SessionMode = "control" | "stream"
+
+export function sessionMode(raw: string | null | undefined): SessionMode {
+  return raw === "stream" ? "stream" : "control"
+}
+
+/** Sunshine's port for pairing and the list of what it streams. */
+export const SUNSHINE_PORT = 47989
+
+export type StreamStage = "bridge" | "sunshine" | "pair" | "pin" | "ready"
+
+/** The one thing a stream waits on, in the order they have to happen. */
+export function streamStage(stream: RdStream): StreamStage {
+  if (stream.bridge.state !== "running") return "bridge"
+  if (stream.paired && stream.sunshine.state === "open") return "ready"
+  if (stream.pairing) return "pin"
+  if (stream.sunshine.state !== "open") return "sunshine"
+  return "pair"
+}
+
+/** The app that is the computer's own screen: Sunshine calls it Desktop. */
+export function desktopApp(apps: readonly RdStreamApp[]) {
+  return apps.find((app) => app.title.toLowerCase() === "desktop") ?? apps[0]
+}
+
+/** The bridge's stream page, served through the dashboard's own origin. */
+export function streamPageUrl(hostId: number, appId: number) {
+  const query = new URLSearchParams({ hostId: String(hostId), appId: String(appId) })
+  return `${API_BASE}/remote-desktop/bridge/stream.html?${query}`
+}
+
+export type StreamQuality = "smooth" | "sharp" | "light"
+
+export const STREAM_QUALITIES: {
+  key: StreamQuality
+  label: string
+  detail: string
+  size: string
+  fps: number
+  bitrate: number
+}[] = [
+  {
+    key: "smooth",
+    label: "Smooth",
+    detail: "1080p, 60 fps",
+    size: "1080p",
+    fps: 60,
+    bitrate: 20_000,
+  },
+  {
+    key: "sharp",
+    label: "Sharp",
+    detail: "1440p, 60 fps",
+    size: "1440p",
+    fps: 60,
+    bitrate: 40_000,
+  },
+  { key: "light", label: "Light", detail: "720p, 60 fps", size: "720p", fps: 60, bitrate: 8_000 },
+]
+
+/** Where the bridge's stream page keeps its settings, in this origin's storage. */
+export const BRIDGE_SETTINGS_KEY = "mlSettings"
+
+/**
+ * The bridge's settings for a stream, over whatever the reader changed in its
+ * own menu. The picture always comes over the dashboard's WebSocket, since
+ * the bridge publishes no WebRTC ports, as H.264, which every browser decodes
+ * in hardware.
+ */
+export function bridgeSettings(held: Record<string, unknown>, quality: StreamQuality) {
+  const preset = STREAM_QUALITIES.find((q) => q.key === quality) ?? STREAM_QUALITIES[0]
+  return {
+    ...held,
+    dataTransport: "websocket",
+    videoCodec: "h264",
+    videoSize: preset.size,
+    fps: preset.fps,
+    bitrate: preset.bitrate,
+    playAudioLocal: false,
+    enterFullscreenOnStreamStart: false,
+  }
 }

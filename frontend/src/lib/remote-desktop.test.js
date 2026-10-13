@@ -1,14 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import {
+  bridgeSettings,
   candidates,
   combosFor,
   computerHues,
+  desktopApp,
   displaySize,
   overviewVerdict,
   peerOS,
   reachability,
+  sessionMode,
   sessionProblem,
   sessionTotals,
+  streamPageUrl,
+  streamStage,
 } from "./remote-desktop"
 
 const peer = (over) => ({
@@ -179,5 +184,64 @@ describe("combosFor", () => {
   test("offers Ctrl+Alt+Del to Windows and not to a Mac", () => {
     expect(combosFor("windows").map((c) => c.key)).toContain("cad")
     expect(combosFor("macos").map((c) => c.key)).not.toContain("cad")
+  })
+})
+
+const stream = (over) => ({
+  bridge: { state: "running" },
+  sunshine: { state: "open", checkedAt: 0 },
+  hostId: 0,
+  paired: false,
+  pairing: false,
+  apps: [],
+  ...over,
+})
+
+describe("streamStage", () => {
+  test("waits on the bridge, then Sunshine, then the pairing, in that order", () => {
+    expect(streamStage(stream({ bridge: { state: "missing" }, paired: true }))).toBe("bridge")
+    expect(streamStage(stream({ sunshine: { state: "closed", checkedAt: 0 } }))).toBe("sunshine")
+    expect(streamStage(stream({}))).toBe("pair")
+    expect(streamStage(stream({ pairing: true, pin: "4821" }))).toBe("pin")
+    expect(streamStage(stream({ paired: true, pairing: true }))).toBe("ready")
+    // Paired, but Sunshine stopped since: it has to be started again.
+    expect(streamStage(stream({ paired: true, sunshine: { state: "closed", checkedAt: 0 } }))).toBe(
+      "sunshine",
+    )
+  })
+})
+
+describe("desktopApp", () => {
+  test("opens Sunshine's Desktop, whatever order the apps come in", () => {
+    const apps = [
+      { id: 7, title: "Steam Big Picture" },
+      { id: 3, title: "Desktop" },
+    ]
+    expect(desktopApp(apps)?.id).toBe(3)
+    expect(desktopApp([{ id: 9, title: "Game" }])?.id).toBe(9)
+    expect(desktopApp([])).toBeUndefined()
+  })
+})
+
+describe("bridgeSettings", () => {
+  test("keeps the reader's own settings and sets how the picture travels", () => {
+    const next = bridgeSettings({ mouseMode: "relative", dataTransport: "webrtc" }, "sharp")
+    expect(next).toMatchObject({
+      mouseMode: "relative",
+      dataTransport: "websocket",
+      videoCodec: "h264",
+      videoSize: "1440p",
+      fps: 60,
+      bitrate: 40000,
+    })
+  })
+})
+
+describe("stream addresses", () => {
+  test("frames the bridge's page through the dashboard, and reads the mode from the URL", () => {
+    expect(streamPageUrl(41, 3)).toBe("/api/v1/remote-desktop/bridge/stream.html?hostId=41&appId=3")
+    expect(sessionMode("stream")).toBe("stream")
+    expect(sessionMode(null)).toBe("control")
+    expect(sessionMode("anything")).toBe("control")
   })
 })

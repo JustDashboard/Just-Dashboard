@@ -38,6 +38,9 @@ type Computer struct {
 	CreatedAt   int64  `json:"createdAt"`
 	UpdatedAt   int64  `json:"updatedAt"`
 	LastSession int64  `json:"lastSessionAt"`
+	// StreamHostID is the stream bridge's id for this computer once it has
+	// been paired with Sunshine on it.
+	StreamHostID int `json:"streamHostId"`
 }
 
 // ComputerInput is what an administrator saves. A nil Password on an edit
@@ -165,14 +168,14 @@ type store struct {
 	now  func() time.Time
 }
 
-const computerColumns = `id, name, os, host, protocol, port, username, domain, password_enc <> '', security, layout, peer_id, created_at, updated_at, last_session_at`
+const computerColumns = `id, name, os, host, protocol, port, username, domain, password_enc <> '', security, layout, peer_id, created_at, updated_at, last_session_at, stream_host_id`
 
 type scanner interface{ Scan(...any) error }
 
 func scanComputer(row scanner) (Computer, error) {
 	var c Computer
 	err := row.Scan(&c.ID, &c.Name, &c.OS, &c.Host, &c.Protocol, &c.Port, &c.Username, &c.Domain,
-		&c.HasPassword, &c.Security, &c.Layout, &c.PeerID, &c.CreatedAt, &c.UpdatedAt, &c.LastSession)
+		&c.HasPassword, &c.Security, &c.Layout, &c.PeerID, &c.CreatedAt, &c.UpdatedAt, &c.LastSession, &c.StreamHostID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -230,10 +233,13 @@ func (s *store) update(ctx context.Context, id string, in ComputerInput) (Comput
 		return Computer{}, err
 	}
 	now := s.now().Unix()
+	// The bridge's pairing is with the computer at its old address; a
+	// computer moved to another one is paired again.
 	res, err := s.db.ExecContext(ctx, `UPDATE remote_desktop_computers SET
-		name = ?, os = ?, host = ?, protocol = ?, port = ?, username = ?, domain = ?, security = ?, layout = ?, peer_id = ?, updated_at = ?
+		name = ?, os = ?, host = ?, protocol = ?, port = ?, username = ?, domain = ?, security = ?, layout = ?, peer_id = ?, updated_at = ?,
+		stream_host_id = CASE WHEN host = ? THEN stream_host_id ELSE 0 END
 		WHERE id = ?`,
-		in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, in.Security, in.Layout, in.PeerID, now, id)
+		in.Name, in.OS, in.Host, in.Protocol, in.Port, in.Username, in.Domain, in.Security, in.Layout, in.PeerID, now, in.Host, id)
 	if err := affectedOne(res, err); err != nil {
 		return Computer{}, err
 	}
@@ -249,6 +255,16 @@ func (s *store) update(ctx context.Context, id string, in ComputerInput) (Comput
 		}
 	}
 	return s.get(ctx, id)
+}
+
+func (s *store) setStreamHost(ctx context.Context, id string, hostID int) error {
+	return affectedOne(s.db.ExecContext(ctx, `UPDATE remote_desktop_computers SET stream_host_id = ? WHERE id = ?`, hostID, id))
+}
+
+// forgetStreamHosts is for a bridge that was removed with its pairings.
+func (s *store) forgetStreamHosts(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE remote_desktop_computers SET stream_host_id = 0`)
+	return err
 }
 
 func (s *store) delete(ctx context.Context, id string) error {

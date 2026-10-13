@@ -80,7 +80,8 @@ strategy, and feature ownership behind those rules.
   history, find) and saving with revision conflicts.
 - [`backend/remote-desktop.md`](backend/remote-desktop.md) — Remote Desktop: guacd as a container the
   dashboard owns on loopback, the Guacamole handshake done server-side and the relay, sealed computer
-  sign-ins, the session history and the route table.
+  sign-ins, the session history and the route table; Stream mode's Sunshine pairing and the Moonlight
+  Web bridge proxied under the dashboard's own sign-in.
 
 ## Deployments and frontend
 

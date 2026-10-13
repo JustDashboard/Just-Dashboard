@@ -130,6 +130,18 @@ func (s *Server) Routes() http.Handler {
 			s.mountJobRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
 		})
+
+		// Remote Desktop's stream bridge serves its own page, which posts
+		// without the CSRF header; the bridge group asks for a same-site
+		// Origin instead. An agent has no screen to stream to.
+		if !s.Cfg.AgentMode {
+			r.Group(func(r chi.Router) {
+				r.Use(s.Authn.Authenticate)
+				r.Use(s.streamLim.ByPrincipal)
+				r.Use(httpx.AuditMutations(s.Audit))
+				s.mountRemoteDesktopBridge(r)
+			})
+		}
 	})
 	return r
 }
