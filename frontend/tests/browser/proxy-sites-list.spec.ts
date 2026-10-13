@@ -1036,18 +1036,6 @@ test("a site served through a link under another name reads serving and names th
   await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
 })
 
-test("the overview names a link to nothing as critical", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await serveSites(page, layouts)
-  await page.goto("/proxy")
-  await expect(page.getByText("sites-enabled/ghost points at a file that is gone")).toBeVisible()
-  // Broken rather than merely "on disk but not serving".
-  await expect(page.getByText("renamed.example.com is on disk but not serving")).toHaveCount(0)
-  await expect(
-    page.getByText("renamed.example.com is not what nginx serves under its name"),
-  ).toBeVisible()
-})
-
 test("the password-file warning says what nginx really does without the file", async ({ page }) => {
   await mockShowcase(page)
   await page.goto("/proxy/sites")
@@ -1172,7 +1160,7 @@ test("a reader sees who manages a route and reaches its deployment, and nothing 
   await expect(menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete/ })).toHaveCount(0)
 })
 
-test("the overview's finding for a link to nothing leads to its removal", async ({ page }) => {
+test("a broken site link remains removable from its inventory", async ({ page }) => {
   await mockProxy(page, { included: true })
   await serveSites(page, layouts)
   let removed: string | undefined
@@ -1185,12 +1173,7 @@ test("the overview's finding for a link to nothing leads to its removal", async 
       reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
     })
   })
-  await page.goto("/proxy")
-  const finding = page
-    .locator("[data-finding]")
-    .filter({ hasText: "sites-enabled/ghost points at a file that is gone" })
-  await finding.getByRole("button", { name: "Open site" }).click()
-  await expect(page).toHaveURL(/\/proxy\/sites\?site=ghost$/)
+  await page.goto("/proxy/sites?site=ghost")
 
   const confirm = page.getByRole("dialog", { name: "Remove sites-enabled/ghost" })
   await expect(confirm).toContainText("Removing it is what lets nginx load its configuration again")

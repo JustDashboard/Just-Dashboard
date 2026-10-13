@@ -119,6 +119,15 @@ export default function NetworkOverviewPage() {
           reading="live throughput"
         />
       )}
+      {(data.observations ?? [])
+        .filter((source) => source.state === "failed")
+        .map((source) => (
+          <ErrorState
+            key={source.source}
+            error={new Error(`${source.label}: ${source.error || "Could not read this source"}`)}
+            onRetry={overview.refresh}
+          />
+        ))}
       {data.persistence.change && <NetworkChange change={data.persistence.change} />}
 
       <Panel plain>

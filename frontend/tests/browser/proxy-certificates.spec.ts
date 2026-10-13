@@ -1,5 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
-import { availability, certs, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
+import { certs, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
 import {
   certbotJob,
   certbotLineage,
@@ -620,67 +620,6 @@ test("a read-only account reads a test certificate for what it is, with nothing 
   ).toHaveCount(0)
 })
 
-test("a test certificate is a finding on the overview", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await mockStagingInventory(page)
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", { name: /^test\.example\.com is a test certificate/ })
-  await expect(finding).toBeVisible()
-  await finding.click()
-  await expect(
-    page.getByText(
-      "A staging authority signed it, so every browser refuses it. Used by test.example.com.",
-    ),
-  ).toBeVisible()
-})
-
-test("with a staging authority configured, the overview's test-certificate finding points at the directory, not a real issuance", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  await mockStagingInventory(page)
-  await mockStagingLineage(page, { testAuthority: true })
-  await page.goto("/proxy")
-  await page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }).click()
-  await expect(
-    page.getByText(
-      "JD_ACME_DIRECTORY names a staging authority, so what this dashboard issues is a test certificate too. Clear it or point it at a production directory and restart the dashboard, then replace this one.",
-    ),
-  ).toBeVisible()
-  await expect(page.getByText(/real certificate from the Certificates page/)).toHaveCount(0)
-})
-
-test("with certbot not installed, the overview's test-certificate finding points at an import", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  await mockStagingInventory(page)
-  // As the backend answers on such a host: the overview never asks certbot.
-  await page.route("**/api/v1/proxy/status", (route) =>
-    json(route, { ...availability, certbot: false }),
-  )
-  await page.route("**/api/v1/certificates/certbot", (route) =>
-    route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      body: JSON.stringify({
-        error: { code: "certbot_unavailable", message: "certbot is not installed on this host" },
-      }),
-    }),
-  )
-  await page.goto("/proxy")
-  await page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }).click()
-  await expect(
-    page.getByText(
-      "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it.",
-    ),
-  ).toBeVisible()
-
-  await page.goto("/proxy/certificates")
-  await expect(page.getByRole("button", { name: "Import", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
-})
-
 test("a test certificate's card fits a phone with its verb", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
@@ -1167,9 +1106,7 @@ test("a hook changed by hand offers its restore, and somebody else's file is lef
   await expect(page.getByText(/is not this dashboard's file, so it is left as it is/)).toBeVisible()
 })
 
-test("a lineage that will fail says why before the run does, and the overview raises it", async ({
-  page,
-}) => {
+test("a lineage reports whether the configured renewal can run", async ({ page }) => {
   await mockProxy(page, { included: true })
   const reason =
     "certbot renews it with the dns-cloudflare plugin, which the host's, certbot 2.11.0 does not have."
@@ -1198,45 +1135,6 @@ test("a lineage that will fail says why before the run does, and the overview ra
   await expect(lineages.getByText(reason)).toBeVisible()
   await expect(lineages.getByText("Cloudflare", { exact: true })).toBeVisible()
   await expect(lineages.getByRole("button", { name: "Dry run", exact: true })).toBeVisible()
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", { name: /^app\.example\.com will fail to renew/ })
-  await expect(finding).toBeVisible()
-  await finding.click()
-  await expect(page.getByText(reason)).toBeVisible()
-})
-
-test("the overview raises a failing renewal, and renewals no reload reaches", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await mockFailingRenewal(page, {
-    certs: [
-      certbotLineage({
-        authenticator: "webroot",
-        installer: undefined,
-        servedBy: ["app.example.com"],
-        lastFailure: { lineage: "app.example.com", reason: "Some challenges have failed." },
-      }),
-    ],
-  })
-  await page.goto("/proxy")
-  const failing = page.getByRole("button", { name: /^certbot's last renewal failed/ })
-  await expect(failing).toBeVisible()
-  await failing.click()
-  await expect(
-    page.getByText(
-      /certbot\.service failed (yesterday )?at \d\d:\d\d\. app\.example\.com: Some challenges have failed\./,
-    ),
-  ).toBeVisible()
-  const unreloaded = page.getByRole("button", {
-    name: /^Renewed certificates will not reach nginx/,
-  })
-  await expect(unreloaded).toBeVisible()
-  await unreloaded.click()
-  await expect(
-    page.getByText(
-      "certbot renews app.example.com without reloading nginx, so app.example.com keeps serving the old certificate until it expires.",
-    ),
-  ).toBeVisible()
 })
 
 test("a read-only account reads the failure, with nothing to press", async ({ page }) => {
@@ -1317,7 +1215,7 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
   await page.screenshot({ path: testInfo.outputPath("renewal-log-phone.png") })
 })
 
-test("a run that passed while its reload hook failed reads Hook failed, in the hook's own words, and the overview raises it", async ({
+test("a completed renewal retains its hook failure and native output", async ({
   page,
 }, testInfo) => {
   await mockProxy(page, { included: true })
@@ -1367,16 +1265,6 @@ test("a run that passed while its reload hook failed reads Hook failed, in the h
   expect(overflow).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath("renewal-hook-failed-phone.png") })
   await page.setViewportSize({ width: 1280, height: 900 })
-
-  await page.goto("/proxy")
-  const finding = page.getByRole("button", { name: /^A renewal hook failed/ })
-  await expect(finding).toBeVisible()
-  await finding.click()
-  await expect(
-    page.getByText(`deploy-hook 50-just-dashboard-reload-nginx exited 1: ${output}`, {
-      exact: false,
-    }),
-  ).toBeVisible()
 })
 
 test("recent renewal runs wrap in the renewal column, each told apart by its time, and Renew all due stays inside it", async ({

@@ -42,7 +42,7 @@ test("failing containers lead the table and the verdict narrows it to them", asy
   await expect(rows.nth(0)).toContainText("monitoring-uptime-kuma")
   await expect(rows.nth(0)).toContainText("Unhealthy")
   await expect(rows.nth(1)).toContainText("shop-worker")
-  await expect(rows.nth(1)).toContainText("killed for memory")
+  await expect(rows.nth(1)).toContainText("exit 137")
   // Stopped by hand is last, and quiet.
   await expect(rows.nth(11)).toContainText("mailhog")
   await expect(rows.nth(11)).toContainText("finished")
@@ -66,8 +66,8 @@ test("a container's readings sit in the columns that name them", async ({ page }
   await expect(api).toContainText("of 512.0 MB")
   const db = page.getByRole("row").filter({ hasText: "shop-db" })
   await expect(db).toContainText("no limit")
-  // The posture issue is counted beside the name, not in the state.
-  await expect(db.getByRole("button", { name: /1 issue/ })).toBeVisible()
+  // Advisory issue badges are absent from native inventory rows.
+  await expect(db.getByRole("button", { name: /1 issue/ })).toHaveCount(0)
   await expect(api.getByRole("img", { name: /processor over the last hour/ })).toBeVisible()
 })
 
@@ -150,7 +150,7 @@ test("on a phone the table is drawn down the row, with nothing dropped", async (
 
   await expect(page.getByRole("columnheader")).toHaveCount(0)
   const worker = page.getByRole("listitem").filter({ hasText: "shop-worker" })
-  await expect(worker.getByText("killed for memory · 12 minutes ago")).toBeVisible()
+  await expect(worker.getByText("exit 137 · 12 minutes ago")).toBeVisible()
   const api = page.getByRole("listitem").filter({ hasText: "shop-api" })
   await expect(api.getByText("38.4% CPU")).toBeVisible()
   await expect(api.getByText(/of 512\.0 MB/)).toBeVisible()

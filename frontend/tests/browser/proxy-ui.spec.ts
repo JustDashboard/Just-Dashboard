@@ -135,24 +135,6 @@ test("the overview draws each domain wired through nginx to what answers it", as
   await expect(page).toHaveURL(/\/proxy\/traffic\?site=app\.example\.com$/)
 })
 
-test("the overview's attention list is folded from conditions worth acting on", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  await page.goto("/proxy")
-
-  // An expired certificate, a renewal timer that is off, and a site proxying
-  // an application in plain text are findings.
-  await expect(page.getByText("old.example.com has expired")).toBeVisible()
-  await expect(page.getByText("Nothing is scheduled to renew certbot's certificates")).toBeVisible()
-  await expect(
-    page.getByText("legacy.example.com serves an application in plain text"),
-  ).toBeVisible()
-  // A database on every interface is one too; nginx on 443 is not.
-  await expect(page.getByText("PostgreSQL answers on every interface")).toBeVisible()
-  await expect(page.getByText(/^nginx answers on every interface/)).toHaveCount(0)
-})
-
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
   await mockProxy(page, { included: true })
   // A new revision on every read, so a reopened editor showing the first one

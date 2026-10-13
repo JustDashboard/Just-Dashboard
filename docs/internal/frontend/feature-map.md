@@ -177,5 +177,6 @@ The current routes omit automatic Attention/Needs attention/What to change panel
 issue badges, settings comparisons and navigation marks. The database Advisor route is removed.
 Docker, Security, project/fleet, proxy, Backups and Network overview no longer request advisory
 endpoints. PM2 details no longer add a heuristic attention panel. Editable settings, updates,
-certificate operations and requested diagnostics remain. See the owning backend guides for retired
+certificate operations and requested diagnostics remain. Network read failures remain visible as
+errors; Gateway retains manual admission-rule repair under Policy evidence. See the owning backend guides for retired
 routes and retained operation checks; the 2026-10-12 actionable-findings audit is historical.

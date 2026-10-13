@@ -54,8 +54,8 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await page.goto("/proxy")
 
   // The list says what it could not see, and never the all-clear.
-  await expect(page.getByText("Sites could not be read")).toBeVisible()
-  await expect(page.getByText("Certificates could not be read")).toBeVisible()
+  await expect(page.getByText("Sites could not be read")).toHaveCount(0)
+  await expect(page.getByText("Certificates could not be read")).toHaveCount(0)
   await expect(page.getByText(/all within limits/)).toHaveCount(0)
   // The engine line's facts say so rather than counting nothing, with the
   // reason for a pointer resting on the fact.
@@ -73,9 +73,10 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("Nothing configured yet")).toHaveCount(0)
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
-  // The finding's own button reads the source again.
   sitesFail = false
-  const source = page.locator("[data-finding]").filter({ hasText: "Sites could not be read" })
+  const source = page
+    .getByRole("alert")
+    .filter({ hasText: "could not determine Docker ingress ownership" })
   await source.getByRole("button", { name: "Try again" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
@@ -103,7 +104,7 @@ test("a source that fails after answering is not judged from its last answer", a
   const identity = page.locator("[data-slot='host-identity']")
   const sitesFact = identity.getByRole("link", { name: "3 sites, 2 on TLS" })
   const plainText = page.getByText("legacy.example.com serves an application in plain text")
-  await expect(plainText).toBeVisible()
+  await expect(plainText).toHaveCount(0)
   await expect(sitesFact).toBeVisible()
 
   // Reload reads the sites again, and this time they fail. The poll keeps its
@@ -112,7 +113,7 @@ test("a source that fails after answering is not judged from its last answer", a
   sitesFail = true
   await identity.getByRole("button", { name: "Reload" }).click()
   await expect(page.getByText("nginx reloaded")).toBeVisible()
-  await expect(page.getByText("Sites could not be read")).toBeVisible()
+  await expect(page.getByText("Sites could not be read")).toHaveCount(0)
   await expect(plainText).toHaveCount(0)
   await expect(identity.getByText("couldn't read sites")).toBeVisible()
   await expect(sitesFact).toHaveCount(0)
@@ -1168,7 +1169,6 @@ test("a status that fails after answering is reported rather than drawn as curre
   await expect(header.getByText("Updated just now")).toHaveCount(0)
 
   statusFails = false
-  await page.getByText("The proxy status could not be read").click()
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByText("The proxy status could not be read")).toHaveCount(0)
 })

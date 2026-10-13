@@ -4084,7 +4084,8 @@ containers/volumes/networks.
   `TestWatchedGradeRuleScansPinnedTargetsAndJudgesOnlyCompletedGrades` cover current watch rows,
   pinned origins, STARTTLS and grade decisions; `TestWatchedGradeRuleRotatesLargeWatchListsAfterTwoPasses`
   covers the bounded schedule.
-The proxy overview no longer folds observations into an attention list or suggests domain/configuration
+The proxy overview retains native source read errors and retry controls, including a status read that
+fails after answering. It no longer folds observations into an attention list or suggests domain/configuration
 changes. The finding snooze routes are removed. Existing `proxy_finding_snoozes` schema/migration entries
 remain so upgrades preserve the database. Certificate hygiene findings and `/certificates/findings`
 are removed; certificate inventory, issuance, renewal, coverage and requested diagnostic tools remain.

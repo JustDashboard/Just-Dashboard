@@ -386,6 +386,7 @@ export default function ProxyOverviewPage() {
           </>
         }
       />
+      {statusError && <ErrorState error={statusError} onRetry={refreshStatus} />}
       {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
       <EngineIdentity

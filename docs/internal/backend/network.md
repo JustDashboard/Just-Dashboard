@@ -250,7 +250,9 @@ Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the a
   `unavailable` and `failed` (e.g. missing `CAP_NET_ADMIN`) are reported as such.
 - `observations` records each reading's availability (`ok`, `failed`, or `unavailable`). The overview
   returns identity, topology, flows and these raw readings without attention findings or incident
-  history. The advisory rule evaluation and five-minute background incident collector were removed in
+  history. Failed observations remain explicit read errors, and the topology does not call an unread
+  firewall absent. Manual admission-rule repair remains in Gateway → Policy evidence behind the
+  existing confirmation and server authorization. The advisory rule evaluation and five-minute background incident collector were removed in
   0.7.5. Existing incident schema/history is preserved for upgrade compatibility. Requested network
   diagnostics, native change admission, failover monitoring and recovery remain operational tools.
 
