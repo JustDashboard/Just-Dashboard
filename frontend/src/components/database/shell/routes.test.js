@@ -15,7 +15,6 @@ describe("addresses from before the connection moved into the path", () => {
     expect(legacy("/databases/query?conn=3")).toBe("/databases/3/query")
     expect(legacy("/databases/find?conn=3")).toBe("/databases/3/search")
     expect(legacy("/databases/monitor?conn=3")).toBe("/databases/3/performance")
-    expect(legacy("/databases/advisor?conn=3")).toBe("/databases/3/advisor")
     expect(legacy("/databases/server?conn=3")).toBe("/databases/3/access")
     expect(legacy("/databases/backups?conn=3")).toBe("/databases/3/backups")
     expect(legacy("/databases/logs?conn=3")).toBe("/databases/3/logs")

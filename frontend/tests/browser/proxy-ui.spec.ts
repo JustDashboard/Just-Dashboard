@@ -153,38 +153,6 @@ test("the overview's attention list is folded from conditions worth acting on", 
   await expect(page.getByText(/^nginx answers on every interface/)).toHaveCount(0)
 })
 
-test("a Docker Caddy route is listed without an editor it cannot use", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await page.goto("/proxy/sites")
-
-  // One card per site, at every width: nothing is rendered twice and hidden.
-  const cards = page.locator("[data-slot='choice-row']")
-  await expect(cards).toHaveCount(3)
-  await expect(cards.filter({ hasText: "just-dashboard-shop" })).toBeVisible()
-  // The nginx site has its raw file behind an inline verb; the container
-  // route, having no file on the host, does not. Every card opens the site's
-  // own page, the route's included — it has no file, and it has requests.
-  await expect(
-    cards.filter({ hasText: "app.example.com" }).getByRole("button", { name: "Raw config" }),
-  ).toHaveCount(1)
-  await expect(
-    cards.filter({ hasText: "just-dashboard-shop" }).getByRole("button", { name: "Raw config" }),
-  ).toHaveCount(0)
-  await expect(
-    cards
-      .filter({ hasText: "just-dashboard-shop" })
-      .getByRole("link", { name: "Open just-dashboard-shop" }),
-  ).toHaveAttribute("href", "/proxy/sites/just-dashboard-shop")
-  // Worst first: the site proxying an application in plain text is under
-  // the attention rule, above the two on TLS.
-  await expect(page.getByRole("list", { name: "Needs attention" })).toBeVisible()
-  await expect(cards.first()).toContainText("legacy.example.com")
-  // What the tiles counted is the identity line's and the chips'.
-  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
-  await expect(page.locator("[data-slot='host-identity']")).toContainText("3 sites")
-  await expect(page.getByRole("button", { name: /^Plain HTTP 1/ })).toBeVisible()
-})
-
 test("the raw editor reads its file afresh on every opening", async ({ page }) => {
   await mockProxy(page, { included: true })
   // A new revision on every read, so a reopened editor showing the first one

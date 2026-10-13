@@ -681,31 +681,6 @@ test("with certbot not installed, the overview's test-certificate finding points
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
 })
 
-test("the overview's certificate fact and block count a test certificate as refused", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  // Nothing expired or expiring beside it: the tile read "all valid" in
-  // neutral, next to a critical finding for the same certificate.
-  await page.route("**/api/v1/certificates/", (route) => json(route, [stagingCertificate()]))
-  await page.goto("/proxy")
-  await expect(
-    page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }),
-  ).toBeVisible()
-  const fact = page
-    .locator("[data-slot='host-identity']")
-    .getByRole("link", { name: "1 certificate, 1 needs attention" })
-  await expect(fact).toHaveAttribute("href", "/proxy/certificates")
-  await expect(fact).toHaveClass(/text-destructive/)
-  const block = page.getByRole("region", { name: "Certificates", exact: true })
-  await expect(block.getByText("needs attention", { exact: true })).toBeVisible()
-  await expect(block.getByText("1", { exact: true })).toHaveClass(/text-destructive/)
-  await expect(block.getByText("of 1 certificate", { exact: true })).toBeVisible()
-  await expect(block.getByText("valid", { exact: false })).toHaveCount(0)
-  await expect(block.getByText("test", { exact: true })).toBeVisible()
-  await expect(block.getByText("80d", { exact: true })).toHaveCount(0)
-})
-
 test("a test certificate's card fits a phone with its verb", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })

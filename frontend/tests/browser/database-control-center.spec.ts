@@ -251,39 +251,6 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
-  test("the server's databases are one line, with the verdict and the commands at its end", async ({
-    page,
-  }) => {
-    await mockFleet(page, {
-      dumps: { 4: null, 5: 200 },
-      fleet: { 2: { ok: false, state: "stopped" } },
-    })
-    await page.goto("/databases")
-    const identity = page.locator("[data-slot=host-identity]")
-
-    // The list that stood here is gone; nothing it said is.
-    await expect(page.getByRole("heading", { name: "Needs attention" })).toHaveCount(0)
-    await expect(identity).toContainText("5 databases")
-    // The file nobody's engine sizes is weighed by discovery, as on its card.
-    await expect(identity).toContainText("33.6 MB stored")
-    // A stopped server has no sessions to count, which is not zero of them.
-    await expect(identity).toContainText("13 sessions open")
-    await expect(identity.getByRole("link", { name: "read by 4" })).toHaveAttribute(
-      "href",
-      "/databases/map",
-    )
-    await expect(identity).toContainText("3 of 5 backed up in the last day")
-    await expect(identity.getByText("1 never backed up")).toHaveClass(/text-warning/)
-    await expect(identity).toContainText("1 database stopped")
-    // The largest database's engine leads the mark.
-    await expect(identity.locator("img").first()).toHaveAttribute("src", /postgresql/)
-    // The commands stand beside the verdict, and the page draws no row of its own for them.
-    await expect(identity.getByRole("link", { name: "Add a database" })).toBeVisible()
-    await expect(identity.getByRole("button", { name: "Scan this server again" })).toBeVisible()
-    await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
-    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  })
-
   test("the band reads where the bytes are, who is connected and how old each dump is, each database in its card's hue", async ({
     page,
   }) => {

@@ -16,7 +16,7 @@ import (
 )
 
 // networkOverview is the Overview page's one read: the topology's nodes, the
-// readings over it and the attention list under it. One request rather than
+// observed readings. One request rather than
 // eight because every part is drawn into one picture, and a picture that
 // fills in a node at a time redraws its wires a node at a time.
 type networkOverview struct {
@@ -36,7 +36,6 @@ type networkOverview struct {
 	DNS             *netx.DNSSummary        `json:"dns,omitempty"`
 	Gateway         overviewGateway         `json:"gateway"`
 	Made            overviewMade            `json:"made"`
-	Findings        []netx.Finding          `json:"findings"`
 	// Identity is each family's way out and what it establishes about the
 	// address the internet sees; Flows the topology's edges as connection
 	// tracking holds them.
@@ -45,15 +44,8 @@ type networkOverview struct {
 	// Observations say which readings above arrived, so a failed one is shown
 	// as failed rather than as an empty answer.
 	Observations []netx.Observation `json:"observations"`
-	// Incidents are the findings over time; IncidentsError why they could
-	// not be read or recorded.
-	Incidents      []netx.Incident `json:"incidents"`
-	IncidentsError string          `json:"incidentsError,omitempty"`
-	ReadAt         time.Time       `json:"readAt"`
+	ReadAt       time.Time          `json:"readAt"`
 }
-
-// overviewIncidents bounds the history the Overview carries.
-const overviewIncidents = 50
 
 // overviewDockerNet is a Docker network as the topology draws it: its bridge
 // and the containers on it, each as the image it runs.
@@ -131,47 +123,19 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-// networkIncidentEvery is how often the attention list is judged while
-// nobody reads the Overview, so an incident at three in the morning is in
-// the history at nine. Each judgement is one Overview read of the host.
-const networkIncidentEvery = 5 * time.Minute
-
-// startNetworkIncidents keeps the incident history observed between page
-// reads. A failed read is logged and leaves the history as it was.
-func (s *Server) startNetworkIncidents(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(networkIncidentEvery)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				read, cancel := context.WithTimeout(ctx, 30*time.Second)
-				if _, err := s.readNetworkOverview(read, ""); err != nil {
-					s.Log.Warn("network incident history could not be observed", "err", err)
-				}
-				cancel()
-			}
-		}
-	}()
-}
-
-// readNetworkOverview gathers every part concurrently — each is a
-// subprocess, a socket or a file on a host that may be busy — judges the
-// attention list from what came back and folds it into the incident history.
+// readNetworkOverview gathers host readings concurrently so a slow subprocess
+// does not delay every independent reading on the page.
 func (s *Server) readNetworkOverview(ctx context.Context, client string) (networkOverview, error) {
 	out := networkOverview{
 		Links: []netx.Link{}, DockerNetworks: []overviewDockerNet{},
 		PublicAddresses: []string{}, Defaults: []netx.DefaultRoute{},
-		Identity: []netx.EgressIdentity{}, Incidents: []netx.Incident{},
+		Identity: []netx.EgressIdentity{},
 	}
 
 	var (
 		wg           sync.WaitGroup
 		inv          netx.Inventory
 		linksErr     error
-		errs         map[string]uint64
 		observations = map[string]netx.Observation{}
 		observedMu   sync.Mutex
 	)
@@ -208,11 +172,7 @@ func (s *Server) readNetworkOverview(ctx context.Context, client string) (networ
 	})
 	do(func() { out.Defaults = netx.DefaultRoutes(ctx) })
 	do(func() { out.Identity = s.modules.network.EgressIdentities(ctx) })
-	do(func() {
-		var err error
-		errs, err = s.modules.network.Sampler().RecentErrors(ctx, time.Hour)
-		observe("history", "Recorded interface errors", "/network/traffic", err)
-	})
+
 	do(func() {
 		inv = s.networkInventory(ctx)
 		out.Links, linksErr = s.modules.network.ReadLinks(ctx, inv, client)
@@ -316,30 +276,11 @@ func (s *Server) readNetworkOverview(ctx context.Context, client string) (networ
 			Blocklists: len(spec.Blocklists), Shaping: len(spec.Shaping), Namespaces: len(spec.Namespaces),
 		}
 	}
-	var encrypted *bool
-	if out.DNS != nil && out.DNS.Resolver == "systemd-resolved" {
-		on := out.DNS.DNSOverTLS == "yes" || out.DNS.DNSOverTLS == "opportunistic"
-		encrypted = &on
-	}
 	out.Observations = make([]netx.Observation, 0, len(observations))
 	for _, o := range observations {
 		out.Observations = append(out.Observations, o)
 	}
 	sort.Slice(out.Observations, func(i, j int) bool { return out.Observations[i].Source < out.Observations[j].Source })
-	out.Findings = netx.OverviewFindings(netx.OverviewInput{
-		Links: out.Links, Spec: spec, Persistence: out.Persistence, Forwarding: out.Forwarding,
-		LinkHistoryErrors: errs, FirewallAvailable: out.Firewall.Available,
-		FirewallEnabled: out.Firewall.Enabled, ConntrackPercent: conntrackPercent(out.Gateway.Conntrack),
-		EncryptedDNS: encrypted, Observations: out.Observations,
-	})
-	if err := s.modules.network.RecordFindings(ctx, out.ReadAt, out.Findings, out.Observations); err != nil {
-		out.IncidentsError = "The incident history could not be recorded: " + err.Error()
-	}
-	if incidents, err := s.modules.network.Incidents(ctx, overviewIncidents); err != nil {
-		out.IncidentsError = "The incident history could not be read: " + err.Error()
-	} else {
-		out.Incidents = incidents
-	}
 	return out, nil
 }
 

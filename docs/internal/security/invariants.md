@@ -110,7 +110,7 @@ A change that weakens any of these has to say so explicitly.
     actions come from a closed set with the account name validated before interpolation. The same
     validator gates the console route and the scheduler, so a schedule cannot send what the console
     refuses.
-11. Diagnosis claims only what an owner returned. An unavailable module is recorded as a *silence* with a
+11. Requested diagnostics claim only what an owner returned. Unavailable measurements carry a
     reason — never as a healthy result, and never as a problem. A finding that cannot name an action or a
     deep link says which external action is required instead.
 

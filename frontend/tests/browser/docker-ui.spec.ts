@@ -521,7 +521,7 @@ async function mockDocker(page: Page) {
  * were two of four tiles until the overview took §15's exit; they are the two
  * verdicts at the end of its identity line now.
  */
-test("the overview separates runtime health from attention", async ({ page }) => {
+test("the overview keeps native runtime health without advisory counts", async ({ page }) => {
   await mockDocker(page)
   await page.setViewportSize({ width: 1696, height: 992 })
   await page.goto("/docker")
@@ -531,7 +531,7 @@ test("the overview separates runtime health from attention", async ({ page }) =>
   await expect(identity.getByText("Nothing failing")).toBeVisible()
 
   // And, at the same time, that something needs attention.
-  await expect(identity.getByText("2 issues to look at")).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toHaveCount(0)
 
   // The word that used to sit above a page of warnings must not appear, and
   // nor do the tiles.
@@ -542,27 +542,6 @@ test("the overview separates runtime health from attention", async ({ page }) =>
     fullPage: true,
     animations: "disabled",
   })
-})
-
-test("attention lists posture findings and never calls them health", async ({ page }) => {
-  await mockDocker(page)
-  await page.goto("/docker")
-
-  await expect(page.getByText("web can control Docker itself")).toBeVisible()
-  await expect(page.getByText("db publishes PostgreSQL on every interface")).toBeVisible()
-  await expect(page.getByText("db has no health check", { exact: true })).toHaveCount(0)
-  const row = page.getByRole("button", { name: "web can control Docker itself", exact: true })
-  await expect(row).toHaveAttribute("aria-expanded", "false")
-  await expect(row.getByText("The Docker socket is mounted into this container.")).toBeVisible()
-  await expect(
-    page.getByRole("button", { name: "Review socket access", exact: true }),
-  ).toBeVisible()
-  await row.click()
-  await expect(row).toHaveAttribute("aria-expanded", "true")
-
-  // The kind of problem is the row's right-hand column, so a reader scanning
-  // the panel gets "security, exposure, configuration" in one pass.
-  await expect(row.getByText("Security")).toBeVisible()
 })
 
 /** "0/0 up" is not a state. */

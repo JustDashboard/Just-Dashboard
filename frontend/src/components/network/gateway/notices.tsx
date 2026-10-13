@@ -21,9 +21,9 @@ import { FlowSummary } from "@/components/network/gateway/impacts"
  * firewall is missing. Each is a fact the reader would otherwise find out
  * from a refusal, or from a forward that was saved and never worked.
  */
-export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefresh?: () => void }) {
-  const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+export function GatewayNotices({ view }: { view: GatewayView; onRefresh?: () => void }) {
+  const {} = useAuth()
+  const { dialog } = useConfirm()
   const { capability, loaded, admission, forwards, nat } = view
   const entries = forwards.some((f) => f.enabled) || nat.some((n) => n.enabled)
   return (
@@ -47,44 +47,6 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
         <Notice tone="warning" icon={Warning} title="The gateway is not loaded into the kernel">
           Its entries are saved but not in force: the host was started without the unit that loads
           them, or something deleted the table. Saving any entry loads it again.
-        </Notice>
-      )}
-      {admission.needed && !admission.present && (
-        <Notice tone="warning" icon={Warning} title="Owned admission rules need attention">
-          <p>
-            A required rule is missing, unsupported or unreadable. A saved forward may be refused
-            after translation. Inspect each chain below; the presence of these rules does not prove
-            the complete connection works.
-          </p>
-          {can("system.admin") &&
-            capability.writable &&
-            admission.chains?.some((chain) => chain.needed && chain.status === "absent") && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                onClick={() =>
-                  confirm({
-                    title: "Repair owned admission rules",
-                    description: (
-                      <p>
-                        Restore the dashboard&rsquo;s marked admission rules for its active
-                        translations. This may admit traffic previously refused by the missing
-                        rules.
-                      </p>
-                    ),
-                    confirmLabel: "Repair rules",
-                    action: async () => {
-                      await post("/network/gateway/admission/repair")
-                      onRefresh?.()
-                    },
-                  })
-                }
-              >
-                Repair owned rules
-              </Button>
-            )}
         </Notice>
       )}
       {(admission.chains || capability.layers || Boolean(view.flows?.length)) && (
@@ -183,6 +145,7 @@ export function ForwardingOff({
   onTurnedOn: () => void
   disabled?: boolean
 }) {
+  const {} = useAuth()
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const name = family === "ipv4" ? "IPv4" : "IPv6"

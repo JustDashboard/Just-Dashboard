@@ -109,7 +109,6 @@ export function backupJob(fields: { id: number; name: string } & Record<string, 
     enabled: true,
     createdAt: now,
     hasCredentials: false,
-    overdue: false,
     stored: { runs: 3, bytes: 1024 },
     databaseDumps: [],
     ...fields,
@@ -319,7 +318,6 @@ export const healthyOperations: DeploymentOperations = {
     ],
   },
   dependencies: { status: "available", items: [] },
-  diagnosis: { status: "assessed", findings: [], silences: [] },
 }
 
 /**
@@ -1179,22 +1177,6 @@ export const showcaseOperations: DeploymentOperations = {
       },
     ],
   },
-  diagnosis: {
-    status: "assessed",
-    findings: [
-      {
-        code: "certificate.expiring",
-        severity: "warning",
-        title: "A certificate expires in 9 days",
-        measured: "www.example.test · Let's Encrypt E5 · 9 days left",
-        means: "Visitors see a certificate warning once it lapses.",
-        action: "Renew it from the proxy's certificates.",
-        owner: "domains",
-        deepLink: "/proxy/certificates",
-      },
-    ],
-    silences: [],
-  },
 }
 
 /** Eight variables: secrets, plain values, two database references and a build token. */
@@ -1878,7 +1860,6 @@ const showcaseBackupJobs: BackupJob[] = [
     enabled: true,
     createdAt: ago(900),
     hasCredentials: false,
-    overdue: false,
     databaseDumps: [11],
     lastSuccessAt: ago(9),
     nextRun: ago(-15),
@@ -1898,7 +1879,6 @@ const showcaseBackupJobs: BackupJob[] = [
     enabled: true,
     createdAt: ago(600),
     hasCredentials: true,
-    overdue: false,
     databaseDumps: [],
     stored: { runs: 8, bytes: 8 * 1024 * 1024 * 1024 },
   },

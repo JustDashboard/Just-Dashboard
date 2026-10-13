@@ -40,7 +40,6 @@ import type {
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FindingList } from "@/components/finding-list"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -66,7 +65,6 @@ import {
 } from "@/components/deploy/vocabulary"
 import {
   FLEET_FILTERS,
-  fleetAttention,
   fleetCounts,
   fleetHaystack,
   matchesFilter,
@@ -178,7 +176,7 @@ function Fleet() {
   // The question is kept for the tab and the furniture for good, so a
   // filtered fleet does not reset itself on the way back from a project.
   const [query, setQuery] = useSessionState("deploy.fleet.query", "")
-  const [filter, setFilter] = useSessionState<FleetFilter>("deploy.fleet.filter", "all")
+  const [filter, setFilter] = useSessionState<FleetFilter>("deploy.fleet.filter.075", "all")
   const [layout, setLayout] = useViewState<"grid" | "list">("deploy.fleet.layout", "grid")
 
   const deployments = useMemo(() => fleet.data?.deployments ?? [], [fleet.data])
@@ -198,14 +196,6 @@ function Fleet() {
       ),
     )
   }, [deployments, filter, pulses, pulls, query])
-  const findings = useMemo(
-    () =>
-      fleetAttention(deployments, pulses).map((finding) => ({
-        ...finding,
-        action: { label: finding.action.label, onClick: () => router.push(finding.action.href) },
-      })),
-    [deployments, pulses, router],
-  )
   const workFor = (deployment: DeploymentSummary) =>
     fleet.data?.activeWork.find((item) => item.run.id === deployment.activeRun?.id)
   const narrowed = query.trim() !== "" || filter !== "all"
@@ -321,14 +311,6 @@ function Fleet() {
 
           {/* Only what somebody has to act on, with the engine's own reason.
               The Attention chip below narrows the cards to the same projects. */}
-          {findings.length > 0 && (
-            <Panel plain>
-              <PanelHeader title="Attention" />
-              <PanelBody className="py-0">
-                <FindingList emphasize findings={findings} emptyLabel="" />
-              </PanelBody>
-            </Panel>
-          )}
 
           {empty && <FleetEmpty admin={admin} />}
 
@@ -378,9 +360,6 @@ function Fleet() {
                           counts[key] > 0 &&
                             key === "failed" &&
                             "text-destructive hover:text-destructive",
-                          counts[key] > 0 &&
-                            key === "attention" &&
-                            "text-warning hover:text-warning",
                         )}
                       >
                         {label}

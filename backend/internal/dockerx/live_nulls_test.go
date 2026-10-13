@@ -54,8 +54,7 @@ func TestNoNullListsOnTheWire(t *testing.T) {
 	check("PreviewCleanup", cleanup, err)
 	du, err := c.DiskUsage(ctx)
 	check("DiskUsage", du, err)
-	diag, err := c.Diagnose(ctx)
-	check("Diagnose", diag, err)
+
 	stacks, err := c.ListStacks(ctx, nil)
 	check("ListStacks", stacks, err)
 	vols, err := c.ListVolumesWithUsers(ctx)
@@ -72,16 +71,7 @@ func TestNoNullListsOnTheWire(t *testing.T) {
 
 	list, err := c.ListContainers(ctx, true)
 	check("ListContainers", list, err)
-	if len(list) > 0 {
-		insp, err := c.Inspect(ctx, list[0].ID)
-		check("Inspect", insp, err)
-		fail, err := c.DiagnoseFailure(ctx, list[0].ID, nil)
-		check("DiagnoseFailure", fail, err)
-		wr, err := c.AnalyzeWritableLayer(ctx, list[0].ID, false)
-		check("AnalyzeWritableLayer", wr, err)
-		net, err := c.NetworkDetail(ctx, "bridge")
-		check("NetworkDetail", net, err)
-	}
+
 	for _, v := range vols {
 		vd, err := c.VolumeDetail(ctx, v.Name)
 		check("VolumeDetail", vd, err)

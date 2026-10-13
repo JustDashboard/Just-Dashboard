@@ -1,37 +1,25 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  ClockRewind,
-  Layers,
-  Pencil,
-  Warning,
-} from "@/components/icons"
+import { ArrowLeft, ChevronDown, ChevronUp, Layers, Pencil } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, ApiError } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import type { ContainerDetail, DockerDiagnosis, FailureDiagnosis, PortRoute } from "@/lib/types"
+import type { ContainerDetail, PortRoute } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { dockerSource, journalSource, stackSource } from "@/lib/log-sources"
 import { kindViews } from "@/components/logs/kind-views"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, LoadingRows } from "@/components/state"
 import { ContainerUsageTab } from "@/components/docker/container-usage-tab"
 import { ContainerInspectTab } from "@/components/docker/container-inspect-tab"
 import { ContainerShellTab } from "@/components/docker/container-shell-tab"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
-import { useDockerFindingActions } from "@/components/docker/finding-actions"
-import { ConfigurationRemedy } from "@/components/docker/configuration-remedy"
-import { ContainerFindings } from "@/components/docker/attention"
 import { containerEventsView } from "@/components/docker/container-events"
 import { Hint, Term } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
@@ -41,6 +29,7 @@ import { ContainerReadings, useContainerFrames } from "@/components/docker/conta
 import { ContainerPicture } from "@/components/docker/container-picture"
 import { ContainerCompany } from "@/components/docker/container-company"
 import { ContainerRecent } from "@/components/docker/container-recent"
+import { ContainerConfiguration } from "@/components/docker/container-configuration"
 import { ContainerStorageTab } from "@/components/docker/container-storage-tab"
 import { EnvironmentTable, NetworksTable, PortsTable } from "@/components/docker/container-tables"
 import { containerProduct } from "@/components/product-logo"
@@ -48,7 +37,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Panel, PanelHeader, Well } from "@/components/panel"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { ChipCount, tabClasses } from "@/components/tabs"
 import { IconAction } from "@/components/icon-action"
 import { VerbMenu } from "@/components/verbs"
 import { ShellWords } from "@/components/deploy/run-evidence"
@@ -80,8 +69,8 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  * nothing on it that moved. It opens on the container's identity line (the
  * product it runs, its image, its project, how long it has been up, ticking,
  * and the verdict at the line's end) over the views as the underlined strip,
- * and the Overview reads, in order: why it is not working where it is not;
- * what it is using, live, with its last hour; what is wrong with it; a picture
+ * and the Overview reads, in order: what it is using, live, with its last
+ * hour; a picture
  * of how it is reached and what it keeps; the containers it runs beside, as a
  * live table; what just happened to it and how it runs; and its ports and
  * networks as tables. Where each old figure went is in `design-system.md` §15.
@@ -157,38 +146,6 @@ function ContainerDetailPanel({
         `/docker/containers/${encodeURIComponent(next.id)}?tab=${encodeURIComponent(tab)}`,
       )
   }
-
-  // The page's own diagnosis pass. As a panel this was handed the container
-  // table's single poll, filtered to the open container; on its own route
-  // there is nobody above to ask.
-  const health = usePoll<DockerDiagnosis>(
-    (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
-    60_000,
-  )
-  const runFix = useDockerFindingActions({
-    confirm,
-    onChanged: () => {
-      health.refresh()
-      setReloads((n) => n + 1)
-    },
-    open: (id, tab) =>
-      id === containerId
-        ? setTab(tab ?? "overview")
-        : router.push(
-            `/docker/containers/${encodeURIComponent(id)}?tab=${encodeURIComponent(tab ?? "overview")}`,
-          ),
-  })
-  // Why it stopped, read once for the page rather than by the tab that says
-  // so: the Logs tab opens on the same diagnosis's window, and the verdict at
-  // the end of the identity line is what tells a loop from a restart.
-  const failure = usePoll<FailureDiagnosis>(
-    (signal) =>
-      get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
-    0,
-    [containerId, reloads],
-  )
-  // Whether the Logs tab is handed that window rather than the tail.
-  const [crash, setCrash] = useState(false)
   // Where each published port is reached from — the picture's ways in and the
   // Ports table both draw it.
   const routes = usePoll<PortRoute[]>(
@@ -228,10 +185,7 @@ function ContainerDetailPanel({
 
   const running = detail?.state === "running"
   const frames = useContainerFrames(containerId, tab === "overview" && running)
-  const verdict = useMemo(
-    () => (detail ? containerVerdict(detail, failure.data) : undefined),
-    [detail, failure.data],
-  )
+  const verdict = useMemo(() => (detail ? containerVerdict(detail) : undefined), [detail])
   const traffic = useMemo(() => {
     const { current, previous } = frames
     if (!current || !previous || !current.networkAvailable || !previous.networkAvailable) return
@@ -244,8 +198,7 @@ function ContainerDetailPanel({
   const shell = can("terminal") && running
   const changed = useCallback(() => {
     setReloads((n) => n + 1)
-    health.refresh()
-  }, [health])
+  }, [])
 
   const views = detail
     ? [
@@ -360,29 +313,16 @@ function ContainerDetailPanel({
 
             <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto pt-6">
               {/*
-                Why it is not working, then what it is using, then what is
-                wrong with it, then what it is connected to and what it runs
-                beside, then what happened and how it runs. An operator who
-                opened this page opened it for the first of those.
+                Native usage, connections, neighboring containers, events and configuration
+                remain readable without a separate diagnosis.
               */}
               <div className="flex min-w-0 flex-col gap-8 pb-4">
-                <FailurePanel
-                  data={failure.data}
-                  onReadLogs={() => {
-                    setCrash(true)
-                    setTab("logs")
-                  }}
-                />
                 <ContainerReadings
                   detail={detail}
                   frames={frames}
                   onUsage={() => setTab("usage")}
                 />
-                <ContainerFindings
-                  diagnosis={health.data}
-                  containerId={detail.id}
-                  onAction={runFix}
-                />
+
                 <ContainerPicture
                   detail={detail}
                   verdict={verdict}
@@ -414,7 +354,6 @@ function ContainerDetailPanel({
                 key={detail.id}
                 detail={detail}
                 onLimitsSaved={() => {
-                  health.refresh()
                   setReloads((n) => n + 1)
                 }}
               />
@@ -423,13 +362,7 @@ function ContainerDetailPanel({
             {/* Scrolls on a phone, where the readings and a pane worth reading
               are taller than what is left of the window under the facts. */}
             <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              <ContainerLogs
-                detail={detail}
-                failure={failure.data}
-                crash={crash}
-                view={logView}
-                onCrashChange={setCrash}
-              />
+              <ContainerLogs detail={detail} view={logView} />
             </TabsContent>
 
             <TabsContent value="env" className="min-h-0 flex-1 overflow-y-auto pt-4">
@@ -444,21 +377,9 @@ function ContainerDetailPanel({
 
             <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto pt-4">
               {tab === "configure" && (
-                <ConfigurationRemedy
-                  detail={detail}
-                  onAction={runFix}
-                  findings={(health.data?.findings ?? []).filter(
-                    (finding) => finding.targetId === detail.id,
-                  )}
-                  confirm={confirm}
-                  onChanged={() => {
-                    health.refresh()
-                    setReloads((n) => n + 1)
-                  }}
-                />
+                <ContainerConfiguration detail={detail} confirm={confirm} onChanged={changed} />
               )}
             </TabsContent>
-
             <TabsContent value="inspect" className="min-h-0 flex-1 pt-4">
               {tab === "inspect" && <ContainerInspectTab containerId={detail.id} />}
             </TabsContent>
@@ -591,18 +512,11 @@ function HowItRuns({ detail }: { detail: ContainerDetail }) {
  */
 function ContainerLogs({
   detail,
-  failure,
-  crash,
   view,
-  onCrashChange,
 }: {
   detail: ContainerDetail
-  failure?: FailureDiagnosis
-  /** Whether the pane is handed the failure's window. */
-  crash: boolean
   /** A view a press elsewhere on the page asked for: Events, from the Overview's Recent. */
   view?: string
-  onCrashChange: (on: boolean) => void
 }) {
   const product = containerProduct(detail)
   const stack = detail.composeStack
@@ -645,30 +559,8 @@ function ContainerLogs({
     source.id === dockerSource(detail.id)
       ? [containerEventsView({ containerId: detail.id, healthcheck: detail.hasHealthcheck })]
       : kindViews(source)
-  const logWindow = failure?.logWindow
-  // A clean exit has a window too — the minutes before it stopped — and
-  // calling that a crash would be the page inventing one.
-  const crashed =
-    failure?.state === "looping" || (detail.state !== "running" && detail.exitCode !== 0)
-  const label = crashed ? "Crash window" : "Before it stopped"
-  // The pane lets go of the window the moment the reader moves off it —
-  // Live, another range, a zoom, History on an event — so the chip is on
-  // exactly while the pane reads the window, and a press brings it back.
-  const chip = logWindow && (
-    <FilterChip
-      selected={crash}
-      onClick={() => onCrashChange(!crash)}
-      title={`The logs worth reading are ${logWindow.reason}.`}
-    >
-      <ClockRewind aria-hidden className="size-3 text-muted-foreground" />
-      {label}
-    </FilterChip>
-  )
-  // The pane's strip has no room for the chip beside four views on a phone.
-  const wide = useMediaQuery("(min-width: 640px)")
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {!wide && chip && <div className="flex shrink-0">{chip}</div>}
       <ServiceLogs
         sources={sources}
         // Kept for the tab, per container: the Environment tab and back is
@@ -677,9 +569,6 @@ function ContainerLogs({
         readings
         views={views}
         view={view}
-        window={crash && logWindow ? { ...logWindow, label } : undefined}
-        onLeaveWindow={() => onCrashChange(false)}
-        actions={wide && chip}
         className="min-h-0 flex-1"
         paneClassName="min-h-[30rem]"
       />
@@ -845,87 +734,5 @@ function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRename
         Cancel
       </Button>
     </span>
-  )
-}
-
-/**
- * Why it stopped, and why it keeps stopping.
- *
- * The facts are already on the page and none of them is an answer: a restart
- * count, an exit code, a memory limit. Somebody who has done this for years
- * reads those three as "it is exceeding its limit and the kernel is killing
- * it"; everybody else reads three numbers. This is the assembly — and because
- * it is an assembly rather than a reading, the conclusion says "likely".
- */
-function FailurePanel({
-  data,
-  onReadLogs,
-}: {
-  data?: FailureDiagnosis
-  /** Opens the Logs tab on the diagnosis's window. */
-  onReadLogs: () => void
-}) {
-  // A container that has been up for a week with nothing to say is told so by
-  // the identity line, which ticks its uptime beside its verdict; the
-  // sentence that used to open the tab said it a second time.
-  if (!data || (data.state === "running" && !data.restarts.looping)) return null
-
-  const tone = data.state === "looping" || data.state === "unhealthy" ? "danger" : "warning"
-  return (
-    <Notice title={data.headline} icon={Warning} tone={tone}>
-      {data.likely && (
-        <p>
-          {data.likely}
-          <span className="ml-1 text-hint text-muted-foreground">
-            ({data.confidence === "observed" ? "recorded by Docker" : "inferred from the evidence"})
-          </span>
-        </p>
-      )}
-
-      {/* The evidence as a column of facts, the decisive one in ink: three
-          lines of "label: value — source" ran together into one paragraph. */}
-      {data.evidence.length > 0 && (
-        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-hint sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-          {data.evidence.map((item, i) => (
-            <Fragment key={i}>
-              <dt className="text-muted-foreground">{item.label}</dt>
-              <dd
-                className={cn(
-                  "min-w-0 break-words",
-                  item.weight === "decisive" ? "font-medium text-foreground" : "text-foreground/85",
-                )}
-              >
-                {item.value}
-              </dd>
-              <dd className="text-muted-foreground/70 max-sm:hidden">{item.source}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      )}
-
-      {data.suggestions.length > 0 && (
-        <ul className="mt-2 space-y-1 text-hint">
-          {data.suggestions.map((suggestion, i) => (
-            <li key={i} className="text-muted-foreground">
-              · {suggestion}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {data.logWindow && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <p className="min-w-0 flex-1 basis-64 text-hint text-muted-foreground">
-            The logs worth reading are {data.logWindow.reason} — {timestamp(data.logWindow.since)}{" "}
-            to {timestamp(data.logWindow.until)}. By the time you look, the tail is the next attempt
-            starting up.
-          </p>
-          <Button size="xs" variant="outline" onClick={onReadLogs}>
-            <ClockRewind className="size-3" />
-            Read those lines
-          </Button>
-        </div>
-      )}
-    </Notice>
   )
 }

@@ -11,7 +11,6 @@ import type {
   Container,
   ContainerSparkline,
   ContainerStats,
-  DockerDiagnosis,
   DockerDiskUsage,
   DockerEvent,
   DockerEventFeed,
@@ -35,8 +34,6 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { useDockerFindingActions } from "@/components/docker/finding-actions"
-import { AttentionPanel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
 import { ContainerBand } from "@/components/docker/container-band"
 import { ContainerRows, ProjectKey } from "@/components/docker/container-table"
@@ -74,8 +71,7 @@ const STANDALONE = "\u0000standalone"
  * The daemon first, as the identity line Services and Live open on — Docker
  * drawn as itself, its version, the host it runs on, the storage driver, how
  * many containers are running and how many compose projects are up — with the
- * verdicts at its right end: the containers failing, which narrows the table
- * to them, and the issues Attention holds, which goes to it.
+ * native runtime verdict at its right end, which narrows the table to failing containers.
  *
  * Then `ContainerBand`: the containers using the most processor and memory as
  * spans of one bar the size of the machine, and the last thing that happened
@@ -92,10 +88,6 @@ const STANDALONE = "\u0000standalone"
  *   **Runtime health** is the verdict at the line's end, and each container's
  *   health is its State cell: up for how long, and whether a check passes,
  *   fails, or does not exist.
- *
- *   **Attention** is the second verdict, a link to the Attention list, which
- *   stayed as it was — posture is still never called health — and each
- *   container's issues are counted beside its name in the table.
  *
  *   **Compose stacks** is the identity line's "3 of 4 projects up" and the
  *   Compose projects head, where each project now draws its services as a
@@ -167,11 +159,6 @@ export default function DockerOverviewPage() {
       ),
     120_000,
   )
-  const health = usePoll<DockerDiagnosis>(
-    (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
-    60_000,
-  )
-  const runFix = useDockerFindingActions({ confirm, onChanged: health.refresh })
   const stacks = usePoll<ComposeStack[]>(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
     60_000,
@@ -227,9 +214,7 @@ export default function DockerOverviewPage() {
       }),
     )
   }, [containers, query, state, project])
-
-  const healthRefresh = health.refresh
-  const { pending, act } = useContainerControl(healthRefresh)
+  const { pending, act } = useContainerControl(list.refresh)
 
   /** Goes to one container, with the table's order kept for its page's previous and next. */
   const open = useCallback(
@@ -274,7 +259,6 @@ export default function DockerOverviewPage() {
   const failing = counts.bucket.failing
   const starting = counts.bucket.starting
   const running = containers.filter((c) => c.state === "running").length
-  const attention = health.data?.attention
   const active = detected.filter((s) => s.deployed)
   const reclaimable = disk.data
     ? disk.data.images.reclaimable + disk.data.buildCache.reclaimable
@@ -303,7 +287,7 @@ export default function DockerOverviewPage() {
       name="Docker"
       refresh={() => {
         list.refresh()
-        health.refresh()
+        list.refresh()
         trends.refresh()
         stacks.refresh()
         disk.refresh()
@@ -398,17 +382,7 @@ export default function DockerOverviewPage() {
               ) : (
                 <Status tone="running" label="Nothing failing" />
               )}
-              {attention && attention.issues > 0 && (
-                <a
-                  href="#attention"
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
-                >
-                  <Status
-                    verdict={attention.critical > 0 ? "critical" : "warning"}
-                    label={`${plural(attention.issues, "issue")} to look at`}
-                  />
-                </a>
-              )}
+
               <WorkspaceHelp compact />
             </div>
           }
@@ -546,12 +520,11 @@ export default function DockerOverviewPage() {
                 rows={visible}
                 stats={stats}
                 trends={trendByName}
-                diagnosis={health.data}
                 pending={pending}
                 confirm={confirm}
                 act={act}
                 onOpen={open}
-                onChanged={healthRefresh}
+                onChanged={list.refresh}
               />
             )}
           </PanelBody>
@@ -563,12 +536,6 @@ export default function DockerOverviewPage() {
             <span>CPU is a share of one core</span>
           </PanelFooter>
         </Panel>
-
-        {/* Problems that do not stop a service: posture, storage,
-            configuration and exposure. The verdict above links here. */}
-        <div id="attention" className="scroll-mt-6">
-          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} onAction={runFix} />
-        </div>
 
         <div className="grid min-w-0 items-start gap-x-10 gap-y-8 lg:grid-cols-2">
           <ComposeProjects stacks={detected} canDeploy={can("service.control")} />
@@ -583,7 +550,7 @@ export default function DockerOverviewPage() {
               confirm={confirm}
               onDone={() => {
                 disk.refresh()
-                health.refresh()
+                list.refresh()
                 list.refresh()
               }}
             />

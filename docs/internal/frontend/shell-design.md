@@ -188,7 +188,7 @@ parameter (`/databases/browse?conn=3`), and those addresses are still out there 
 link of every database card drawn on it, and a bookmark outlives every release — so a segment that is
 not a number is read by `legacyDatabasesHref` and replaced, not pushed: `overview` is the home,
 `browse` Data, `structure` Schema, `find` Search, `monitor` Performance, `server` Access,
-`connection` Settings, `diagram`, `query`, `advisor`, `backups`, `logs` and `generate` themselves,
+`connection` Settings, `diagram`, `query`, `backups`, `logs` and `generate` themselves,
 with `schema`, `table`, `sql`, `source` and `view` carried over, and `/databases/topology` is the
 map. An old page with no valid `conn` opens the control center rather than a guess.
 
@@ -446,14 +446,10 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `RowActions` (the cluster of them that appears on hover, stays on keyboard focus and on an open menu,
   and is always visible on touch) and `DimActions`, the same cluster for a row whose controls have a
   column to themselves: always drawn, dimmed until the pointer arrives.
-- `components/finding-list.tsx` — `FindingList`, the one list of verdict findings in the product. A row
-  shows its severity, problem and measured consequence, with a named action beside the disclosure or
-  below it in a narrow panel. Extended evidence folds away; the action stays visible. Expanded
-  evidence does not repeat the header's text. Security, Docker, databases, deployments, network
-  evidence, proxy reports and backup failures share it.
-  Attention lists retain warnings and critical findings. Routine recommendations stay in configuration
-  or inventory; an unavailable check states its limits. Actions land on the actual resource or control,
-  retain capability and confirmation checks, and show progress while an async action runs.
+- `components/finding-list.tsx` renders results in requested diagnostic tools, including TLS/network
+  reports, config lint and issuance diagnostics. Automatic attention panels, routine settings
+  recommendations and navigation attention marks were removed in 0.7.5. Pending-edit marks still
+  represent saved changes. Operational error messages and diagnostic evidence remain visible.
 
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`

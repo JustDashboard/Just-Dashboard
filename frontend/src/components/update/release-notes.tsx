@@ -70,7 +70,7 @@ export function ReleaseNotes({
           {installed && <Tag>Installed</Tag>}
           {release.breaking && (
             <Tag tone="warning" icon={Warning}>
-              Needs attention
+              Breaking change
             </Tag>
           )}
         </div>

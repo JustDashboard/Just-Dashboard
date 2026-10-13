@@ -2,11 +2,12 @@ package dockerx
 
 import (
 	"encoding/json"
-	"github.com/docker/docker/client"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/docker/docker/client"
 )
 
 func TestAdvisorReclaimOnlyTouchesAdvertisedImagesAndCache(t *testing.T) {
@@ -37,12 +38,5 @@ func TestAdvisorReclaimOnlyTouchesAdvertisedImagesAndCache(t *testing.T) {
 		if report.Error != "" {
 			t.Fatal(report.Error)
 		}
-	}
-}
-
-func TestRuntimeUnknownInspectionIsNotNoHealthCheck(t *testing.T) {
-	summary := summarizeRuntime([]Container{{ID: "unread", State: "running"}}, nil)
-	if summary.Unknown != 1 || summary.NoHealthchk != 0 || summary.Healthy != 0 || summary.Status != "notice" {
-		t.Fatalf("unread check treated as answer: %+v", summary)
 	}
 }

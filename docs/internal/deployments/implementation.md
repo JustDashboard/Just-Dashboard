@@ -569,29 +569,13 @@ only renderer/executor/validation authority for their feature.
   one of the decisions a run cannot pass: `readiness_missing`, `domain_link_missing`,
   `go_main_ambiguous`, `rust_binary_ambiguous` — stops the run with the finding's code as the terminal code and
   `title: measured. action` as the reason.
-- `POST /deploy/{id}/environments/{env}/check` answers the same evaluation for the environment's desired
-  plan before Deploy is pressed. It carries the run request's capability (`service.control`), resolves
-  the commit exactly as the run request does (`sourceRevision`, `ref` via `ResolveGitRef`, else
-  `ResolveGitRevision`; a local checkout's recorded commit), reads it through a temporary planning
-  worktree (`HostSourceAnalyzer.InspectRevision`: the bounded, blob-filtered planning mirror, fetching a
-  pinned commit by id when the branch has moved past it; a local checkout's commit is fetched at depth
-  one, never its working tree, one inspection at a time, within a minute, and only after its tree
-  listing shows at most 20,000 files and 256 MiB — a larger commit is `source_inspection_unavailable`
-  and left to the deployment's own read) and returns `{findings, planRevision, sourceRevision, checkedAt}`. An
-  answer is kept for three minutes per environment, plan revision and commit. It is advisory — a
-  warning never gates `/runs`, and analyze_plan stays the gate every trigger passes, git watch, hooks,
-  schedules and previews included — and, being a read, it is kept out of the audit log
-  (`httpx.SkipAudit`); a refused attempt is still recorded. A commit that cannot be read is a
-  `source_inspection_unavailable` finding, and the evaluation falls back to the stored evidence.
-- The project page asks the check on arrival and after each settings save that leaves changes waiting
-  (`useDeploymentCheck`), and draws what it found in the pending-changes strip and as "Before you
-  deploy" on the Overview, each finding opening the settings page that holds its `fieldId`
-  (`settingsPathForField`). Every build a page starts — the header's Deploy, Deploy changes and Rebuild
-  without cache, a fleet card's Deploy (from the check the project page last made, for the revision
-  the card shows, while recent), and Deploy a specific version (which checks that version itself) —
-  opens "Ready to deploy?" when the check found something that stops the deployment, which keeps the
-  command disabled, or warnings not yet confirmed in this tab; confirming deploys, and the same warnings
-  are not asked again this session. With no answer yet, or a clean one, Deploy stays one press.
+- Optional project advisory checks and `POST …/environments/{env}/check` were removed in 0.7.5.
+  Project and fleet attention panels, header counts and setting recommendations are gone. Deploy
+  commands enqueue the run directly; `analyze_plan`, source validation, readiness gates, permission
+  checks, audit and recovery still run as part of execution. Source inspection and detection remain
+  operational setup tools. `/operations` returns each owner's runtime/domain/storage/backup/dependency
+  observation without a `diagnosis` field.
+
 - A draft's preflight reads the commit its detection reviewed (`PreflightDraftWithSource`): the recipe's
   dry run replaces what detection alone could say about the plan, a root directory edited to one
   detection found nothing in is `detection_root_mismatch` (a decision without a tree, a warning once the
@@ -1213,9 +1197,7 @@ only renderer/executor/validation authority for their feature.
   (`/backups`, `/databases`) until then. A database is a path now — `/databases/<id>` is its home and
   each of its pages a segment under it — so the link no longer selects a connection by query; the
   older `/databases/connection?conn=<id>` a previous release emitted still resolves, through the
-  section's redirect for such addresses. `deploy.Diagnose` is a pure function over those
-  observations returning findings and explicit *silences*: an owner that could not be read is never a
-  claim and never a clean result. Release comparison (`.../releases/{release}/comparison`) names source,
+  section's redirect for such addresses. Each observation retains its own availability and reason; an unavailable owner is not a healthy result. Release comparison (`.../releases/{release}/comparison`) names source,
   image, command, ports, runtime plan, storage, dependencies, checks and domains, compares variables by
   name and value digest only, and reports artifact retention through the same planner a prune uses.
 - The fleet read model batches every per-deployment join. `liveReleaseFacts`, `activeProjectRuns` and
@@ -1562,12 +1544,10 @@ names** — remove a mount and the file manager silently browses the container's
 ## Deployment workspace
 
 `/deploy` opens on the runs in progress as rows that open the run (it has no row of figures: each
-card carries its own traffic and the counts are the chips'), then an attention list, and the projects under a search field and counted state
-chips, ordered worst first: failed, unhealthy, deploying, ready with pending changes, ready,
-stopped, not deployed. What needs attention is decided apart from how it is drawn
-(`components/deploy/fleet.ts`, `fleetAttention`): a failed deploy with the engine's own terminal
-reason, a live release failing its health check, and a site failing 5% or more of its requests; a
-health reading of *unavailable* is not a finding. A card carries the project drawn as itself
+card carries its own traffic and the counts are the chips), then the projects under a search field
+and native state chips, ordered failed, unhealthy, deploying, ready with pending changes, ready,
+stopped and not deployed. Automatic fleet attention rules and their list were removed in 0.7.5.
+A card carries the project drawn as itself
 (`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
 hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
 the last one, and the verbs the project context row offers (`useProjectVerbs`). Every card draws
@@ -1634,12 +1614,7 @@ shrunk into one tile that is a link to it, beside the way a request reaches the 
 with automatic deployments, the live release with who deployed it, the runtime's containers and
 health, domains with their certificates), each drawn as its product, over four readings (requests
 a minute, the failing share, processor and memory, each carrying its last hour and each a way to
-the page that has the rest); first sign-in, for a template that declares one; the findings from
-the operations diagnosis (`#attention`, which the header's verdict links to) — among them
-`last_deploy_failed`, which diagnosis raises before its no-live-release silence from the
-environment's newest run when that run failed and made nothing live (critical when nothing serves,
-a warning while an older release does), titled by its cause and linking to the run, and
-`auto_deploy_stopped` when the watcher could not read its branch for a named reason; the delivery
+the page that has the rest); first sign-in, for a template that declares one; the delivery
 figures; the recent deployments; then release history, whose columns share the split of the lists
 above and whose single failure cause is a count instead of a full-width bar. The Overview keeps the
 delivery figures compact; the Deployments page retains the release-time trend. From `2xl`, recent

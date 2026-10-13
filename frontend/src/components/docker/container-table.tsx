@@ -1,6 +1,4 @@
 "use client"
-
-import { Warning } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { useNow } from "@/components/deploy/vocabulary"
@@ -22,7 +20,7 @@ import {
 } from "@/components/ui/table"
 import { bytes, duration, percent, plural } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
-import type { Container, ContainerSparkline, ContainerStats, DockerDiagnosis } from "@/lib/types"
+import type { Container, ContainerSparkline, ContainerStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { MiniBar } from "@/components/procs/process-table"
 import { PortList } from "@/components/docker/exposure"
@@ -53,7 +51,6 @@ export function ProjectKey({ project }: { project: string }) {
 type RowsProps = {
   stats: Record<string, ContainerStats>
   trends: Map<string, ContainerSparkline>
-  diagnosis?: DockerDiagnosis
   pending: PendingMap
   confirm: ConfirmFn
   act: (c: Container, action: string, progressive: string, phrase?: string) => Promise<void>
@@ -166,23 +163,13 @@ function WideRow({
               <RowLink title={container.name} onClick={() => props.onOpen(container.id)}>
                 {container.name}
               </RowLink>
-              <Issues
-                container={container}
-                diagnosis={props.diagnosis}
-                onOpen={() => props.onOpen(container.id, "overview")}
-              />
             </div>
             <Origin container={container} />
           </div>
         </div>
       </TableCell>
       <TableCell className="py-2">
-        <StateReading
-          container={container}
-          pending={pending}
-          now={props.now}
-          diagnosis={props.diagnosis}
-        />
+        <StateReading container={container} pending={pending} now={props.now} />
       </TableCell>
       <TableCell className="py-2">
         <CpuReading
@@ -242,21 +229,10 @@ function NarrowRow({
             <RowLink data-workspace-primary onClick={() => props.onOpen(container.id)}>
               {container.name}
             </RowLink>
-            <Issues
-              container={container}
-              diagnosis={props.diagnosis}
-              onOpen={() => props.onOpen(container.id, "overview")}
-            />
           </div>
           <Origin container={container} />
         </div>
-        <StateReading
-          container={container}
-          pending={pending}
-          now={props.now}
-          diagnosis={props.diagnosis}
-          inline
-        />
+        <StateReading container={container} pending={pending} now={props.now} inline />
         {stat && container.state === "running" && (
           <p className="numeric flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-hint text-muted-foreground">
             <span>{stat.cpuReady === false ? "measuring" : `${percent(stat.cpuPercent)} CPU`}</span>
@@ -301,48 +277,6 @@ function Origin({ container }: { container: Container }) {
 }
 
 /**
- * What the dashboard thinks is wrong with it, beside its name: the count of
- * issues in their worst tone, and nothing when there are none. The
- * recommendations stay in Configure, where their controls and reasoning are.
- */
-function Issues({
-  container,
-  diagnosis,
-  onOpen,
-}: {
-  container: Container
-  diagnosis?: DockerDiagnosis
-  onOpen: () => void
-}) {
-  const issues = (diagnosis?.findings ?? []).filter(
-    (f) =>
-      f.targetId === container.id &&
-      f.class !== "runtime" &&
-      (f.severity === "critical" || f.severity === "warning"),
-  )
-  if (issues.length === 0) return null
-  const critical = issues.some((f) => f.severity === "critical")
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation()
-        onOpen()
-      }}
-      title={issues.map((f) => f.title).join("\n")}
-      aria-label={`${plural(issues.length, "issue")} on ${container.name}`}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-sm text-hint font-medium focus-ring",
-        critical ? "text-destructive" : "text-warning",
-      )}
-    >
-      <Warning className="size-3" />
-      {issues.length}
-    </button>
-  )
-}
-
-/**
  * The state as a word, and under it how long the container has been in it —
  * up for how long and whether anything is checking it, or how it stopped and
  * when. A verb in flight or a health check that has not passed yet shimmers,
@@ -352,13 +286,11 @@ function StateReading({
   container,
   pending,
   now,
-  diagnosis,
   inline,
 }: {
   container: Container
   pending?: string
   now: number
-  diagnosis?: DockerDiagnosis
   inline?: boolean
 }) {
   const bucket = containerBucket(container)
@@ -402,7 +334,7 @@ function StateReading({
   } else {
     detail = (
       <span className={cn(bucket === "failing" && "text-destructive/80")}>
-        {stoppedWords(container, diagnosis?.findings)}
+        {stoppedWords(container)}
       </span>
     )
   }

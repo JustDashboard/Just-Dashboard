@@ -6,13 +6,7 @@ import { ApiError, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { useSessionState } from "@/lib/view-state"
-import type {
-  DeploymentCheckResult,
-  DeploymentCommit,
-  DeploymentEngineRun,
-  DeploymentRelease,
-} from "@/lib/types"
+import type { DeploymentCommit, DeploymentEngineRun, DeploymentRelease } from "@/lib/types"
 import { Modal } from "@/components/modal"
 import { Field, FormFact, FormFacts } from "@/components/form"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -30,13 +24,6 @@ import { BranchChip, ShortSha } from "@/components/git/marks"
 import { InitialsMark } from "@/components/account/user-avatar"
 import { useProject } from "@/components/deploy/project-context"
 import { runCommit } from "@/components/deploy/vocabulary"
-import { DeployCheckList } from "@/components/deploy/deploy-check"
-import {
-  attentionFindings,
-  confirmationSignature,
-  needsConfirmation,
-  stopsDeployment,
-} from "@/components/deploy/deploy-check-state"
 
 /** A full Git object id; anything else is a name the remote is asked about. */
 const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i
@@ -82,13 +69,6 @@ export function DeployVersionDialog({
   const [value, setValue] = useState("")
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
-  // What the advisory check found for the version in the field, kept against
-  // the request it was about: another version is another commit to check.
-  const [checked, setChecked] = useState<{ request: string; result: DeploymentCheckResult }>()
-  const [confirmed, setConfirmed] = useSessionState(
-    `deploy.${project.projectId}.check.confirmed`,
-    "",
-  )
   const trimmed = value.trim()
   const exact = OBJECT_ID.test(trimmed)
   const partial = !exact && PARTIAL_ID.test(trimmed)
@@ -120,14 +100,9 @@ export function DeployVersionDialog({
     onOpenChange(false)
     setValue("")
     setError(undefined)
-    setChecked(undefined)
   }
 
   const version = exact ? { sourceRevision: trimmed.toLowerCase() } : { ref: trimmed }
-  const request = JSON.stringify(version)
-  const check = checked?.request === request ? checked.result : undefined
-  const findings = check ? attentionFindings(check.findings) : []
-  const stops = findings.some(stopsDeployment)
 
   const deploy = async () => {
     if (!trimmed) {
@@ -137,26 +112,6 @@ export function DeployVersionDialog({
     setBusy(true)
     setError(undefined)
     try {
-      // The version is checked before it is built, the way the header's
-      // Deploy is: a first press that finds something asks, a second press
-      // on the same version confirms it.
-      if (!check) {
-        const result = await post<DeploymentCheckResult>(
-          `/deploy/${project.projectId}/environments/${project.environmentId}/check`,
-          version,
-        ).catch((caught: unknown) => {
-          // A name the remote does not have is the answer; any other failure
-          // leaves the deployment to check itself before building.
-          if (caught instanceof ApiError && caught.code === "ref_not_found") throw caught
-          return undefined
-        })
-        if (Array.isArray(result?.findings) && needsConfirmation(result, confirmed)) {
-          setChecked({ request, result })
-          return
-        }
-      } else {
-        setConfirmed(confirmationSignature(check.findings))
-      }
       const run = await post<DeploymentEngineRun>(
         `/deploy/${project.projectId}/environments/${project.environmentId}/runs`,
         { operation: "deploy", ...version },
@@ -193,15 +148,9 @@ export function DeployVersionDialog({
           <Button variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            onClick={() => void deploy()}
-            pending={busy}
-            disabled={stops}
-            className="max-w-64"
-          >
+          <Button onClick={() => void deploy()} pending={busy} disabled={busy} className="max-w-64">
             <span className="truncate">
               {trimmed ? `Deploy ${exact ? trimmed.slice(0, 7) : trimmed}` : "Deploy"}
-              {check && findings.length > 0 && !stops && " anyway"}
             </span>
           </Button>
         </>
@@ -268,20 +217,6 @@ export function DeployVersionDialog({
             />
           </InputGroup>
         </Field>
-
-        {check && findings.length > 0 && (
-          <section aria-labelledby="deploy-version-check" className="space-y-2">
-            <p id="deploy-version-check" className="eyebrow">
-              Ready to deploy?
-            </p>
-            <p className="text-hint text-muted-foreground">
-              {stops
-                ? "This version would stop before it builds until these are fixed."
-                : "This version can be deployed; confirm these first."}
-            </p>
-            <DeployCheckList projectId={project.projectId} findings={findings} />
-          </section>
-        )}
 
         {(branch || picks.length > 0) && (
           <section aria-labelledby="deploy-version-picks" className="space-y-2">

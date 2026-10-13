@@ -248,7 +248,7 @@ export function NetworkChangeConfirmation() {
               ? `${subject} change confirmed`
               : change.phase === "recovered"
                 ? `Previous ${settings} restored`
-                : `${subject} recovery needs attention`
+                : `${subject} recovery incomplete`
           }
         >
           <p>

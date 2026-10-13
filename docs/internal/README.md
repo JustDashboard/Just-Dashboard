@@ -55,7 +55,7 @@ strategy, and feature ownership behind those rules.
   telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, posture, login history, sshd and its pending apply,
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, exposure, login history, sshd and its pending apply,
   firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
   and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,

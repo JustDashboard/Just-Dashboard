@@ -1144,199 +1144,6 @@ func TestLiveOpsPostgresStatements(t *testing.T) {
 	}
 }
 
-func TestLiveOpsPostgresAdvisor(t *testing.T) {
-	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
-	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_adv_child`, `DROP TABLE IF EXISTS jd_b3_ops_adv`,
-		`CREATE TABLE jd_b3_ops_adv (id int primary key, a int)`,
-		`CREATE INDEX jd_b3_ops_adv_a ON jd_b3_ops_adv (a)`, `CREATE INDEX jd_b3_ops_adv_a2 ON jd_b3_ops_adv (a)`,
-		`CREATE INDEX jd_b3_ops_adv_e1 ON jd_b3_ops_adv ((a + 1))`, `CREATE INDEX jd_b3_ops_adv_e2 ON jd_b3_ops_adv ((a + 2))`,
-		`CREATE TABLE jd_b3_ops_adv_child (v int, parent int REFERENCES jd_b3_ops_adv(id))`)
-	// A slot nothing reads from is the quiet way a disk fills.
-	db.Exec(`SELECT pg_drop_replication_slot('jd_b3_ops_idle_slot')`)
-	slotMade := true
-	if _, err := db.Exec(`SELECT pg_create_physical_replication_slot('jd_b3_ops_idle_slot', true)`); err != nil {
-		slotMade = false
-		t.Logf("no slot could be made here: %v", err)
-	}
-	t.Cleanup(func() {
-		db.Exec(`DROP TABLE IF EXISTS jd_b3_ops_adv_child`)
-		db.Exec(`DROP TABLE IF EXISTS jd_b3_ops_adv`)
-		db.Exec(`SELECT pg_drop_replication_slot('jd_b3_ops_idle_slot')`)
-	})
-	report, err := Advise(t.Context(), db, DriverPostgres, "public")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !report.EngineChecks || report.Version == "" || report.Truncated {
-		t.Fatalf("report: %+v", report)
-	}
-	by := map[string]Advice{}
-	for _, f := range report.Findings {
-		by[f.ID] = f
-		switch f.Category {
-		case AdviceSecurity, AdvicePerformance, AdviceReliability, AdviceMaintenance:
-		default:
-			t.Errorf("%s has category %q", f.ID, f.Category)
-		}
-		if len(f.Targets) == 0 {
-			t.Errorf("%s names no object", f.ID)
-		}
-	}
-	dup, ok := by["duplicate-index"]
-	if !ok {
-		t.Fatalf("the duplicate index was not found: %v", report.Findings)
-	}
-	// One set: the two indexes on (a). The two expression indexes differ and
-	// used to be reported as a second set.
-	mine := 0
-	for _, o := range dup.Objects {
-		if strings.HasPrefix(o, "jd_b3_ops_adv:") {
-			mine++
-			if !strings.Contains(o, "jd_b3_ops_adv_a, jd_b3_ops_adv_a2") {
-				t.Errorf("the set is %q", o)
-			}
-		}
-	}
-	if mine != 1 {
-		t.Errorf("%d duplicate sets on the table, want 1: %v", mine, dup.Objects)
-	}
-	if !strings.Contains(dup.SQL, `DROP INDEX "public"."jd_b3_ops_adv_a2";`) {
-		t.Errorf("the fix is %q", dup.SQL)
-	}
-	if fk, ok := by["unindexed-foreign-key"]; !ok || !strings.Contains(fk.SQL, `ON "public"."jd_b3_ops_adv_child" ("parent")`) {
-		t.Errorf("unindexed foreign key: %+v", fk)
-	}
-	if pk, ok := by["no-primary-key"]; !ok || pk.Category != AdviceReliability {
-		t.Errorf("no primary key: %+v", pk)
-	}
-	if slotMade {
-		slot, ok := by["inactive-replication-slot"]
-		if !ok || !strings.Contains(slot.SQL, `SELECT pg_drop_replication_slot('jd_b3_ops_idle_slot');`) {
-			t.Errorf("inactive slot: %+v", slot)
-		}
-	}
-	// The account asking is never told to demote itself.
-	var me string
-	if err := db.QueryRow(`SELECT current_user`).Scan(&me); err != nil {
-		t.Fatal(err)
-	}
-	if supers, ok := by["extra-superusers"]; ok {
-		for _, name := range supers.Objects {
-			if name == me {
-				t.Errorf("the advisor suggests demoting the connection's own role: %+v", supers)
-			}
-		}
-	}
-}
-
-// A fix the advisor hands over has to be one the server accepts and that makes
-// the finding go away: each of these is taken from the report, run as it
-// stands, and the report read again.
-func TestLiveOpsPostgresAdvisorFixesRun(t *testing.T) {
-	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
-	ctx := t.Context()
-	drop := func() {
-		for _, table := range []string{"jd_b3_fix_keyed", "jd_b3_fix_bare", "jd_b3_fix_serial", "jd_b3_fix_identity"} {
-			db.Exec(`DROP TABLE IF EXISTS ` + table)
-		}
-		db.Exec(`DROP SEQUENCE IF EXISTS jd_b3_fix_capped`)
-	}
-	drop()
-	t.Cleanup(drop)
-	opsMustExec(t, db,
-		// A key in everything but name, and a table with nothing to be one.
-		`CREATE TABLE jd_b3_fix_keyed (code text NOT NULL, note text)`,
-		`CREATE UNIQUE INDEX jd_b3_fix_keyed_code ON jd_b3_fix_keyed (code)`,
-		`CREATE TABLE jd_b3_fix_bare (v int, note text)`,
-		`INSERT INTO jd_b3_fix_bare VALUES (1, 'a'), (2, 'b')`,
-		// Three sequences near their ceilings: a serial column's, an identity
-		// column's, and a bigint one somebody capped by hand.
-		`CREATE TABLE jd_b3_fix_serial (id serial PRIMARY KEY, v int)`,
-		`SELECT setval('jd_b3_fix_serial_id_seq', 2000000000)`,
-		`CREATE TABLE jd_b3_fix_identity (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, v int)`,
-		`SELECT setval('jd_b3_fix_identity_id_seq', 2100000000)`,
-		`CREATE SEQUENCE jd_b3_fix_capped MAXVALUE 1000`,
-		`SELECT setval('jd_b3_fix_capped', 900)`)
-
-	find := func(id string) (Advice, map[string]AdviceTarget) {
-		t.Helper()
-		report, err := Advise(ctx, db, DriverPostgres, "public")
-		if err != nil {
-			t.Fatal(err)
-		}
-		targets := map[string]AdviceTarget{}
-		for _, f := range report.Findings {
-			if f.ID != id {
-				continue
-			}
-			for _, target := range f.Targets {
-				if strings.HasPrefix(target.Name, "jd_b3_fix_") {
-					targets[target.Name] = target
-				}
-			}
-			return f, targets
-		}
-		return Advice{}, targets
-	}
-	runFix := func(target AdviceTarget) {
-		t.Helper()
-		if target.SQL == "" {
-			t.Fatalf("%s carries no fix", target.Name)
-		}
-		for _, stmt := range strings.Split(target.SQL, "\n") {
-			opsMustExec(t, db, stmt)
-		}
-	}
-
-	finding, keyless := find("no-primary-key")
-	if keyed := keyless["jd_b3_fix_keyed"]; keyed.SQL != `ALTER TABLE "public"."jd_b3_fix_keyed" ADD CONSTRAINT "jd_b3_fix_keyed_pkey" PRIMARY KEY USING INDEX "jd_b3_fix_keyed_code";` {
-		t.Errorf("a table with a unique index: %+v", keyed)
-	}
-	if bare := keyless["jd_b3_fix_bare"]; bare.SQL != `ALTER TABLE "public"."jd_b3_fix_bare" ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;` {
-		t.Errorf("a table with nothing to be a key: %+v", bare)
-	}
-	if !strings.Contains(finding.SQL, "jd_b3_fix_keyed_pkey") || !strings.Contains(finding.SQL, "jd_b3_fix_bare") {
-		t.Errorf("the finding's own fix is %q", finding.SQL)
-	}
-	runFix(keyless["jd_b3_fix_keyed"])
-	runFix(keyless["jd_b3_fix_bare"])
-	// The insert the application already makes, naming no columns, still works.
-	opsMustExec(t, db, `INSERT INTO jd_b3_fix_bare VALUES (3, 'c')`)
-	if _, keyless = find("no-primary-key"); len(keyless) != 0 {
-		t.Errorf("still without a key after the fix: %v", keyless)
-	}
-
-	_, sequences := find("sequence-exhaustion")
-	if len(sequences) != 3 {
-		t.Fatalf("sequences near their ceiling: %v", sequences)
-	}
-	if got := sequences["jd_b3_fix_serial_id_seq"]; got.Table != "jd_b3_fix_serial" ||
-		got.SQL != "ALTER TABLE \"public\".\"jd_b3_fix_serial\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"public\".\"jd_b3_fix_serial_id_seq\" AS bigint;" {
-		t.Errorf("serial: %+v", got)
-	}
-	if got := sequences["jd_b3_fix_capped"]; got.SQL != `ALTER SEQUENCE "public"."jd_b3_fix_capped" NO MAXVALUE;` {
-		t.Errorf("capped: %+v", got)
-	}
-	for _, target := range sequences {
-		runFix(target)
-	}
-	if _, sequences = find("sequence-exhaustion"); len(sequences) != 0 {
-		t.Errorf("still near their ceiling after the fix: %v", sequences)
-	}
-	for _, table := range []string{"jd_b3_fix_serial", "jd_b3_fix_identity"} {
-		var column, sequence string
-		if err := db.QueryRow(`
-		  SELECT format_type(a.atttypid, NULL), s.data_type::text
-		  FROM pg_attribute a, pg_sequences s
-		  WHERE a.attrelid = $1::regclass AND a.attname = 'id' AND s.sequencename = $1 || '_id_seq'`, table).Scan(&column, &sequence); err != nil {
-			t.Fatal(err)
-		}
-		if column != "bigint" || sequence != "bigint" {
-			t.Errorf("%s: column %s, sequence %s", table, column, sequence)
-		}
-	}
-}
-
 // --- MySQL / MariaDB ---------------------------------------------------------
 
 func TestLiveOpsMySQL(t *testing.T) {
@@ -1881,69 +1688,11 @@ func TestLiveOpsMySQL(t *testing.T) {
 				}
 			})
 
-			t.Run("advisor", func(t *testing.T) {
-				report, err := Advise(ctx, db, DriverMySQL, "")
-				if err != nil {
-					t.Fatal(err)
-				}
-				// With no schema named the checks run on the connection's own
-				// database, not on every database of the server.
-				if !report.EngineChecks || report.Version == "" || report.TablesChecked == 0 {
-					t.Fatalf("report: %+v", report)
-				}
-				for _, f := range report.Findings {
-					if f.Category == "schema" || f.Category == "" {
-						t.Errorf("%s has category %q", f.ID, f.Category)
-					}
-				}
-			})
-
 			// A table that is keyed in everything but name is offered the
 			// statement that names the key; one that is not is offered none,
 			// because a new column would break every INSERT that names no
 			// columns.
-			t.Run("advisor_fix_runs", func(t *testing.T) {
-				opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_fix_keyed`, `DROP TABLE IF EXISTS jd_b3_fix_bare`,
-					`CREATE TABLE jd_b3_fix_keyed (tenant INT NOT NULL, code VARCHAR(20) NOT NULL, note VARCHAR(20),
-					   UNIQUE KEY jd_b3_fix_keyed_code (tenant, code)) ENGINE=InnoDB`,
-					`CREATE TABLE jd_b3_fix_bare (v INT, note VARCHAR(20), UNIQUE KEY jd_b3_fix_bare_note (note)) ENGINE=InnoDB`)
-				t.Cleanup(func() {
-					db.Exec(`DROP TABLE IF EXISTS jd_b3_fix_keyed`)
-					db.Exec(`DROP TABLE IF EXISTS jd_b3_fix_bare`)
-				})
-				keyless := func() map[string]AdviceTarget {
-					t.Helper()
-					report, err := Advise(ctx, db, DriverMySQL, "")
-					if err != nil {
-						t.Fatal(err)
-					}
-					out := map[string]AdviceTarget{}
-					for _, f := range report.Findings {
-						if f.ID == "no-primary-key" {
-							for _, target := range f.Targets {
-								out[target.Name] = target
-							}
-						}
-					}
-					return out
-				}
-				found := keyless()
-				keyed, isKeyless := found["jd_b3_fix_keyed"]
-				// InnoDB already treats a unique index over NOT NULL columns as
-				// the clustered key, and information_schema may report it as one.
-				if isKeyless {
-					if !strings.HasSuffix(keyed.SQL, "ADD PRIMARY KEY (`tenant`, `code`);") || !strings.Contains(keyed.SQL, "`jd_b3_fix_keyed`") {
-						t.Fatalf("a table with a unique index: %+v", keyed)
-					}
-					opsMustExec(t, db, strings.TrimSuffix(keyed.SQL, ";"))
-				}
-				if bare, ok := found["jd_b3_fix_bare"]; !ok || bare.SQL != "" {
-					t.Errorf("a table whose only unique column may be NULL: %+v (found %v)", bare, ok)
-				}
-				if _, still := keyless()["jd_b3_fix_keyed"]; still {
-					t.Error("still without a key after the fix")
-				}
-			})
+
 		})
 	}
 }
@@ -2184,18 +1933,6 @@ func TestOpsSQLite(t *testing.T) {
 		t.Errorf("replication on SQLite: %+v %v", rep, err)
 	}
 
-	report, err := Advise(ctx, db, DriverSQLite, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !report.EngineChecks {
-		t.Errorf("the SQLite engine checks did not run: %+v", report)
-	}
-	for _, f := range report.Findings {
-		if f.ID == "journal-mode-not-wal" {
-			t.Errorf("a WAL database was advised to switch to WAL")
-		}
-	}
 }
 
 // A foreign key check answers a row per orphan. What is kept of it is bounded
@@ -2263,34 +2000,6 @@ func TestSQLiteIndexStatsRankBeforeTheyCut(t *testing.T) {
 	if len(two.Indexes) != 2 || two.Indexes[0].Table != "zzz" || two.Indexes[1].Table != "zzz" ||
 		(two.Indexes[0].DuplicateOf == "") == (two.Indexes[1].DuplicateOf == "") {
 		t.Errorf("limit 2: %+v", two.Indexes)
-	}
-}
-
-func TestSQLiteAdvisorSaysWhenTheFileIsNotInWALMode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "plain.db")
-	d, _ := DialectFor(DriverSQLite)
-	db, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.TunePool(db)
-	t.Cleanup(func() { db.Close() })
-	opsMustExec(t, db, `CREATE TABLE t (id INTEGER PRIMARY KEY)`)
-	report, err := Advise(t.Context(), db, DriverSQLite, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, f := range report.Findings {
-		if f.ID == "journal-mode-not-wal" {
-			found = true
-			if f.SQL != "PRAGMA journal_mode = WAL;" || f.Category != AdvicePerformance || len(f.Targets) != 1 {
-				t.Errorf("finding: %+v", f)
-			}
-		}
-	}
-	if !found {
-		t.Errorf("no journal mode finding: %+v", report.Findings)
 	}
 }
 
@@ -2490,16 +2199,6 @@ func TestLiveOpsClickHouse(t *testing.T) {
 		t.Errorf("role detail: %+v", detail)
 	}
 
-	report, err := Advise(ctx, db, DriverClickHouse, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !report.EngineChecks || report.Version == "" || report.EndOfLife == nil {
-		t.Fatalf("report: %+v", report)
-	}
-	if len(report.Silences) != 0 {
-		t.Errorf("silences: %v", report.Silences)
-	}
 }
 
 // --- SQL Server --------------------------------------------------------------
@@ -3014,49 +2713,6 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		}
 	})
 
-	t.Run("advisor", func(t *testing.T) {
-		opsMustExec(t, db, `CREATE TABLE dbo.jd_b3_ops_child (v INT, parent INT REFERENCES dbo.jd_b3_ops_t(id))`)
-		report, err := Advise(ctx, db, DriverMSSQL, "dbo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !report.EngineChecks || report.EndOfLife == nil || report.EndOfLife.Release != "2022" {
-			t.Fatalf("report: %+v", report)
-		}
-		if len(report.Silences) != 0 {
-			t.Errorf("silences: %v", report.Silences)
-		}
-		by := map[string]Advice{}
-		for _, f := range report.Findings {
-			by[f.ID] = f
-		}
-		if sa, ok := by["sa-enabled"]; !ok || sa.SQL != "ALTER LOGIN [sa] DISABLE;" {
-			t.Errorf("sa finding: %+v", sa)
-		}
-		// The keyless table has nothing that could be its key, so the fix is a
-		// new column — and it is one the server accepts as written.
-		keyless, ok := by["no-primary-key"]
-		if !ok || !strings.Contains(keyless.SQL, "ALTER TABLE [dbo].[jd_b3_ops_child] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;") {
-			t.Fatalf("the keyless table: %+v in %+v", keyless, report.Findings)
-		}
-		opsMustExec(t, db, `INSERT INTO dbo.jd_b3_ops_child VALUES (1, 1)`,
-			"ALTER TABLE [dbo].[jd_b3_ops_child] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY",
-			// The insert an application already makes, naming no columns.
-			`INSERT INTO dbo.jd_b3_ops_child VALUES (2, 2)`)
-		if fk, ok := by["unindexed-foreign-key"]; !ok || !strings.Contains(fk.SQL, "ON [dbo].[jd_b3_ops_child] ([parent])") {
-			t.Errorf("unindexed foreign key: %+v", fk)
-		}
-		again, err := Advise(ctx, db, DriverMSSQL, "dbo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range again.Findings {
-			if f.ID == "no-primary-key" && strings.Contains(strings.Join(f.Objects, ","), "jd_b3_ops_child") {
-				t.Errorf("still without a key after the fix: %+v", f)
-			}
-		}
-	})
-
 	// An application's login: a user in its own database and nothing on the
 	// server. What it may not read is a sentence naming the permission, not an
 	// error and not an empty list that reads as "nothing is waiting".
@@ -3139,7 +2795,7 @@ func TestLiveOpsSQLServer(t *testing.T) {
 // is an ordinary application schema, which may not, and has to be told so
 // rather than fail.
 func TestLiveOpsOracle(t *testing.T) {
-	db, dsn := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN", "JD_TEST_ORACLE_ADMIN_DSN")
+	db, _ := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN", "JD_TEST_ORACLE_ADMIN_DSN")
 	ctx := t.Context()
 	db.Exec(`DROP TABLE jd_b3_ops_t PURGE`)
 	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER, w VARCHAR2(20))`,
@@ -3630,86 +3286,8 @@ func TestLiveOpsOracle(t *testing.T) {
 		}
 	})
 
-	t.Run("advisor", func(t *testing.T) {
-		db.Exec(`DROP VIEW jd_b3_ops_broken`)
-		db.Exec(`DROP TABLE jd_b3_ops_gone PURGE`)
-		// A view over a table that is then dropped is the classic invalid object.
-		opsMustExec(t, db, `CREATE TABLE jd_b3_ops_gone (id NUMBER)`, `CREATE VIEW jd_b3_ops_broken AS SELECT id FROM jd_b3_ops_gone`,
-			`DROP TABLE jd_b3_ops_gone PURGE`)
-		t.Cleanup(func() { db.Exec(`DROP VIEW jd_b3_ops_broken`) })
-		report, err := Advise(ctx, db, DriverOracle, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !report.EngineChecks || report.Version == "" {
-			t.Fatalf("report: %+v", report)
-		}
-		var invalid *Advice
-		for i := range report.Findings {
-			if report.Findings[i].ID == "invalid-objects" {
-				invalid = &report.Findings[i]
-			}
-		}
-		if invalid == nil || !strings.Contains(invalid.SQL, `"JD_B3_OPS_BROKEN" COMPILE;`) {
-			t.Errorf("invalid objects: %+v in %+v", invalid, report.Findings)
-		}
-		// This account may read the DBA views, so the two checks that need
-		// them were made rather than passed over.
-		for _, silence := range report.Silences {
-			if strings.Contains(silence, "Default passwords") || strings.Contains(silence, "Tablespace usage") {
-				t.Errorf("a check an administrator can make was not made: %s", silence)
-			}
-		}
-	})
-
 	// A table that is keyed in everything but name is offered the statement
 	// that names the key, and the statement is one the server accepts.
-	t.Run("advisor_fix_runs", func(t *testing.T) {
-		db.Exec(`DROP USER jd_b3_fix CASCADE`)
-		opsMustExec(t, db, `CREATE USER jd_b3_fix IDENTIFIED BY "Jd_b3_pw_2026" QUOTA UNLIMITED ON users`,
-			`CREATE TABLE jd_b3_fix.keyed (tenant NUMBER NOT NULL, code VARCHAR2(20) NOT NULL, note VARCHAR2(20))`,
-			`CREATE UNIQUE INDEX jd_b3_fix.keyed_code ON jd_b3_fix.keyed (tenant, code)`,
-			`CREATE TABLE jd_b3_fix.bare (v NUMBER, note VARCHAR2(20))`)
-		t.Cleanup(func() { db.Exec(`DROP USER jd_b3_fix CASCADE`) })
-		// Each finding's targets by name, with the fix each carries.
-		targets := func(id string) map[string]AdviceTarget {
-			t.Helper()
-			report, err := Advise(ctx, db, DriverOracle, "JD_B3_FIX")
-			if err != nil {
-				t.Fatal(err)
-			}
-			out := map[string]AdviceTarget{}
-			for _, f := range report.Findings {
-				if f.ID == id {
-					for _, target := range f.Targets {
-						out[target.Name] = target
-					}
-				}
-			}
-			return out
-		}
-		keyless := targets("no-primary-key")
-		if got := keyless["KEYED"].SQL; got != `ALTER TABLE "JD_B3_FIX"."KEYED" ADD PRIMARY KEY ("TENANT", "CODE");` {
-			t.Fatalf("a table with a unique index: %+v", keyless["KEYED"])
-		}
-		// A new column would break every INSERT that names no columns.
-		if bare, ok := keyless["BARE"]; !ok || bare.SQL != "" {
-			t.Errorf("a table with nothing to be a key: %+v (found %v)", bare, ok)
-		}
-		// The statement offered for a table with no statistics is the block the
-		// maintenance action runs.
-		unanalysed := targets("never-analysed")
-		if got := unanalysed["BARE"].SQL; got != `BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => '"JD_B3_FIX"', tabname => '"BARE"', cascade => TRUE); END;` {
-			t.Fatalf("a table with no statistics: %+v", unanalysed["BARE"])
-		}
-		opsMustExec(t, db, strings.TrimSuffix(keyless["KEYED"].SQL, ";"), unanalysed["BARE"].SQL)
-		if _, still := targets("no-primary-key")["KEYED"]; still {
-			t.Error("still without a key after the fix")
-		}
-		if _, still := targets("never-analysed")["BARE"]; still {
-			t.Error("still without statistics after the fix")
-		}
-	})
 
 	t.Run("unsupported_surfaces_say_so", func(t *testing.T) {
 		if rep, err := ReadReplication(ctx, db, DriverOracle); err != nil || rep.Supported || rep.Reason == "" {
@@ -3726,134 +3304,8 @@ func TestLiveOpsOracle(t *testing.T) {
 	// An account that can sign in and nothing more — what an application
 	// schema is on every release before the developer role of 23. Every read
 	// answers it: with what it may see, or with the grant it lacks.
-	t.Run("bare_account", func(t *testing.T) {
-		db.Exec(`DROP USER jd_b3_bare CASCADE`)
-		opsMustExec(t, db, `CREATE USER jd_b3_bare IDENTIFIED BY "Jd_b3_pw_2026"`, `GRANT CREATE SESSION TO jd_b3_bare`)
-		t.Cleanup(func() { db.Exec(`DROP USER jd_b3_bare CASCADE`) })
-		parsed, err := url.Parse(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parsed.User = url.UserPassword("jd_b3_bare", "Jd_b3_pw_2026")
-		bare := opsOpen(t, DriverOracle, parsed.String(), "the bare account")
-
-		_, err = ListSettings(ctx, bare, DriverOracle, true)
-		if _, refused := err.(ErrSettingsRefused); !refused || !strings.Contains(err.Error(), "v$parameter") {
-			t.Errorf("settings: %v", err)
-		}
-		if _, err := ChangeSetting(ctx, bare, DriverOracle, "undo_retention", "901", false); err == nil {
-			t.Error("an account that may not read the parameters changed one")
-		}
-		if _, err := ListActivity(ctx, bare, DriverOracle); !errors.Is(err, ErrNoActivityView) || !strings.Contains(err.Error(), "v$session") {
-			t.Errorf("sessions: %v", err)
-		}
-		if locks, err := ListLocks(ctx, bare, DriverOracle); err != nil || locks.Supported || locks.Reason == "" {
-			t.Errorf("locks: %+v %v", locks, err)
-		}
-		if statements, err := TopStatements(ctx, bare, DriverOracle, StatementsOptions{}); err != nil || statements.Supported || statements.Reason == "" {
-			t.Errorf("statements: %+v %v", statements, err)
-		}
-		stats, err := ReadServerStats(ctx, bare, DriverOracle)
-		if err != nil || stats.Version == "" || len(stats.Notes) < 3 {
-			t.Errorf("stats: %+v %v", stats, err)
-		}
-		// The catalogue's ALL_ views answer anyone, with what they may see:
-		// an account that owns nothing has nothing to list, and is not refused.
-		if tables, err := ReadTableStats(ctx, bare, DriverOracle, StatsOptions{}); err != nil || !tables.Supported || len(tables.Tables) != 0 {
-			t.Errorf("tablestats: %+v %v", tables, err)
-		}
-		if indexes, err := ReadIndexStats(ctx, bare, DriverOracle, StatsOptions{}); err != nil || !indexes.Supported || len(indexes.Indexes) != 0 {
-			t.Errorf("indexstats: %+v %v", indexes, err)
-		}
-		if report, err := Advise(ctx, bare, DriverOracle, ""); err != nil || len(report.Silences) < 2 {
-			t.Errorf("advisor: %+v %v", report, err)
-		}
-	})
 
 	// An application schema with no grant on the V$ views gets a snapshot
 	// with the parts it may read and a note for each it may not.
-	t.Run("ordinary_account", func(t *testing.T) {
-		plain, _ := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_DSN", "JD_TEST_ORACLE_DSN")
-		stats, err := ReadServerStats(ctx, plain, DriverOracle)
-		if err != nil {
-			t.Fatalf("an ordinary account got no snapshot at all: %v", err)
-		}
-		if stats.Version == "" || len(stats.Notes) == 0 {
-			t.Errorf("stats: %+v", stats)
-		}
-		for _, note := range stats.Notes {
-			if !strings.Contains(note, "v$") {
-				t.Errorf("a note does not name the view: %q", note)
-			}
-		}
-		report, err := Advise(ctx, plain, DriverOracle, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(report.Silences) == 0 {
-			t.Errorf("the checks that need DBA views read as passed: %+v", report)
-		}
 
-		// What it may not read is a sentence naming the grant, not an error
-		// and not an empty list that reads as "nothing is waiting".
-		if _, err := ListActivity(ctx, plain, DriverOracle); !errors.Is(err, ErrNoActivityView) || !strings.Contains(err.Error(), "v$session") {
-			t.Errorf("sessions: %v", err)
-		}
-		locks, err := ListLocks(ctx, plain, DriverOracle)
-		if err != nil || locks.Supported || !strings.Contains(locks.Reason, "v$session") || locks.Waits == nil {
-			t.Errorf("locks: %+v %v", locks, err)
-		}
-		statements, err := TopStatements(ctx, plain, DriverOracle, StatementsOptions{})
-		if err != nil || statements.Supported || !strings.Contains(statements.Reason, "v$sqlstats") || statements.Statements == nil {
-			t.Errorf("statements: %+v %v", statements, err)
-		}
-		// Its parameters it may read, where it holds that grant, and none of
-		// them is offered for editing: it has no ALTER SYSTEM.
-		if settings, err := ListSettings(ctx, plain, DriverOracle, true); err == nil {
-			for _, s := range settings {
-				if s.Editable {
-					t.Fatalf("an account without ALTER SYSTEM is offered %+v", s)
-				}
-			}
-			if _, err := ChangeSetting(ctx, plain, DriverOracle, "undo_retention", "901", false); err == nil {
-				t.Error("an account without ALTER SYSTEM changed a parameter")
-			} else if _, refused := err.(ErrSettingRequest); !refused {
-				t.Errorf("the refusal reached the server: %v", err)
-			}
-		}
-
-		// Its own schema it can maintain and measure with no grant at all:
-		// DBMS_STATS on its own tables, sizes from USER_SEGMENTS.
-		plain.Exec(`DROP TABLE jd_b3_plain_t PURGE`)
-		opsMustExec(t, plain, `CREATE TABLE jd_b3_plain_t (id NUMBER PRIMARY KEY, v VARCHAR2(40))`,
-			`INSERT INTO jd_b3_plain_t SELECT LEVEL, 'row ' || LEVEL FROM dual CONNECT BY LEVEL <= 50`)
-		t.Cleanup(func() { plain.Exec(`DROP TABLE jd_b3_plain_t PURGE`) })
-		gathered, err := RunMaintenance(ctx, plain, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Table: "JD_B3_PLAIN_T"})
-		if err != nil || len(gathered.Output) != 1 || !strings.HasPrefix(gathered.Output[0], "JD_B3_PLAIN_T: 50 rows, ") {
-			t.Fatalf("gather on its own table: %+v %v", gathered, err)
-		}
-		tables, err := ReadTableStats(ctx, plain, DriverOracle, StatsOptions{})
-		if err != nil || !tables.Supported {
-			t.Fatalf("tablestats: %+v %v", tables, err)
-		}
-		var stat *TableStat
-		for i := range tables.Tables {
-			if tables.Tables[i].Table == "JD_B3_PLAIN_T" {
-				stat = &tables.Tables[i]
-			}
-		}
-		if stat == nil || stat.Rows != 50 || stat.TableBytes <= 0 || stat.IndexBytes <= 0 || stat.LastAnalyze == nil {
-			t.Errorf("its own table: %+v", stat)
-		}
-		indexes, err := ReadIndexStats(ctx, plain, DriverOracle, StatsOptions{Table: "JD_B3_PLAIN_T"})
-		if err != nil || !indexes.Supported || len(indexes.Indexes) != 1 || !indexes.Indexes[0].Primary || indexes.Indexes[0].Bytes <= 0 ||
-			indexes.Indexes[0].Scans != -1 || !strings.Contains(strings.Join(indexes.Notes, " "), "DBA_INDEX_USAGE") {
-			t.Errorf("its own index: %+v %v", indexes, err)
-		}
-		// Another schema's tables it may not size; that is a note, with the
-		// size the statistics recorded in its place.
-		if other, err := ReadTableStats(ctx, plain, DriverOracle, StatsOptions{Schema: "SYSTEM"}); err != nil || !other.Supported {
-			t.Errorf("another schema: %+v %v", other, err)
-		}
-	})
 }

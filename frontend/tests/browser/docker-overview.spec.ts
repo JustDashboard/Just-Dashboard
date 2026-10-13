@@ -24,7 +24,7 @@ test("the overview opens on the daemon and its verdicts, with no tiles", async (
   await expect(identity.getByText("10 of 12 containers running")).toBeVisible()
   await expect(identity.getByText("3 of 4 projects up")).toBeVisible()
   await expect(identity.getByText("2 containers failing")).toBeVisible()
-  await expect(identity.getByText("2 issues to look at")).toBeVisible()
+  await expect(identity.getByText("2 issues to look at")).toHaveCount(0)
 
   await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
   await expect(page.getByText("Runtime health")).toHaveCount(0)

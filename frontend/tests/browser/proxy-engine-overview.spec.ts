@@ -151,32 +151,6 @@ test("the overview says why when the proxy status cannot be read", async ({ page
   ).toHaveCount(0)
 })
 
-test("a finding's button names where it leads", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await page.goto("/proxy")
-
-  // Actions remain available while the measured evidence is folded away.
-  const open = async (title: string, label: string) => {
-    const finding = page.locator("[data-finding]").filter({ hasText: title })
-    const trigger = finding.getByRole("button", { name: title, exact: true })
-    const button = finding.getByRole("button", { name: label, exact: true })
-    await expect(button).toBeVisible()
-    // It was `Open ${meta}`: "Open renewal", "Open stream" for a list. "Open
-    // certificate" is kept for a finding that links to one certificate.
-    await expect(page.getByRole("button", { name: /^Open (renewal|stream)$/ })).toHaveCount(0)
-    await trigger.click()
-    await expect(trigger).toHaveAttribute("aria-expanded", "true")
-    await trigger.click()
-    await expect(trigger).toHaveAttribute("aria-expanded", "false")
-    await expect(button).toBeVisible()
-  }
-  await open("old.example.com has expired", "Open certificate")
-  await open("Nothing is scheduled to renew certbot's certificates", "Enable automatic renewal")
-  await open("PostgreSQL answers on every interface", "Open ports")
-
-  await open("legacy.example.com serves an application in plain text", "Open site")
-})
-
 /** What nginx 1.26 prints for a directive it does not know, and the test's reading of it. */
 const brokenTest = {
   valid: false,
@@ -1442,81 +1416,6 @@ test("a reload whose test does not finish says nothing was reloaded, not that ng
   ).toBeVisible()
   await expect(page.getByRole("dialog", { name: "nginx config test" })).toHaveCount(0)
   await expect(page.getByText("nginx's configuration fails its test")).toHaveCount(0)
-})
-
-test("the last test's warning stays in Needs attention until a test comes back clean", async ({
-  page,
-}) => {
-  await mockProxy(page, { included: true })
-  let last: unknown = {
-    kind: "nginx",
-    checkedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-    validation: claimedTwice,
-  }
-  const asked: string[] = []
-  await page.route("**/api/v1/proxy/test/last?**", (route) => {
-    asked.push(new URL(route.request().url()).searchParams.get("kind") ?? "")
-    return json(route, last)
-  })
-  const runs: string[] = []
-  await page.route("**/api/v1/proxy/test", (route) => {
-    runs.push("POST")
-    // The server keeps the test it just ran as the last one.
-    last = { kind: "nginx", checkedAt: new Date().toISOString(), validation: passingTest }
-    return json(route, passingTest)
-  })
-  await page.goto("/proxy")
-
-  const finding = page.getByText("nginx's config test has a warning")
-  await expect(finding).toBeVisible()
-  await finding.click()
-  await expect(
-    page.getByText('conflicting server name "app.example.com" on 0.0.0.0:80, ignored'),
-  ).toBeVisible()
-  await expect(page.getByText(/This stays until a test comes back clean/)).toBeVisible()
-
-  // The kept test, as it was and when: not run again by opening it.
-  await page.getByRole("button", { name: "Open test" }).click()
-  const panel = page.getByRole("dialog", { name: "nginx config test" })
-  await expect(panel.getByText("Valid with 1 warning")).toBeVisible()
-  await expect(panel.getByText("tested 3h ago")).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Open at line 3 of app-copy" })).toBeVisible()
-  expect(runs).toEqual([])
-
-  await panel.getByRole("button", { name: "Test again" }).click()
-  await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
-  await expect(panel.getByText("tested just now")).toBeVisible()
-  await panel.getByRole("button", { name: "Close" }).click()
-  await expect(finding).toHaveCount(0)
-  expect(runs).toEqual(["POST"])
-  expect(new Set(asked)).toEqual(new Set(["nginx"]))
-})
-
-test("a failed last test is critical until a test comes back clean", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  await page.route("**/api/v1/proxy/test/last?**", (route) =>
-    json(route, { kind: "nginx", checkedAt: new Date().toISOString(), validation: brokenTest }),
-  )
-  await page.goto("/proxy")
-
-  const finding = page.getByRole("button", { name: /nginx's configuration fails its test/ })
-  await expect(finding).toBeVisible()
-  // Worst first: above the plain-text site the fixtures warn about.
-  const titles = await page.locator("[data-slot='accordion-trigger']").allInnerTexts()
-  const failing = titles.findIndex((title) =>
-    title.includes("nginx's configuration fails its test"),
-  )
-  const plainText = titles.findIndex((title) => title.includes("in plain text"))
-  expect(failing).toBeGreaterThanOrEqual(0)
-  expect(plainText).toBeGreaterThan(failing)
-  await finding.click()
-  await expect(
-    page.getByText('unknown directive "frobnicate" in /etc/nginx/sites-available/app:3'),
-  ).toBeVisible()
-  await page.getByRole("button", { name: "Open test" }).click()
-  await expect(
-    page.getByRole("dialog", { name: "nginx config test" }).getByText("Fails", { exact: true }),
-  ).toBeVisible()
 })
 
 test("a reader is not asked about the config test and has no way to run one", async ({ page }) => {

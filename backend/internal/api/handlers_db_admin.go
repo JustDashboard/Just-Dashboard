@@ -21,12 +21,10 @@ import (
 )
 
 // The server behind a connection: its accounts, its databases, its
-// extensions, its settings, what the advisor finds wrong with it, which
-// statements cost it the most, and the dumps taken of it.
+// extensions, its settings, the cost of its statements and the dumps taken of it.
 //
-// Reading any of it is on the read surface — a list of role names, a list of
-// parameters and a list of findings carry nothing an operator with read
-// access to the data could not already learn from the catalogue. Making an
+// Reading any of it is on the read surface — role names and parameters carry
+// nothing an operator with read access to the data could not already learn from the catalogue. Making an
 // account, granting it a database and enabling an extension are administrative
 // acts, so they sit with creating a connection under system.admin. Dropping an
 // account, an extension or a dump is destructive and sits there.
@@ -35,7 +33,6 @@ func (s *Server) mountDatabaseAdminRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/server/roles", s.handle(s.handleDBRoles))
 	r.Method(http.MethodGet, "/{id}/server/extensions", s.handle(s.handleDBExtensions))
 	r.Method(http.MethodGet, "/{id}/server/settings", s.handle(s.handleDBSettings))
-	r.Method(http.MethodGet, "/{id}/advisor", s.handle(s.handleDBAdvisor))
 	r.Method(http.MethodGet, "/{id}/statements", s.handle(s.handleDBStatements))
 	r.Method(http.MethodGet, "/{id}/backups", s.handle(s.handleDBBackupList))
 	r.Group(func(r chi.Router) {
@@ -894,116 +891,6 @@ func stringify(v any) string {
 		}
 		return strings.Trim(string(b), `"`)
 	}
-}
-
-func (s *Server) handleDBAdvisor(w http.ResponseWriter, r *http.Request) error {
-	httpx.SkipAudit(r)
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	pool, conn, err := s.dbPool(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 120*time.Second)
-	defer cancel()
-	report, err := dbx.Advise(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
-	if err != nil {
-		return queryFailed(err)
-	}
-	// The findings no catalogue can make: where the server is reachable
-	// from, whether anything would bring it back, and what its container is
-	// allowed to take. They are read here, beside the engine's own, so the
-	// page is one list.
-	panel, silences := s.panelAdvice(ctx, r, conn)
-	report.Findings = append(panel, report.Findings...)
-	report.Silences = append(report.Silences, silences...)
-	dbx.SortAdvice(report.Findings)
-	// A finding names the page its fix is made on by that page's own name;
-	// which connection it belongs to is only known here.
-	for i := range report.Findings {
-		if link := report.Findings[i].Link; link != "" {
-			report.Findings[i].Link = fmt.Sprintf("/databases/%d/%s", id, link)
-		}
-	}
-	httpx.JSON(w, http.StatusOK, report)
-	return nil
-}
-
-// dbBackupStaleAfter is how old the newest dump may be before the advisor
-// says so. A week: long enough that a weekly schedule never trips it, short
-// enough that a schedule which stopped is noticed before the dump is needed.
-const dbBackupStaleAfter = 7 * 24 * time.Hour
-
-// panelAdvice is what this dashboard knows about a database that the
-// database does not: its dumps, its published port, its container's limits.
-//
-// The dumps are read by anyone who may read the backups list. The port and
-// the container are read through the same calls as the access page, which
-// lists containers and the firewall and is an administrator's; for everyone
-// else those two are named as not assessed rather than left out, so their
-// absence does not read as a clean result.
-func (s *Server) panelAdvice(ctx context.Context, r *http.Request, conn *dbConnection) ([]dbx.Advice, []string) {
-	out := []dbx.Advice{}
-	silences := []string{}
-
-	database := []dbx.AdviceTarget{{Kind: "database", Name: conn.Name}}
-	switch newest := s.newestDump(conn.Name); {
-	case newest == nil:
-		out = append(out, dbx.Advice{
-			ID: "no-backup", Level: "warning", Category: dbx.AdviceReliability,
-			Title:   "No backup of this database has been taken from here",
-			Detail:  "Nothing in this dashboard's backup directory would bring the database back after a bad migration, a dropped table or a lost disk. A backup taken by some other tool is not seen here.",
-			Advice:  "Take one now, and schedule them under Backups.",
-			Targets: database, Link: "backups",
-		})
-	case time.Since(*newest) > dbBackupStaleAfter:
-		days := int(time.Since(*newest).Hours() / 24)
-		out = append(out, dbx.Advice{
-			ID: "stale-backup", Level: "warning", Category: dbx.AdviceReliability,
-			Title:   fmt.Sprintf("The newest backup is %d days old", days),
-			Detail:  "Restoring it would lose everything written since. A schedule that stopped running looks exactly like this.",
-			Advice:  "Take a backup now, and check the schedule under Backups is still running.",
-			Targets: database, Link: "backups",
-		})
-	}
-
-	if p := httpx.MustPrincipal(r); !p.Can(auth.CapSystemAdmin) {
-		silences = append(silences, "Where the server is reachable from, and its container's limits, are assessed for an administrator only.")
-		return out, silences
-	}
-	_, dsn, err := s.dbConnRow(ctx, conn.ID)
-	if err != nil {
-		return out, silences
-	}
-	access := s.describeDBAccess(ctx, conn, dsn)
-	if access.Exposure == exposurePublic && (!access.Firewall.Active || access.Firewall.Open) {
-		out = append(out, dbx.Advice{
-			ID: "published-everywhere", Level: "warning", Category: dbx.AdviceSecurity,
-			Title:   "The server is reachable from the internet",
-			Detail:  "Its port is published on every interface and the firewall lets it through, so the only thing between the internet and the data is the password.",
-			Advice:  "Keep it if applications elsewhere need it and the passwords are strong; otherwise switch it to this server only under Settings.",
-			Targets: []dbx.AdviceTarget{{Kind: "server", Name: fmt.Sprintf("port %d", access.Port)}}, Link: "settings",
-		})
-	}
-	if access.Container != "" && s.modules.docker != nil {
-		// The container's own ceiling. Without one a database's cache grows
-		// until the kernel has to kill something, and what it kills is
-		// whichever process is largest — which may not be the database.
-		if spec, err := s.modules.docker.SpecOf(ctx, access.Container); err != nil {
-			silences = append(silences, "The container's limits could not be read: "+err.Error())
-		} else if spec.Limits.MemoryMB == 0 {
-			out = append(out, dbx.Advice{
-				ID: "container-no-memory-limit", Level: "notice", Category: dbx.AdviceReliability,
-				Title:   "The container has no memory limit",
-				Detail:  "The server may take as much memory as the machine has. When the machine runs out the kernel kills a process to get some back, and it chooses by size, not by which one grew.",
-				Advice:  "Give the container a memory limit a little above what the database is configured to use, so it is the one stopped and restarted rather than its neighbours.",
-				Targets: []dbx.AdviceTarget{{Kind: "container", Name: access.Container}},
-			})
-		}
-	}
-	return out, silences
 }
 
 // handleDBStatements lists the statements that cost the server most. sort

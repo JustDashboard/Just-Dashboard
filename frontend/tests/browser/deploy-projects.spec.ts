@@ -108,69 +108,6 @@ test("deployment fleet stays useful across the responsive contract", async ({ pa
   }
 })
 
-test("filter chips narrow the grid", async ({ page }) => {
-  await mockProject(page)
-  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
-    json(route, {
-      deployments: [
-        {
-          ...deployment,
-          id: 1,
-          name: "deploying-app",
-          activeRun: run,
-          lastRun: run,
-          pendingChanges: false,
-          health: "healthy",
-        },
-        {
-          ...deployment,
-          id: 2,
-          name: "failed-app",
-          activeRun: undefined,
-          lastRun: { ...run, id: 90, state: "failed", releaseId: 5 },
-          pendingChanges: false,
-          health: "healthy",
-        },
-        {
-          ...deployment,
-          id: 3,
-          name: "pending-app",
-          activeRun: undefined,
-          lastRun: { ...run, id: 91, state: "succeeded", releaseId: 20 },
-          pendingChanges: true,
-          health: "healthy",
-        },
-      ],
-      activeWork: [],
-      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
-    }),
-  )
-  await page.goto("/deploy")
-  const projects = page.getByRole("list", { name: "Deployment projects" })
-  await expect(projects.locator(":scope > li")).toHaveCount(3)
-
-  // Each chip carries its count, so its name is "Deploying 1" and the like.
-  await expect(page.getByRole("button", { name: /^Failed/ })).toContainText("1")
-  await page.getByRole("button", { name: /^Deploying/ }).click()
-  await expect(projects.locator(":scope > li")).toHaveCount(1)
-  await expect(projects.getByText("deploying-app", { exact: true })).toBeVisible()
-
-  await page.getByRole("button", { name: /^Failed/ }).click()
-  await expect(projects.locator(":scope > li")).toHaveCount(1)
-  await expect(projects.getByText("failed-app", { exact: true })).toBeVisible()
-
-  await page.getByRole("button", { name: /^Changes pending/ }).click()
-  await expect(projects.locator(":scope > li")).toHaveCount(1)
-  await expect(projects.getByText("pending-app", { exact: true })).toBeVisible()
-
-  await page.getByRole("button", { name: /^All/ }).click()
-  await expect(projects.locator(":scope > li")).toHaveCount(3)
-
-  // A failed deploy is said once, in the engine's words, above the fleet.
-  await expect(page.getByRole("heading", { name: "Attention", exact: true })).toBeVisible()
-  await expect(page.getByText(/^failed-app: #1 Deploy failed/)).toBeVisible()
-})
-
 test("the empty state offers to start a project or clear the filters", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/?view=fleet", (route) =>

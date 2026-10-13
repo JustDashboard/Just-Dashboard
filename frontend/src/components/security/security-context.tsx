@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext } from "react"
-import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import type { Exposure, FirewallStatus } from "@/lib/types"
 
 /**
  * The three verdicts the whole Security section is built around.
@@ -17,17 +17,12 @@ import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/t
 
  */
 export type SecurityContextValue = {
-  posture: Posture | undefined
-  postureLoading: boolean
   firewall: FirewallStatus | undefined
   firewallLoading: boolean
   firewallError: Error | undefined
   firewallLastSuccess: number | undefined
   exposure: Exposure | undefined
-  refreshPosture: () => void
   refreshFirewall: () => void
-  /** Review a finding at the controls responsible for it. */
-  applyFix: (finding: SecurityFinding) => void
 }
 
 const SecurityContext = createContext<SecurityContextValue | null>(null)

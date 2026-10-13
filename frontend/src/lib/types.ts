@@ -744,79 +744,6 @@ export type ComposeValidation = {
   services: string[]
 }
 
-/**
- * The dashboard's opinion of what Docker on this host is doing wrong.
- * `action` names a remedy the UI turns into a button; the empty ones are
- * findings whose fix is outside this panel.
- */
-export type Severity = "critical" | "warning" | "recommendation" | "info"
-
-/**
- * What kind of problem this is, which decides whether it belongs to runtime
- * health or to attention. Mixing the two is what let the overview say "all
- * good" above a containers page full of security warnings.
- */
-export type FindingClass =
-  "runtime" | "security" | "storage" | "configuration" | "exposure" | "lifecycle"
-
-export type DockerFinding = {
-  id: string
-  /** Derived from `severity`; kept for older bundles. Prefer `severity`. */
-  level: "critical" | "warning" | "notice"
-  severity: Severity
-  class: FindingClass
-  title: string
-  detail: string
-  advice?: string
-  scope: "container" | "stack" | "daemon" | string
-  target?: string
-  targetId?: string
-  action?: string
-  actionLabel?: string
-}
-
-/** What Docker itself reports about what is running. Clears itself. */
-export type RuntimeHealth = {
-  total: number
-  running: number
-  exited: number
-  created: number
-  restarting: number
-  paused: number
-  dead: number
-  removing: number
-  /** Of the running containers. `noHealthcheck` is what makes "all healthy" honest. */
-  healthy: number
-  unhealthy: number
-  starting: number
-  noHealthcheck: number
-  unknown?: number
-  status: "ok" | "notice" | "warning" | "critical"
-  summary: string
-}
-
-/** Everything else: posture, storage, configuration, exposure. Never "health". */
-export type AttentionSummary = {
-  critical: number
-  warning: number
-  recommendations: number
-  info: number
-  /** critical + warning — what is wrong now, as opposed to what could be better. */
-  issues: number
-  total: number
-}
-
-export type DockerDiagnosis = {
-  silences?: string[]
-  /** The worst of everything. Never render this as "health" — see `runtime`. */
-  status: "ok" | "notice" | "warning" | "critical"
-  findings: DockerFinding[]
-  checkedAt: string
-  checked: number
-  runtime: RuntimeHealth
-  attention: AttentionSummary
-}
-
 /** One line of `docker system df`. */
 export type DockerDiskUsageLine = {
   total: number
@@ -1097,57 +1024,6 @@ export type MigrationPlan = {
   commands: string[]
   composePatch?: string
   warnings: string[]
-}
-
-/** Why a container is not working, with the reasoning shown. */
-export type FailureDiagnosis = {
-  containerId: string
-  name: string
-  checkedAt: string
-  state: "running" | "stopped" | "looping" | "unhealthy" | "flapping" | "unknown"
-  headline: string
-  /** The inferred cause. Always worded as "likely" when it is one. */
-  likely?: string
-  /** "observed" when the evidence states it outright, "inferred" when worked out. */
-  confidence: "observed" | "inferred"
-  evidence: {
-    label: string
-    value: string
-    source: string
-    weight: "decisive" | "supporting" | "context"
-  }[]
-  restarts: {
-    count: number
-    window?: string
-    recent: number
-    looping: boolean
-    since?: string
-    summary?: string
-  }
-  suggestions: string[]
-  /** The range worth reading logs over — the failure, not the tail. */
-  logWindow?: { since: string; until: string; reason: string }
-}
-
-/** A change in behaviour read out of recorded history. Always inferred. */
-export type Anomaly = {
-  id: string
-  severity: Severity
-  class: FindingClass
-  title: string
-  detail: string
-  advice?: string
-  metric: string
-  window: string
-  inferred: boolean
-}
-
-export type AnomalyReport = {
-  container: string
-  window: string
-  samples: number
-  anomalies: Anomaly[]
-  note?: string
 }
 
 /** What a deploy is expected to change, before it changes it. */
@@ -2005,8 +1881,6 @@ export type DbCapabilityFlag =
   | "privileges" // role detail, grants, grant and revoke
   | "statements"
   | "statementsReset"
-  | "advisor"
-  | "engineAdvisor" // the engine's own checks, beyond the structure ones
   | "queryLog"
   | "clickhouseViews" // parts, merges, mutations, running queries
   | "sqliteFile"
@@ -2860,7 +2734,6 @@ export type BackupJob = {
   /** When the newest successful artifact was taken. */
   lastSuccessAt?: string
   /** A scheduled job that has gone two intervals without a successful run. */
-  overdue: boolean
   /** The retained artifacts and what they add up to. */
   stored: { runs: number; bytes: number }
   sqlitePaths?: string[]
@@ -3523,24 +3396,6 @@ export type BlueprintRenderedPlan = {
   files: BlueprintConfigFile[]
 }
 
-export type DeploymentDiagnosisFinding = {
-  code: string
-  severity: "critical" | "warning" | "notice"
-  title: string
-  measured: string
-  means: string
-  action: string
-  owner: string
-  deepLink?: string
-  external?: boolean
-}
-
-export type DeploymentDiagnosis = {
-  status: "assessed" | "partial"
-  findings: DeploymentDiagnosisFinding[]
-  silences: { subject: string; reason: string }[]
-}
-
 export type DeploymentDomainRoute = {
   hostname: string
   https: boolean
@@ -3621,7 +3476,6 @@ export type DeploymentOperations = {
     reason?: string
     items: DeploymentDependencyItem[]
   }
-  diagnosis: DeploymentDiagnosis
 }
 
 export type ReleaseFieldChange = {
@@ -5093,18 +4947,6 @@ export type DeploymentPreflightFinding = {
   fix?: DeploymentCauseFix
 }
 
-/**
- * POST /deploy/{id}/environments/{env}/check: preflight for the saved plan
- * against the commit a deployment would build now — what analyze_plan runs
- * before every build, asked before Deploy is pressed.
- */
-export type DeploymentCheckResult = {
-  findings: DeploymentPreflightFinding[]
-  planRevision: number
-  sourceRevision?: string
-  checkedAt: string
-}
-
 /** One plan field whose saved value differs from what detection proposes now. */
 export type DeploymentDetectionChange = {
   /** The plan field: `build.packageManager`, `runtime.internalPort`. */
@@ -5907,7 +5749,6 @@ export type Exposure = {
   allowlist: string[]
   interfaces: string[]
   tailscaleIp?: string
-  recommendation?: string
   /** The address this browser is reaching the dashboard from — the one every lockout guard protects. */
   client?: string
 }
@@ -6239,27 +6080,6 @@ export type DbSetting = {
 }
 
 export type DbSettings = { settings: DbSetting[]; supported: boolean }
-
-/** One thing the advisor found, with the fix where one statement is the fix. */
-export type DbAdvice = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  category: "performance" | "schema" | "security" | "maintenance"
-  title: string
-  detail: string
-  advice?: string
-  objects?: string[]
-  sql?: string
-}
-
-export type DbAdviseReport = {
-  checkedAt?: string
-  silences?: string[]
-  tablesOmitted?: number
-  findings: DbAdvice[]
-  tablesChecked: number
-  engineChecks: boolean
-}
 
 export type DbStatement = {
   id: string
@@ -6646,34 +6466,6 @@ export type UninstallPlan = {
   durableLog: string
 }
 
-/**
- * The security verdict. Mirrors netsec.Posture: the same three-field shape as
- * a health finding, because what was measured, what it means and what to do
- * are three different things and the UI renders them differently.
- */
-export type SecurityFinding = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  title: string
-  detail: string
-  advice?: string
-  area: "exposure" | "firewall" | "ssh" | "intrusion" | "ports" | "tls" | "updates"
-  /** A remedy the dashboard can carry out itself, rendered as a button. */
-  fix?: string
-  fixLabel?: string
-}
-
-export type Posture = {
-  status: "ok" | "notice" | "warning" | "critical"
-  findings: SecurityFinding[]
-  checkedAt: string
-  checks: number
-  /** Checks that could not run, because a check that did not run is not a pass. */
-  skipped: string[]
-  /** Layers no check could see — provider policy, foreign nftables tables. */
-  unknowns?: PostureUnknown[]
-}
-
 /** A layer of the host's exposure the posture did not see: neither a finding nor a pass. */
 export type PostureUnknown = {
   id: string
@@ -6687,8 +6479,6 @@ export type SSHSetting = {
   key: string
   label: string
   value: string
-  recommended: string
-  secure: boolean
   detail: string
   risk?: string
   options?: string[]
@@ -7403,17 +7193,6 @@ export type NetworkDefaultRoute = {
   metric?: number
 }
 
-export type NetworkFinding = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  /** The reading it was judged from. */
-  source: string
-  title: string
-  detail: string
-  /** The page that fixes it. */
-  href: string
-}
-
 /** The Network Overview's one read. */
 export type NetworkOverview = {
   hostname: string
@@ -7464,15 +7243,12 @@ export type NetworkOverview = {
     shaping: number
     namespaces: number
   }
-  findings: NetworkFinding[]
   /** Each family's way out, and what it establishes about the address the internet sees. */
   identity: NetworkEgressIdentity[]
   /** The topology's edges as connection tracking holds them. */
   flows: NetworkTopologyFlows
   /** Which readings arrived; a failed one is not an empty answer. */
   observations: NetworkObservation[]
-  incidents: NetworkIncident[]
-  incidentsError?: string
   readAt: string
 }
 
@@ -7520,23 +7296,6 @@ export type NetworkTopologyFlows = {
   truncated: boolean
   accounting: boolean
   edges: NetworkFlowEdge[]
-}
-
-export type NetworkIncident = {
-  id: number
-  findingId: string
-  source: string
-  level: NetworkFinding["level"]
-  title: string
-  detail: string
-  href: string
-  openedAt: string
-  lastSeenAt: string
-  resolvedAt?: string
-  /** When its reading began failing; an unobserved incident stays open. */
-  unobservedSince?: string
-  /** Incidents that began within the same two minutes. */
-  related: number[]
 }
 
 /** What a change to a device the dashboard did not make says about the next boot. */
@@ -9059,7 +8818,6 @@ export type ProtectionSetting = {
   key: string
   label: string
   why: string
-  recommended: string
   kind: "choice" | "number"
   allowed: string[]
   min: number

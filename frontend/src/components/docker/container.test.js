@@ -58,16 +58,15 @@ describe("containerVerdict", () => {
   })
 
   // Docker calls both of these running; the reader would not.
-  test("reads a failing check and a loop as failing", () => {
+  test("reads reported health checks and restart state", () => {
     expect(containerVerdict(container({ health: "unhealthy" }))).toMatchObject({
       tone: "danger",
       word: "Failing its health check",
     })
-    const loop = { state: "looping", restarts: { looping: true } }
-    expect(containerVerdict(container({}), loop).word).toBe("Restarting in a loop")
-    expect(containerVerdict(container({ state: "restarting", exitCode: 1 }), loop)).toMatchObject({
-      tone: "danger",
-      detail: "exit 1",
+    expect(containerVerdict(container({})).word).toBe("Running")
+    expect(containerVerdict(container({ state: "restarting", exitCode: 1 }))).toMatchObject({
+      tone: "warning",
+      word: "Restarting",
     })
     // A restart nobody is looping through is amber, on its way somewhere.
     expect(containerVerdict(container({ state: "restarting" })).tone).toBe("warning")

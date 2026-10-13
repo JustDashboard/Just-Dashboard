@@ -1071,7 +1071,7 @@ function AutomaticDeploymentForm({
         ? "stopped"
         : "running"
   const label = unavailable
-    ? "Needs attention"
+    ? "Unavailable"
     : !automatic
       ? "Manual"
       : watch.status === "awaiting_first_deployment"

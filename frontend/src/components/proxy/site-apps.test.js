@@ -7,7 +7,6 @@ import {
   runwayTone,
   siteApp,
   siteHue,
-  sitesVerdict,
   trafficShares,
   upstreamEndpoint,
 } from "./site-apps"
@@ -235,39 +234,4 @@ describe("certRunway", () => {
   })
 })
 
-describe("sitesVerdict", () => {
-  const base = { isDown: () => false, stopped: false, engine: "nginx", total: 3 }
-
-  test("says each site once, by the worst thing about it", () => {
-    const plain = vhost({ name: "plain", tls: false })
-    const down = vhost({ name: "down" })
-    const verdict = sitesVerdict({
-      ...base,
-      attention: [plain, down],
-      isDown: (v) => v.name === "down",
-    })
-    expect(verdict).toEqual({
-      tone: "danger",
-      label: "2 sites need attention",
-      detail: "1 application refusing · 1 on plain HTTP",
-      chip: "attention",
-    })
-  })
-
-  test("a lone warning is amber, and nothing to act on is said plainly", () => {
-    const parked = vhost({ name: "parked", enabled: false })
-    expect(sitesVerdict({ ...base, attention: [parked] })).toMatchObject({
-      tone: "warning",
-      label: "1 site needs attention",
-      detail: "1 disabled",
-    })
-    expect(sitesVerdict({ ...base, attention: [] })).toEqual({
-      tone: "running",
-      label: "Nothing needs attention",
-    })
-    expect(sitesVerdict({ ...base, attention: [], stopped: true })).toEqual({
-      tone: "stopped",
-      label: "No nginx site is served",
-    })
-  })
-})
+describe("sitesVerdict", () => {})

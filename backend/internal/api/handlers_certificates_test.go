@@ -22,7 +22,6 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -675,20 +674,6 @@ func TestCaddyEvidenceIsOutOfTheInventoryAndInTheDeploymentsView(t *testing.T) {
 	}
 	if !foundBought || foundEvidence {
 		t.Fatalf("the inventory is %+v, want the import and no deployment evidence", listed)
-	}
-
-	w = c.do(http.MethodGet, "/api/v1/security/posture", "", nil)
-	var posture netsec.Posture
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &posture) != nil {
-		t.Fatalf("posture = %d: %s", w.Code, w.Body.String())
-	}
-	var ids []string
-	for _, f := range posture.Findings {
-		ids = append(ids, f.ID)
-	}
-	joined := strings.Join(ids, " ")
-	if !strings.Contains(joined, "tls.expiring.bought") || strings.Contains(joined, evidence) {
-		t.Fatalf("posture findings %v: want the import's expiry and not the copy's", ids)
 	}
 
 	w = c.do(http.MethodGet, "/api/v1/deploy/hostname?hostname=app.jd.test", "", nil)

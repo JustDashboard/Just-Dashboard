@@ -1,7 +1,7 @@
 # The network module (`internal/netx`)
 
 `netx` changes the host's network: its devices, routing, gateway table, protections, shaping, tunnels
-and resolver. `netsec` keeps reading the network for the posture and keeps the firewall, sshd,
+and resolver. `netsec` reads native network state and keeps the firewall, sshd,
 fail2ban, CrowdSec and Suricata; this package is the half that writes. The Network section of the
 frontend (`/network/*`) is its only client. The plan it was built from, with the reasoning behind each
 choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-network-section/README.md).
@@ -248,17 +248,11 @@ Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the a
   destination), the translating device and an effective hop-by-hop path. Bytes appear only when
   `nf_conntrack_acct` is on. It is a moment's reading of this host, not a capture or switch discovery;
   `unavailable` and `failed` (e.g. missing `CAP_NET_ADMIN`) are reported as such.
-- `observations` records whether each reading the attention list depends on arrived (`ok`, `failed`,
-  or `unavailable` for a missing tool). A failed reading becomes an `observation.<source>` finding and
-  the findings judged from it are skipped, so a failed firewall, error-history or forwarding read is
-  never reported as an absent firewall, zero errors or forwarding off. `Sampler.RecentErrors` returns
-  its database error for this.
-- Every finding names its `source`. `RecordFindings` folds each Overview read into the additive
-  `network_incidents` table: a new finding opens an incident (correlated with others opened within
-  two minutes), a repeated one extends it, and an open incident resolves only when its own reading
-  succeeded without it; a failed reading marks it `unobservedSince` and keeps it open. Resolved history
-  is kept 30 days, at most 1,000 rows. `Server.Start` also judges the list every five minutes with no
-  browser (`startNetworkIncidents`); between those reads and page reads nothing is observed.
+- `observations` records each reading's availability (`ok`, `failed`, or `unavailable`). The overview
+  returns identity, topology, flows and these raw readings without attention findings or incident
+  history. The advisory rule evaluation and five-minute background incident collector were removed in
+  0.7.5. Existing incident schema/history is preserved for upgrade compatibility. Requested network
+  diagnostics, native change admission, failover monitoring and recovery remain operational tools.
 
 ## Traffic
 
@@ -433,8 +427,7 @@ address is refused; a fetched list that holds it is reported (`containsYou`).
 
 Kernel protections are a closed list of fifteen sysctls (SYN cookies, loose reverse-path filtering —
 strict is not offered because it breaks policy routing and tunnels — redirects, source routing,
-ICMP, SYN backlog and retries, RFC 1337, martians, the conntrack maximum), each with its recommendation
-and why, written to the sysctl drop-in. The read adds `interfaces`: each device's effective value for
+ICMP, SYN backlog and retries, RFC 1337, martians, the conntrack maximum), each with its effective value, legal choices and explanation, written to the sysctl drop-in. The read adds `interfaces`: each device's effective value for
 the five per-interface settings, combined as the kernel does (reverse-path filter: the higher of all
 and the device; IPv4 accept_redirects: both when forwarding, either when not; send_redirects and
 log_martians: either; IPv4 source routing: both; IPv6 redirects: the device's own; IPv6 source routing:
@@ -757,7 +750,7 @@ phrase.
 
 | Area | Routes |
 | --- | --- |
-| Overview | `GET /`, `GET /capabilities`, `GET /overview` (identity, flows, observations, incidents), `GET /links`, `GET /traffic/live` (`?since=`, `&latency=1`), `GET /traffic/history` (`window=` or `from=`/`to=`), `GET /handoffs/{package}` (wireguard-tools, bpftool, crowdsec, suricata) |
+| Overview | `GET /`, `GET /capabilities`, `GET /overview` (identity, flows, observations), `GET /links`, `GET /traffic/live` (`?since=`, `&latency=1`), `GET /traffic/history` (`window=` or `from=`/`to=`), `GET /handoffs/{package}` (wireguard-tools, bpftool, crowdsec, suricata) |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`, `PUT /links/{name}/vlans`, `PUT /links/{name}/remotes` (destructive by content when removing); reads `GET /links/{name}/detail`, `/bridge`, `/readiness`, `/master/preview?master=`; `GET`/`POST /namespaces`, `GET /namespaces/{name}?kind=`, `GET /namespaces/{name}/lookup?kind=&target=`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `GET /routing/history?family=&object=&target=`, `POST /routing/routes/preview`, `POST /routing/routes/{id}/plan`, `POST /routing/rules/preview` (admin, change nothing), `POST /routing/routes`, `PUT /routing/routes/{id}` (destructive), `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp`, `GET /bgp/routes?family=&prefix=` |

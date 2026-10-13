@@ -104,18 +104,6 @@ func TestContainerListingRetainsHealthUptimeAndLimits(t *testing.T) {
 	}
 }
 
-func TestDiagnoseInspectsEachContainerOnce(t *testing.T) {
-	c, inspections := inventoryTestClient(t)
-	diagnosis, err := c.Diagnose(cacheTestContext(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inspections.Load() != 2 || diagnosis.Checked != 2 || diagnosis.Runtime.Running != 1 ||
-		diagnosis.Runtime.Healthy != 1 || diagnosis.Runtime.Exited != 1 {
-		t.Fatalf("diagnosis changed or repeated inspections: %+v, inspections=%d", diagnosis, inspections.Load())
-	}
-}
-
 // The table of who is where reads every network's members at once, so the
 // listing carries each one's address rather than leaving it to an inspect per
 // network — and a stopped container, which holds no address, is still listed.

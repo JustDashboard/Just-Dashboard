@@ -11,8 +11,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -47,61 +45,6 @@ func TestDomainRoutesReadCaddyEvidenceAsTheDomainsCertificate(t *testing.T) {
 	if shop.Certificate != "valid" || shop.CertificateName != "shop" || shop.CertificateRenewedBy != "" ||
 		shop.CertificateDaysLeft < 84 || shop.CertificateLink != "/proxy/certificates" {
 		t.Fatalf("shop.jd.test reads %+v", shop)
-	}
-}
-
-// A copy is refreshed only when a release runs, so a release left alone ages
-// its copy into the renewal window and past it while Caddy serves the
-// certificate it renewed. Graded by the copy, every such deployment warned
-// "Renew the certificate in Proxy" and linked to a Certificates page that
-// does not list it. An import nobody renews still raises both findings.
-func TestDiagnosisRaisesNoExpiryFindingForAnAgeingCaddyCopy(t *testing.T) {
-	imported := t.TempDir()
-	t.Cleanup(proxysvc.UseCertificateDirsForTest(t.TempDir(), imported))
-	writeEvidence(t, filepath.Join(imported, "caddy-0da2f3126af1d760c968313b"), "old.jd.test", time.Now().Add(10*24*time.Hour))
-	writeEvidence(t, filepath.Join(imported, "caddy-111111111111111111111111"), "older.jd.test", time.Now().Add(-24*time.Hour))
-	writeEvidence(t, filepath.Join(imported, "shop"), "shop.jd.test", time.Now().Add(10*24*time.Hour))
-	writeEvidence(t, filepath.Join(imported, "gone"), "gone.jd.test", time.Now().Add(-24*time.Hour))
-
-	proxy := proxysvc.New(t.TempDir(), "")
-	summary := observeDomainRoutes(context.Background(), OperationsOwners{Proxy: proxy, Certificates: proxy}, []PlannedDomain{
-		{Hostname: "old.jd.test", HTTPS: true}, {Hostname: "older.jd.test", HTTPS: true},
-		{Hostname: "shop.jd.test", HTTPS: true}, {Hostname: "gone.jd.test", HTTPS: true},
-	}, 7)
-	rows := map[string]DomainRoute{}
-	for _, row := range summary.Domains {
-		rows[row.Hostname] = row
-	}
-	for _, hostname := range []string{"old.jd.test", "older.jd.test"} {
-		row := rows[hostname]
-		if row.Certificate != "valid" || row.CertificateRenewedBy != "caddy" || row.CertificateDaysLeft != 0 || row.CertificateLink != "" {
-			t.Fatalf("%s reads certificate=%q renewedBy=%q daysLeft=%d link=%q, want valid and renewed by caddy with no days or link",
-				hostname, row.Certificate, row.CertificateRenewedBy, row.CertificateDaysLeft, row.CertificateLink)
-		}
-	}
-	if row := rows["shop.jd.test"]; row.Certificate != "expiring" || row.CertificateLink != "/proxy/certificates" {
-		t.Fatalf("shop.jd.test reads %+v, want expiring with its link", row)
-	}
-	if row := rows["gone.jd.test"]; row.Certificate != "expired" || row.CertificateLink != "/proxy/certificates" {
-		t.Fatalf("gone.jd.test reads %+v, want expired with its link", row)
-	}
-
-	input := healthyDiagnosisInput()
-	input.Domains = summary
-	diagnosis := Diagnose(input)
-	got := []string{}
-	for _, finding := range diagnosis.Findings {
-		if !strings.HasPrefix(finding.Code, "certificate_") {
-			continue
-		}
-		got = append(got, finding.Code+" "+strings.Fields(finding.Title)[3])
-		if finding.DeepLink != "/proxy/certificates" {
-			t.Fatalf("%q links to %q", finding.Code, finding.DeepLink)
-		}
-	}
-	sort.Strings(got)
-	if strings.Join(got, ", ") != "certificate_expired gone.jd.test, certificate_expiring shop.jd.test" {
-		t.Fatalf("certificate findings = %v, want only the two imports'", got)
 	}
 }
 

@@ -22,7 +22,7 @@ import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { lensFor } from "@/lib/log-lenses"
-import type { FirewallRule, FirewallStatus, LogLine, Posture, SecurityFinding } from "@/lib/types"
+import type { FirewallRule, FirewallStatus, LogLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field } from "@/components/form"
@@ -33,7 +33,6 @@ import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { FirewallPicture } from "@/components/network/firewall-picture"
@@ -88,23 +87,19 @@ import {
  */
 export function FirewallPanel({
   status,
-  posture,
   loading,
   error,
   lastSuccess,
   refresh,
-  onFix,
   handoff,
 }: {
   /** A rule a link into the page asked for, from the ports page's hand-offs. */
   handoff?: RuleHandoff
   status: FirewallStatus | undefined
-  posture: Posture | undefined
   loading: boolean
   error: Error | undefined
   lastSuccess?: number
   refresh: () => void
-  onFix?: (finding: SecurityFinding) => void
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -468,8 +463,6 @@ export function FirewallPanel({
             />
           ))}
       </StatGrid>
-
-      <AreaFindings posture={posture} area="firewall" onFix={onFix} />
 
       <FirewallAccessPanel />
 

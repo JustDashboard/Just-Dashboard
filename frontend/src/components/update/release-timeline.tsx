@@ -123,7 +123,7 @@ function Entry({
           {latest && <Tag>Latest</Tag>}
           {release.breaking && (
             <Tag tone="warning" icon={Warning}>
-              Needs attention
+              Breaking change
             </Tag>
           )}
         </span>

@@ -882,39 +882,16 @@ stays editable on a protected connection.
     `report_password`, `wsrep_sst_auth`…), any name whose last word is one for a secret, and — on
     PostgreSQL — an extension's or application's own dotted parameter with such a word anywhere. It
     is a list and not a pattern on purpose: a pattern on "password" hid `password_encryption`,
-    which the advisor reports to the same viewer. The same rule keeps the value and the statement
+    which is a public setting. The same rule keeps the value and the statement
     out of the audit detail. Audit `database.setting.set` / `database.setting.reset`.
   - `POST /{id}/statements/reset` (the destructive group) zeroes `pg_stat_statements` or the
     performance_schema digest table for the whole server. No data goes, but the record does, for
     everyone, and on MySQL the statement is a `TRUNCATE` the console holds to the same capability;
     the Redis slow-log reset sits in that group too. Audit `database.statements.reset`.
-- **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs `dbx.Advise`:
-  generic checks over the introspected structure on every SQL engine (tables with no primary key, foreign
-  keys no index begins with; the first 300 tables, with `truncated` and `tablesOmitted` saying so past
-  that; a partitioned table is checked like any other), plus an engine's own `Adviser` — Postgres
-  (unused, duplicate and invalid indexes, never-analysed tables, dead rows, sequence exhaustion,
-  connections near the limit, cache hit ratio, sessions idle in a transaction, transaction-id wraparound,
-  inactive replication slots, `fsync`/`full_page_writes`/ `autovacuum` off, `md5` passwords, a writable
-  `public` schema, superusers besides the connection's own role, no `pg_stat_statements`), MySQL/MariaDB
-  (non-InnoDB tables, free space, connections, the slow log and `performance_schema` off, superusers at
-  any host, anonymous accounts, a small buffer pool), SQLite (journal mode, free pages, a large WAL,
-  never analysed), ClickHouse (too many parts, stuck mutations, accounts without a password, read-only
-  replicas, disk, detached parts), SQL Server (auto-shrink, auto-close, page verify, `sa` enabled, logins
-  without a password policy) and Oracle (invalid objects, never analysed, default passwords,
-  tablespaces). Every finding carries a `category` — `security`, `performance`, `reliability` or
-  `maintenance` (the old `schema` is `reliability`) — the `targets` it is about, each with its own fix
-  statement wherever one can be written without a decision only the operator can make (a table with a
-  unique index over NOT NULL columns is offered the statement that names it the key, one without is
-  offered an identity column only where that cannot break an INSERT that names no columns; a sequence
-  near its ceiling is offered `bigint` for itself and the column it feeds; a finding whose fix is a
-  password, a host or an amount of memory carries none), and a `link` to the page that acts on it. The
-  handler adds what only a server panel can know (`panelAdvice`): no dump or a stale one, read from the
-  same dump directory the fleet reads; a release past its end of life (`dbx.VersionEndOfLife`, a
-  compiled-in table of vendor dates), read where the engine's own number stands in its banner and skipped
-  for a fork that answers with another engine's (YugabyteDB, CockroachDB, TiDB…); and, for an
-  administrator, a port published to every address and a container with no memory limit — a viewer is
-  told in `silences` that those were not assessed. Nothing is executed. With no `schema`, MySQL and
-  ClickHouse check the connection's own database. `GET /databases/{id}/statements?sort=&limit=` reads
+- **Statement statistics.** Database Home displays recorded activity and engine readings. The
+  Advisor page, advice detectors, capability flags and `GET /databases/{id}/advisor` were removed in
+  0.7.5. Query, schema, performance and maintenance controls remain available through their own routes.
+  `GET /databases/{id}/statements?sort=&limit=` reads
   `pg_stat_statements` (13+ and older column names both),
   `performance_schema.events_statements_summary_by_digest`, ClickHouse's `system.query_log` over the last
   day, SQL Server's `sys.dm_exec_query_stats` summed by query hash for plans compiled in this database
@@ -925,15 +902,7 @@ stays editable on a protected connection.
   never one execution: the list is on the read surface and a literal is somebody's e-mail address.
   PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
   and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
-  leaves the package. Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Unread
-  engine statistics retain completed structure findings and name the failed source with
-  `engineChecks=false`. The route runs nothing and neither does the report: the Advisor page applies a
-  fix only through a route that authorises it by itself — a maintenance action the engine's list leaves
-  on `service.control`, through `POST …/maintenance`, or a statement `POST …/classify` calls
-  non-destructive, through `POST …/script` — never on a protected connection, and hands everything else
-  to the Query page with the statement in it (`applyVerdict` in
-  `frontend/src/components/database/ops/advisor-fix.ts`).
-- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  leaves the package. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
@@ -1619,7 +1588,6 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/activity` | read | — | — | — |
 | `POST` | `/databases/{id}/activity/cancel` | `destructive` | yes | `database.session.cancel` | open |
 | `POST` | `/databases/{id}/activity/kill` | `destructive` | yes | `database.session.kill` | open |
-| `GET` | `/databases/{id}/advisor` | read | — | — | — |
 | `GET` | `/databases/{id}/clickhouse/merges` | read | — | — | — |
 | `GET` | `/databases/{id}/clickhouse/mutations` | read | — | — | — |
 | `GET` | `/databases/{id}/clickhouse/parts` | read | — | — | — |
@@ -1792,7 +1760,7 @@ What the table cannot say in a cell:
   rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for a preview as
   much as for a run.
 - The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
-- `GET /databases/inventory`, `GET /databases/fleet` and `GET …/advisor` are `read` and answer more
+- `GET /databases/inventory`, `GET /databases/fleet` are `read` and answer more
   for `system.admin`; the sections above say what.
 
 ### Database provisioning for deployments
@@ -1883,7 +1851,7 @@ containers/volumes/networks.
   only between unrelated holders, and init only when it holds the socket alone.
   `Listener.Scope` is `loopback`, `interface` (one specific address) or `all`; `Exposed` is every scope but
   loopback. It used to mean "bound to a wildcard", which drew caddy on the tailnet address as loopback and
-  let a database on a public IP raise nothing in the posture or the attention list. `Listener.Reach` is
+  failed to identify a database on a public IP as exposed. `Listener.Reach` is
   netsec's grade of the address (`loopback`, `host` for a bridge, `network`, `public`, `all`, see
   observability-security.md), and `Listener.Network` and `Listener.Interface` name what it is made of
   (`tailnet` on `tailscale0`, `docker` on `docker0` or a `br-<network id>`, `public` on `ens3`, `vpn`,
@@ -1891,12 +1859,11 @@ containers/volumes/networks.
   `link-local`, `loopback`, `all`); all three come from one `HostNetwork.Place`, which needs the
   interfaces, so `GET /ports` fills them and `ListListeners` leaves them empty. `GET /ports` also fills
   `Listener.Level` and `InboundDefault` from `netsec.GradePort`, with the firewall status read beside the
-  walk: the posture's level for a finding on that socket (empty where it raises none) and the firewall's
+  walk: the service catalogue's reach level for that socket and the firewall's
   inbound default when that is what holds it to a warning, or `PastFirewall` — `docker` for a port
   docker-proxy holds, `rule` with `FirewallRule` for one a rule admits from anywhere — when the default
   does not hold it (see observability-security.md). The ports page words a socket by its network
-  ("Tailnet only · tailscale0") and colours a database by `Level`, and the overview's attention finding
-  is levelled by it, so neither can call critical what the posture calls a warning. `Listener.Family`
+  ("Tailnet only · tailscale0") and colours a database by the same `Level`. `Listener.Family`
   (`ipv4`/`ipv6`) is the kernel table the socket is in, and `Listener.PPID` the owner's parent; the page
   folds a service's two families on one network into one row and one count when one process holds both,
   or one program run by one account was started by one parent (not init) or with the same command line
@@ -1988,8 +1955,6 @@ containers/volumes/networks.
   points at, looked up in `deploy_environments`. `Self` marks the dashboard's own sockets: its own PID,
   and every container of the compose project whose container mounts `JD_DATA_DIR` (the `backend`
   service's where several do); the ingress the dashboard creates serves deployments and is not its own.
-  The posture reads the same containers (`ownerInput` without systemd or PM2), so a published port
-  whose holder it cannot see, and a NAT-only one, is graded as Docker's there too.
 - **The ports history** (`ports_history.go`). The kernel keeps no record of what listened before, so
   `PortRecorder`, started from `startProxyExtras` and stopped from `stopProxyExtras`, walks
   `ListListeners` at once and then every minute and compares the result with the stretches still open
@@ -2700,9 +2665,7 @@ containers/volumes/networks.
   renewal is due in the last third of it, the last half for a term of ten days or less — certbot's rule
   since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
   by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no
-  longer expiring for its whole life. Not everything reads it yet: the Overview's attention entry still
-  says certbot renews at thirty days and turns critical at 7 days left (`findings/certificates.ts`),
-  certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
+  longer expiring for its whole life. Not everything reads it yet: certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
   `import.go`), and the Certificates page's expiring reading counts by the window under a 30-day label
   (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
   half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
@@ -3394,7 +3357,7 @@ containers/volumes/networks.
   (the route summary names it with `certificateRenewedBy: "caddy"` and neither days left, a link to the
   Certificates page, which does not list it, nor an expiry finding: the copy is refreshed only when a
   release runs, and graded by its own expiry it warned about a certificate Caddy had already renewed).
-  `CertificateInventory` — `GET /certificates/` and the security posture — leaves out the copies no
+  `CertificateInventory` — `GET /certificates/` — leaves out the copies no
   nginx site names, since Caddy renews what it serves and never these, and listed they raised an expiry
   finding apiece; their names are refused to an operator's import. On a Docker Caddy host it lists
   what Caddy serves instead, read from `/data/caddy/certificates` in one `docker exec` (a fixed `sh -c`
@@ -3424,7 +3387,7 @@ containers/volumes/networks.
   **local CA** certificates (`POST /certificates/local-ca` makes the root, a 409 `local_ca_exists` after;
   `POST /certificates/local-ca/issue`) are 397-day server certificates for names or addresses, written
   beside the imports by `installPair` (key 0600 then certificate 0644, staged and renamed, a replaced pair
-  kept as `.bak`) so sites, the inventory and the posture read them as imports. The root is ECDSA P-256,
+  kept as `.bak`) so sites and the inventory read them as imports. The root is ECDSA P-256,
   ten years, path length zero, in `/etc/ssl/just-dashboard-private/ca/` (0700; `root-key.pem` 0600): no
   route reads or exports its key, and `GET /certificates/local-ca/root.pem` hands every signed-in account
   the certificate alone as `application/x-x509-ca-cert`, since a root is made to be installed. The private
@@ -3811,110 +3774,11 @@ containers/volumes/networks.
   rest) of a listed file as PEM, 403 for an unlisted path; `POST /certificates/export` (system.admin,
   ordinary export confirmation, `{path, format: key|pfx, password, legacy}`) returns the matching key as PEM
   or a PFX (OpenSSL 3's AES-256/PBKDF2 default, or 3DES/SHA-1 with `legacy`; password at least 8
-  characters) — see invariants.md for the confirmation policy and how the password stays out of argv. Hygiene and coverage (`cert_hygiene.go`, both read): `GET /certificates/findings` reads the
-  server blocks from `nginx -T` through `NginxTree` (includes followed, http- and stream-level
-  `ssl_certificate` inherited, pairs matched by position; a `$variable`, `data:` or `engine:` value
-  is not read) and reports a key another account can read (the mode and every directory above the
-  resolved file must let it through, so certbot's 0700 archive hides a 0644 key), a certificate
-  paired with a key that is not its own, one key behind certificates sharing no name, an RSA key
-  under 2048 bits or a SHA-1 signature below the root, a TLS block answering names its certificate
-  does not cover, and a certbot lineage whose every plain name is NXDOMAIN or resolves off this
-  host's public addresses (a Cloudflare address, or a host with no public address, is not judged).
-  `GET /certificates/coverage` maps every server name to the certificate its block serves, or a
-  listed one that could, and lists the certificates no server block, stream or Caddyfile names;
-  when `nginx -T` fails (a mismatched pair is enough) the enabled site files are parsed alone,
-  `configNote` says so, and `unused` is null. Neither answer carries key material. Back to the served check: `settle=1` asks again for up to three seconds while a site
-  serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
-  offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
-  the sites answered after the reload. `Certificate.Staging` (`certs.go`,
-  `stagingIssuer`) flags any certificate a staging authority signed — an issuer named `(STAGING) …`, or
-  `Fake LE …` from before 2020 — wherever it is found (certbot, an import, a site's file, a live
-  check); the name is the tell, since a staging chain fails verification exactly as a private CA's
-  does. An import of one says so in place of the chain's verdict. `CertbotState.Directory` is the
-  configured `JD_ACME_DIRECTORY` when it is not one of Let's Encrypt's own, so the page says whom a
-  test run rehearses with; `CertbotState.TestAuthority` is a configured directory with "staging" in
-  it (certbot's own test), whose certificates are test ones: the job says so, and the page offers
-  no "real" certificate (`CertbotAuthorityInUse`, `acme_directory.go`). **One certbot** (`certbot_runtime.go`): the host's when the host has one, this
-  process's own otherwise, for the version, the plugin list (`certbot plugins`, cached a minute, run
-  in a directory `mktemp -d` makes for each probe on certbot's side, mode 0700, removed after it, so
-  the probe never holds the lock a renewal timer needs and never runs as root in a directory another
-  user could have made first) and the jobs,
-  which stream it through `jobs.Emitter.RunCmd`; the page used to read the image's certbot and run the
-  host's. `IssueArgs` refuses the nginx or a DNS method when that certbot lacks the plugin, naming which
-  certbot. **Lineages are read from files** (`certbot_lineages.go`: `renewal/*.conf` and the certificate
-  each names), never from `certbot certificates`, which takes certbot's lock: while any certbot ran, the
-  page said certbot managed nothing and nothing renewed it. Certbot jobs start through
-  `Manager.StartExclusive("certbot.")`, so a second one — issue, renew, revoke, delete, a renewal run,
-  a DNS test or an install — is a 409 `certbot_busy` naming the run in the way (the Certificates page
-  reads the same state from `GET /jobs/` to disable its certbot verbs beforehand), and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
-  kept rather than reading as done. DNS credentials sent with an issuance are checked with the request
-  (`CheckDNSCredentials`) and saved by the job as its first step, so a refused or busy request leaves no
-  token on disk. `CheckDNSCredentials` also checks each provider's file against the keys its plugin
-  reads (`ValidateDNSCredentials`: an ini of the plugin's own keys with one complete way to
-  authenticate, Google's service-account JSON). `CertbotState.Runtime` names the certbot (host or
-  image, snap) and its authenticators, which the issuance form uses to disable methods with the reason;
-  `Installs` maps each missing nginx/DNS plugin to the host package manager's package (apt/dnf/yum
-  `python3-certbot-*`, pacman `certbot-*`; none for a snap certbot, apk, zypper or Gandi). `POST
-  /certificates/certbot/install {plugin}` (system.admin, audited, job `certbot.install`) installs it —
-  or certbot itself with `plugin: ""` — and then fails the job unless the certbot that runs jobs now
-  lists the plugin. `POST /certificates/dns-credentials/{provider}/test {domain}` (system.admin: it
-  writes to a caller-named zone and talks to the authority) streams a `certonly --dry-run` through the
-  saved credentials as job `certbot.dns-test`. **Renewal is read, not assumed** (`renewal_health.go`): an active timer says nothing
-  about whether its runs pass — this host's certbot.timer was active while every run failed and the page
-  said "Scheduled". `CertbotState.Health` is the last run of the service the timer starts (its `Unit`),
-  from `systemctl show` asked in UTC (`Result`, `ExecMainStatus`, `ExecMainStartTimestamp`,
-  `ActiveState`, `InvocationID`, and the timer's `NextElapseUSecRealtime`); a failed run reads the
-  journal (`journalctl -u <service> --since -14d -n 400 -o json`, grouped by invocation ID) for each
-  certificate it failed on in certbot's words — `Failed to renew certificate X with error: …`, a
-  renewal configuration it could not use, the `The error was: …` line a plugin error continues on —
-  or else the run's own last line, and for how far back the failed runs go. systemd forgets a unit's
-  run when the host restarts and then reports `Result=success` with no start; with the timer's
-  `LastTriggerUSec` set (a `Persistent` timer keeps it) the journal's newest run is judged by
-  systemd's own lines about it, and a journal that has no run from that trigger on answers `unknown`.
-  A failure whose certificate certbot saved after the run is `recovered`, and one for a lineage
-  deleted since is dropped. `Health.HookFailures` are the hooks the run ran that exited with an error
-  (`Hook 'deploy-hook' reported error code N` and the error output after it, or certbot 1's wording):
-  certbot only warns, so a run whose reload hook refused to reload still passes, and the timer's
-  `certbot -q` keeps the warning out of the journal — they are read from the renewal certbot's log
-  holds that began with the run (`loggedRenewalNear`), or from the journal's lines where the log
-  cannot be read. On a cron host the record is certbot's log: each invocation in
-  `/var/log/letsencrypt/letsencrypt.log*` (Debian's `cli.ini` sets `max-log-backups = 0`, so they are
-  appended to one file) starts at its `certbot version:` line, the last `renew` that was not a dry run
-  is the run, and the file's time gives the zone of its stamps. Each lineage carries how it renews
-  (`Authenticator`, `Installer`, `Webroots`, `DNSProvider`, a `DeployHook` or `PostHook` of its own),
-  `ServedBy` (the enabled sites whose certificate is the lineage's), its real `NotBefore`,
-  `LastFailure`, and `WillFail`: only failures certain in certbot's code — an
-  authenticator plugin the runtime lacks (manual, null, standalone and webroot are built in, and
-  `certbot plugins` hides the first two), a DNS credentials file gone on certbot's side of the
-  namespace, the manual plugin without an auth hook, no authenticator, standalone with its port held
-  and no pre hook. A missing webroot folder is not one (certbot creates it again), nor is a missing
-  installer plugin (a renewal runs as certonly and only skips deploying). `GET /certificates/renewal/log`
-  (system.admin) is the record for the page's log panel; `POST /certificates/renewal/run` (system.admin,
-  a `certbot.renewal` job exclusive with every certbot job) runs `systemctl start <service>` — a
-  oneshot, so it returns with the run — prints that invocation's lines and ends as the run did; a cron
-  host answers 409 `renewal_not_systemd`. Stopping the job runs `systemctl stop <service>`: killing
-  the `systemctl start` client would leave systemd's start and certbot running. An exclusive job
-  cancelled from the dashboard stays `running`, holding the lock, until its runner returns
-  (`jobs.Manager.Cancel`), so nothing else certbot starts while the service stops, and a lineage
-  certbot saved before it stopped is reloaded for as after any run. **Reloading after renewal** (`renewal_hooks.go`): nginx
-  serves the certificate it read at its last reload, and certbot reloads it only for a lineage its
-  nginx plugin installed. `PUT /certificates/renewal-hook` writes
-  `renewal-hooks/deploy/50-just-dashboard-reload-nginx` (0755, staged under a name ending in `~`,
-  which certbot never runs, and marked `# Managed by Just Dashboard`): `nginx -t -q`, then
-  `systemctl reload nginx || nginx -s reload`, and exit 0 where there is no nginx. `RenewalHook.Others`
-  lists what else may reload nginx after a renewal — other files in `renewal-hooks/deploy`, files in
-  `renewal-hooks/post` (as `post/<name>`), and a `deploy-hook`/`renew-hook`/`post-hook` in `cli.ini`
-  — and the page claims nothing about a lineage one of them, or its own deploy or post hook, may
-  reload for. `DELETE`
-  (destructive, no phrase) removes it; a copy changed by hand reads `modified`, and a file of somebody
-  else's at the name is `foreign` and never replaced or removed (409). The dashboard's own renewal,
-  issuance and run-now jobs reload nginx themselves once a lineage's serial changed and an enabled site
-  names a file in its live or archive directory (`SitesServingLineages`) — certbot runs no deploy hook
-  for a new lineage — and a configuration that fails its test fails the job: renewed, not served.
-  `dns.go` answers
-  "does this domain point here yet" and recognises Cloudflare explicitly — every range it publishes at
-  cloudflare.com/ips-v4 and /ips-v6 — since reporting a CDN as a
-  misconfiguration is the commonest false alarm of this kind.
+  characters) — see invariants.md for the confirmation policy and how the password stays out of argv. Certificate coverage (`cert_coverage.go`) maps served names to their certificates through
+  `GET /certificates/coverage`. The hygiene findings endpoint and its recommendation rules are removed
+  in 0.7.5. Existing certificate issuance, renewal and lineage controls retain their own review and
+  permission boundaries.
+
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
   validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, what nginx has not
@@ -3978,9 +3842,9 @@ containers/volumes/networks.
   disk and is not kept. A test begun before the kept one never replaces it, and every reader gets its
   own copy. `GET /proxy/test/last?kind=` (admin, as the test itself — its output quotes the
   configuration) answers the record or 204 when none has run since the dashboard started; it is held
-  in memory, so a restart forgets it rather than vouching for files it did not see. The overview's
-  finding reads it: a warning stays in Needs attention, and a failure as critical, until a test comes
-  back clean.
+  in memory, so a restart forgets it rather than vouching for files it did not see. Test config
+  opens this retained result without running the test again. The automatic overview finding was
+  removed in 0.7.5.
 - **A conflicting server name is placed at the sites that claim it.** nginx names no file for its
   commonest warning (`conflicting server name "a.test" on 0.0.0.0:80, ignored`).
   `PlaceNameConflicts` (`nameclaims.go`) reads the effective configuration and gives such a warning
@@ -4220,23 +4084,11 @@ containers/volumes/networks.
   `TestWatchedGradeRuleScansPinnedTargetsAndJudgesOnlyCompletedGrades` cover current watch rows,
   pinned origins, STARTTLS and grade decisions; `TestWatchedGradeRuleRotatesLargeWatchListsAfterTwoPasses`
   covers the bounded schedule.
-- **Snoozed findings** (`api/handlers_proxy_findings.go`; table `proxy_finding_snoozes` in
-  `store/schema_proxy.go`): the overview's findings are judged in the browser, so a snooze keeps the
-  finding's id and the fingerprint it had (`finding-snooze.ts`: the level plus the area's fingerprint or
-  its title and detail); a finding that reads differently is shown again whatever the span.
-  `GET /proxy/findings/snoozes` (every account; expired rows left out); `PUT /proxy/findings/snoozes
-  {findingId, fingerprint, level, for: day|week|change, note}` (`system.admin`, audited
-  `proxy.findings.snooze`; a `critical` level is refused anything but `day`, and expired rows are pruned);
-  `DELETE /proxy/findings/snoozes?id=` (`destructive`, audited `proxy.findings.unsnooze`; the id is a
-  query parameter because upstream finding ids carry file paths). The level is the browser's word, so
-  the day cap on critical findings is a rule for the operator's own buttons, not a boundary.
-- **Recent changes on the overview** read `GET /audit/?action_prefix=proxy.&action_prefix=certificates.&action_prefix=system.packages.&limit=8`
-  (`system.admin`, as all of `/audit`). `audit.Filter.ActionPrefixes` matches each repeated
-  `action_prefix` as a literal prefix (`LIKE ? ESCAPE '\'`, with `%`, `_` and `\` escaped), OR-ed together;
-  `action=` keeps its substring match.
-- **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
-  the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
-  `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.
+The proxy overview no longer folds observations into an attention list or suggests domain/configuration
+changes. The finding snooze routes are removed. Existing `proxy_finding_snoozes` schema/migration entries
+remain so upgrades preserve the database. Certificate hygiene findings and `/certificates/findings`
+are removed; certificate inventory, issuance, renewal, coverage and requested diagnostic tools remain.
+nginx Settings returns current values and constraints without levels, advice or recommended values.
 
 ## Streaming, jobs, secrets, agent mode
 

@@ -2,7 +2,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -65,7 +64,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": true,
       "explainAnalyze": true,
       "explainJSON": true,
@@ -237,7 +235,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -300,7 +297,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": true,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -428,7 +424,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -491,7 +486,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": true,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -619,7 +613,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -682,7 +675,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": true,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -804,7 +796,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -867,7 +858,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": true,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -1002,7 +992,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -1057,7 +1046,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": false,
       "explainAnalyze": true,
       "explainJSON": true,
@@ -1229,7 +1217,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -1284,7 +1271,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -1411,7 +1397,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -1468,7 +1453,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -1595,7 +1579,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -1650,7 +1633,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -1777,7 +1759,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -1832,7 +1813,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": true,
           "explainJSON": false,
@@ -1961,7 +1941,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -2008,7 +1987,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": false,
       "explainAnalyze": false,
       "explainJSON": false,
@@ -2167,7 +2145,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -2214,7 +2191,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -2352,7 +2328,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -2412,7 +2387,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": false,
       "explainAnalyze": false,
       "explainJSON": false,
@@ -2579,7 +2553,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -2639,7 +2612,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -2764,7 +2736,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -2824,7 +2795,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -2956,7 +2926,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -3005,7 +2974,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": false,
       "explainAnalyze": false,
       "explainJSON": false,
@@ -3161,7 +3129,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -3210,7 +3177,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -3332,7 +3298,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": true,
       "aggregation": false,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -3392,7 +3357,6 @@
       "dumpSchemaOnly": true,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": true,
       "enums": false,
       "explainAnalyze": false,
       "explainJSON": false,
@@ -3548,7 +3512,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": true,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -3608,7 +3571,6 @@
           "dumpSchemaOnly": true,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": true,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -3735,7 +3697,6 @@
   {
     "capabilities": {
       "aclRules": false,
-      "advisor": false,
       "aggregation": true,
       "aofRewrite": false,
       "bulkKeys": false,
@@ -3765,7 +3726,6 @@
       "dumpSchemaOnly": false,
       "dumpTables": true,
       "dumpUpload": true,
-      "engineAdvisor": false,
       "enums": false,
       "explainAnalyze": true,
       "explainJSON": true,
@@ -3867,7 +3827,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": false,
           "aggregation": true,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -3897,7 +3856,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": true,
           "explainJSON": true,
@@ -3998,7 +3956,6 @@
       {
         "capabilities": {
           "aclRules": false,
-          "advisor": false,
           "aggregation": true,
           "aofRewrite": false,
           "bulkKeys": false,
@@ -4028,7 +3985,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": true,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -4136,7 +4092,6 @@
   {
     "capabilities": {
       "aclRules": true,
-      "advisor": false,
       "aggregation": false,
       "aofRewrite": true,
       "bulkKeys": true,
@@ -4166,7 +4121,6 @@
       "dumpSchemaOnly": false,
       "dumpTables": false,
       "dumpUpload": true,
-      "engineAdvisor": false,
       "enums": false,
       "explainAnalyze": false,
       "explainJSON": false,
@@ -4260,7 +4214,6 @@
       {
         "capabilities": {
           "aclRules": true,
-          "advisor": false,
           "aggregation": false,
           "aofRewrite": true,
           "bulkKeys": true,
@@ -4290,7 +4243,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": false,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -4383,7 +4335,6 @@
       {
         "capabilities": {
           "aclRules": true,
-          "advisor": false,
           "aggregation": false,
           "aofRewrite": true,
           "bulkKeys": true,
@@ -4413,7 +4364,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": false,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -4506,7 +4456,6 @@
       {
         "capabilities": {
           "aclRules": true,
-          "advisor": false,
           "aggregation": false,
           "aofRewrite": true,
           "bulkKeys": true,
@@ -4536,7 +4485,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": false,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
@@ -4629,7 +4577,6 @@
       {
         "capabilities": {
           "aclRules": true,
-          "advisor": false,
           "aggregation": false,
           "aofRewrite": false,
           "bulkKeys": true,
@@ -4659,7 +4606,6 @@
           "dumpSchemaOnly": false,
           "dumpTables": false,
           "dumpUpload": true,
-          "engineAdvisor": false,
           "enums": false,
           "explainAnalyze": false,
           "explainJSON": false,
