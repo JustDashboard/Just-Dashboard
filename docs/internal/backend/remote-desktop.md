@@ -145,7 +145,7 @@ so the record says a stream rather than which computer.
 
 **Pairing.** Sunshine streams only to clients it was paired with, by a PIN typed into Sunshine's
 own page on the computer (`https://localhost:47990`). `Service.Pair` resolves the computer's name
-here (as `Connect` does), probes Sunshine's 47989, adds the address to the bridge
+here (as `Connect` does), probes Sunshine, adds the address to the bridge
 (`POST /api/host`), saves the bridge's id for it in `remote_desktop_computers.stream_host_id`, and
 asks the bridge to pair. The bridge answers one JSON line with the PIN and holds the request open
 until Sunshine takes it; the PIN goes back to the page at once and a goroutine keeps the request,
@@ -155,6 +155,15 @@ usually far away, and Control reaches its Sunshine page). Recent Sunshine versio
 request by the name Moonlight always pairs under, `roth`, which the page says. A computer whose
 address changes is paired again (the `UPDATE` clears `stream_host_id` when `host` changes), as is
 one the bridge no longer knows (reinstalled, or the host removed there).
+
+**Sunshine is probed by asking it, not by connecting** (`probeSunshine`): a `GET /serverinfo` on
+47989 with three seconds to answer, which is the bridge's own first request for a new host. A
+Sunshine that is running but stuck (a macOS prompt nobody answered, or a hung copy holding the port)
+accepts the connection and then answers nothing; a TCP probe called that "answering", and the
+bridge's add then waited its fifteen seconds and failed as `context deadline exceeded`. It reads as
+`closed` with the error `stuck`, the page names it and lists how to free it (the prompt, a restart,
+Sunshine's log), and pairing refuses before the bridge is asked. A bridge that still times out is
+said the same way.
 
 **`deploy/Caddyfile`** frames nothing by default: `X-Frame-Options: DENY` is set only where the
 response has none (`?X-Frame-Options`), so the backend's `SAMEORIGIN` on the bridge (and on a
@@ -223,7 +232,8 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   once, the bridge handed the address resolved here, a second press joining the waiting pairing,
   paired when Sunshine takes it, every request as the dashboard's account); a refused PIN that can
   start again without adding the host twice; a host the bridge lost being forgotten; a closed
-  Sunshine port refused before anything is added; a moved computer unpaired.
+  Sunshine port refused before anything is added; a Sunshine that accepts and never answers
+  reported as stuck, and never handed to the bridge; a moved computer unpaired.
 - `handlers_remote_desktop_test.go`: the routes round-trip without the password, are refused to a
   limited account, validate a probe's address and refuse an install without Docker. The bridge's
   proxy sends the dashboard's account whatever the browser claims and never its cookie, replaces the
@@ -242,7 +252,8 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   answered from the page and saved, and no size update before the first frame. Stream: pairing
   shows the PIN, keeps it over Control (which opens only then) until Sunshine takes it, then frames
   the bridge's page for the Desktop app with the WebSocket and quality settings written; the
-  bridge's install as a job; and a closed Sunshine port answered with the Mac's own steps.
+  bridge's install as a job; a closed Sunshine port answered with the Mac's own steps; and a
+  stuck Sunshine named as stuck, with how to free it and no Pair.
 
 ## Not here
 

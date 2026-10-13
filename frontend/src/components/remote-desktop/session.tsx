@@ -909,7 +909,9 @@ function StreamStatus({ stream }: { stream: RdStream | undefined }) {
         stage === "bridge"
           ? "bridge not running"
           : stage === "sunshine"
-            ? "Sunshine not answering"
+            ? stream.sunshine.error === "stuck"
+              ? "Sunshine stuck"
+              : "Sunshine not answering"
             : "not paired"
       }
       className="px-2"

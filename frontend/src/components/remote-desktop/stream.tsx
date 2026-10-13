@@ -275,6 +275,62 @@ function sunshineSteps(os: RdOS): Step[] {
  * computer's own system's words, while the port is watched. The Mac is
  * likely far away, so Control is one press: every step can be done there.
  */
+/**
+ * A Sunshine that is running but stuck: it takes the connection on its
+ * pairing port and never answers, so the bridge can neither pair nor stream.
+ * What usually holds it is a system prompt nobody at the computer has
+ * answered, else a copy of it that hung.
+ */
+function unstickSteps(os: RdOS): Step[] {
+  const restart: Step =
+    os === "macos"
+      ? {
+          title: "Restart Sunshine",
+          detail: (
+            <>
+              In Terminal: <Mono>brew services restart sunshine</Mono>. If it was started by hand
+              too, quit that copy first: <Mono>lsof -iTCP:{SUNSHINE_PORT} -sTCP:LISTEN</Mono> lists
+              what holds the port.
+            </>
+          ),
+        }
+      : os === "windows"
+        ? {
+            title: "Restart Sunshine",
+            detail: (
+              <>
+                Its tray icon › Restart, or restart <Mono>SunshineService</Mono> in Services.
+              </>
+            ),
+          }
+        : {
+            title: "Restart Sunshine",
+            detail: (
+              <>
+                <Mono>systemctl --user restart sunshine</Mono>.
+              </>
+            ),
+          }
+  return [
+    {
+      title: "Look for a prompt on the computer's screen",
+      detail:
+        os === "macos"
+          ? "Through Control: a macOS dialog asking to let Sunshine record the screen, control the computer, find devices on the local network or accept incoming connections holds it until it is answered. Allow it."
+          : "Through Control: a dialog asking about Sunshine, or its firewall, holds it until it is answered.",
+    },
+    restart,
+    {
+      title: (
+        <>
+          Read its log at <Mono>{SUNSHINE_PAGE}</Mono> › Troubleshooting
+        </>
+      ),
+      detail: "If it is still stuck, the last lines say what it is waiting on.",
+    },
+  ]
+}
+
 function TurnOnSunshine({
   computer,
   stream,
@@ -284,15 +340,24 @@ function TurnOnSunshine({
   stream: RdStream
   onControl: () => void
 }) {
+  const stuck = stream.sunshine.error === "stuck"
+  const where = `${stream.address ?? computer.host}:${SUNSHINE_PORT}`
   return (
     <>
-      <Heading title={`Turn on Sunshine on ${computer.name}`}>
-        Sunshine is the server on the computer that encodes its screen. Nothing answered on{" "}
-        {stream.address ?? computer.host}:{SUNSHINE_PORT}
-        {stream.sunshine.error ? ` (${stream.sunshine.error})` : ""}.
-      </Heading>
+      {stuck ? (
+        <Heading title={`Sunshine on ${computer.name} is stuck`}>
+          It is running and takes the connection on {where}, but answers nothing on it, so nothing
+          can pair with it or stream from it.
+        </Heading>
+      ) : (
+        <Heading title={`Turn on Sunshine on ${computer.name}`}>
+          Sunshine is the server on the computer that encodes its screen. Nothing answered on{" "}
+          {where}
+          {stream.sunshine.error ? ` (${stream.sunshine.error})` : ""}.
+        </Heading>
+      )}
       <div className="rounded-xl border border-hairline bg-card p-4">
-        <Steps steps={sunshineSteps(computer.os)} />
+        <Steps steps={stuck ? unstickSteps(computer.os) : sunshineSteps(computer.os)} />
       </div>
       <div className="flex flex-wrap items-center justify-center gap-3">
         <span className="flex items-center gap-2 text-hint text-muted-foreground">

@@ -348,3 +348,17 @@ test("Stream says where Sunshine is turned on, in the computer's own system's wo
   await page.getByRole("button", { name: "Do it through Control" }).click()
   await expect(page).not.toHaveURL(/mode=stream/)
 })
+
+test("a Sunshine that takes the connection and answers nothing is called stuck, with how to free it", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, {
+    stream: streamView({ sunshine: { state: "closed", error: "stuck", checkedAt: 0 } }),
+  })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.getByText("Sunshine on studio-mac is stuck")).toBeVisible()
+  await expect(page.getByText("Sunshine stuck")).toBeVisible()
+  await expect(page.getByText("brew services restart sunshine")).toBeVisible()
+  await expect(page.getByText("Look for a prompt on the computer's screen")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Pair", exact: true })).toHaveCount(0)
+})
