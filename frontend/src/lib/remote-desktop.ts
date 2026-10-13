@@ -271,7 +271,10 @@ export function sessionProblem(
     case 0x0303:
       return {
         title: "The computer refused the sign-in",
-        detail: `Check the username and password saved for ${computer.name}.`,
+        detail:
+          computer.os === "macos"
+            ? `Check the Mac account name and login password saved for ${computer.name}.`
+            : `Check the username and password saved for ${computer.name}.`,
       }
     case 0x0209:
       return {

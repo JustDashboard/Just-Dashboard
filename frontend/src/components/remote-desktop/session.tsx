@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import type * as Guac from "guacamole-common-js"
 import {
   ArrowLeft,
@@ -21,10 +21,12 @@ import { PaneHeader } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { wsUrl } from "@/lib/api"
+import { put, wsUrl } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import {
   combosFor,
@@ -44,10 +46,12 @@ import { notify } from "@/lib/toast"
 import { useViewState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
 import { ComputerMark, HueKey, reachTone } from "@/components/remote-desktop/marks"
+import { draftOf, inputOf } from "@/components/remote-desktop/computer-form"
 import { useRemoteDesktop } from "@/components/remote-desktop/use-remote-desktop"
 
 type Phase =
   | { kind: "connecting" }
+  | { kind: "sign-in"; fields: string[] }
   | { kind: "connected" }
   | { kind: "ended" }
   | { kind: "failed"; code: number; message: string }
@@ -158,8 +162,20 @@ export function RemoteSession({ id }: { id: string }) {
       }
       keyboard.onkeyup = (keysym) => session.sendKeyEvent(0, keysym)
 
+      // libvncclient crashes on a size update that arrives while it is still
+      // signing in, and Apple's sign-in is slow enough for the first resize
+      // to land in it: the screen's size follows the frame only once it is up.
+      let connected = false
+      const followFrame = () => {
+        const next = displaySize(frame.clientWidth, frame.clientHeight, window.devicePixelRatio)
+        session.sendSize(next.width, next.height)
+        fit()
+      }
+
       session.onstatechange = (state) => {
         if (state === CONNECTED) {
+          connected = true
+          followFrame()
           setPhase({ kind: "connected" })
           setStartedAt(Math.floor(Date.now() / 1000))
           frame.focus()
@@ -169,12 +185,10 @@ export function RemoteSession({ id }: { id: string }) {
           setPhase((held) => (held.kind === "failed" ? held : { kind: "ended" }))
         }
       }
-      // A computer that asks for a sign-in the dashboard does not hold would
-      // otherwise wait on a prompt the page has nowhere to draw.
-      session.onrequired = () => {
-        setPhase({ kind: "failed", code: 0x0301, message: "" })
-        session.disconnect()
-      }
+      // A Mac signs in with its account, and a computer asks for what the
+      // dashboard does not hold: the page asks in its place and answers. The
+      // tunnel reuses the array it hands over, so the names are copied out.
+      session.onrequired = (fields) => setPhase({ kind: "sign-in", fields: [...fields] })
       session.onerror = (status) =>
         setPhase({ kind: "failed", code: status.code, message: status.message ?? "" })
       session.onclipboard = (stream, mimetype) => {
@@ -212,12 +226,9 @@ export function RemoteSession({ id }: { id: string }) {
       }
 
       const observer = new ResizeObserver(() => {
+        if (!connected) return
         window.clearTimeout(resizeTimer)
-        resizeTimer = window.setTimeout(() => {
-          const next = displaySize(frame.clientWidth, frame.clientHeight, window.devicePixelRatio)
-          session.sendSize(next.width, next.height)
-          fit()
-        }, 250)
+        resizeTimer = window.setTimeout(followFrame, 250)
       })
       let resizeTimer = 0
       observer.observe(frame)
@@ -273,6 +284,36 @@ export function RemoteSession({ id }: { id: string }) {
     // so Alt+Tab and the Windows key switch windows on the computer.
     await keyboard?.lock?.().catch(() => {})
     viewport.current?.focus()
+  }
+
+  const signIn = async (values: Record<string, string>, remember: boolean) => {
+    const session = client.current
+    const G = guac.current
+    if (!session || !G || !computer) return
+    for (const [name, value] of Object.entries(values)) {
+      const writer = new G.StringWriter(session.createArgumentValueStream("text/plain", name))
+      writer.sendText(value)
+      writer.sendEnd()
+    }
+    setPhase({ kind: "connecting" })
+    if (!remember) return
+    try {
+      await put(
+        `/remote-desktop/computers/${computer.id}`,
+        inputOf(
+          {
+            ...draftOf(computer),
+            username: values.username ?? computer.username,
+            domain: values.domain ?? computer.domain,
+            password: values.password ?? "",
+          },
+          true,
+        ),
+      )
+      refresh()
+    } catch (err) {
+      notify.error(`Could not save the sign-in for ${computer.name}`, err)
+    }
   }
 
   const send = (combo: KeyCombo) => {
@@ -393,6 +434,8 @@ export function RemoteSession({ id }: { id: string }) {
               />
             ) : phase.kind === "connecting" ? (
               <TextShimmer className="px-2 text-xs font-medium">connecting…</TextShimmer>
+            ) : phase.kind === "sign-in" ? (
+              <Status tone="notice" label="waiting for a sign-in" className="px-2" />
             ) : (
               <Status
                 tone={phase.kind === "failed" ? "warning" : "stopped"}
@@ -465,7 +508,9 @@ export function RemoteSession({ id }: { id: string }) {
               <div className="absolute inset-0 flex items-center justify-center p-6">
                 <div className="flex max-w-md min-w-0 flex-col items-center gap-4 text-center">
                   <ComputerMark os={computer.os} size="lg" reach={reach} />
-                  {phase.kind === "connecting" ? (
+                  {phase.kind === "sign-in" ? (
+                    <SignIn computer={computer} fields={phase.fields} onSubmit={signIn} />
+                  ) : phase.kind === "connecting" ? (
                     <>
                       <TextShimmer className="text-title font-semibold">{`Connecting to ${computer.name}…`}</TextShimmer>
                       <p className="text-hint text-muted-foreground">
@@ -773,5 +818,84 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 truncate text-right">{children}</span>
     </div>
+  )
+}
+
+const FIELD_ORDER = ["username", "domain", "password"]
+
+/**
+ * What the computer asked for, asked of the reader: a Mac signs in with its
+ * account name and login password, and a PC without a saved password asks
+ * for one. The answer goes to guacd on this connection and, unless the box is
+ * cleared, is saved for the next one.
+ */
+function SignIn({
+  computer,
+  fields,
+  onSubmit,
+}: {
+  computer: RdComputerView
+  fields: string[]
+  onSubmit: (values: Record<string, string>, remember: boolean) => void
+}) {
+  const id = useId()
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      fields.map((field) => [field, field === "username" ? computer.username : ""]),
+    ),
+  )
+  const [remember, setRemember] = useState(true)
+  const mac = computer.os === "macos"
+  const label = (field: string) =>
+    field === "username"
+      ? mac
+        ? "Mac account name"
+        : "Username"
+      : field === "password"
+        ? mac
+          ? "Mac login password"
+          : "Password"
+        : "Domain"
+  const asked = FIELD_ORDER.filter((field) => fields.includes(field))
+  return (
+    <form
+      className="flex w-full max-w-sm flex-col gap-3 text-left"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit(values, remember)
+      }}
+    >
+      <div className="space-y-1 text-center">
+        <p className="text-title font-semibold">Sign in to {computer.name}</p>
+        <p className="text-body text-muted-foreground">
+          {mac
+            ? "The Mac signs in with one of its accounts: the short account name and the password you log in with."
+            : `${computer.name} asks for a sign-in the dashboard does not have saved.`}
+        </p>
+      </div>
+      {asked.map((field, index) => (
+        <div key={field} className="flex flex-col gap-1.5">
+          <label htmlFor={`${id}-${field}`} className="text-hint font-medium">
+            {label(field)}
+          </label>
+          <Input
+            id={`${id}-${field}`}
+            type={field === "password" ? "password" : "text"}
+            autoFocus={index === 0}
+            autoComplete={field === "password" ? "current-password" : "off"}
+            spellCheck={false}
+            value={values[field] ?? ""}
+            onChange={(event) => setValues((held) => ({ ...held, [field]: event.target.value }))}
+          />
+        </div>
+      ))}
+      <label className="flex items-center gap-2 text-hint text-muted-foreground">
+        <Checkbox checked={remember} onCheckedChange={(on) => setRemember(on === true)} />
+        Save for {computer.name}
+      </label>
+      <Button type="submit" className="self-end">
+        Sign in
+      </Button>
+    </form>
   )
 }

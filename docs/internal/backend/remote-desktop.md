@@ -32,6 +32,18 @@ browser ──WebSocket "guacamole"──▶ backend ──TCP 127.0.0.1──�
   Its `WebSocketTunnel` asks for the `guacamole` subprotocol, so the route upgrades through
   `wsx.Upgrader.UpgradeProtocol`, which answers with the protocol only when the client offered it.
 
+**A Mac signs in with one of its accounts.** macOS Screen Sharing offers Apple's own security
+type (30) before plain VNC passwords, and libvncclient takes the first it supports, so guacd signs
+in with the account's short name and the password it logs in with, never a separate VNC password.
+When the dashboard holds neither, guacd sends `required` and waits; the session page asks for the
+names it lists and answers on the same connection with `argv` streams, saving them unless told not
+to.
+
+**The screen's size follows the frame only once it is up.** libvncclient crashes on a size update
+that arrives while it is still signing in, and Apple's sign-in is slow enough for the page's first
+resize to land in it: the guacd child dies with nothing sent to the page, which waited on
+*Connecting* for ever. The page sends its size after the first frame, never before.
+
 guacd's status codes travel to the page unchanged; `lib/remote-desktop.ts` (`sessionProblem`) says
 them as what to check on the computer. A session that cannot start is refused in the protocol's own
 terms (`RefuseSocket`: the tunnel's UUID, then an `error` instruction), so the page shows the reason
@@ -126,7 +138,8 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   unless `JD_REMOTE_DESKTOP_KEEP=1`.
 - `frontend/tests/browser/remote-desktop.spec.ts` mocks the API and the tunnel: the overview, the
   install, the add flow's instructions, port watch and saved input, a session drawing what the
-  tunnel sends, a download, a refusal in the reader's words, and removal.
+  tunnel sends, a download, a refusal in the reader's words, removal, a Mac asking for its account
+  answered from the page and saved, and no size update before the first frame.
 
 ## Not here
 

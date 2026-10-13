@@ -560,9 +560,9 @@ function instructions(os: RdOS, edition: Edition): Instruction[] {
         title: "Click the ⓘ beside Screen Sharing",
         detail: (
           <>
-            Turn on{" "}
-            <span className="text-foreground">VNC viewers may control screen with password</span>{" "}
-            and choose a password. You will type it on the next step.
+            Under <span className="text-foreground">Allow access for</span>, choose All users, or
+            add your own account. The dashboard signs in with that account&apos;s name and the
+            password you log in with.
           </>
         ),
       },

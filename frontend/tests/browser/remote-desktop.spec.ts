@@ -176,6 +176,57 @@ test("a file the computer puts in the drive's Download folder arrives as a downl
   )
 })
 
+test("a Mac that asks for its account is answered from the page, and the answer is saved", async ({
+  page,
+}) => {
+  const { calls } = await mockRemoteDesktop(page)
+  const sent: string[] = []
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      socket.onMessage((message) => sent.push(String(message)))
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+      setTimeout(() => socket.send(instruction("required", "username", "password")), 200)
+    },
+  )
+  await page.goto(`/remote-desktop/${MAC}`)
+  await expect(page.getByText("Sign in to studio-mac")).toBeVisible()
+  await page.getByLabel("Mac account name").fill("zoro")
+  await page.getByLabel("Mac login password").fill("login-password")
+  await page.getByRole("button", { name: "Sign in", exact: true }).click()
+  await expect(page.getByText("Connecting to studio-mac…")).toBeVisible()
+  await expect
+    .poll(() => sent.some((m) => m.includes("4.argv,") && m.includes("8.username")))
+    .toBe(true)
+  await expect.poll(() => sent.some((m) => m.includes(btoa("zoro")))).toBe(true)
+  await expect.poll(() => calls.updated.map((u) => u.id)).toEqual([MAC])
+  expect(calls.updated[0].body).toMatchObject({ username: "zoro", password: "login-password" })
+})
+
+test("the screen's size is sent only once it is up, never while the computer signs in", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page)
+  const sent: string[] = []
+  let up: (() => void) | undefined
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      socket.onMessage((message) => sent.push(String(message)))
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+      up = () => socket.send(instruction("size", "0", "1280", "720") + instruction("sync", "1"))
+    },
+  )
+  await page.goto(`/remote-desktop/${MAC}`)
+  await expect(page.getByText("Connecting to studio-mac…")).toBeVisible()
+  await page.setViewportSize({ width: 1100, height: 760 })
+  await page.waitForTimeout(1200)
+  expect(sent.filter((m) => m.startsWith("4.size,"))).toEqual([])
+  up?.()
+  await expect(page.getByRole("application", { name: "The screen of studio-mac" })).toBeVisible()
+  await expect.poll(() => sent.filter((m) => m.startsWith("4.size,")).length).toBeGreaterThan(0)
+})
+
 test("a refused session says what to check on the computer, in its words", async ({ page }) => {
   await mockRemoteDesktop(page)
   await page.routeWebSocket(
