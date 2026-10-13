@@ -11,7 +11,7 @@ import {
   streamView,
 } from "./remote-desktop-fixture"
 
-test("the overview draws the computers as the picture, the band and cards, without tiles", async ({
+test("the overview draws the computers as the picture and cards, without tiles or a band", async ({
   page,
 }) => {
   await mockRemoteDesktop(page)
@@ -34,10 +34,7 @@ test("the overview draws the computers as the picture, the band and cards, witho
   await expect(picture).toContainText("Screen Sharing not answering")
   await expect(picture).toContainText("guacd 1.6.0 · Moonlight Web 2.10.0")
 
-  const band = page.locator("[data-slot=remote-band]")
-  await expect(band.getByRole("region", { name: "Reach" })).toContainText("of 4 ready")
-  await expect(band.getByRole("region", { name: "Time on each" })).toContainText("in 14 days")
-  await expect(band.getByRole("region", { name: "Recent sessions" })).toContainText("now")
+  await expect(page.getByRole("region", { name: "Time on each" })).toHaveCount(0)
 
   const cards = page.locator("[data-card=computer]")
   await expect(cards).toHaveCount(4)
@@ -183,9 +180,7 @@ test("a file the computer puts in the drive's Download folder arrives as a downl
   await page.goto(`/remote-desktop/${OFFICE}`)
   const download = await page.waitForEvent("download")
   expect(download.suggestedFilename()).toBe("invoice.txt")
-  await expect(page.getByRole("complementary", { name: "Session tools" })).toContainText(
-    "invoice.txt",
-  )
+  await expect(page.getByRole("complementary", { name: "Session" })).toContainText("invoice.txt")
 })
 
 test("a Mac that asks for its account is answered from the page, and the answer is saved", async ({
@@ -303,7 +298,10 @@ test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, 
   // Sunshine takes the PIN: the card goes on its own, and Stream frames the bridge's page.
   state.stream = streamView(PAIRED)
   await expect(card).toBeHidden({ timeout: 15_000 })
-  await page.getByRole("radio", { name: "Stream" }).click()
+  await page
+    .getByRole("radiogroup", { name: "How the screen is drawn" })
+    .getByRole("radio", { name: /Stream/ })
+    .click()
   const frame = page.locator('iframe[data-slot="remote-stream"]')
   await expect(frame).toHaveAttribute(
     "src",
@@ -394,10 +392,16 @@ test("a session stays connected while another page is up, and only Disconnect en
     .click()
   await expect(page).toHaveURL(/\/remote-desktop$/)
   const dock = page.getByRole("complementary", { name: "Remote sessions" })
-  await expect(dock.getByRole("link", { name: /office-pc\s*connected/ })).toBeVisible()
+  await expect(dock).toContainText("office-pc")
+  await expect(dock).toContainText("Remote Desktop · 43 ms")
+  // The rail's Remote Desktop leads back into the session, not to the overview.
+  await expect(page.getByRole("link", { name: "Remote Desktop", exact: true })).toHaveAttribute(
+    "href",
+    `/remote-desktop/${OFFICE}?mode=control`,
+  )
   expect(closed).toBe(0)
 
-  await dock.getByRole("link", { name: /office-pc/ }).click()
+  await dock.getByRole("link", { name: "Open office-pc" }).click()
   await expect(screen).toBeVisible()
   await expect(dock).toBeHidden()
   expect(opened).toBe(1)
@@ -425,7 +429,7 @@ test("a stream keeps playing while another page is up, with only the computer's 
       Boolean((node as HTMLIFrameElement).contentDocument?.getElementById("jd-hide-pointer")),
     )
   await expect.poll(hidden).toBe(true)
-  await page.getByRole("checkbox", { name: /Show this computer's pointer too/ }).click()
+  await page.getByRole("switch", { name: "Show this computer's pointer too" }).click()
   await expect.poll(hidden).toBe(false)
 
   await page
@@ -433,9 +437,43 @@ test("a stream keeps playing while another page is up, with only the computer's 
     .getByRole("link", { name: "Computers" })
     .click()
   const dock = page.getByRole("complementary", { name: "Remote sessions" })
-  await expect(dock.getByRole("link", { name: /studio-mac\s*streaming/ })).toBeVisible()
-  await dock.getByRole("link", { name: /studio-mac/ }).click()
+  await expect(dock).toContainText("Streaming")
+  await dock.getByRole("link", { name: "Open studio-mac" }).click()
   await expect(frame).toBeVisible()
   await expect(page).toHaveURL(/mode=stream/)
   expect(loads).toBe(1)
+})
+
+test("the session's column switches how the screen is drawn, and the computers can be put away", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+    },
+  )
+  await page.goto(`/remote-desktop/${MAC}`)
+  const panel = page.getByRole("complementary", { name: "Session" })
+  const modes = panel.getByRole("radiogroup", { name: "How the screen is drawn" })
+  await expect(modes.getByRole("radio", { name: /Screen Sharing/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
+  // The top bar names the computer and how it is drawn, with no switch in it.
+  await expect(page.locator("[data-slot=pane-header]").getByRole("radio")).toHaveCount(0)
+
+  await modes.getByRole("radio", { name: /Stream/ }).click()
+  await expect(page).toHaveURL(/mode=stream/)
+  await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
+  await expect(panel.getByRole("radio", { name: "Smooth" })).toHaveAttribute("aria-checked", "true")
+  await expect(panel).toContainText("Paired with Sunshine")
+
+  const computers = page.getByRole("navigation", { name: "Computers" })
+  await expect(computers).toBeVisible()
+  await page.getByRole("button", { name: "Hide the computers" }).click()
+  await expect(computers).toBeHidden()
+  await page.getByRole("button", { name: "Show the computers" }).click()
+  await expect(computers).toBeVisible()
 })

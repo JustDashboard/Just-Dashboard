@@ -1,6 +1,6 @@
 import { API_BASE } from "@/lib/api"
 import { LANES } from "@/lib/hue"
-import { duration, plural } from "@/lib/format"
+import { plural } from "@/lib/format"
 
 /**
  * Remote Desktop's data and the decisions drawn from it, apart from any
@@ -235,33 +235,6 @@ export function overviewVerdict(o: RdOverview) {
     tone: ready === 0 ? ("warning" as const) : ("neutral" as const),
     label: `${ready} of ${o.computers.length} ready`,
   }
-}
-
-export type SessionTotals = { computerId: string; seconds: number; count: number }
-
-/**
- * Time spent on each computer over the history the overview reads, a session
- * still open counted to now. Busiest first.
- */
-export function sessionTotals(sessions: readonly RdSession[], now: number): SessionTotals[] {
-  const totals = new Map<string, SessionTotals>()
-  for (const session of sessions) {
-    const end = session.endedAt || now
-    const held = totals.get(session.computerId) ?? {
-      computerId: session.computerId,
-      seconds: 0,
-      count: 0,
-    }
-    held.seconds += Math.max(0, end - session.startedAt)
-    held.count += 1
-    totals.set(session.computerId, held)
-  }
-  return [...totals.values()].sort((a, b) => b.seconds - a.seconds || b.count - a.count)
-}
-
-export function sessionLength(session: RdSession, now: number) {
-  if (session.outcome === "interrupted") return "cut off"
-  return duration(Math.max(0, (session.endedAt || now) - session.startedAt))
 }
 
 /**

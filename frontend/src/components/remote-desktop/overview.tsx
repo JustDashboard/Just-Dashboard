@@ -30,7 +30,6 @@ import {
   type RdOverview,
 } from "@/lib/remote-desktop"
 import { notify } from "@/lib/toast"
-import { useNow } from "@/components/deploy/vocabulary"
 import { ComputerCard } from "@/components/remote-desktop/computer-card"
 import {
   ComputerFields,
@@ -39,7 +38,6 @@ import {
   type ComputerDraft,
 } from "@/components/remote-desktop/computer-form"
 import { EngineNotice, EngineSetup } from "@/components/remote-desktop/engine"
-import { RemoteBand } from "@/components/remote-desktop/band"
 import { ComputerMark } from "@/components/remote-desktop/marks"
 import { ComputerPicture } from "@/components/remote-desktop/picture"
 import { useRemoteDesktop } from "@/components/remote-desktop/use-remote-desktop"
@@ -54,10 +52,8 @@ const NEW_HREF = `${REMOTE_DESKTOP_HREF}/new`
  * now, the open sessions, and the path they take — with the verdict and Add
  * a computer at its end. Under it the picture of how a session travels, from
  * this browser through guacd on this server to each computer, wired by
- * whether it answers; then the band, which reads the computers three ways
- * the cards cannot: how far each one is, where the fortnight's time went and
- * the sessions themselves. Then the computers, each a card that opens its
- * screen, and the tailnet's desktops that are not added yet.
+ * whether it answers. Then the computers, each a card that opens its screen,
+ * and the tailnet's desktops that are not added yet.
  *
  * A server that has never had the engine opens on the one thing to do: the
  * install, with its output under it.
@@ -67,7 +63,6 @@ export function RemoteDesktopOverview() {
   const { host } = useMetrics()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<RdComputer | null>(null)
-  const now = Math.floor(useNow(30_000) / 1000)
   const offered = useMemo(() => (data ? candidates(data.tailnet, data.computers) : []), [data])
 
   const add = (
@@ -156,7 +151,6 @@ export function RemoteDesktopOverview() {
       {data.computers.length > 0 ? (
         <>
           <ComputerPicture overview={data} hueOf={hueOf} hostname={host?.hostname} />
-          <RemoteBand overview={data} hueOf={hueOf} now={now} />
           <Section title="Computers">
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-3">
               {data.computers.map((computer, index) => (
