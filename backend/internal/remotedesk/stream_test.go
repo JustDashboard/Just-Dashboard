@@ -125,21 +125,71 @@ func newFakeBridge(t *testing.T) *fakeBridge {
 func (b *fakeBridge) address() string { return strings.TrimPrefix(b.srv.URL, "http://") }
 
 // newStreamService is a service whose bridge is the fake, and whose
-// computers' Sunshine port answers: every name resolves to 192.0.2.10, and a
-// dial there connects to nothing but succeeds.
+// computers' Sunshine answers: every name resolves to 192.0.2.10, and a dial
+// there reaches a fake Sunshine's server info.
 func newStreamService(t *testing.T, b *fakeBridge) *Service {
+	sunshine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/serverinfo" {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, `<root status_code="200"><hostname>box</hostname></root>`)
+	}))
+	t.Cleanup(sunshine.Close)
+	return newStreamServiceAt(t, b, sunshine.Listener.Addr().String())
+}
+
+func newStreamServiceAt(t *testing.T, b *fakeBridge, sunshine string) *Service {
 	s := newTestService(t, &fakeEngine{status: EngineStatus{State: EngineRunning, Address: "127.0.0.1:4822"}})
 	s.bridge = &fakeEngine{status: EngineStatus{State: EngineRunning, Address: b.address()}}
 	var d net.Dialer
 	s.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
 		if strings.HasPrefix(address, "192.0.2.10:") {
-			client, server := net.Pipe()
-			server.Close()
-			return client, nil
+			return d.DialContext(ctx, network, sunshine)
 		}
 		return d.DialContext(ctx, network, address)
 	}
 	return s
+}
+
+// A Sunshine that accepts the connection and then says nothing is running
+// but stuck: the bridge would wait on it until it gave up, so it is reported
+// as such and nothing is handed to the bridge.
+func TestASunshineThatAcceptsButNeverAnswersIsStuck(t *testing.T) {
+	held := sunshineWait
+	sunshineWait = 300 * time.Millisecond
+	t.Cleanup(func() { sunshineWait = held })
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { conn.Close() })
+		}
+	}()
+	b := newFakeBridge(t)
+	s := newStreamServiceAt(t, b, ln.Addr().String())
+	ctx := t.Context()
+	c, _ := s.Add(ctx, ComputerInput{Name: "zoro-1", OS: OSMac, Host: "zoro-1"})
+
+	v, err := s.Stream(ctx, c.ID)
+	if err != nil || v.Sunshine.State != ReachClosed || v.Sunshine.Error != SunshineStuck {
+		t.Fatalf("stream: %+v %v", v.Sunshine, err)
+	}
+	_, err = s.Pair(ctx, c.ID)
+	var refused *StreamError
+	if !errors.As(err, &refused) || !strings.Contains(refused.Message, "running but stuck") {
+		t.Fatalf("pair: %v", err)
+	}
+	if len(b.added) != 0 {
+		t.Fatalf("handed a stuck Sunshine to the bridge: %v", b.added)
+	}
 }
 
 func TestPairShowsThePinAndFinishesWhenSunshineTakesIt(t *testing.T) {

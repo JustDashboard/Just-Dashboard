@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/go-connections/nat"
@@ -248,7 +250,7 @@ func (s *Service) Stream(ctx context.Context, id string) (StreamView, error) {
 		v.Sunshine = Reach{State: ReachClosed, Error: "unknown host", CheckedAt: s.now().Unix()}
 	} else {
 		v.Address = target
-		v.Sunshine = s.Probe(ctx, target, SunshinePort)
+		v.Sunshine = s.probeSunshine(ctx, target)
 	}
 	s.mu.Lock()
 	if p := s.pairs[id]; p != nil && !p.done {
@@ -307,7 +309,10 @@ func (s *Service) Pair(ctx context.Context, id string) (StreamView, error) {
 	if err != nil {
 		return StreamView{}, invalid("%s does not resolve from this server", c.Host)
 	}
-	if reach := s.Probe(ctx, target, SunshinePort); reach.State != ReachOpen {
+	if reach := s.probeSunshine(ctx, target); reach.State != ReachOpen {
+		if reach.Error == SunshineStuck {
+			return StreamView{}, &StreamError{Message: fmt.Sprintf("Sunshine on %s accepts connections on %s:%d but does not answer them: it is running but stuck. Restart it on the computer.", c.Name, target, SunshinePort)}
+		}
 		return StreamView{}, &StreamError{Message: fmt.Sprintf("Sunshine is not answering on %s:%d (%s)", target, SunshinePort, reach.Error)}
 	}
 	s.mu.Lock()
@@ -325,6 +330,9 @@ func (s *Service) Pair(ctx context.Context, id string) (StreamView, error) {
 	hostID := c.StreamHostID
 	if paired, known := hosts[hostID]; !known || hostID == 0 {
 		if hostID, err = api.addHost(ctx, target, SunshinePort); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return StreamView{}, &StreamError{Message: fmt.Sprintf("Sunshine on %s did not answer the stream bridge within 15 seconds. Restart it on the computer.", c.Name)}
+			}
 			return StreamView{}, &StreamError{Message: "The stream bridge could not reach Sunshine: " + err.Error()}
 		}
 		if err := s.store.setStreamHost(ctx, id, hostID); err != nil {
@@ -378,6 +386,54 @@ func (s *Service) Unpair(ctx context.Context, id string) error {
 		}
 	}
 	return s.store.setStreamHost(ctx, id, 0)
+}
+
+// SunshineStuck is the error of a Sunshine that accepts a connection on its
+// pairing port and then answers nothing: running, but not serving.
+const SunshineStuck = "stuck"
+
+// sunshineWait is how long Sunshine has to answer the probe.
+var sunshineWait = 3 * time.Second
+
+// probeSunshine asks Sunshine for its server info, the first thing the bridge
+// asks when a computer is added. A connect alone is not enough: a Sunshine
+// that is running but stuck accepts the connection and then says nothing,
+// and the bridge waits on it until it gives up. Any HTTP answer is an answer;
+// the round trip is the connect's, as the other probes measure it.
+func (s *Service) probeSunshine(ctx context.Context, target string) Reach {
+	ctx, cancel := context.WithTimeout(ctx, sunshineWait)
+	defer cancel()
+	started := s.now()
+	var connected atomic.Int64
+	client := &http.Client{Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := s.dial(ctx, network, address)
+			if err == nil {
+				connected.Store(int64(s.now().Sub(started)) + 1)
+			}
+			return conn, err
+		},
+	}}
+	r := Reach{State: ReachClosed, CheckedAt: s.now().Unix()}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+net.JoinHostPort(target, strconv.Itoa(SunshinePort))+"/serverinfo", nil)
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	res, err := client.Do(req)
+	took := time.Duration(connected.Load() - 1)
+	switch {
+	case err == nil:
+		res.Body.Close()
+		r.State, r.LatencyMs = ReachOpen, float64(took.Microseconds())/1000
+	case took >= 0 && errors.Is(err, context.DeadlineExceeded):
+		r.Error = SunshineStuck
+	default:
+		r.Error = reachError(err)
+	}
+	return r
 }
 
 // StreamError is the bridge or Sunshine refusing, said in the reader's terms.
