@@ -29,7 +29,9 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
 - **WebSocket origins** are checked by `wsx` against the request host, port and the scheme Caddy serves:
   HTTPS for `JD_TLS=internal` or `tailscale`, HTTP for `JD_TLS=off` or local development. An explicit
   `JD_ALLOWED_ORIGINS` entry remains the only cross-origin exception. The backend's loopback HTTP hop
-  does not determine the browser-facing scheme.
+  does not determine the browser-facing scheme. A socket whose client names a subprotocol upgrades
+  through `UpgradeProtocol`, which answers with it only when it was offered — Remote Desktop's
+  Guacamole tunnel asks for `guacamole`, and a browser drops a handshake that does not name it.
 
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature

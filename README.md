@@ -137,6 +137,7 @@ free.
 - GitHub, GitLab and Gitea pull requests and Actions logs
 - Excalidraw: drawings with live cards for the host, projects and databases, each listed as a thumbnail of itself
 - Stickyboard: endless boards of sticky notes you colour, group into sections and link together
+- Remote Desktop: your Windows PCs, Macs and Linux desktops in a browser tab over Tailscale, unattended, with clipboard and file transfer
 
 </td>
 <td width="50%" valign="top">

@@ -78,6 +78,9 @@ strategy, and feature ownership behind those rules.
 - [`stickyboard.md`](stickyboard.md) — the sticky-note boards: the validated document, its routes and
   permissions, the list and templates, the canvas (notes, sections, links, formatting, clipboard,
   history, find) and saving with revision conflicts.
+- [`backend/remote-desktop.md`](backend/remote-desktop.md) — Remote Desktop: guacd as a container the
+  dashboard owns on loopback, the Guacamole handshake done server-side and the relay, sealed computer
+  sign-ins, the session history and the route table.
 
 ## Deployments and frontend
 

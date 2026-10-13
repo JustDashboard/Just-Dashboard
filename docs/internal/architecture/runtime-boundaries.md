@@ -8,7 +8,7 @@ holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEv
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
 `dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
-`ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
+`remoteDesktop` (`remotedesk`, [Remote Desktop](../backend/remote-desktop.md)), `ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -22,9 +22,10 @@ rather than swallowed in construction. It starts the metrics recorder (here, not
 purpose is to have been running while nobody was looking), the database activity recorder, the Docker
 event log, the network module's interface sampler and its daily blocklist refresh, the self-update
 check, the backup scheduler, `selfupdate.Installer.Reconcile`,
-`selfcfg.Applier.Reconcile` and the Tailscale
-certificate keeper. `Shutdown` releases what outlives a request:
-samplers, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+`selfcfg.Applier.Reconcile`, Remote Desktop's `Reconcile` (closing the history of sessions a restart cut
+off) and the Tailscale certificate keeper. `Shutdown` releases what outlives a request:
+samplers, scheduler, live PTYs, database pools, Docker clients (Remote Desktop's engine client among them;
+the engine itself keeps running). A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
 running holder back before the first request, including when preparing new holders fails. New direct
 terminals require that protection; an unavailable holder returns a reason instead of silently opening
@@ -198,7 +199,8 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`); boards (`boards`, `sticky_boards`); backups
+`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`); boards (`boards`, `sticky_boards`); Remote Desktop (`remote_desktop_computers`, with sealed passwords, and
+`remote_desktop_sessions`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,
