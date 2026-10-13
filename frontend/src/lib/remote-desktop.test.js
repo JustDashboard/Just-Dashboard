@@ -158,6 +158,11 @@ describe("sessionProblem", () => {
   test("turns Guacamole's codes into what to check on the computer", () => {
     const pc = { name: "office-pc", port: 3389, protocol: "rdp", os: "windows" }
     expect(sessionProblem(0x0207, "", pc).detail).toContain("Remote Desktop is turned on")
+    const answered = { ...pc, os: "macos", protocol: "vnc", reach: { state: "open", checkedAt: 0 } }
+    expect(sessionProblem(0x0207, "", answered).title).toBe(
+      "office-pc would not let the dashboard in",
+    )
+    expect(sessionProblem(0x0207, "", answered).detail).toContain("Allow access for")
     expect(sessionProblem(0x0301, "", pc).title).toBe("The computer refused the sign-in")
     expect(sessionProblem(0x0200, "Aborted. See logs.", pc).detail).toBe("Aborted. See logs.")
   })
