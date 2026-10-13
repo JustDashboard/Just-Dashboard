@@ -27,7 +27,7 @@ import { isPlain } from "./site-order"
  */
 const SITE_HUES = LANES.filter((hue) => hue !== "var(--tag-slate)")
 
-/** The colour a site has everywhere on the page: its card's edge, its span, its dot. */
+/** The colour a site has everywhere on the page: its hour bar, its span, its dot. */
 export function siteHue(name: string): string {
   return hueFor(name.toLowerCase(), SITE_HUES)
 }

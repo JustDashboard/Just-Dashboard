@@ -139,7 +139,7 @@ export function ControlCenter() {
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
   // Each database's hue, dealt once for the whole fleet so a filter never
-  // repaints one: the band's spans, the runway's dots, the cards' edges.
+  // repaints one: the band's spans, the runway's dots, the cards' size bars.
   const hues = useMemo(() => fleetHues(entries), [entries])
   const hueOf = useCallback(
     (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",

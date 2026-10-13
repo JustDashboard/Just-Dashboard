@@ -139,6 +139,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("interrupted native DNS changes could not be reconciled", "err", err)
 	}
 	dnsServicesCancel()
+	remoteCtx, remoteCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := s.modules.remoteDesktop.Reconcile(remoteCtx); err != nil {
+		s.Log.Warn("interrupted remote desktop sessions could not be closed in the history", "err", err)
+	}
+	remoteCancel()
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}
@@ -279,6 +284,9 @@ func (s *Server) Shutdown() {
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {
 		s.Log.Warn("native DNS runtime client shutdown failed", "err", err)
+	}
+	if err := s.modules.remoteDesktop.Close(); err != nil && s.Log != nil {
+		s.Log.Warn("remote desktop runtime client shutdown failed", "err", err)
 	}
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()

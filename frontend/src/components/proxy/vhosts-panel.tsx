@@ -1672,9 +1672,9 @@ type CardProps = {
  * may write it — and a deployment's route read-only for everyone.
  *
  * The site is drawn as what it is made of — the application it fronts over
- * the engine serving it — with its hue down its left edge: the colour its
- * span, its certificate's dot and its application's key carry in the band
- * above, so a card and its readings there are found by colour.
+ * the engine serving it. Its hue is on its hour bar, the colour its span,
+ * its certificate's dot and its application's key carry in the band above;
+ * the card's edge carries none.
  */
 function SiteCard({
   vhost,
@@ -1717,7 +1717,7 @@ function SiteCard({
       index={index}
       busy={Boolean(busy)}
       className={cn(
-        "h-full gap-4 p-4 pl-5",
+        "h-full gap-4 p-4",
         cursor && "ring-2 ring-ring",
         arrived && "animate-rise",
         !vhost.enabled && "opacity-80",
@@ -1736,11 +1736,6 @@ function SiteCard({
         />
       }
     >
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-y-4 left-0 w-0.75 rounded-r-full"
-        style={{ background: siteHue(vhost.name) }}
-      />
       {cursor && <ScrollHere />}
       {!linkOnly && (
         <RoutePath

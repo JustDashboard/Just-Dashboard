@@ -98,6 +98,10 @@ to the contribution terms above, including the additional licence grant to the p
   authored Netplan/networkd DHCPv4/SLAAC policy with DHCP MTU disabled and explicit DHCP/RA domains.
   Follow its [v8 source/helper proof](docs/internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md);
   this selection does not replace the default-policy, DHCPv6 or structural acceptance requirements.
+- Remote Desktop has an opt-in live fixture, `JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run Live -v`.
+  It installs the real guacd engine, opens a session over VNC and one over RDP to throwaway XFCE
+  desktops on the engine's network and waits for each first frame, then removes the engine unless
+  `JD_REMOTE_DESKTOP_KEEP=1` ([Remote Desktop](docs/internal/backend/remote-desktop.md#tests)).
 - The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
   Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
   to compile the narrow test binary and run it as root. It creates a network-none fixture with no

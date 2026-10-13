@@ -2344,8 +2344,8 @@ The passes, in order. Each one is a diff you can review on its own.
    the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
-   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else", and
-   it runs down its card's left edge. The card leads with the application tucked over its engine
+   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the
+   card's edge carries none (0.7.5, at the operator's request: the stripe read as noise). The card leads with the application tucked over its engine
    (`ProductLogos`), names it in its second line and at the route's far end beside the address, and
    draws a static site's directory as *Files* and a redirect's target as *Redirects to* where both
    read "Served by configuration"; its hour is a short bar against the busiest site's. A site
@@ -2376,8 +2376,9 @@ The passes, in order. Each one is a diff you can review on its own.
    week washed amber because a week is where every other reading of the section calls a dump stale.
    A row opens the database, or on the runway its Backups page. Each database keeps one hue
    (`fleetHues`, a lane hue without slate dealt in the order the connections were saved, so five
-   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row,
-   its card's left edge and its table row; the card's Stored figure carries a short bar in that hue
+   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row
+   and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
 
@@ -2912,6 +2913,9 @@ the reader through it.
 | A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the project header's shape saying what the run is, its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the far end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
+| Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
+| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's frame held to the window around the live screen. |
+| `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which
 is correct: making a project is a flow and reading one is not.

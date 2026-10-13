@@ -297,10 +297,11 @@ test.describe("the control center", () => {
     await expect(never).toHaveAttribute("href", "/databases/4/backups")
     await expect(never.getByText("never backed up")).toHaveClass(/text-warning/)
 
-    // One database, one hue: its span's key in the band is its card's edge.
+    // One database, one hue: its span's key in the band is its card's size bar,
+    // and the card's edge carries none.
     const hue = (el: Element) => getComputedStyle(el).backgroundColor
     const edge = async (name: string) =>
-      card(page, name).locator("[data-slot=fleet-hue]").evaluate(hue)
+      card(page, name).locator("[data-slot=fleet-size]").evaluate(hue)
     const key = (name: string) =>
       band
         .getByRole("list", { name: "Largest databases" })
@@ -309,9 +310,11 @@ test.describe("the control center", () => {
         .evaluate(hue)
     expect(await key("shop")).toBe(await edge("shop"))
     expect(await key("cache")).toBe(await edge("cache"))
+    await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
     // Five databases are five hues.
-    const edges = await page
-      .locator("[data-slot=fleet-hue]")
+    const edges = await band
+      .getByRole("list", { name: "Largest databases" })
+      .locator("[data-slot=hue-key]")
       .evaluateAll((spans) => spans.map((span) => getComputedStyle(span).backgroundColor))
     expect(new Set(edges).size).toBe(5)
 

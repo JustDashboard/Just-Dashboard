@@ -202,3 +202,7 @@ https://www.netfilter.org/images/netfilter-logo3.png, resized to 96px WebP.
 spamhaus.svg is the mark from the Spamhaus Project's site logo
 (https://www.spamhaus.org), its wordmark removed. firehol.webp is FireHOL's
 web-shield-128.png from https://firehol.org, resized to 96px WebP.
+
+Remote Desktop is drawn as the engine it runs: guacamole.svg is the
+collection's apache-guacamole.svg, renamed after the product id the pages use
+and otherwise unchanged.

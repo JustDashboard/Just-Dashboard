@@ -64,7 +64,7 @@ export function FleetTable({
   feeds: Map<number, { products: string[]; count: number }>
   /** What each database holds, where anybody knows: the same answer the cards give. */
   storedOf: (entry: DbFleetEntry) => number | undefined
-  /** Each database's hue: the band's span, the card's edge, the row's key. */
+  /** Each database's hue: the band's span, the card's size bar, the row's key. */
   hueOf: (entry: DbFleetEntry) => string
   /** The largest database's size, which every row's bar is drawn against. */
   largest: number

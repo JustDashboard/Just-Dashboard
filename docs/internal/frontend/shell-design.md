@@ -77,7 +77,7 @@ a list of sections kept out of its sidebar — stored on the account (`users.hid
 `user.hiddenSections` on the session and written by `PUT /account/workspace`), so it follows the person
 to every browser rather than living in this one's storage. `lib/sidebar-sections.ts` names the
 sections that can be hidden — the first segment of their path: Deployments, Databases, Docker, the
-five Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
+six Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
 log — and the purposes the question offers, each the sections it needs. Overview, Monitoring,
 Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
 or back to the switch.
@@ -204,7 +204,7 @@ row's slot made the heading read as one more row to press.
 
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
-then Databases, Docker), **Workspace** (Excalidraw, Stickyboard, Terminal, Files, Git), **Protection** (Security, Backups),
+then Databases, Docker), **Workspace** (Excalidraw, Stickyboard, Terminal, Files, Git, Remote Desktop), **Protection** (Security, Backups),
 **Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
 (Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
 one question, and the four configuration pages are opened to change the server rather than to use it.

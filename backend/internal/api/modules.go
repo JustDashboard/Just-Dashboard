@@ -37,6 +37,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
@@ -98,6 +99,9 @@ type moduleSet struct {
 	dnsServices     *dnsservice.Service
 	networkVantages *netvantage.Service
 	ipam            *netipam.Service
+	// remoteDesktop keeps the computers sessions open to and runs guacd,
+	// the container that speaks RDP and VNC on the browser's behalf.
+	remoteDesktop *remotedesk.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -227,6 +231,7 @@ func (s *Server) initModules() {
 	s.modules.netsec = netsec.New()
 	s.modules.blocks = netsec.NewBlocks(s.Store.DB, s.modules.netsec)
 	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
+	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: remotedesk.NewDockerEngine(s.Cfg.DockerHost), Tailnet: s.remoteDesktopTailnet})
 	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
 	s.modules.network = netx.New(netx.Options{
 		Paths:               netx.DefaultPaths(),
