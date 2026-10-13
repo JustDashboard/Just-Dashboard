@@ -1,26 +1,22 @@
 "use client"
 
-import dynamic from "next/dynamic"
-import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
-import { LoadingPanel } from "@/components/state"
-import { sessionMode, type SessionMode } from "@/lib/remote-desktop"
+import { useEffect } from "react"
+import { useParams, useSearchParams } from "next/navigation"
+import { useHeldSessions } from "@/components/remote-desktop/held-sessions"
+import { sessionMode } from "@/lib/remote-desktop"
 
-// The Guacamole client draws into the page's own DOM and reads the window's
-// size and keyboard; there is nothing of it to render on the server.
-const RemoteSession = dynamic(
-  () => import("@/components/remote-desktop/session").then((mod) => mod.RemoteSession),
-  { ssr: false, loading: () => <LoadingPanel /> },
-)
-
+/**
+ * A computer's session is drawn by the shell (`HeldSessionsHost`), which keeps
+ * it connected while other pages are up. This page only names it: the
+ * computer, and the mode when the address asks for one; without one, a
+ * session already open keeps its own.
+ */
 export default function RemoteSessionPage() {
   const { id } = useParams<{ id: string }>()
-  const params = useSearchParams()
-  const router = useRouter()
-  const pathname = usePathname()
-  // Which way the screen is drawn is in the address, so a stream can be
-  // linked to and a reload stays in it.
-  const mode = sessionMode(params.get("mode"))
-  const onMode = (next: SessionMode) =>
-    router.replace(next === "stream" ? `${pathname}?mode=stream` : pathname, { scroll: false })
-  return <RemoteSession key={id} id={id} mode={mode} onMode={onMode} />
+  const asked = useSearchParams().get("mode")
+  const { hold } = useHeldSessions()
+  useEffect(() => {
+    hold(id, asked === null ? null : sessionMode(asked))
+  }, [id, asked, hold])
+  return null
 }

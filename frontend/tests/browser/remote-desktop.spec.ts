@@ -71,8 +71,10 @@ test("a server without the engine opens on the install, which runs as a job", as
   await page.goto("/remote-desktop")
   await expect(page.getByText("Control your computers from here")).toBeVisible()
   await page.getByRole("button", { name: "Install Remote Desktop" }).click()
-  await expect(page.getByText("guacd 1.6.0 is ready")).toBeVisible()
-  expect(calls.installs).toBe(1)
+  // The job's console is up only until the job succeeds and the overview
+  // reads the engine running, which on a loaded machine can be one frame.
+  await expect.poll(() => calls.installs).toBe(1)
+  await expect(page.getByText("Control your computers from here")).toBeHidden()
 })
 
 test("adding a tailnet PC says where Remote Desktop is, waits for the port and saves the sign-in", async ({
@@ -361,4 +363,79 @@ test("a Sunshine that takes the connection and answers nothing is called stuck, 
   await expect(page.getByText("brew services restart sunshine")).toBeVisible()
   await expect(page.getByText("Look for a prompt on the computer's screen")).toBeVisible()
   await expect(page.getByRole("button", { name: "Pair", exact: true })).toHaveCount(0)
+})
+
+test("a session stays connected while another page is up, and only Disconnect ends it", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page)
+  let opened = 0
+  let closed = 0
+  await page.routeWebSocket(
+    /\/api\/v1\/remote-desktop\/computers\/[0-9a-f]+\/session/,
+    (socket) => {
+      opened += 1
+      socket.onClose(() => (closed += 1))
+      socket.send(instruction("", "6b1e3b54-6f2c-4d55-a0a2-5c7cf1c4b8d9"))
+      socket.send(
+        instruction("size", "0", "1280", "720") +
+          instruction("rect", "0", "0", "0", "1280", "720") +
+          instruction("sync", "1"),
+      )
+    },
+  )
+  await page.goto(`/remote-desktop/${OFFICE}`)
+  const screen = page.getByRole("application", { name: "The screen of office-pc" })
+  await expect(screen).toBeVisible()
+
+  await page
+    .getByRole("navigation", { name: "Computers" })
+    .getByRole("link", { name: "Computers" })
+    .click()
+  await expect(page).toHaveURL(/\/remote-desktop$/)
+  const dock = page.getByRole("complementary", { name: "Remote sessions" })
+  await expect(dock.getByRole("link", { name: /office-pc\s*connected/ })).toBeVisible()
+  expect(closed).toBe(0)
+
+  await dock.getByRole("link", { name: /office-pc/ }).click()
+  await expect(screen).toBeVisible()
+  await expect(dock).toBeHidden()
+  expect(opened).toBe(1)
+  expect(closed).toBe(0)
+
+  await page.getByRole("link", { name: "Disconnect" }).click()
+  await expect(page).toHaveURL(/\/remote-desktop$/)
+  await expect.poll(() => closed).toBe(1)
+  await expect(page.getByRole("complementary", { name: "Remote sessions" })).toHaveCount(0)
+})
+
+test("a stream keeps playing while another page is up, with only the computer's own pointer", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  let loads = 0
+  page.on("request", (request) => {
+    if (request.url().includes("/bridge/stream.html")) loads += 1
+  })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  const frame = page.locator('iframe[data-slot="remote-stream"]')
+  await expect(frame).toBeVisible()
+  const hidden = () =>
+    frame.evaluate((node) =>
+      Boolean((node as HTMLIFrameElement).contentDocument?.getElementById("jd-hide-pointer")),
+    )
+  await expect.poll(hidden).toBe(true)
+  await page.getByRole("checkbox", { name: /Show this computer's pointer too/ }).click()
+  await expect.poll(hidden).toBe(false)
+
+  await page
+    .getByRole("navigation", { name: "Computers" })
+    .getByRole("link", { name: "Computers" })
+    .click()
+  const dock = page.getByRole("complementary", { name: "Remote sessions" })
+  await expect(dock.getByRole("link", { name: /studio-mac\s*streaming/ })).toBeVisible()
+  await dock.getByRole("link", { name: /studio-mac/ }).click()
+  await expect(frame).toBeVisible()
+  await expect(page).toHaveURL(/mode=stream/)
+  expect(loads).toBe(1)
 })

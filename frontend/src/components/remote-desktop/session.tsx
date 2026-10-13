@@ -110,13 +110,21 @@ const DISCONNECTED = 5
 export function RemoteSession({
   id,
   mode,
+  visible,
   onMode,
+  onDisconnect,
+  onState,
 }: {
   id: string
   mode: SessionMode
+  /** A held session on another page stays connected and stops reading the computers. */
+  visible: boolean
   onMode: (mode: SessionMode) => void
+  onDisconnect: () => void
+  /** What the shell shows of a session kept connected while another page is up. */
+  onState: (state: { name: string; live: boolean }) => void
 }) {
-  const { data, hueOf, refresh } = useRemoteDesktop(15_000)
+  const { data, hueOf, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
   const computer = data?.computers.find((candidate) => candidate.id === id)
   const workspace = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
@@ -137,11 +145,18 @@ export function RemoteSession({
     "smooth",
   )
   const [streamAttempt, setStreamAttempt] = useState(0)
-  const streamPoll = useStream(id, mode === "stream")
+  const [pointer, setPointer] = useViewState("remote-desktop.stream-pointer", false)
+  const streamFrame = useRef<HTMLIFrameElement>(null)
+  const streamPoll = useStream(id, visible && mode === "stream")
   const stream = streamPoll.data
   const pin = stream?.pairing ? stream.pin : undefined
   const known = computer !== undefined
   const control = mode === "control"
+  const live = control ? phase.kind === "connected" : streamPoll.live !== undefined
+  const name = computer?.name
+  useEffect(() => {
+    if (name) onState({ name, live })
+  }, [name, live, onState])
 
   const track = useCallback((key: string, change: Partial<Transfer>) => {
     setTransfers((held) =>
@@ -171,7 +186,7 @@ export function RemoteSession({
       const fit = () => {
         const width = display.getWidth()
         const height = display.getHeight()
-        if (!width || !height) return
+        if (!width || !height || !frame.clientWidth) return
         display.scale(Math.min(frame.clientWidth / width, frame.clientHeight / height))
       }
       display.onresize = fit
@@ -196,6 +211,9 @@ export function RemoteSession({
       // to land in it: the screen's size follows the frame only once it is up.
       let connected = false
       const followFrame = () => {
+        // A session held while another page is up has no frame to follow;
+        // the computer keeps the size it had until the session is shown.
+        if (!frame.clientWidth || !frame.clientHeight) return
         const next = displaySize(frame.clientWidth, frame.clientHeight, window.devicePixelRatio)
         session.sendSize(next.width, next.height)
         fit()
@@ -312,7 +330,14 @@ export function RemoteSession({
     // In fullscreen a browser will hand over the keys it otherwise keeps,
     // so Alt+Tab and the Windows key switch windows on the computer.
     await keyboard?.lock?.().catch(() => {})
-    viewport.current?.focus()
+    if (control) {
+      viewport.current?.focus()
+      return
+    }
+    // The stream takes keys in its own page, on its input element.
+    const frame = streamFrame.current
+    frame?.focus()
+    frame?.contentDocument?.getElementById("input")?.focus()
   }
 
   const switchMode = (next: SessionMode) => {
@@ -519,13 +544,19 @@ export function RemoteSession({
               {tools ? <SidebarRightClose /> : <SidebarRightOpen />}
             </IconAction>
             <IconAction
-              label={immersive ? "Leave fullscreen" : "Fullscreen"}
+              label={
+                immersive
+                  ? "Leave fullscreen"
+                  : `Fullscreen, with every key going to ${computer?.name ?? "the computer"}`
+              }
               onClick={() => void toggleImmersive()}
             >
               {immersive ? <FullscreenClose /> : <Fullscreen />}
             </IconAction>
             <Button size="sm" variant="outline" asChild>
-              <Link href={REMOTE_DESKTOP_HREF}>Disconnect</Link>
+              <Link href={REMOTE_DESKTOP_HREF} onClick={onDisconnect}>
+                Disconnect
+              </Link>
             </Button>
           </PaneHeader>
 
@@ -534,8 +565,13 @@ export function RemoteSession({
               <StreamPane
                 computer={computer}
                 stream={stream}
+                live={streamPoll.live}
                 quality={quality}
                 attempt={streamAttempt}
+                pointer={pointer}
+                onFrame={(node) => {
+                  streamFrame.current = node
+                }}
                 onRefresh={streamPoll.refresh}
                 onControl={() => switchMode("control")}
               />
@@ -627,6 +663,8 @@ export function RemoteSession({
             stream={stream}
             quality={quality}
             onQuality={setQuality}
+            pointer={pointer}
+            onPointer={setPointer}
             onUnpaired={streamPoll.refresh}
           />
         )}
@@ -868,6 +906,8 @@ function Tools({
           </section>
         )}
 
+        <KeysNote name={computer.name} />
+
         <section aria-label="Keys" className="flex flex-col gap-2">
           <p className="eyebrow">Send keys</p>
           <div className="grid grid-cols-2 gap-1.5">
@@ -886,6 +926,31 @@ function Tools({
         </section>
       </div>
     </aside>
+  )
+}
+
+// Keyboard Lock is Chrome's and Edge's; other browsers keep their own keys
+// even in fullscreen.
+const keyboardLock = Boolean(
+  (navigator as Navigator & { keyboard?: { lock?: unknown } }).keyboard?.lock,
+)
+
+/**
+ * Where the keys go. With the screen focused every key a page may have goes
+ * to the computer; the system's own (Alt+Tab, the Windows key) and the
+ * browser's (Ctrl+W, Ctrl+T) never reach a page at all, except in fullscreen
+ * with the keyboard locked, which is what the fullscreen button asks for.
+ */
+function KeysNote({ name }: { name: string }) {
+  return (
+    <section aria-label="Keyboard" className="flex flex-col gap-1.5">
+      <p className="eyebrow">Keyboard</p>
+      <p className="text-hint text-muted-foreground">
+        {keyboardLock
+          ? `With the screen focused, keys go to ${name}. Alt+Tab, the Windows key and the browser's own shortcuts stay with this computer until fullscreen, which sends every key to ${name}; hold Esc to leave it.`
+          : `With the screen focused, keys go to ${name}. This browser keeps Alt+Tab, the Windows key and its own shortcuts even in fullscreen; Chrome and Edge send them on in fullscreen.`}
+      </p>
+    </section>
   )
 }
 
@@ -929,12 +994,16 @@ function StreamTools({
   stream,
   quality,
   onQuality,
+  pointer,
+  onPointer,
   onUnpaired,
 }: {
   computer: RdComputerView
   stream: RdStream | undefined
   quality: StreamQuality
   onQuality: (quality: StreamQuality) => void
+  pointer: boolean
+  onPointer: (pointer: boolean) => void
   onUnpaired: () => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -985,11 +1054,26 @@ function StreamTools({
 
         <section aria-label="In the stream" className="flex flex-col gap-2">
           <p className="eyebrow">In the stream</p>
+          <label className="flex items-start gap-2 text-hint">
+            <Checkbox
+              checked={pointer}
+              onCheckedChange={(on) => onPointer(on === true)}
+              className="mt-px"
+            />
+            <span>
+              Show this computer&apos;s pointer too
+              <span className="block text-muted-foreground">
+                {computer.name} draws its own into the picture, a round trip behind.
+              </span>
+            </span>
+          </label>
           <p className="text-hint text-muted-foreground">
             The arrow at the stream&apos;s left edge opens its menu: the on-screen keyboard, the
             mouse&apos;s modes, its statistics and leaving fullscreen.
           </p>
         </section>
+
+        <KeysNote name={computer.name} />
 
         {stream?.hostId ? (
           <section aria-label="Pairing" className="flex flex-col gap-2">

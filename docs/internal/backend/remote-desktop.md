@@ -127,6 +127,24 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
   1080p60 at 20 Mb/s, Sharp 1440p60 at 40 Mb/s, Light 720p60 at 8 Mb/s), over whatever the reader
   changed in the stream's own menu.
 
+**A session outlives its page.** Sessions are drawn by the shell, not the session page
+(`components/remote-desktop/held-sessions.tsx`): the dashboard layout holds every session opened in
+the tab and draws it after the page, the one the address names in the page's place and the rest
+hidden but mounted. A hidden frame keeps its document and a hidden Guacamole display its tunnel,
+so a look at another page and back finds the stream still playing and the Mac still signed in;
+only **Disconnect**, a change of mode or leaving the dashboard ends one. While another page is up,
+a dock at the window's corner lists them, one press back to each and one to end it. A held session
+stops reading the computers until it is shown again, and Control does not send the computer a new
+size while its frame has none.
+
+**One pointer, and where the keys go.** The computer draws its own pointer into the stream, so the
+browser's is hidden over the picture (a style the session page puts into the bridge's page, which
+is this origin); *Show this computer's pointer too* in the tools brings it back. With the screen
+focused, every key a page can receive goes to the computer; the system's own (Alt+Tab, the Windows
+key, Cmd+Tab) and the browser's (Ctrl+W, Ctrl+T) never reach a page, except in fullscreen with the
+keyboard locked (Chrome and Edge), which is what the session's fullscreen does, in both modes; held
+Esc leaves it.
+
 **The proxy** (`mountRemoteDesktopBridge`) is the only way to the bridge. It sits in its own group
 in `routes.go`: authenticated, `system.admin` with a browser session, audited, on a rate limit of
 its own (`streamLim`, 3000 a minute with a burst of 600, since the stream page loads about a hundred
@@ -253,7 +271,10 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   shows the PIN, keeps it over Control (which opens only then) until Sunshine takes it, then frames
   the bridge's page for the Desktop app with the WebSocket and quality settings written; the
   bridge's install as a job; a closed Sunshine port answered with the Mac's own steps; and a
-  stuck Sunshine named as stuck, with how to free it and no Pair.
+  stuck Sunshine named as stuck, with how to free it and no Pair. A Control session survives a
+  visit to another page (one socket, never closed, the dock leading back) until Disconnect closes
+  it; a stream's frame is loaded once across the same round trip, and hides this computer's pointer
+  until asked.
 
 ## Not here
 

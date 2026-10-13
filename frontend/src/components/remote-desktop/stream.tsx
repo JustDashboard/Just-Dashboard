@@ -33,21 +33,29 @@ import type { Job } from "@/lib/types"
 export function useStream(id: string, active: boolean) {
   const [waiting, setWaiting] = useState(false)
   const [pinOut, setPinOut] = useState(false)
-  return usePoll(
+  // The stream last seen ready. A stream that is playing stays up through a
+  // read that missed Sunshine for a moment; only unpairing or the bridge
+  // stopping takes it down.
+  const [live, setLive] = useState<RdStream>()
+  const poll = usePoll(
     async (signal) => {
       const stream = await get<RdStream>(
         `/remote-desktop/computers/${id}/stream`,
         undefined,
         signal,
       )
-      setWaiting(streamStage(stream) !== "ready")
+      const ready = streamStage(stream) === "ready"
+      setWaiting(!ready)
       setPinOut(stream.pairing)
+      if (ready) setLive(stream)
+      else if (!stream.paired || stream.bridge.state !== "running") setLive(undefined)
       return stream
     },
     waiting ? 2000 : 10_000,
     [id],
     { enabled: active || pinOut },
   )
+  return { ...poll, live }
 }
 
 /**
@@ -59,18 +67,35 @@ export function useStream(id: string, active: boolean) {
 export function StreamPane({
   computer,
   stream,
+  live,
   quality,
   attempt,
+  pointer,
+  onFrame,
   onRefresh,
   onControl,
 }: {
   computer: RdComputerView
   stream: RdStream | undefined
+  live: RdStream | undefined
   quality: StreamQuality
   attempt: number
+  pointer: boolean
+  onFrame: (frame: HTMLIFrameElement | null) => void
   onRefresh: () => void
   onControl: () => void
 }) {
+  if (live)
+    return (
+      <StreamFrame
+        computer={computer}
+        stream={live}
+        quality={quality}
+        attempt={attempt}
+        pointer={pointer}
+        onFrame={onFrame}
+      />
+    )
   if (!stream)
     return (
       <Centered>
@@ -78,8 +103,6 @@ export function StreamPane({
       </Centered>
     )
   const stage = streamStage(stream)
-  if (stage === "ready")
-    return <StreamFrame computer={computer} stream={stream} quality={quality} attempt={attempt} />
   return (
     <div className="absolute inset-0 overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-xl flex-col justify-center gap-5 p-6">
@@ -522,11 +545,15 @@ function StreamFrame({
   stream,
   quality,
   attempt,
+  pointer,
+  onFrame,
 }: {
   computer: RdComputerView
   stream: RdStream
   quality: StreamQuality
   attempt: number
+  pointer: boolean
+  onFrame: (frame: HTMLIFrameElement | null) => void
 }) {
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -541,6 +568,13 @@ function StreamFrame({
     localStorage.setItem(BRIDGE_SETTINGS_KEY, JSON.stringify(bridgeSettings(held, quality)))
     frame.current.src = src
   }, [key, src, quality])
+  // The computer draws its own pointer into the picture. This one, over it,
+  // was a second pointer a round trip ahead of the first, so it is hidden
+  // over the screen unless asked for; the stream's menu keeps its own.
+  useEffect(() => {
+    const doc = frame.current?.contentDocument
+    if (doc?.readyState === "complete") pointerStyle(doc, pointer)
+  }, [key, pointer])
   if (!app)
     return (
       <Centered>
@@ -553,7 +587,10 @@ function StreamFrame({
   return (
     <iframe
       key={key}
-      ref={frame}
+      ref={(node) => {
+        frame.current = node
+        onFrame(node)
+      }}
       data-slot="remote-stream"
       title={`The screen of ${computer.name}, streamed by Sunshine`}
       allow="fullscreen; autoplay; gamepad; keyboard-map"
@@ -565,8 +602,20 @@ function StreamFrame({
         const style = doc.createElement("style")
         style.textContent = "body::before { background: #000 !important; }"
         doc.head.append(style)
+        pointerStyle(doc, pointer)
       }}
       className="absolute inset-0 size-full border-0 bg-black"
     />
   )
+}
+
+const POINTER_STYLE = "jd-hide-pointer"
+
+function pointerStyle(doc: Document, pointer: boolean) {
+  doc.getElementById(POINTER_STYLE)?.remove()
+  if (pointer || !doc.head) return
+  const style = doc.createElement("style")
+  style.id = POINTER_STYLE
+  style.textContent = "#root, #root *, #input { cursor: none !important; }"
+  doc.head.append(style)
 }
