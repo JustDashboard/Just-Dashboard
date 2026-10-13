@@ -156,9 +156,6 @@ function HeldSessionsDock({ held, onRelease }: { held: Held[]; onRelease: (id: s
       data-slot="held-sessions-dock"
       className="fixed right-4 bottom-4 z-40 flex w-[22rem] max-w-[calc(100vw-2rem)] animate-rise flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-xl backdrop-blur"
     >
-      <p className="px-2 pt-1 pb-0.5 text-hint font-medium text-muted-foreground">
-        Still connected
-      </p>
       {held.map((session) => {
         const name = session.name ?? "Remote session"
         const href = heldHref(session)

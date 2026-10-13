@@ -231,7 +231,7 @@ func (s *Server) initModules() {
 	s.modules.netsec = netsec.New()
 	s.modules.blocks = netsec.NewBlocks(s.Store.DB, s.modules.netsec)
 	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
-	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: remotedesk.NewDockerEngine(s.Cfg.DockerHost), Bridge: remotedesk.NewDockerStreamBridge(s.Cfg.DockerHost), Tailnet: s.remoteDesktopTailnet})
+	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: remotedesk.NewDockerEngine(s.Cfg.DockerHost), Bridge: remotedesk.NewDockerStreamBridge(s.Cfg.DockerHost, s.remoteDesktopMedia), Tailnet: s.remoteDesktopTailnet})
 	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
 	s.modules.network = netx.New(netx.Options{
 		Paths:               netx.DefaultPaths(),

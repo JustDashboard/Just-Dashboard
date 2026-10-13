@@ -207,7 +207,11 @@ describe("desktopApp", () => {
 
 describe("bridgeSettings", () => {
   test("keeps the reader's own settings and sets how the picture travels", () => {
-    const next = bridgeSettings({ mouseMode: "relative", dataTransport: "webrtc" }, "sharp")
+    const next = bridgeSettings(
+      { mouseMode: "relative", dataTransport: "webrtc" },
+      "sharp",
+      "websocket",
+    )
     expect(next).toMatchObject({
       mouseMode: "relative",
       dataTransport: "websocket",
@@ -215,6 +219,16 @@ describe("bridgeSettings", () => {
       videoSize: "1440p",
       fps: 60,
       bitrate: 40000,
+      videoFrameQueueSize: 1,
+    })
+  })
+
+  test("asks for WebRTC only where the backend says this browser can reach it, with a fallback", () => {
+    expect(bridgeSettings({}, "max", "webrtc")).toMatchObject({
+      dataTransport: "auto",
+      videoSize: "1440p",
+      fps: 120,
+      bitrate: 80000,
     })
   })
 })

@@ -17,7 +17,7 @@ import (
 )
 
 func TestBridgeSeedIsItsConfigOwnedByItsAccount(t *testing.T) {
-	archive, err := bridgeSeed()
+	archive, err := bridgeSeed("100.110.34.31", 40020)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,26 @@ func TestBridgeSeedIsItsConfigOwnedByItsAccount(t *testing.T) {
 	if config.WebServer.Prefix != BridgePrefix || config.WebServer.Forwarded.Header != BridgeUserHeader ||
 		!config.WebServer.Forwarded.Create || config.Moonlight.Port != SunshinePort {
 		t.Fatalf("config %+v", config)
+	}
+}
+
+// WebRTC is held to the published block and names the address the browser
+// can reach; without one it is left to fail over to the WebSocket.
+func TestBridgeConfigHoldsWebRTCToTheMediaAddress(t *testing.T) {
+	webrtc := bridgeConfig("100.110.34.31", 40020)["webrtc"].(map[string]any)
+	if r := webrtc["port_range"].(map[string]any); r["min"] != 40020 || r["max"] != 40039 {
+		t.Fatalf("port range %v", r)
+	}
+	nat := webrtc["nat_1to1"].(map[string]any)
+	if ips := nat["ips"].([]string); len(ips) != 1 || ips[0] != "100.110.34.31" || nat["ice_candidate_type"] != "host" {
+		t.Fatalf("nat %v", nat)
+	}
+	if webrtc["include_loopback_candidates"] != false || len(webrtc["ice_servers"].([]any)) != 0 {
+		t.Fatalf("webrtc %v", webrtc)
+	}
+	off := bridgeConfig("", 0)["webrtc"].(map[string]any)
+	if off["nat_1to1"] != nil || off["port_range"] != nil {
+		t.Fatalf("no media, yet %v", off)
 	}
 }
 

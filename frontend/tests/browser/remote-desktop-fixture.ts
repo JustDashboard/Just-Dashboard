@@ -164,6 +164,7 @@ export const LAYOUTS = [
 export function streamView(extra: Record<string, unknown> = {}) {
   return {
     bridge: BRIDGE,
+    transport: "websocket",
     address: "100.101.12.40",
     sunshine: { state: "open", latencyMs: 38.2, checkedAt: nowSec },
     hostId: 0,

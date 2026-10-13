@@ -88,6 +88,11 @@ A change that weakens any of these has to say so explicitly.
    a funnel or any other target of the operator's is never touched, at start, on a failed activation or
    on removal, since restore and withdrawal act only on a mapping whose upstream the row recorded. See
    [preview isolation](../deployments/preview-isolation.md#tailnet-only-addresses).
+   The second exception is Remote Desktop's stream bridge: on a server on a tailnet it publishes a
+   block of 20 UDP ports from 40000 on the **tailnet address only**, for WebRTC
+   ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
+   stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
+   block is published on a server off a tailnet.
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the

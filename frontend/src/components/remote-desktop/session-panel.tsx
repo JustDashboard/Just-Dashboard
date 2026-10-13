@@ -335,6 +335,7 @@ export function StreamSections({
   onUnpaired: () => void
 }) {
   const [busy, setBusy] = useState(false)
+  const webrtc = stream?.transport === "webrtc"
   const unpair = async () => {
     setBusy(true)
     try {
@@ -350,19 +351,35 @@ export function StreamSections({
     <>
       <PanelSection
         title="Route"
-        aside={<span className="font-mono text-hint text-muted-foreground">H.264</span>}
+        aside={
+          <span className="flex items-center gap-1.5 font-mono text-hint text-muted-foreground">
+            H.264
+            <span
+              className={cn(
+                "rounded-sm px-1.5 py-0.5 font-sans text-micro font-semibold",
+                webrtc ? "bg-wash-success text-success" : "bg-control text-muted-foreground",
+              )}
+            >
+              {webrtc ? "WebRTC" : "WebSocket"}
+            </span>
+          </span>
+        }
       >
         <Route
           server="Moonlight Web on this server"
           serverMark={<ServerMark />}
           computer={`Sunshine on ${computer.name}`}
           computerMark={<ProductGlyph id="sunshine" className="size-4" />}
-          note={`${routeNote(computer)}, over this dashboard's own connection`}
+          note={
+            webrtc
+              ? `${routeNote(computer)}; to this browser over UDP on the tailnet`
+              : `${routeNote(computer)}; to this browser over the dashboard's own connection`
+          }
         />
       </PanelSection>
 
       <PanelSection title="Quality">
-        <div role="radiogroup" aria-label="Stream quality" className="grid grid-cols-3 gap-1.5">
+        <div role="radiogroup" aria-label="Stream quality" className="grid grid-cols-2 gap-1.5">
           {STREAM_QUALITIES.map((preset) => {
             const selected = preset.key === quality
             return (

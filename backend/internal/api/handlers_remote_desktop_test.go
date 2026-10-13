@@ -191,3 +191,25 @@ func TestRemoteDesktopBridgeThatIsNotRunningSaysSo(t *testing.T) {
 		t.Fatalf("pair without a bridge: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// The picture goes over WebRTC only to a browser that can reach the bridge's
+// UDP block, which is published on the tailnet: anything else would wait out
+// a failed connection before falling back to the WebSocket.
+func TestRemoteDesktopStreamUsesWebRTCOnlyFromTheTailnet(t *testing.T) {
+	published := remotedesk.EngineStatus{State: remotedesk.EngineRunning, Media: "100.110.34.31:40000-40019"}
+	for _, c := range []struct {
+		bridge remotedesk.EngineStatus
+		client string
+		want   string
+	}{
+		{published, "100.107.233.73", remotedesk.TransportWebRTC},
+		{published, "fd7a:115c:a1e0::5", remotedesk.TransportWebRTC},
+		{published, "203.0.113.9", remotedesk.TransportWebSocket},
+		{published, "", remotedesk.TransportWebSocket},
+		{remotedesk.EngineStatus{State: remotedesk.EngineRunning}, "100.107.233.73", remotedesk.TransportWebSocket},
+	} {
+		if got := streamTransport(c.bridge, c.client); got != c.want {
+			t.Errorf("%s with media %q: %s, want %s", c.client, c.bridge.Media, got, c.want)
+		}
+	}
+}

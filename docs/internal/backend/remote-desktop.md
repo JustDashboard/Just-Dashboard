@@ -102,6 +102,8 @@ a container removed by hand reads as missing.
 browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ Moonlight Web ──Moonlight protocol──▶ Sunshine
  (bridge page in an iframe,     (proxy under                 (container beside       (on the computer,
   WebCodecs)                     /remote-desktop/bridge)      guacd)                  TCP 47984-48010, UDP 47998-48000)
+    ▲                                                            │
+    └──────────── WebRTC, UDP on the tailnet address ────────────┘  (the picture, when the browser is on the tailnet)
 ```
 
 - **Sunshine** (LizardByte, GPL-3.0) runs on the computer and is the only thing installed there.
@@ -116,16 +118,36 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
   hardening with 1 GiB. Its `config.json` is copied into the container before its first start
   (`bridgeSeed`): the URL prefix the proxy serves it at, the account header it trusts, pairing as
   *Just Dashboard*.
-- **The picture travels over the dashboard's own connection.** The bridge can send it over WebRTC
-  (UDP) or a WebSocket; the session page sets the WebSocket, and no WebRTC port is published, so
-  nothing new listens on a routable address. The page decodes H.264 with WebCodecs, which needs the
-  secure context the dashboard already is (HTTPS, or loopback).
+- **The picture goes over WebRTC on the tailnet, else over the dashboard's own connection.** On a
+  server that is on a tailnet, the bridge publishes a block of 20 UDP ports (`bridgeMediaPorts`,
+  the first free block from 40000) on this server's tailnet IPv4 address only
+  (`remoteDesktopMedia`), and its WebRTC is held to them: `port_range` in its config, the same
+  range in `WEBRTC_PORT_RANGE` (the image sets its own, which outranks the config), and `nat_1to1`
+  naming the tailnet address as the host candidate, never the container's own; no STUN servers,
+  no loopback candidates. `EngineStatus.Media` reads the block back from the container. The stream
+  view's `transport` is `webrtc` only when the bridge has a block **and** the request came from a
+  tailnet address (100.64.0.0/10, fd7a:115c:a1e0::/48): only such a browser can reach the block,
+  and any other would wait out a failed connection first. The page then asks the bridge for
+  `auto`, WebRTC with the WebSocket as its fallback. WebRTC carries the picture over UDP with no
+  jitter buffer (`playoutDelayHint` 0), so a lost packet costs that packet rather than stalling
+  the frames behind it the way TCP does; the signalling still rides the authenticated WebSocket,
+  so a tailnet device without a dashboard session gets nothing from the ports. Off a tailnet the
+  picture rides the dashboard's own HTTPS connection (`websocket`). The page decodes H.264 with
+  WebCodecs, which needs the secure context the dashboard already is.
+- **A bridge made by an older dashboard is made again.** The container carries
+  `io.justdashboard.remote-desktop.revision` (`bridgeRevision` and the media address); an install
+  that finds another one stops and removes the container, keeps its volume (so its pairings), and
+  makes it again. `Server.Start` runs that install in the background for a running bridge
+  (`UpgradeBridge`), so an upgrade of the dashboard upgrades the bridge, and a change of tailnet
+  address moves its block.
 - **The bridge's own page draws the stream.** The session page frames
   `/api/v1/remote-desktop/bridge/stream.html?hostId=…&appId=…` (Sunshine's *Desktop* app). The page
   reads its settings from this origin's `localStorage` (`mlSettings`), so the session page writes
-  them just before it loads the frame: WebSocket transport, H.264, and the reader's quality (Smooth
-  1080p60 at 20 Mb/s, Sharp 1440p60 at 40 Mb/s, Light 720p60 at 8 Mb/s), over whatever the reader
-  changed in the stream's own menu.
+  them just before it loads the frame: the transport, H.264, a frame queue of one (a frame that
+  arrives late is dropped for the next rather than shown behind it), and the reader's quality
+  (Light 720p60 at 8 Mb/s, Smooth 1080p60 at 20, Sharp 1440p60 at 40, Max 1440p120 at 80; a
+  computer whose screen runs at 60 Hz sends 60), over whatever the reader changed in the stream's
+  own menu.
 
 **A session outlives its page.** Sessions are drawn by the shell, not the session page
 (`components/remote-desktop/held-sessions.tsx`): the dashboard layout holds every session opened in
@@ -247,7 +269,8 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   malformed input; computers' validation and sealing; peer matching and skipped probes; the
   handshake against a fake guacd, whose `connect` values must line up with its `args`; the relay's
   UUID first, whole-instruction frames, echoed pings that never reach guacd; refusals; the history.
-- `stream_test.go`: the bridge's seeded configuration; pairing against a fake bridge (the PIN at
+- `stream_test.go`: the bridge's seeded configuration, its WebRTC held to the published block and
+  the tailnet address as its host candidate (and left alone without one); pairing against a fake bridge (the PIN at
   once, the bridge handed the address resolved here, a second press joining the waiting pairing,
   paired when Sunshine takes it, every request as the dashboard's account); a refused PIN that can
   start again without adding the host twice; a host the bridge lost being forgotten; a closed
@@ -258,13 +281,15 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   proxy sends the dashboard's account whatever the browser claims and never its cookie, replaces the
   bridge's CSP, `X-Frame-Options` and cookie, refuses a write with no `Origin` or another site's,
   takes one from this dashboard without the CSRF header, and refuses a limited account and no
-  session; a stopped bridge answers `503`, and pairing without it `409`.
+  session; a stopped bridge answers `503`, and pairing without it `409`. WebRTC is offered only
+  to a browser on the tailnet and only when the bridge publishes a block.
 - `live_test.go`, opt-in: `JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run Live -v`
   installs the real engine, starts a throwaway XFCE desktop over VNC and one over RDP on its network,
   opens a session to each and waits for the first frame (`img` and `sync`), then removes the engine
   unless `JD_REMOTE_DESKTOP_KEEP=1`. `TestLiveBridgeServesTheStreamPage` (`-run LiveBridge` alone)
-  installs the real bridge with its seeded configuration and reads its stream page and account under
-  the dashboard's prefix and header.
+  installs the real bridge under its own name with its seeded configuration, makes it again once it
+  has an address to publish WebRTC on (its block read back, the range in its env), and reads its
+  stream page and account under the dashboard's prefix and header.
 - `frontend/tests/browser/remote-desktop.spec.ts` mocks the API and the tunnel: the overview, the
   install, the add flow's instructions, port watch and saved input, a session drawing what the
   tunnel sends, a download, a refusal in the reader's words, removal, a Mac asking for its account
@@ -281,8 +306,8 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
 
 - **Which computer a stream was.** The stream's socket names its host inside the socket, so a
   stream is audited as one but not counted in a computer's session history or time.
-- **WebRTC.** The bridge could send the picture over UDP, which copes with loss better than a
-  WebSocket; that needs its port range published on an address the browser reaches, which nothing
-  here does.
+- **A shorter path.** The picture always passes through this server: the bridge runs here (it has
+  no macOS build to run beside Sunshine), so a browser and a computer near each other but far from
+  the server pay the server's distance twice.
 - **Wake-on-LAN.** A sleeping computer cannot be reached; the add flow says to turn sleep off.
 - **Windows Home** has no RDP server; the add flow sends it to TightVNC as a service, over VNC.

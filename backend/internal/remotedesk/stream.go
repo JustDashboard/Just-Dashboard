@@ -27,8 +27,11 @@ import (
 // It sits beside guacd on the engine's network, published on loopback, and
 // the backend proxies it under BridgePrefix. It trusts the user the backend
 // names in BridgeUserHeader, so the dashboard's sign-in is the only one. The
-// picture reaches the browser over the dashboard's own HTTPS connection
-// (WebSocket transport, decoded with WebCodecs), so no WebRTC ports are opened.
+// picture goes to the browser over WebRTC (UDP) when this server is on a
+// tailnet: a block of bridgeMediaPorts UDP ports is published on this
+// server's tailnet address only, which a browser that reached the dashboard
+// over the tailnet can reach too. Without one, and as the browser's fallback,
+// it rides the dashboard's own HTTPS connection (WebSocket transport).
 const (
 	BridgeImage   = "mrcreativ3001/moonlight-web-stream@sha256:4ee561ec4043526e93b0b3dba4926031c86ee3c9dab0333475a6b3c7117c701a"
 	BridgeVersion = "2.10.0"
@@ -43,6 +46,17 @@ const (
 	bridgeHome   = "/moonlight-web/server"
 	// SunshinePort is where Sunshine answers Moonlight's pairing and app list.
 	SunshinePort = 47989
+	// bridgeMediaPorts is the UDP block for WebRTC: a stream holds one or
+	// two, and a server streams to a few browsers at most.
+	bridgeMediaPorts = 20
+	// bridgeRevision changes whenever bridgeConfig does, so a bridge made by
+	// an older dashboard is made again (its pairings kept) on the next start.
+	bridgeRevision = "2"
+
+	// The ways a browser can be sent a stream: over WebRTC on the published
+	// UDP block, or over the dashboard's own connection.
+	TransportWebRTC    = "webrtc"
+	TransportWebSocket = "websocket"
 )
 
 var bridgeSpec = engineSpec{
@@ -54,28 +68,41 @@ var bridgeSpec = engineSpec{
 		"DISABLE_DEFAULT_WEBRTC_ICE_SERVERS=true",
 		"LOG_LEVEL=info",
 	},
-	memory: 1 << 30, hostname: "remote-stream", seed: bridgeSeed, probe: probeBridge,
+	memory: 1 << 30, hostname: "remote-stream", mediaPorts: bridgeMediaPorts, mediaEnv: "WEBRTC_PORT_RANGE",
+	seed:     bridgeSeed,
+	revision: bridgeRevision, probe: probeBridge,
 }
 
-// NewDockerStreamBridge is the Moonlight Web container's runtime.
-func NewDockerStreamBridge(host string) Engine { return newDockerEngine(host, bridgeSpec) }
+// NewDockerStreamBridge is the Moonlight Web container's runtime. media names
+// the address its WebRTC ports are published on: this server's tailnet
+// address, or none.
+func NewDockerStreamBridge(host string, media func(ctx context.Context) string) Engine {
+	spec := bridgeSpec
+	spec.media = media
+	return newDockerEngine(host, spec)
+}
 
 // bridgeConfig is the bridge's config.json as it prints its own defaults for
-// this version, with the dashboard's prefix and account header. How a stream
-// is sent (WebSockets, H.264, its size and rate) is a browser setting the
-// session page writes before it opens the stream.
-func bridgeConfig() map[string]any {
+// this version, with the dashboard's prefix and account header, and WebRTC
+// held to the published block: its candidates name the media address, the
+// one the browser can reach, never the container's own. How a stream is sent
+// (its transport, codec, size and rate) is a browser setting the session page
+// writes before it opens the stream.
+func bridgeConfig(media string, firstPort int) map[string]any {
+	webrtc := map[string]any{
+		"ice_servers": []any{}, "ice_server_script": nil, "port_range": nil, "nat_1to1": nil,
+		"network_types": []string{"udp4"}, "include_loopback_candidates": false,
+	}
+	if media != "" {
+		webrtc["port_range"] = map[string]any{"min": firstPort, "max": firstPort + bridgeMediaPorts - 1}
+		webrtc["nat_1to1"] = map[string]any{"ips": []string{media}, "ice_candidate_type": "host"}
+	}
 	return map[string]any{
 		"data_storage": map[string]any{
 			"type": "json", "path": "server/data.json",
 			"session_expiration_check_interval": map[string]any{"secs": 300, "nanos": 0},
 		},
-		"webrtc": map[string]any{
-			"ice_servers": []any{}, "ice_server_script": nil,
-			"port_range":    map[string]any{"min": 40000, "max": 40100},
-			"nat_1to1":      nil,
-			"network_types": []string{"udp4", "udp6"}, "include_loopback_candidates": true,
-		},
+		"webrtc": webrtc,
 		"web_server": map[string]any{
 			"bind_address": "0.0.0.0:8080", "certificate": nil, "url_path_prefix": BridgePrefix,
 			"session_cookie_secure": true, "session_cookie_expiration": map[string]any{"secs": 86400, "nanos": 0},
@@ -89,8 +116,8 @@ func bridgeConfig() map[string]any {
 	}
 }
 
-func bridgeSeed() ([]byte, error) {
-	body, err := json.MarshalIndent(bridgeConfig(), "", "  ")
+func bridgeSeed(media string, firstPort int) ([]byte, error) {
+	body, err := json.MarshalIndent(bridgeConfig(media, firstPort), "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -144,15 +171,19 @@ type StreamApp struct {
 // StreamView is a computer's stream as the session page needs it: whether
 // the bridge runs, whether Sunshine answers, and how far pairing has got.
 type StreamView struct {
-	Bridge   EngineStatus `json:"bridge"`
-	Address  string       `json:"address,omitempty"`
-	Sunshine Reach        `json:"sunshine"`
-	HostID   int          `json:"hostId"`
-	Paired   bool         `json:"paired"`
-	Pairing  bool         `json:"pairing"`
-	Pin      string       `json:"pin,omitempty"`
-	Error    string       `json:"error,omitempty"`
-	Apps     []StreamApp  `json:"apps"`
+	Bridge EngineStatus `json:"bridge"`
+	// Transport is how this browser can be sent the picture: WebRTC when the
+	// bridge publishes its UDP block and the browser is on the same tailnet,
+	// the WebSocket otherwise. The handler sets it, since it knows the browser.
+	Transport string      `json:"transport"`
+	Address   string      `json:"address,omitempty"`
+	Sunshine  Reach       `json:"sunshine"`
+	HostID    int         `json:"hostId"`
+	Paired    bool        `json:"paired"`
+	Pairing   bool        `json:"pairing"`
+	Pin       string      `json:"pin,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	Apps      []StreamApp `json:"apps"`
 }
 
 // pairing is a PIN the bridge is waiting for someone to type into Sunshine.
@@ -173,6 +204,16 @@ func (s *Service) Bridge(ctx context.Context) EngineStatus { return s.bridge.Sta
 func (s *Service) InstallBridge(ctx context.Context, progress func(string)) error {
 	s.ForgetBridgeAddress()
 	return s.bridge.Install(ctx, progress)
+}
+
+// UpgradeBridge makes a running bridge again when an older dashboard made it,
+// or for another tailnet address; its pairings are on its volume and stay.
+// Install is a no-op for one that is current.
+func (s *Service) UpgradeBridge(ctx context.Context, progress func(string)) error {
+	if s.bridge.Status(ctx).State != EngineRunning {
+		return nil
+	}
+	return s.InstallBridge(ctx, progress)
 }
 
 // RemoveBridge takes the bridge and its pairings away; every computer is

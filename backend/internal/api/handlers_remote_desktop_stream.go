@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -197,8 +198,25 @@ func (s *Server) handleRemoteDesktopStream(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return mapRemoteDesktopStreamError(err)
 	}
+	v.Transport = streamTransport(v.Bridge, httpx.ClientIP(r))
 	httpx.JSON(w, http.StatusOK, v)
 	return nil
+}
+
+// streamTransport sends the picture over WebRTC only to a browser that can
+// reach the bridge's UDP block: one on the tailnet the block is published
+// on. Anything else would wait out a failed connection before falling back.
+func streamTransport(bridge remotedesk.EngineStatus, client string) string {
+	address, err := netip.ParseAddr(client)
+	if bridge.Media == "" || err != nil {
+		return remotedesk.TransportWebSocket
+	}
+	for _, prefix := range tailnetRanges {
+		if prefix.Contains(address.Unmap()) {
+			return remotedesk.TransportWebRTC
+		}
+	}
+	return remotedesk.TransportWebSocket
 }
 
 func (s *Server) handleRemoteDesktopStreamPair(w http.ResponseWriter, r *http.Request) error {
