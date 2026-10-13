@@ -45,7 +45,9 @@ type Options struct {
 	Tailnet func(ctx context.Context) (Tailnet, error)
 	// Dial reaches guacd and probes computers; tests swap it.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
-	Now  func() time.Time
+	// Lookup resolves a computer's name the way this server does; tests swap it.
+	Lookup func(ctx context.Context, host string) ([]net.IPAddr, error)
+	Now    func() time.Time
 }
 
 type Service struct {
@@ -53,6 +55,7 @@ type Service struct {
 	engine  Engine
 	tailnet func(ctx context.Context) (Tailnet, error)
 	dial    func(ctx context.Context, network, address string) (net.Conn, error)
+	lookup  func(ctx context.Context, host string) ([]net.IPAddr, error)
 	now     func() time.Time
 
 	mu   sync.Mutex
@@ -67,6 +70,9 @@ func New(o Options) *Service {
 		var d net.Dialer
 		o.Dial = d.DialContext
 	}
+	if o.Lookup == nil {
+		o.Lookup = net.DefaultResolver.LookupIPAddr
+	}
 	if o.Tailnet == nil {
 		o.Tailnet = func(context.Context) (Tailnet, error) { return Tailnet{Peers: []Peer{}}, nil }
 	}
@@ -75,6 +81,7 @@ func New(o Options) *Service {
 		engine:  o.Engine,
 		tailnet: o.Tailnet,
 		dial:    o.Dial,
+		lookup:  o.Lookup,
 		now:     o.Now,
 		live:    map[string]int{},
 	}
@@ -316,9 +323,16 @@ func (s *Service) Connect(ctx context.Context, id string, d Display, actor strin
 	if err != nil {
 		return nil, &GuacError{Message: "Remote Desktop's engine is not answering: " + reachError(err), Code: statusServerError}
 	}
+	target, err := s.resolve(ctx, c.Host)
+	if err != nil {
+		conn.Close()
+		return nil, &GuacError{Message: c.Host + " does not resolve from this server", Code: statusUpstreamNotFound}
+	}
+	params := connectParams(c, password, d)
+	params["hostname"] = target
 	d = d.normalized()
 	rd := NewReader(conn)
-	if err := handshake(conn, rd, c.Protocol, connectParams(c, password, d), d, actor); err != nil {
+	if err := handshake(conn, rd, c.Protocol, params, d, actor); err != nil {
 		conn.Close()
 		var guac *GuacError
 		if errors.As(err, &guac) {
@@ -339,6 +353,31 @@ func (s *Service) Connect(ctx context.Context, id string, d Display, actor strin
 	s.live[c.ID]++
 	s.mu.Unlock()
 	return &Session{conn: conn, rd: rd, computer: c.ID, record: record}, nil
+}
+
+// resolve turns a computer's name into an address here, where the probe
+// resolves it too. guacd's container resolves with musl and Docker's DNS,
+// which never try the tailnet's search domain, so a MagicDNS short name like
+// "office-pc" answered the probe and then failed inside guacd.
+func (s *Service) resolve(ctx context.Context, host string) (string, error) {
+	if net.ParseIP(host) != nil {
+		return host, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addrs, err := s.lookup(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if addr.IP.To4() != nil {
+			return addr.IP.String(), nil
+		}
+	}
+	if len(addrs) == 0 {
+		return "", errors.New("no address")
+	}
+	return addrs[0].IP.String(), nil
 }
 
 // Finish closes the session and writes how it ended into the history.

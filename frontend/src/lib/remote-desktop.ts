@@ -252,12 +252,22 @@ export function sessionLength(session: RdSession, now: number) {
 export function sessionProblem(
   code: number,
   message: string,
-  computer: Pick<RdComputer, "name" | "port" | "protocol" | "os">,
+  computer: Pick<RdComputer, "name" | "port" | "protocol" | "os"> & { reach?: RdReach },
 ) {
   const server = protocolLabel(computer.protocol, computer.os)
   switch (code) {
     case 0x0207:
     case 0x0208:
+      // guacd says "not found" for a sign-in it lost as much as for a port
+      // nobody answers; the probe says which this was.
+      if (computer.reach?.state === "open")
+        return {
+          title: `${computer.name} would not let the dashboard in`,
+          detail:
+            computer.os === "macos"
+              ? `Screen Sharing answered, but the sign-in failed. Check the Mac account name and login password saved for ${computer.name}, and that the account is allowed under Screen Sharing › Allow access for.`
+              : `${server} answered, but the connection failed. Check the username and password saved for ${computer.name}, and that the account may sign in remotely.`,
+        }
       return {
         title: `${computer.name} is not answering`,
         detail: `Nothing answered on port ${computer.port}. Check that the computer is on and awake and that ${server} is turned on.`,

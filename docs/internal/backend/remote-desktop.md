@@ -39,6 +39,12 @@ When the dashboard holds neither, guacd sends `required` and waits; the session 
 names it lists and answers on the same connection with `argv` streams, saving them unless told not
 to.
 
+**Names are resolved here, not in guacd.** guacd's container resolves with musl through Docker's
+DNS, which never applies the tailnet's search domain, so a MagicDNS short name such as `office-pc`
+answered the probe (which runs on this server) and then failed inside guacd. `Connect` resolves
+the computer's name with this server's resolver, preferring IPv4, and hands guacd the address; a
+name that does not resolve is refused as such.
+
 **The screen's size follows the frame only once it is up.** libvncclient crashes on a size update
 that arrives while it is still signing in, and Apple's sign-in is slow enough for the page's first
 resize to land in it: the guacd child dies with nothing sent to the page, which waited on

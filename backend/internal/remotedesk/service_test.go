@@ -97,7 +97,11 @@ func newTestService(t *testing.T, engine Engine) *Service {
 	t.Cleanup(func() { st.Close() })
 	seal := func(v string) (string, error) { return "sealed:" + v, nil }
 	open := func(v string) (string, error) { return strings.TrimPrefix(v, "sealed:"), nil }
-	return New(Options{DB: st.DB, Seal: seal, Open: open, Engine: engine})
+	// Every name resolves to a documentation address, so no test asks real DNS.
+	lookup := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("192.0.2.10")}}, nil
+	}
+	return New(Options{DB: st.DB, Seal: seal, Open: open, Engine: engine, Lookup: lookup})
 }
 
 func ptr(s string) *string { return &s }
@@ -399,4 +403,31 @@ func TestRelayEndsWhenTheComputerDoesEvenWhileTheBrowserPings(t *testing.T) {
 		t.Fatal("the relay outlived the computer's end of the session")
 	}
 	svc.Finish(ctx, sess, nil)
+}
+
+func TestConnectHandsGuacdTheAddressThisServerResolves(t *testing.T) {
+	ctx := context.Background()
+	guacd := startGuacd(t, []string{"hostname", "port"}, nil)
+	svc := newTestService(t, &fakeEngine{status: EngineStatus{State: EngineRunning, Address: guacd.ln.Addr().String()}})
+	svc.lookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host != "studio-mac" {
+			return nil, errors.New("no such host")
+		}
+		return []net.IPAddr{{IP: net.ParseIP("fd7a:115c:a1e0::1")}, {IP: net.ParseIP("100.101.12.11")}}, nil
+	}
+	mac, _ := svc.Add(ctx, ComputerInput{Name: "studio-mac", OS: "macos", Host: "studio-mac"})
+	sess, err := svc.Connect(ctx, mac.ID, Display{}, "wayy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Finish(ctx, sess, nil)
+	if got := strings.Join(guacd.connect, "|"); got != "VERSION_1_5_0|100.101.12.11|5900" {
+		t.Fatalf("guacd was handed %q; it should get the IPv4 address this server resolved", got)
+	}
+
+	gone, _ := svc.Add(ctx, ComputerInput{Name: "gone", OS: "windows", Host: "gone-pc"})
+	var guac *GuacError
+	if _, err := svc.Connect(ctx, gone.ID, Display{}, "wayy"); !errors.As(err, &guac) || !strings.Contains(guac.Message, "gone-pc does not resolve") {
+		t.Fatalf("an unresolvable name should say so: %v", err)
+	}
 }
