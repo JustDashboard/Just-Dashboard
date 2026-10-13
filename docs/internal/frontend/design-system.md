@@ -933,8 +933,9 @@ above:
   participles that stand for a wait — *Sending test…*, *Testing…*, *Pausing…*, *Candidate for
   release #14*, *deploying #14*, *running now*;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
-  and on the Overview when a run watched there from start to finish ends in success — never on
-  arrival, and never for a Stop, which takes the release down.
+  on the Overview when a run watched there from start to finish ends in success, and from the
+  sidebar's update notice when an update of the dashboard itself finishes while the tab is open —
+  never on arrival, and never for a Stop, which takes the release down.
 
 `animate-sweep` is spent the same way, on the three waits in the section that cannot say how far
 along they are: a credential's test while the server tries it, the website preview while the site
@@ -966,6 +967,16 @@ lines through the same painter and the same drip (`components/transcript-line.ts
 consoles cannot drift into two answers to what a live log looks like. The version history's
 timeline took its layout from Aceternity's and Magic UI's timelines — the sticky label, the rail —
 and not their scroll-driven gradient beam, which is a motion this section does not have.
+
+The sidebar's update notice (`components/update/update-notice.tsx`) says the same things at the
+rail's scale. Its row of two versions is a wire (`UpdateWire` in `components/update/update-art.tsx`)
+with `AnimatedBeam`'s pulse running from the installed version to the newest, drawn as a flex item
+rather than measured between two elements, so a dialog zooming in as it opens cannot leave it
+pointing at where its ends were; it goes still once the run has finished or failed. Under it, what
+the releases bring is a band of the change kinds' own hues whose spans draw out one after another
+as the notice lands (*arrived*, once). While an update runs, `BorderBeam` runs round the notice, the
+stage it is at is the update's own three `Segment`s with its name in `TextShimmer`, and an update
+that succeeds while the tab watches fires the confetti above.
 
 Magic UI's `animated-circular-progress-bar` was tried beside the release path and removed: a ring
 saying "100%" next to a header saying "Ready" was the same fact twice, and the timeline now shows how
@@ -3031,6 +3042,15 @@ half is the same lights closer (`.auth-art`), pooled behind the server it draws.
 these screens to have colour and life, and for the line grid that used to sit under the washes to go;
 the exception is the ground of those screens and nothing else — no page in either register takes a
 wash, and nothing on these screens takes a glow, a gradient fill or a pattern.
+
+**One element of the shell stands on the same light: the update notice.** The operator asked for the
+notice above the account card to be as alive as these screens, and the argument is the same one —
+it is the one thing in the shell that announces something arriving. `.update-art` is `.auth-art` at
+a 240px card's scale, its main light in the notice's tone: the signal while a version is on its way,
+`--success` once it has landed, `--destructive` if it did not (`data-tone`), over the violet and
+blue of the lower corners. The dialog that installs the update (`components/update/update-dialog.tsx`)
+opens its body on the same ground, behind the picture of the two versions. Nothing else takes it: not
+the account card beside it, not the Version page the notice leads to, which is a reading page.
 
 ## 17. Redesigning a flow page
 

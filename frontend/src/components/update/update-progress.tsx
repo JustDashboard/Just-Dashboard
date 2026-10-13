@@ -94,7 +94,7 @@ export function UpdateProgress({
         </p>
       )}
 
-      <RunPhases phases={phases(run, log)} />
+      <RunPhases phases={updatePhases(run, log)} />
 
       {log && (
         <RunTranscript
@@ -113,9 +113,10 @@ export function UpdateProgress({
  * The upgrade's stages, from the phase the record is in. A failed run's
  * record says only `finished`, so where it stopped is read off the transcript:
  * the first `docker` command is the build starting, and the wait for an answer
- * is the updater's own line.
+ * is the updater's own line. The sidebar notice draws the same stages as bars
+ * alone, so the two cannot disagree about where a run is.
  */
-function phases(run: UpdateRun, log: string | undefined) {
+export function updatePhases(run: UpdateRun, log: string | undefined) {
   const labels = ["Fetch the new version", "Build and restart", "Wait for an answer"]
   if (run.status === "success") return phaseStates(labels, labels.length, "success")
   if (run.status === "failed") {

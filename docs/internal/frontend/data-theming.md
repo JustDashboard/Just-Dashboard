@@ -345,9 +345,14 @@ are dated evidence, not proof of current attachment ownership.
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run
   renders as "restarting", never an error, and the cadence is set from the fetch rather than an effect so a
   failure does not drop back to the five-minute interval. `components/update/` is the sidebar-footer notice
-  (which renders *nothing* when there is nothing to say), the release-notes sheet, and the panel on
-  `/dashboard` — that page is the dashboard's own version and nothing else, because the server's packages
-  and the tool you look at it through are updated by completely different machinery.
+  (which renders *nothing* when there is nothing to say), the dialog that installs an update, and the
+  panel on `/dashboard` — that page is the dashboard's own version and nothing else, because the server's
+  packages and the tool you look at it through are updated by completely different machinery. The
+  notice's links all go to that page, which is where the release notes are read; there is no second
+  rendering of them in a sheet. Installing goes through `useUpdateDialog`, not the shared
+  `ConfirmDialog`: that one is for acts that are awkward to undo and its command is always destructive
+  red, where an update is something taken, so its command is the brand face. Both the notice and the
+  page hold one.
 - `hooks/use-self-config.tsx` is the same shape for the dashboard's own settings, with one problem the
   update flow does not have: a change to the port or the address means the dashboard **does not come back
   here**. Nothing on the client can follow it, so the run record carries the new endpoint and

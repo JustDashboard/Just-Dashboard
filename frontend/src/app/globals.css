@@ -987,6 +987,42 @@
     );
 }
 
+/* The same light, brought into the shell for the one thing in it that
+ * announces something arriving: the sidebar's update notice, and the dialog
+ * that installs the update. The main light comes from the top right, in the
+ * notice's tone — the signal while a version is on its way, green once it has
+ * landed, red if it did not — over the chart ramp's violet and blue from the
+ * lower corners, so a 240px card carries the sign-in screen's colour at its
+ * own scale. Nothing else in the shell or on a page takes it (§16). */
+.update-art {
+  --update-light: var(--signal);
+  --update-low: var(--chart-4);
+  background-image:
+    radial-gradient(
+      90% 75% at 100% 0%,
+      color-mix(in oklab, var(--update-light) 36%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      85% 70% at 0% 100%,
+      color-mix(in oklab, var(--update-low) 30%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      60% 55% at 100% 100%,
+      color-mix(in oklab, var(--chart-2) 18%, transparent),
+      transparent 72%
+    );
+}
+.update-art[data-tone="success"] {
+  --update-light: var(--success);
+  --update-low: var(--chart-5);
+}
+.update-art[data-tone="danger"] {
+  --update-light: var(--destructive);
+  --update-low: var(--destructive);
+}
+
 /* The ground a wiring picture is drawn on: the ER diagram's dot grid, as a
  * utility for a picture that is not a React Flow canvas. The dots take the
  * same `--grid-dot` as the diagram, and they fade out toward the edges so the

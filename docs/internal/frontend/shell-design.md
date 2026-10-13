@@ -211,6 +211,18 @@ one question, and the four configuration pages are opened to change the server r
 Deployments open the second group because shipping something is the reason most visits happen; until
 0.6.7 it sat fourth in a group called Operations, between Packages and Backups.
 
+Above the account card sits the update notice (`components/update/update-notice.tsx`), and only when
+there is something to say: a newer version, an update running, or one that finished and has not been
+dismissed. It is a card on arrival's light (`.update-art`, design system §16) with the dashboard's J,
+an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
+along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
+an install that updates in place gets *Update now*, which opens the update's own dialog
+(`update-dialog.tsx`); everyone gets a link to the Version page (`/dashboard`) for the notes. While an
+update runs the card carries the border beam, the stage it is at and *View progress*; afterwards it
+turns green with *See what's new*, or red with the updater's error and *See what went wrong*, and only
+then can it be dismissed. In the icon rail it is one tile in the same tone that links to the Version
+page.
+
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
