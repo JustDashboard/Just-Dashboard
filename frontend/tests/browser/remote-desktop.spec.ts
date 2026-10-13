@@ -318,6 +318,7 @@ test("Stream pairs with Sunshine, keeps the PIN over Control while it is typed, 
     videoSize: "1080p",
     fps: 60,
     bitrate: 20000,
+    videoFrameQueueSize: 1,
   })
 
   await page.getByRole("radio", { name: "Sharp" }).click()
@@ -476,4 +477,29 @@ test("the session's column switches how the screen is drawn, and the computers c
   await expect(computers).toBeHidden()
   await page.getByRole("button", { name: "Show the computers" }).click()
   await expect(computers).toBeVisible()
+})
+
+test("a browser on the tailnet is sent the stream over WebRTC, at up to Max", async ({ page }) => {
+  await mockRemoteDesktop(page, {
+    stream: streamView({
+      ...PAIRED,
+      transport: "webrtc",
+      bridge: { ...BRIDGE, media: "100.110.34.31:40000-40019" },
+    }),
+  })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.locator('iframe[data-slot="remote-stream"]')).toBeVisible()
+  const panel = page.getByRole("complementary", { name: "Session" })
+  await expect(panel.getByText("WebRTC", { exact: true })).toBeVisible()
+  const settings = async () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("mlSettings") ?? "{}"))
+  await expect.poll(async () => (await settings()).dataTransport).toBe("auto")
+
+  await panel.getByRole("radio", { name: "Max" }).click()
+  await expect.poll(async () => (await settings()).fps).toBe(120)
+  expect(await settings()).toMatchObject({
+    videoSize: "1440p",
+    bitrate: 80000,
+    videoFrameQueueSize: 1,
+  })
 })

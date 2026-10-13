@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,6 +88,22 @@ func (s *Server) remoteDesktopTailnet(ctx context.Context) (remotedesk.Tailnet, 
 			Address: firstAddress(p.TailscaleIPs), Online: p.Online, Direct: p.Direct, Relay: p.Relay, LastSeen: p.LastSeen})
 	}
 	return t, err
+}
+
+// remoteDesktopMedia is where the stream bridge publishes its WebRTC ports:
+// this server's own tailnet IPv4 address, which only the tailnet reaches.
+// Off a tailnet there is none, and streams ride the dashboard's connection.
+func (s *Server) remoteDesktopMedia(ctx context.Context) string {
+	view, _ := s.modules.network.Tailscale(ctx, "")
+	if view == nil || view.Self == nil {
+		return ""
+	}
+	for _, address := range view.Self.TailscaleIPs {
+		if ip := net.ParseIP(address); ip != nil && ip.To4() != nil {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 func firstAddress(values []string) string {

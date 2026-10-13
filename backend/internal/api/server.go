@@ -149,6 +149,18 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("interrupted remote desktop sessions could not be closed in the history", "err", err)
 	}
 	remoteCancel()
+	// A stream bridge made by an older dashboard is made again in the
+	// background, its pairings kept; a current one is left alone.
+	go func() {
+		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		err := s.modules.remoteDesktop.UpgradeBridge(upgradeCtx, func(line string) {
+			s.Log.Info("remote desktop stream bridge", "step", line)
+		})
+		if err != nil {
+			s.Log.Warn("the remote desktop stream bridge could not be brought up to date", "err", err)
+		}
+	}()
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}

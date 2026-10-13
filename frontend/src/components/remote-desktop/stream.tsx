@@ -557,7 +557,8 @@ function StreamFrame({
 }) {
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
-  const key = `${stream.hostId}:${app?.id}:${quality}:${attempt}`
+  const transport = stream.transport
+  const key = `${stream.hostId}:${app?.id}:${quality}:${transport}:${attempt}`
   const src = app ? streamPageUrl(stream.hostId, app.id) : undefined
   useEffect(() => {
     if (!src || !frame.current) return
@@ -565,9 +566,12 @@ function StreamFrame({
     try {
       held = JSON.parse(localStorage.getItem(BRIDGE_SETTINGS_KEY) ?? "{}") ?? {}
     } catch {}
-    localStorage.setItem(BRIDGE_SETTINGS_KEY, JSON.stringify(bridgeSettings(held, quality)))
+    localStorage.setItem(
+      BRIDGE_SETTINGS_KEY,
+      JSON.stringify(bridgeSettings(held, quality, transport)),
+    )
     frame.current.src = src
-  }, [key, src, quality])
+  }, [key, src, quality, transport])
   // The computer draws its own pointer into the picture. This one, over it,
   // was a second pointer a round trip ahead of the first, so it is hidden
   // over the screen unless asked for; the stream's menu keeps its own.

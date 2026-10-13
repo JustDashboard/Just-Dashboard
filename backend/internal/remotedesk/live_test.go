@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -123,8 +124,9 @@ func TestLiveSessionsDrawADesktop(t *testing.T) {
 }
 
 // TestLiveBridgeServesTheStreamPage installs the real stream bridge with its
-// seeded configuration and reads its stream page and account the way the
-// proxy does, under the dashboard's prefix and account header.
+// seeded configuration, makes it again once it has an address to publish
+// WebRTC on, and reads its stream page and account the way the proxy does,
+// under the dashboard's prefix and account header.
 //
 //	JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run LiveBridge -v
 func TestLiveBridgeServesTheStreamPage(t *testing.T) {
@@ -137,7 +139,13 @@ func TestLiveBridgeServesTheStreamPage(t *testing.T) {
 	if host == "" {
 		host = "unix:///var/run/docker.sock"
 	}
-	bridge := NewDockerStreamBridge(host)
+	media := ""
+	// Its own name, volume and port, so a server with Stream mode installed
+	// keeps its bridge and pairings while this runs.
+	spec := bridgeSpec
+	spec.name, spec.volume, spec.prefer = "jd-live-test-stream", "jd-live-test-stream-data", 4890
+	spec.media = func(context.Context) string { return media }
+	bridge := newDockerEngine(host, spec)
 	defer bridge.Close()
 	if err := bridge.Install(ctx, func(line string) { t.Log(line) }); err != nil {
 		t.Fatal(err)
@@ -150,8 +158,27 @@ func TestLiveBridgeServesTheStreamPage(t *testing.T) {
 		}()
 	}
 	st := bridge.Status(ctx)
-	if st.State != EngineRunning || !strings.HasPrefix(st.Address, "127.0.0.1:") {
+	if st.State != EngineRunning || !strings.HasPrefix(st.Address, "127.0.0.1:") || st.Media != "" {
 		t.Fatalf("bridge after install: %#v", st)
+	}
+	// Loopback stands in for the tailnet address: the bridge is made again
+	// with its UDP block published there.
+	media = "127.0.0.1"
+	if err := bridge.Install(ctx, func(line string) { t.Log(line) }); err != nil {
+		t.Fatal(err)
+	}
+	st = bridge.Status(ctx)
+	if st.State != EngineRunning || !strings.HasPrefix(st.Media, "127.0.0.1:") {
+		t.Fatalf("bridge after media: %#v", st)
+	}
+	// The image's own range outranks its config, so the block is in its env.
+	inspected, err := bridge.(*dockerEngine).cli.ContainerInspect(ctx, spec.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, last, _ := strings.Cut(strings.TrimPrefix(st.Media, "127.0.0.1:"), "-")
+	if !slices.Contains(inspected.Config.Env, "WEBRTC_PORT_RANGE="+first+":"+last) {
+		t.Fatalf("env %v, media %s", inspected.Config.Env, st.Media)
 	}
 	get := func(path string) (int, string) {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+st.Address+BridgePrefix+path, nil)

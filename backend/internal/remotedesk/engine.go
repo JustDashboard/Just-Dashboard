@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"time"
 
@@ -58,6 +59,9 @@ type EngineStatus struct {
 	Pulled    bool   `json:"pulled"`
 	Address   string `json:"address,omitempty"`
 	Container string `json:"container,omitempty"`
+	// Media is where an engine's UDP ports for WebRTC are published, as
+	// address:first-last, when it has them.
+	Media     string `json:"media,omitempty"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -86,10 +90,25 @@ type engineSpec struct {
 	env      []string
 	memory   int64
 	hostname string
-	// seed is a tar archive copied into the container before its first start.
-	seed  func() ([]byte, error)
-	probe func(ctx context.Context, address string) error
+	// media, when set, is the address a block of mediaPorts UDP ports is
+	// published on for WebRTC, settled at install: none when it is empty.
+	media      func(ctx context.Context) string
+	mediaPorts int
+	// mediaEnv names the variable the image reads its UDP range from, as
+	// "first:last"; the image sets its own default, which outranks its config.
+	mediaEnv string
+	// seed is a tar archive copied into the container before its first start,
+	// given the media address and the first of its ports.
+	seed func(media string, firstPort int) ([]byte, error)
+	// revision names what seed writes. A container made by another revision,
+	// or for another media address, is made again by the next install.
+	revision string
+	probe    func(ctx context.Context, address string) error
 }
+
+// revisionLabel carries the revision and media address a container was made
+// with, so an install can tell a container that is out of date.
+const revisionLabel = engineLabel + ".revision"
 
 var guacdSpec = engineSpec{
 	name: engineName, role: engineRole, product: "guacd", image: GuacdImage, version: GuacdVersion,
@@ -165,6 +184,7 @@ func (d *dockerEngine) Status(ctx context.Context) EngineStatus {
 	if port := boundPort(c, d.spec.port); port != "" {
 		st.Address = net.JoinHostPort("127.0.0.1", port)
 	}
+	st.Media = mediaBinding(c)
 	st.State = EngineStopped
 	if c.State != nil && c.State.Running {
 		st.State = EngineRunning
@@ -189,6 +209,33 @@ func boundPort(c container.InspectResponse, port nat.Port) string {
 	return ""
 }
 
+// mediaBinding reads the published UDP block back from the container.
+func mediaBinding(c container.InspectResponse) string {
+	if c.HostConfig == nil {
+		return ""
+	}
+	host, first, last := "", 0, 0
+	for port, bindings := range c.HostConfig.PortBindings {
+		if port.Proto() != "udp" {
+			continue
+		}
+		for _, binding := range bindings {
+			n := port.Int()
+			host = binding.HostIP
+			if first == 0 || n < first {
+				first = n
+			}
+			if n > last {
+				last = n
+			}
+		}
+	}
+	if host == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d-%d", host, first, last)
+}
+
 func (d *dockerEngine) imagePinned(ctx context.Context) error {
 	img, err := d.cli.ImageInspect(ctx, d.spec.image)
 	if err != nil {
@@ -206,7 +253,18 @@ func (d *dockerEngine) Install(ctx context.Context, progress func(string)) error
 	if err := d.ready(); err != nil {
 		return err
 	}
+	media := ""
+	if d.spec.media != nil {
+		media = d.spec.media(ctx)
+	}
 	st := d.Status(ctx)
+	if (st.State == EngineRunning || st.State == EngineStopped) && d.stale(ctx, media) {
+		progress("Making " + d.spec.name + " again with this version's configuration; its data stays")
+		if err := d.removeContainer(ctx); err != nil {
+			return err
+		}
+		st = d.Status(ctx)
+	}
 	switch st.State {
 	case EngineUnavailable, EngineForeign:
 		return errors.New(st.Error)
@@ -240,10 +298,33 @@ func (d *dockerEngine) Install(ctx context.Context, progress func(string)) error
 	if err != nil {
 		return err
 	}
+	bindings := nat.PortMap{d.spec.port: {{HostIP: "127.0.0.1", HostPort: strconv.Itoa(port)}}}
+	exposed := nat.PortSet{d.spec.port: {}}
+	first := 0
+	if media != "" {
+		if first, err = mediaBlock(media, d.spec.mediaPorts); err != nil {
+			progress("No free UDP ports on " + media + " for WebRTC; streams will use the dashboard's connection: " + err.Error())
+			media = ""
+		}
+	}
+	for p := first; media != "" && p < first+d.spec.mediaPorts; p++ {
+		udp := nat.Port(strconv.Itoa(p) + "/udp")
+		bindings[udp] = []nat.PortBinding{{HostIP: media, HostPort: strconv.Itoa(p)}}
+		exposed[udp] = struct{}{}
+	}
+	if media != "" {
+		progress(fmt.Sprintf("Publishing UDP %d-%d on %s for WebRTC", first, first+d.spec.mediaPorts-1, media))
+	}
+	labels := d.labels()
+	labels[revisionLabel] = d.revision(media)
+	env := slices.Clone(d.spec.env)
+	if media != "" && d.spec.mediaEnv != "" {
+		env = append(env, fmt.Sprintf("%s=%d:%d", d.spec.mediaEnv, first, first+d.spec.mediaPorts-1))
+	}
 	pids := int64(512)
 	host := &container.HostConfig{
 		NetworkMode:  container.NetworkMode(engineName),
-		PortBindings: nat.PortMap{d.spec.port: {{HostIP: "127.0.0.1", HostPort: strconv.Itoa(port)}}},
+		PortBindings: bindings,
 		Mounts:       []mount.Mount{{Type: mount.TypeVolume, Source: d.spec.volume, Target: d.spec.mountAt}},
 		CapDrop:      []string{"ALL"},
 		SecurityOpt:  []string{"no-new-privileges:true"},
@@ -256,9 +337,9 @@ func (d *dockerEngine) Install(ctx context.Context, progress func(string)) error
 	config := &container.Config{
 		Image:        d.spec.image,
 		Hostname:     d.spec.hostname,
-		Labels:       d.labels(),
-		Env:          d.spec.env,
-		ExposedPorts: nat.PortSet{d.spec.port: {}},
+		Labels:       labels,
+		Env:          env,
+		ExposedPorts: exposed,
 	}
 	progress(fmt.Sprintf("Creating %s on 127.0.0.1:%d", d.spec.name, port))
 	created, err := d.cli.ContainerCreate(ctx, config, host, &network.NetworkingConfig{}, nil, d.spec.name)
@@ -266,7 +347,7 @@ func (d *dockerEngine) Install(ctx context.Context, progress func(string)) error
 		return fmt.Errorf("create the %s container: %w", d.spec.product, err)
 	}
 	if d.spec.seed != nil {
-		archive, err := d.spec.seed()
+		archive, err := d.spec.seed(media, first)
 		if err != nil {
 			return err
 		}
@@ -302,6 +383,45 @@ func (d *dockerEngine) start(ctx context.Context, progress func(string)) error {
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
+}
+
+func (d *dockerEngine) revision(media string) string { return d.spec.revision + "|" + media }
+
+// stale is an engine with a revision whose container was made by another
+// one, or for another media address. An engine without one never is.
+func (d *dockerEngine) stale(ctx context.Context, media string) bool {
+	if d.spec.revision == "" {
+		return false
+	}
+	c, err := d.cli.ContainerInspect(ctx, d.spec.name)
+	if err != nil || c.Config == nil || !d.mine(c.Config.Labels) {
+		return false
+	}
+	return c.Config.Labels[revisionLabel] != d.revision(media)
+}
+
+func (d *dockerEngine) removeContainer(ctx context.Context) error {
+	timeout := 10
+	d.cli.ContainerStop(ctx, d.spec.name, container.StopOptions{Timeout: &timeout})
+	if err := d.cli.ContainerRemove(ctx, d.spec.name, container.RemoveOptions{Force: true}); err != nil {
+		return fmt.Errorf("remove the %s container: %w", d.spec.product, err)
+	}
+	return nil
+}
+
+// mediaBlock finds a block of free UDP ports on the address, from 40000 in
+// steps of the block's own size.
+func mediaBlock(address string, size int) (int, error) {
+	for first := 40000; first+size <= 41000; first += size {
+		free := true
+		for p := first; p < first+size && free; p++ {
+			free = portalloc.Available(address, "udp", p) == nil
+		}
+		if free {
+			return first, nil
+		}
+	}
+	return 0, fmt.Errorf("none between 40000 and 41000")
 }
 
 // probeGuacd asks for the RDP client's parameters and hangs up: an answer
