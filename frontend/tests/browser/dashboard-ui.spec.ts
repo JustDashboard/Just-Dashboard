@@ -281,12 +281,11 @@ test("the sidebar's update notice leads to the Version page and installs through
   await notice.getByRole("button", { name: "Update now" }).click()
   const dialog = page.getByRole("dialog", { name: "Update to 0.7.0" })
   await expect(dialog).toBeVisible()
-  const command = dialog.getByRole("button", { name: "Update to 0.7.0" })
+  const command = dialog.getByRole("button", { name: "Update", exact: true })
   await expect(command).toHaveAttribute("data-variant", "default")
   await expect(dialog.locator("[data-variant=destructive]")).toHaveCount(0)
-  await expect(dialog.getByText("Before you update")).toBeVisible()
-  await expect(dialog.getByText("M Caddyfile")).toBeVisible()
-  await expect(dialog.getByText("Your data, accounts and settings are untouched.")).toBeVisible()
+  // A yes or a no: the notes and what the updater does are on the Version page.
+  await expect(dialog.getByText("Before you update")).toHaveCount(0)
 
   const install = page.waitForRequest(
     (request) =>

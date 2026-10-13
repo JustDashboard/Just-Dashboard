@@ -217,7 +217,7 @@ dismissed. It is a card on arrival's light (`.update-art`, design system §16) w
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
 an install that updates in place gets *Update now*, which opens the update's own dialog
-(`update-dialog.tsx`); everyone gets a link to the Version page (`/dashboard`) for the notes. While an
+(`update-dialog.tsx`: the two versions, *Not now* and *Update*, nothing else); everyone gets a link to the Version page (`/dashboard`) for the notes. While an
 update runs the card carries the border beam, the stage it is at and *View progress*; afterwards it
 turns green with *See what's new*, or red with the updater's error and *See what went wrong*, and only
 then can it be dismissed. In the icon rail it is one tile in the same tone that links to the Version

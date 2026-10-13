@@ -351,8 +351,8 @@ are dated evidence, not proof of current attachment ownership.
   notice's links all go to that page, which is where the release notes are read; there is no second
   rendering of them in a sheet. Installing goes through `useUpdateDialog`, not the shared
   `ConfirmDialog`: that one is for acts that are awkward to undo and its command is always destructive
-  red, where an update is something taken, so its command is the brand face. Both the notice and the
-  page hold one.
+  red, where an update is something taken, so its command is the brand face. It is a yes or a no and
+  nothing else to read — the notes are on the page. Both the notice and the page hold one.
 - `hooks/use-self-config.tsx` is the same shape for the dashboard's own settings, with one problem the
   update flow does not have: a change to the port or the address means the dashboard **does not come back
   here**. Nothing on the client can follow it, so the run record carries the new endpoint and
