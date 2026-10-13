@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -21,10 +20,7 @@ import (
 // the checks that come from detection are run again, over a fresh, data-only
 // detection of the commit about to be built, and the recipe itself is asked
 // whether it would prepare the plan from that tree. analyze_plan runs this
-// immediately before any build side effect, on every trigger; the advisory
-// check endpoint runs the same evaluation when a project is opened and after
-// every settings save, so what would stop or trouble a deployment is shown
-// before Deploy is pressed.
+// immediately before any build side effect, on every trigger.
 
 // deploymentPlan is what a deploy-time evaluation reads: the plan about to
 // run, the evidence stored when it was saved, and what already owns the
@@ -336,20 +332,10 @@ func buildScopedNames(variables []ReleaseVariableSnapshot) []string {
 	return names
 }
 
-// DeploymentCheckRequest names the version an advisory check is for, the way
-// a deployment request names the version it builds.
+// DeploymentCheckRequest selects the source revision for requested detection.
 type DeploymentCheckRequest struct {
 	SourceRevision string `json:"sourceRevision,omitempty"`
 	Ref            string `json:"ref,omitempty"`
-}
-
-// DeploymentCheckResult is preflight for the environment's saved plan and
-// the commit a deployment would build now.
-type DeploymentCheckResult struct {
-	Findings       []PreflightFinding `json:"findings"`
-	PlanRevision   int                `json:"planRevision"`
-	SourceRevision string             `json:"sourceRevision,omitempty"`
-	CheckedAt      time.Time          `json:"checkedAt"`
 }
 
 type deploymentCheckSources interface {
@@ -357,34 +343,12 @@ type deploymentCheckSources interface {
 	ResolveGitRef(ctx context.Context, source DraftSourceConfig, ref string) (string, error)
 }
 
-type deploymentCheckKey struct {
-	environmentID  int64
-	planRevision   int
-	sourceRevision string
-}
-
-type deploymentCheckEntry struct {
-	result  DeploymentCheckResult
-	expires time.Time
-}
-
-// deploymentCheckTTL is how long an advisory check is answered from memory.
-// A project page asks on arrival and after each save; the answer only moves
-// with the plan revision or the commit, both of which are in the key, or
-// with host facts such as a port or DNS, which a few minutes cannot mislead.
-const deploymentCheckTTL = 3 * time.Minute
-
-// DeploymentChecker answers the advisory check with the evaluation
-// analyze_plan runs, for the environment's desired plan.
 type DeploymentChecker struct {
 	runs     *OrchestrationStore
 	planning *PlanningStore
 	sources  deploymentCheckSources
 	observer PreflightObserver
 	now      func() time.Time
-
-	mu    sync.Mutex
-	cache map[deploymentCheckKey]deploymentCheckEntry
 }
 
 func NewDeploymentChecker(
@@ -395,7 +359,7 @@ func NewDeploymentChecker(
 ) *DeploymentChecker {
 	checker := &DeploymentChecker{
 		runs: runs, planning: planning,
-		now: time.Now, cache: map[deploymentCheckKey]deploymentCheckEntry{},
+		now: time.Now,
 	}
 	// A module that is not wired stays a nil interface, which the checks
 	// read as unavailable; a typed nil pointer would read as present and
@@ -407,77 +371,6 @@ func NewDeploymentChecker(
 		checker.observer = observer
 	}
 	return checker
-}
-
-// Check evaluates the environment's desired plan against the commit a
-// deployment would build: the requested revision or ref, resolved exactly as
-// a deployment request resolves it, or the branch head.
-func (c *DeploymentChecker) Check(
-	ctx context.Context,
-	projectID, environmentID int64,
-	request DeploymentCheckRequest,
-) (*DeploymentCheckResult, error) {
-	if request.SourceRevision != "" && request.Ref != "" {
-		return nil, fmt.Errorf("%w: sourceRevision and ref cannot both be set", ErrInvalidPlan)
-	}
-	plan, revision, err := c.desiredPlan(ctx, projectID, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	if plan == nil {
-		// The compatibility pipeline has no preflight of its own to share.
-		return &DeploymentCheckResult{Findings: []PreflightFinding{}, PlanRevision: revision, CheckedAt: c.now().UTC()}, nil
-	}
-	if err := c.resolveRevision(ctx, plan, request); err != nil {
-		return nil, err
-	}
-	key := deploymentCheckKey{environmentID: environmentID, planRevision: revision, sourceRevision: immutableSourceRevision(plan.Identity)}
-	if cached, ok := c.cached(key); ok {
-		return &cached, nil
-	}
-	reading, identity := inspectDeploymentSource(ctx, c.sources, *plan)
-	plan.Identity = identity
-	if c.observer == nil {
-		return nil, fmt.Errorf("%w: deployment host preflight is unavailable", ErrBuilderUnavailable)
-	}
-	evaluation, err := evaluateDeployment(ctx, *plan, reading, c.observer)
-	if err != nil {
-		return nil, err
-	}
-	result := DeploymentCheckResult{
-		Findings: evaluation.Findings, PlanRevision: revision,
-		SourceRevision: identity.Revision, CheckedAt: c.now().UTC(),
-	}
-	c.store(key, result)
-	if identity.Revision != key.sourceRevision {
-		c.store(deploymentCheckKey{environmentID, revision, identity.Revision}, result)
-	}
-	return &result, nil
-}
-
-func (c *DeploymentChecker) cached(key deploymentCheckKey) (DeploymentCheckResult, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, ok := c.cache[key]
-	if !ok || !c.now().Before(entry.expires) || key.sourceRevision == "" {
-		return DeploymentCheckResult{}, false
-	}
-	return entry.result, true
-}
-
-func (c *DeploymentChecker) store(key deploymentCheckKey, result DeploymentCheckResult) {
-	if key.sourceRevision == "" {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := c.now()
-	for existing, entry := range c.cache {
-		if !now.Before(entry.expires) {
-			delete(c.cache, existing)
-		}
-	}
-	c.cache[key] = deploymentCheckEntry{result: result, expires: now.Add(deploymentCheckTTL)}
 }
 
 // resolveRevision pins the commit a deployment would build now: the same

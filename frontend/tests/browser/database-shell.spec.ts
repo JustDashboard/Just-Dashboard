@@ -23,48 +23,6 @@ const railPages = (page: Page) =>
     .getByRole("link")
     .evaluateAll((links) => links.map((link) => link.textContent?.trim()))
 
-test("a database is a level below Databases, with its engine's pages in its engine's words", async ({
-  page,
-}) => {
-  await mockDatabases(page)
-  await page.goto("/databases/1/data")
-
-  await expect(rail(page).getByText("shop", { exact: true })).toBeVisible()
-  expect(await railPages(page)).toEqual([
-    "Home",
-    "Data",
-    "Query",
-    "Search",
-    "Schema",
-    "Diagram",
-    "Generate",
-    "Performance",
-    "Advisor",
-    "Logs",
-    "Access",
-    "Backups",
-    "Settings",
-  ])
-  for (const group of ["Work", "Schema", "Insights", "Operate"]) {
-    await expect(rail(page).getByText(group, { exact: true }).first()).toBeVisible()
-  }
-  await expect(rail(page).getByRole("link", { name: "Data", exact: true })).toHaveAttribute(
-    "data-active",
-    "true",
-  )
-  // Home is `/databases/1`, a prefix of every other page: current on Home alone.
-  await expect(rail(page).getByRole("link", { name: "Home", exact: true })).not.toHaveAttribute(
-    "data-active",
-    "true",
-  )
-  // No strip of route tabs came back with the rebuild.
-  await expect(page.getByRole("navigation", { name: "Database section" })).toHaveCount(0)
-
-  await page.getByRole("button", { name: "Back to Databases" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/data$/)
-  expect(await railPages(page)).toEqual(["Control center", "Map", "Add a database"])
-})
-
 test("Redis and MongoDB have only their own pages, under their own names", async ({ page }) => {
   await mockDatabases(page)
 

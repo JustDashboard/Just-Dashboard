@@ -21,7 +21,6 @@ import {
   useHostLog,
   useReadingPress,
 } from "@/components/security/log-section"
-import { AreaFindings } from "@/components/security/posture-panel"
 import { BlocksPanel } from "@/components/security/blocks-panel"
 import { CrowdSecPanel } from "@/components/security/crowdsec-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
@@ -97,7 +96,7 @@ function ToolSection({ name, children }: { name: string; children: React.ReactNo
  */
 function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked: () => void }) {
   const { can } = useAuth()
-  const { posture, exposure, applyFix } = useSecurity()
+  const { exposure } = useSecurity()
   const { data, error, loading, refresh } = usePoll(
     (signal) =>
       get<{ available: boolean; running: boolean; jails: Fail2banJail[]; error?: string }>(
@@ -140,7 +139,6 @@ function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked
   if (!data?.available) {
     return (
       <>
-        <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
         <EmptyState
           icon={Slash}
           title="fail2ban is not installed"
@@ -152,7 +150,6 @@ function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked
   if (!data.running) {
     return (
       <>
-        <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
         <EmptyState
           icon={Slash}
           title="fail2ban is installed but not responding"
@@ -223,8 +220,6 @@ function Fail2banSection({ blocks, onBlocked }: { blocks?: BlocksView; onBlocked
           />
         ))}
       </StatGrid>
-
-      <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
 
       <JailsPanel
         jails={jails}

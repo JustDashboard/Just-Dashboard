@@ -14,11 +14,7 @@ import { Status } from "@/components/status-dot"
 import { ChartPanel, ChartPlaceholder } from "@/components/metrics/chart-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
 import type { Series } from "@/components/metrics/metric-chart"
-import {
-  ContainerAnomalies,
-  useContainerScales,
-  useContainerUsage,
-} from "@/components/docker/container-usage"
+import { useContainerScales, useContainerUsage } from "@/components/docker/container-usage"
 
 // A hue per measurement rather than the two blues every chart shared, so the
 // page reads as five readings at a glance; in and out, read and write keep a
@@ -196,7 +192,6 @@ export function RuntimeUsage({
         {picker && <div className="min-w-0 max-sm:w-full sm:mr-auto">{picker}</div>}
       </PanelHeader>
       <PanelBody className="space-y-6">
-        <ContainerAnomalies containerId={containerId} />
         {disabled ? (
           <ChartPlaceholder
             plain

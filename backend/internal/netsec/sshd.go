@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -61,17 +60,12 @@ type SSHDConfig struct {
 // SSHSetting is one directive, carrying the reasoning next to the value the
 // same way a Docker finding does.
 type SSHSetting struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Value string `json:"value"`
-	// Recommended is what a public-facing host should have. Secure reports
-	// whether the current value counts as that — a separate field because
-	// several directives have more than one acceptable answer.
-	Recommended string   `json:"recommended"`
-	Secure      bool     `json:"secure"`
-	Detail      string   `json:"detail"`
-	Risk        string   `json:"risk,omitempty"`
-	Options     []string `json:"options,omitempty"`
+	Key     string   `json:"key"`
+	Label   string   `json:"label"`
+	Value   string   `json:"value"`
+	Detail  string   `json:"detail"`
+	Risk    string   `json:"risk,omitempty"`
+	Options []string `json:"options,omitempty"`
 	// Kind is "choice" for a fixed set and "number" for a bounded integer,
 	// so the UI knows which control to draw.
 	Kind string `json:"kind"`
@@ -178,7 +172,6 @@ func (s *Service) SSHDStatus(ctx context.Context) *SSHDConfig {
 		}
 		cfg.Settings = append(cfg.Settings, SSHSetting{
 			Key: def.Key, Label: def.Label, Value: value,
-			Recommended: def.Recommended, Secure: def.secure(value),
 			Detail: def.Detail, Risk: def.Risk, Options: def.Options, Kind: def.Kind,
 		})
 	}
@@ -199,20 +192,9 @@ func first(values []string, fallback string) string {
 
 // sshDirective describes one setting this page offers.
 type sshDirective struct {
-	Key         string
-	Label       string
-	Default     string
-	Recommended string
-	// Accept lists every value that counts as secure. More than one because
-	// "prohibit-password" and "forced-commands-only" are both fine answers
-	// for root login and neither is "the" recommendation.
-	Accept []string
-	// Max and Min are the *recommendation*: a MaxAuthTries of 6 is legal and
-	// not advised. LegalMax and LegalMin are what the value is refused
-	// outside. Conflating the two meant a port's range was treated as advice
-	// and never enforced.
-	Max      int
-	Min      int
+	Key      string
+	Label    string
+	Default  string
 	LegalMax int
 	LegalMin int
 	Detail   string
@@ -224,10 +206,6 @@ type sshDirective struct {
 	// entry for renders as an empty control, which reads as "not set" for a
 	// setting that very much is.
 	Aliases map[string]string
-	// AlwaysAcceptable marks a directive with no better or worse value — a
-	// port, a list of accounts. Grading those would put a permanent amber
-	// dot next to a setting that is simply a choice.
-	AlwaysAcceptable bool
 }
 
 // canonical folds a spelling sshd prints onto the one this page offers.
@@ -238,32 +216,6 @@ func (d sshDirective) canonical(value string) string {
 	return value
 }
 
-func (d sshDirective) secure(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(d.canonical(value)))
-	if d.AlwaysAcceptable {
-		return true
-	}
-	if d.Kind == "number" {
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return false
-		}
-		if d.Max > 0 && n > d.Max {
-			return false
-		}
-		if d.Min > 0 && n < d.Min {
-			return false
-		}
-		return true
-	}
-	for _, a := range d.Accept {
-		if value == a {
-			return true
-		}
-	}
-	return false
-}
-
 // sshDirectives is the closed set. Closed because every entry here becomes a
 // line this dashboard is willing to write into sshd_config, and an open set
 // would make this endpoint a config editor with extra steps — one that can
@@ -271,7 +223,6 @@ func (d sshDirective) secure(value string) bool {
 var sshDirectives = []sshDirective{
 	{
 		Key: "permitrootlogin", Label: "Root login", Default: "prohibit-password",
-		Recommended: "prohibit-password", Accept: []string{"no", "prohibit-password", "forced-commands-only"},
 		Kind: "choice", Options: []string{"no", "prohibit-password", "forced-commands-only", "yes"},
 		// `sshd -T` on OpenSSH 9.9 — Ubuntu 25.04, which is to say a current
 		// mainstream server — still prints the deprecated spelling for the
@@ -283,28 +234,24 @@ var sshDirectives = []sshDirective{
 	},
 	{
 		Key: "passwordauthentication", Label: "Password authentication", Default: "yes",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "yes"},
 		Detail: "Whether a password alone is enough to get a shell.",
 		Risk:   "With this on, your server's security is whatever the weakest password on it is. Keys cannot be guessed.",
 	},
 	{
 		Key: "pubkeyauthentication", Label: "Public key authentication", Default: "yes",
-		Recommended: "yes", Accept: []string{"yes"},
 		Kind: "choice", Options: []string{"yes", "no"},
 		Detail: "Whether keys are accepted. This is the way in that replaces passwords.",
 		Risk:   "Turning this off with passwords already disabled leaves nobody a way in.",
 	},
 	{
 		Key: "permitemptypasswords", Label: "Empty passwords", Default: "no",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "yes"},
 		Detail: "Whether an account with a blank password may log in.",
 		Risk:   "There is no legitimate reason for this on a server reachable from anywhere.",
 	},
 	{
 		Key: "x11forwarding", Label: "X11 forwarding", Default: "no",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "yes"},
 		Detail: "Lets a remote session open windows on your desktop.",
 		Risk:   "Rarely wanted on a server, and it widens what a compromised session can reach.",
@@ -316,28 +263,24 @@ var sshDirectives = []sshDirective{
 		// turns a stolen key into a tunnel into the internal network, which
 		// is what the recommendation says. "local" is the middle answer for
 		// a bastion: ProxyJump needs it, remote forwards (-R) do not.
-		Recommended: "no, unless this server is a jump host", Kind: "choice", AlwaysAcceptable: true,
-		Options: []string{"no", "local", "remote", "all", "yes"},
-		Detail:  "Whether a login may open TCP tunnels through this server (ssh -L and -R, and ProxyJump).",
-		Risk:    "With forwarding on, anyone holding a key can reach whatever this server can reach, from outside the firewall. A jump host needs yes or local; a server that is not one should say no.",
+		Kind: "choice", Options: []string{"no", "local", "remote", "all", "yes"},
+		Detail: "Whether a login may open TCP tunnels through this server (ssh -L and -R, and ProxyJump).",
+		Risk:   "With forwarding on, anyone holding a key can reach whatever this server can reach, from outside the firewall. A jump host needs yes or local; a server that is not one should say no.",
 	},
 	{
 		Key: "gatewayports", Label: "Forwarded ports on all interfaces", Default: "no",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "clientspecified", "yes"},
 		Detail: "Whether a port forwarded with -R listens on this server's public addresses or only on loopback.",
 		Risk:   "With yes, a remote forward is open to the whole network instead of the one session that asked for it.",
 	},
 	{
 		Key: "allowagentforwarding", Label: "Agent forwarding", Default: "yes",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "yes"},
 		Detail: "Whether a login may use the SSH agent on the machine it came from, from this server.",
 		Risk:   "Anyone with root here can use the forwarded agent to sign in as you elsewhere for as long as you are connected. ProxyJump reaches the same hosts without lending out the agent.",
 	},
 	{
 		Key: "permittunnel", Label: "Tunnel devices", Default: "no",
-		Recommended: "no", Accept: []string{"no"},
 		Kind: "choice", Options: []string{"no", "point-to-point", "ethernet", "yes"},
 		Detail: "Whether a login may create a tun or tap device on this server, which is a VPN over SSH.",
 		Risk:   "A tunnel device puts the client on this server's network at layer 3 or 2, past anything that filters TCP forwards.",
@@ -347,25 +290,24 @@ var sshDirectives = []sshDirective{
 		// A multiplexed connection (ControlMaster) shares one login across its
 		// sessions, so a bastion serving many people through one master
 		// wants more and a hardened server fewer; neither is wrong.
-		Recommended: "any", LegalMin: 1, LegalMax: 64, Kind: "number", AlwaysAcceptable: true,
-		Detail: "How many shells, forwards and file transfers one login may have open at once.",
-		Risk:   "Lowering it below what automation multiplexes over one connection makes the extra sessions fail with an error that does not mention this setting.",
+		LegalMin: 1, LegalMax: 64, Kind: "number", Detail: "How many shells, forwards and file transfers one login may have open at once.",
+		Risk: "Lowering it below what automation multiplexes over one connection makes the extra sessions fail with an error that does not mention this setting.",
 	},
 	{
 		Key: "maxauthtries", Label: "Attempts per connection", Default: "6",
-		Recommended: "3 or fewer", Max: 4, Kind: "number",
+		Kind:   "number",
 		Detail: "How many guesses one connection gets before it is dropped.",
 		Risk:   "The default of six lets a bot try six passwords per handshake instead of one.",
 	},
 	{
 		Key: "logingracetime", Label: "Login grace time", Default: "120",
-		Recommended: "60 seconds or less", Max: 60, Kind: "number",
+		Kind:   "number",
 		Detail: "How long an unauthenticated connection may stay open.",
 		Risk:   "A long grace time lets a small number of connections hold every available slot.",
 	},
 	{
 		Key: "clientaliveinterval", Label: "Idle check interval", Default: "0",
-		Recommended: "300 seconds", Min: 1, Max: 900, Kind: "number",
+		Kind:   "number",
 		Detail: "How often the server checks a quiet session is still there.",
 		Risk:   "At zero, a session whose client vanished stays open indefinitely.",
 	},
@@ -375,21 +317,18 @@ var sshDirectives = []sshDirective{
 		// background noise of untargeted scanning and nothing else, which is
 		// worth saying rather than dressing up as hardening — so it is not
 		// graded, only bounded.
-		Recommended: "any", LegalMin: 1, LegalMax: 65535,
-		Kind: "number", AlwaysAcceptable: true,
-		Detail: "Where sshd listens. Moving off 22 quiets the logs; it does not make the server harder to break into.",
-		Risk:   "Change this and the firewall must already allow the new port, or the next connection has nowhere to land.",
+		LegalMin: 1, LegalMax: 65535,
+		Kind: "number", Detail: "Where sshd listens. Moving off 22 quiets the logs; it does not make the server harder to break into.",
+		Risk: "Change this and the firewall must already allow the new port, or the next connection has nowhere to land.",
 	},
 	{
 		Key: "allowusers", Label: "Only these accounts may log in", Default: "",
-		Recommended: "", Kind: "list", AlwaysAcceptable: true,
-		Detail: "A space-separated list. Leave empty to allow every account that is otherwise permitted.",
-		Risk:   "An account left off this list cannot log in at all, however good its key is.",
+		Kind: "list", Detail: "A space-separated list. Leave empty to allow every account that is otherwise permitted.",
+		Risk: "An account left off this list cannot log in at all, however good its key is.",
 	},
 	{
 		Key: "denyusers", Label: "These accounts may never log in", Default: "",
-		Recommended: "", Kind: "list", AlwaysAcceptable: true,
-		Detail: "A space-separated list, applied before the allow list.",
+		Kind: "list", Detail: "A space-separated list, applied before the allow list.",
 	},
 }
 

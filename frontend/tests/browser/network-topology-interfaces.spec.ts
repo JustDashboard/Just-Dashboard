@@ -208,7 +208,7 @@ test("the throughput tiles and the chart drill into the devices under them", asy
   await expect(page.getByRole("dialog").getByText("ens3").first()).toBeVisible()
 })
 
-test("a failed reading is its own finding, and history keeps unobserved incidents open", async ({
+test("a failed native reading remains an error without advisory findings or incidents", async ({
   page,
 }) => {
   await mockNetwork(page, [], {
@@ -225,45 +225,16 @@ test("a failed reading is its own finding, and history keeps unobserved incident
             href: "/network/firewall",
           },
         ],
-        findings: [
-          {
-            id: "observation.firewall",
-            level: "warning",
-            source: "firewall",
-            title: "The host firewall could not be read",
-            detail:
-              "ufw status timed out What depends on it is not judged until it reads again; this is not evidence that nothing is wrong.",
-            href: "/network/firewall",
-          },
-        ],
-        incidents: [
-          {
-            id: 9,
-            findingId: "firewall.off",
-            source: "firewall",
-            level: "warning",
-            title: "The firewall is installed but not enforcing",
-            detail: "Its rules exist and are not applied.",
-            href: "/network/firewall",
-            openedAt: iso(30),
-            lastSeenAt: iso(5),
-            unobservedSince: iso(4),
-            related: [],
-          },
-          ...overview.incidents,
-        ],
       },
     },
   })
   await page.goto("/network")
   await loaded(page)
-  await expect(page.getByText("The host firewall could not be read")).toBeVisible()
-  await expect(page.getByText("No supported host firewall manager was detected")).toHaveCount(0)
-  const history = page.getByRole("list", { name: "Incident history" })
-  await expect(history.getByText("Unobserved")).toBeVisible()
-  await expect(history.getByText(/so whether it is still true is unknown/)).toBeVisible()
-  await expect(history.getByText("Resolved")).toBeVisible()
-  await expect(history.getByText(/began with ens3 has no carrier/)).toBeVisible()
+  await expect(page.getByRole("alert").filter({ hasText: "ufw status timed out" })).toBeVisible()
+  await expect(page.getByText("firewall unread", { exact: true })).toBeVisible()
+  await expect(page.getByText("no firewall", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("list", { name: "Incident history" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Attention", exact: true })).toHaveCount(0)
 })
 
 test("interfaces flag Docker devices that could not be joined instead of hiding them", async ({

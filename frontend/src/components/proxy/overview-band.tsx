@@ -391,7 +391,7 @@ function CertificatesBlock({
             {wrong > 0 ? (
               <Headline
                 value={wrong}
-                unit={wrong === 1 ? "needs attention" : "need attention"}
+                unit={wrong === 1 ? "not valid" : "not valid"}
                 caption={`of ${plural(all.length, "certificate")}`}
                 tone={severe ? "danger" : "warning"}
               />

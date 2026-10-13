@@ -188,9 +188,6 @@ export function levelTone(level: Conntrack["level"]): Tone {
   return level === "critical" ? "danger" : level === "warning" ? "warning" : "default"
 }
 
-/** A setting that is running and is not where it is recommended to be. */
-export const below = (s: ProtectionSetting) => s.available && !s.atRecommended
-
 /**
  * The words a choice setting's values go by. Zero and one are off and on for
  * all of them but the reverse-path filter, whose two on-values are loose and

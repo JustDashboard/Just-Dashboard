@@ -895,10 +895,8 @@ func OpsCapabilities(driver Driver, flavor string) map[string]bool {
 	_, out["privileges"] = d.(PrivilegeAdmin)
 	_, out["statements"] = d.(StatementStatser)
 	_, out["statementsReset"] = d.(StatementResetter)
-	_, out["engineAdvisor"] = d.(Adviser)
 	// Every SQL engine gets the structure checks; SQLite alone has no
 	// sessions to list or end, and says so through the same interface.
-	out["advisor"] = true
 	out["sessions"] = driver != DriverSQLite
 	out["kill"] = driver != DriverSQLite
 	out["cancel"] = out["cancel"] && driver != DriverSQLite
@@ -915,11 +913,11 @@ func OpsCapabilities(driver Driver, flavor string) map[string]bool {
 		// No statistics collector, no VACUUM, no ALTER SYSTEM, no
 		// pg_stat_statements; its own equivalents are crdb_internal tables.
 		off("stats", "locks", "replication", "tableStats", "indexStats", "maintenance", "settingsWrite",
-			"statements", "statementsReset", "engineAdvisor", "privileges")
+			"statements", "statementsReset", "privileges")
 	case "tidb":
 		// No InnoDB and no performance_schema digests behind the MySQL wire.
 		off("stats", "locks", "replication", "tableStats", "indexStats", "maintenance", "settingsWrite",
-			"statements", "statementsReset", "engineAdvisor")
+			"statements", "statementsReset")
 	}
 	return out
 }

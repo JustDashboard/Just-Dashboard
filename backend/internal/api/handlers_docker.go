@@ -28,7 +28,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 		// What is wrong with Docker on this host, in sentences. Read-only: it
 		// only reports, and every remedy it suggests is a separate route with
 		// its own capability check.
-		r.Method(http.MethodGet, "/health", s.handle(s.handleDockerDiagnose))
 
 		// What the daemon did while nobody was watching.
 		r.Method(http.MethodGet, "/events", s.handle(s.handleDockerEvents))
@@ -48,8 +47,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// polls.
 			r.Method(http.MethodGet, "/{id}/writable-layer", s.handle(s.handleWritableLayer))
 			r.Method(http.MethodGet, "/{id}/migration-plan", s.handle(s.handleMigrationPlan))
-			r.Method(http.MethodGet, "/{id}/failure", s.handle(s.handleContainerFailure))
-			r.Method(http.MethodGet, "/{id}/anomalies", s.handle(s.handleContainerAnomalies))
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))

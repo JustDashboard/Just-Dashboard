@@ -140,8 +140,7 @@ import {
   useSiteVerbs,
 } from "@/components/proxy/site-verbs"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
-import { isDisabled, sharedNames, waiting } from "@/components/proxy/site-order"
-import { isDown } from "@/components/proxy/upstream-health"
+import { isDisabled, sharedNames } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -160,7 +159,6 @@ type BulkAction = keyof typeof BULK
  * there is one (the strip leaves out an empty chip).
  */
 const CHIP_TONE: Partial<Record<SiteChip, string>> = {
-  attention: "text-warning",
   broken: "text-destructive",
   down: "text-destructive",
   notlive: "text-warning",
@@ -232,7 +230,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     session: number
   }>("proxy.sites.form", { open: false, editing: null, copyFrom: null, session: 0 })
   const [filter, setFilter] = useSessionState("proxy.sites.query", "")
-  const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip", "all")
+  const [chip, setChip] = useSessionState<SiteChip>("proxy.sites.chip.075", "all")
   const [sortChoice, setSort] = useSessionState<SiteSort>("proxy.sites.sort", "urgency")
   const [view, setView] = useViewState<"cards" | "table">("proxy.sites.view", "cards")
   // By name, as the bulk endpoint acts: a name two entries share is never
@@ -1134,19 +1132,12 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // filter is on, its name *is* the group.
   // Nor once another order is chosen: the groups are the urgency order.
   const narrowed = filter.trim().length > 0 || chip !== "all" || sort !== "urgency"
-  // The attention chip's test, spelled out here rather than called through
-  // the readings: React's compiler reads a call handed the readings during
-  // render as one that may run the page's verbs.
-  const refuses = (v: VHost) => siteUpstreams(v, upstreamPoll.data).some(isDown)
-  const needsMe = (v: VHost) => waiting(v) || isUnloaded(v) || Boolean(notLive(v)) || refuses(v)
-  const attention = visible.filter(needsMe)
-  const active = visible.filter((v) => !needsMe(v) && v.enabled)
+  const active = visible.filter((v) => v.enabled)
   // Off, and nothing to decide about — the distribution's untouched default
   // site, a conf.d file nginx does not read. Drawn under "Serving", the
   // stock default read as one of the sites that serve.
-  const idle = visible.filter((v) => !needsMe(v) && !v.enabled)
+  const idle = visible.filter((v) => !v.enabled)
   const sorted: { key: string; label: string; sites: VHost[] }[] = [
-    { key: "waiting", label: "Needs attention", sites: attention },
     { key: "serving", label: active.some(engineStopped) ? "Enabled" : "Serving", sites: active },
     { key: "idle", label: "Not in use", sites: idle },
   ].filter((group) => group.sites.length > 0)
@@ -1164,8 +1155,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     : undefined
   const busiest = Math.max(0, ...hosts.map((v) => siteTraffic(v, trafficPoll.data)?.requests ?? 0))
   const verdict = sitesVerdict({
-    attention: hosts.filter(needsMe),
-    isDown: refuses,
     stopped: run?.running === false,
     engine: engineName,
     total: hosts.length,

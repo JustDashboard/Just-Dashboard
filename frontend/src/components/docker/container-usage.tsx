@@ -13,54 +13,10 @@ import {
   windowRefreshMs,
   type ContainerRow,
 } from "@/lib/metrics-range"
-import type { AnomalyReport, ContainerHistory } from "@/lib/types"
+import type { ContainerHistory } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"
 import { useMetricsWindow } from "@/hooks/use-metrics-window"
-import { Notice } from "@/components/state"
-import { Warning } from "@/components/icons"
-
-/**
- * What this container's recorded history says has changed.
- *
- * Every claim here is a pattern read out of a series rather than a state
- * Docker reported, so every row says it was inferred and none of them fires on
- * a spike — a core pinned for one sample is a busy moment, and a panel that
- * calls that an anomaly is a panel people learn to close.
- */
-export function ContainerAnomalies({ containerId }: { containerId: string }) {
-  const { data } = usePoll<AnomalyReport>(
-    (signal) =>
-      get<AnomalyReport>(
-        `/docker/containers/${encodeURIComponent(containerId)}/anomalies`,
-        undefined,
-        signal,
-      ),
-    0,
-    [containerId],
-  )
-  if (!data || data.anomalies.length === 0) return null
-
-  return (
-    <div className="space-y-2">
-      {data.anomalies.map((anomaly) => (
-        <Notice
-          key={anomaly.id}
-          title={anomaly.title}
-          icon={Warning}
-          tone={anomaly.severity === "critical" ? "danger" : "warning"}
-        >
-          <p>{anomaly.detail}</p>
-          {anomaly.advice && <p className="mt-1">{anomaly.advice}</p>}
-          <p className="mt-1 text-hint text-muted-foreground">
-            Read from {data.samples} recorded points over the last {anomaly.window}, and inferred
-            from their shape rather than reported by Docker.
-          </p>
-        </Notice>
-      ))}
-    </div>
-  )
-}
 
 /** What a live feed hands the charts: its rows, and the limit memory is drawn against. */
 export type LiveRows = { rows: ContainerRow[]; memoryLimit: number }

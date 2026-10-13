@@ -11,19 +11,12 @@ import { Field } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
-import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Segments } from "@/components/deploy/settings/segments"
 import { relativePath } from "@/components/proxy/config-tree"
 import { refusalOf } from "@/components/proxy/engine-lifecycle"
-
-const LEVEL: Record<ProxySetting["level"], { verdict: Verdict; label: string }> = {
-  ok: { verdict: "ok", label: "Fine" },
-  notice: { verdict: "notice", label: "Consider" },
-  warning: { verdict: "warning", label: "Change" },
-}
 
 /**
  * nginx's server-wide directives as nginx loads them: each value, the file and
@@ -105,13 +98,11 @@ function SettingRow({
   onOpen: (path: string, line?: number) => void
   onChange: (value: string) => void
 }) {
-  const level = LEVEL[setting.level]
   const file = setting.file
   return (
     <li className="flex min-w-0 flex-col gap-2 py-3 sm:flex-row sm:items-start sm:gap-4">
       <div className="min-w-0 space-y-1 sm:w-56 sm:shrink-0">
         <p className="truncate font-mono text-body font-medium">{setting.name}</p>
-        <Status verdict={level.verdict} label={level.label} />
       </div>
       <div className="min-w-0 flex-1 space-y-1">
         <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -134,7 +125,6 @@ function SettingRow({
           )}
         </p>
         <p className="text-hint leading-relaxed text-muted-foreground">
-          {setting.advice}
           {setting.name === "worker_connections" &&
             report.openFiles > 0 &&
             ` Open files per worker: ${report.openFiles}, from ${report.openFilesFrom}.`}
@@ -143,11 +133,6 @@ function SettingRow({
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
-        {setting.recommended && (
-          <Button size="sm" variant="outline" onClick={() => onChange(setting.recommended ?? "")}>
-            Use {setting.recommended}
-          </Button>
-        )}
         <Button
           size="sm"
           variant="outline"

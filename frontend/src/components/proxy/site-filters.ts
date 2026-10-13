@@ -5,7 +5,7 @@ import type {
   SitesTraffic,
   VHost,
 } from "@/lib/types"
-import { byUrgency, isBroken, isDisabled, isPlain, waiting } from "./site-order"
+import { byUrgency, isBroken, isDisabled, isPlain } from "./site-order"
 import { isDown, upstreamsOf } from "./upstream-health"
 
 /**
@@ -18,7 +18,6 @@ import { isDown, upstreamsOf } from "./upstream-health"
 
 export type SiteChip =
   | "all"
-  | "attention"
   | "broken"
   | "notlive"
   | "down"
@@ -34,7 +33,6 @@ export type SiteChip =
 
 export const CHIP_LABEL: Record<SiteChip, string> = {
   all: "All",
-  attention: "Needs attention",
   broken: "Broken",
   notlive: "Not live",
   down: "Upstream down",
@@ -122,26 +120,10 @@ export function siteRequests(v: VHost, traffic: SitesTraffic | undefined): numbe
   return reading?.status === "available" ? reading.requests : undefined
 }
 
-/**
- * The Needs attention group, and the chip and verdict that count it: a site
- * someone has to decide about, one nginx is not serving as its file says, or
- * one whose application refuses connections, which its visitors see as a 502.
- */
-export function needsAttention(v: VHost, r: SiteReadings): boolean {
-  return (
-    waiting(v) ||
-    r.notLive(v) ||
-    Boolean(r.unloaded?.(v)) ||
-    siteUpstreams(v, r.upstreams).some(isDown)
-  )
-}
-
 export function matchesChip(v: VHost, chip: SiteChip, r: SiteReadings): boolean {
   switch (chip) {
     case "all":
       return true
-    case "attention":
-      return needsAttention(v, r)
     case "broken":
       return isBroken(v)
     case "notlive":

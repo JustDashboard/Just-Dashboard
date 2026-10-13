@@ -370,8 +370,7 @@ test("a list holding the reader's address and an untrusted reader are each said"
 test("staged kernel settings post exactly the settings that changed", async ({ page }) => {
   const mutations: Mutation[] = []
   await open(page, "/network/protection", mutations)
-  await page.getByRole("button", { name: /Below recommendation/ }).click()
-  // IPv6 redirects: running On, recommended Off.
+  // Stage IPv6 redirects from On to Off.
   await page
     .getByRole("radiogroup", { name: "Accept ICMP redirects (IPv6)" })
     .getByRole("radio", { name: "Off" })

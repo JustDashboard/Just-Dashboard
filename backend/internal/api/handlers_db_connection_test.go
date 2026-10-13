@@ -1567,8 +1567,7 @@ var gatedCapabilities = []string{
 	"comments", "indexes", "extensions",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
-	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "advisor",
-	"engineAdvisor", "queryLog", "clickhouseViews", "sqliteFile",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "queryLog", "clickhouseViews", "sqliteFile",
 	// Redis
 	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
 	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
@@ -1632,6 +1631,11 @@ func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
 		// server then reports a different address for.
 		if info, err := dbx.ParseDSN(d.ID, d.DSNExample); err != nil || (d.DefaultPort != 0 && info.Port != strconv.Itoa(d.DefaultPort)) {
 			t.Errorf("%s: its own DSN example does not parse to port %d: %+v %v", d.ID, d.DefaultPort, info, err)
+		}
+		for _, retired := range []string{"advisor", "engineAdvisor"} {
+			if _, present := d.Capabilities[retired]; present {
+				t.Errorf("%s advertises retired %s", d.ID, retired)
+			}
 		}
 		for _, flag := range gatedCapabilities {
 			if _, ok := d.Capabilities[flag].(bool); !ok {

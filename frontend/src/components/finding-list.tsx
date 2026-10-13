@@ -145,7 +145,7 @@ export function FindingList({
                     {finding.level === "critical"
                       ? "Critical issue"
                       : finding.level === "warning"
-                        ? "Needs attention"
+                        ? "Warning"
                         : "Observation"}
                   </span>
                   <span className="block font-medium wrap-anywhere">{finding.title}</span>

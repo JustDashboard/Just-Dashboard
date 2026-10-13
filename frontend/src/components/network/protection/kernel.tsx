@@ -9,7 +9,7 @@ import type { InterfaceReading, KernelProfile, ProtectionSetting } from "@/lib/t
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormSection, InfoTip } from "@/components/form"
 import { EmptyNote } from "@/components/state"
-import { Status, StatusDot } from "@/components/status-dot"
+import { StatusDot } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,6 @@ import {
 } from "@/components/ui/select"
 import { InterfaceValues } from "@/components/network/protection/interfaces"
 import {
-  below,
   choiceWord,
   inRange,
   profileChanges,
@@ -34,7 +33,7 @@ import {
   stagedChanges,
 } from "@/components/network/protection/reading"
 
-type Only = "all" | "attention" | "edited"
+type Only = "all" | "edited"
 
 /**
  * The kernel's own defences against floods and spoofed packets, as the closed
@@ -80,17 +79,11 @@ export function KernelSettings({
   const keys = Object.keys(changes)
   const dirty = keys.length > 0
   const invalid = settings.some((s) => s.key in pending && !inRange(s, pending[s.key]))
-  const attention = settings.filter(below).length
   const valueOf = (s: ProtectionSetting) => pending[s.key] ?? s.current
   const edited = (s: ProtectionSetting) => s.key in changes
   const byKey = (key: string) => settings.find((s) => s.key === key)
 
-  const shown =
-    only === "attention"
-      ? settings.filter((s) => below(s) || edited(s))
-      : only === "edited"
-        ? settings.filter(edited)
-        : settings
+  const shown = only === "edited" ? settings.filter(edited) : settings
   const groups = [
     ...SETTING_GROUPS.map((g) => g.title),
     ...(settings.some((s) => settingGroup(s.key) === "Other settings") ? ["Other settings"] : []),
@@ -112,11 +105,6 @@ export function KernelSettings({
                   <span className="font-mono text-hint text-muted-foreground">
                     {settingWord(s, s.current)} → {settingWord(s, changes[key])}
                   </span>
-                  {changes[key] !== s.recommended && (
-                    <span className="text-hint text-warning">
-                      not the recommended {settingWord(s, s.recommended)}
-                    </span>
-                  )}
                 </li>
               )
             })}
@@ -181,10 +169,6 @@ export function KernelSettings({
         <FilterChip selected={only === "all"} onClick={() => setOnly("all")}>
           All <ChipCount>{settings.length}</ChipCount>
         </FilterChip>
-        <FilterChip selected={only === "attention"} onClick={() => setOnly("attention")}>
-          <StatusDot tone={attention ? "warning" : "running"} />
-          Below recommendation <ChipCount>{attention}</ChipCount>
-        </FilterChip>
         {dirty && (
           <FilterChip selected={only === "edited"} onClick={() => setOnly("edited")}>
             <span style={{ color: "var(--git-modified)" }}>Edited</span>
@@ -199,7 +183,6 @@ export function KernelSettings({
         {groups.map((title) => {
           const rows = shown.filter((s) => settingGroup(s.key) === title)
           if (rows.length === 0) return null
-          const warnings = rows.filter(below).length
           return (
             <FormSection
               aside
@@ -211,10 +194,6 @@ export function KernelSettings({
               }
               hint={
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <Status
-                    verdict={warnings ? "warning" : "ok"}
-                    label={warnings ? `${warnings} below recommendation` : "At recommendation"}
-                  />
                   <span className="numeric">{plural(rows.length, "setting")}</span>
                 </span>
               }
@@ -236,9 +215,7 @@ export function KernelSettings({
           )
         })}
       </div>
-      {shown.length === 0 && (
-        <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
-      )}
+      {shown.length === 0 && <EmptyNote>No settings match this filter.</EmptyNote>}
       {interfaces && <InterfaceValues reading={interfaces} settings={settings} />}
 
       {/* The apply bar follows the reader, as SSH's does: a change may be
@@ -293,7 +270,7 @@ export function KernelSettings({
   )
 }
 
-/** One setting: its name and why, what is running against what is recommended, and the control. */
+/** One setting: its name and why, its effective value, and the control. */
 function SettingRow({
   setting: s,
   readOnly,
@@ -309,7 +286,6 @@ function SettingRow({
   onChange: (value: string) => void
   onLetGo: () => void
 }) {
-  const behind = below(s)
   const valid = inRange(s, value)
   const id = `kernel-${s.key}`
   return (
@@ -328,22 +304,13 @@ function SettingRow({
             {s.label}
           </label>
           <InfoTip label={`About ${s.label}`}>{s.why}</InfoTip>
-          {edited ? (
-            <Tag style={{ color: "var(--git-modified)" }}>edited</Tag>
-          ) : (
-            behind && <Status verdict="warning" label="below recommendation" />
-          )}
+          {edited ? <Tag style={{ color: "var(--git-modified)" }}>edited</Tag> : null}
           {s.setHere && <Tag title="Restored at every boot">kept for boot</Tag>}
         </div>
         <code className="block font-mono text-hint break-all text-muted-foreground">{s.key}</code>
         {s.available ? (
           <p className="text-hint leading-relaxed text-muted-foreground">
             Running <span className="font-mono text-foreground">{settingWord(s, s.current)}</span>
-            {" · "}
-            recommended{" "}
-            <span className={behind ? "font-mono text-warning" : "font-mono text-foreground"}>
-              {settingWord(s, s.recommended)}
-            </span>
             {s.setHere && !readOnly && (
               <>
                 {" · "}

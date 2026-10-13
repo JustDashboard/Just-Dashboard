@@ -9,7 +9,7 @@
 Deploy apps, run Docker, manage databases, shape the network, open a real shell and keep it all
 backed up — behind one login that lives on your private network.
 
-**Version 0.7.4** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.5** · Go backend · Next.js frontend · one `docker compose` stack
 
 [![Website](https://img.shields.io/badge/website-just--dashboard.com-CAE9FF?style=flat-square&labelColor=16181d)](https://just-dashboard.com)
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJustDashboard%2FJust-Dashboard%2Fmain%2Fbackend%2Finternal%2Fselfupdate%2Fchangelog.json&query=%24.latest&label=version&style=flat-square&color=CAE9FF&labelColor=16181d)](CHANGELOG.md)
@@ -36,10 +36,10 @@ backed up — behind one login that lives on your private network.
 <tr>
 <td width="25%" valign="top">
 
-**Answers, not numbers**
+**Readings and controls**
 
-It says *why*: a server that is waiting rather than busy, a container killed for its memory limit.
-Where it can fix a finding, the finding comes with a button.
+See what the server is doing through live readings, recorded events and logs.
+Open the owning controls to review and apply a change.
 
 </td>
 <td width="25%" valign="top">
@@ -107,8 +107,8 @@ free.
 - Overview of what every container uses and what just happened to it
 - Containers, stacks, images, volumes, networks and events, each a page
 - Create from a template, a pasted `docker run` or a form
-- Crash loops, failing health checks and memory kills said in words
-- Prepared fixes for exposure, limits and security posture
+- Docker state, health checks and recorded lifecycle events
+- Reviewed container configuration and live resource limits
 - Browse a volume's or a container's files in place
 
 </td>
@@ -119,7 +119,7 @@ free.
 - A control center for every database on the server — even unconnected ones
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
 - Table editor with staged, reviewed edits and a SQL editor with plans
-- Schema browser, diagram, code generation, performance and an advisor
+- Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, accounts, grants and a live map
 
@@ -365,7 +365,7 @@ disk.
 
 ## Version, and updating
 
-This is **0.7.4**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.5**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds and
 restarts from a container that outlives the restart. The update check is one unauthenticated GET of
 one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.

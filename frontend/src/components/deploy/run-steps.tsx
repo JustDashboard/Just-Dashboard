@@ -36,10 +36,10 @@ import {
 import { Segment } from "@/components/deploy/run-pipeline"
 import { FindingRow } from "@/components/deploy/deployment-findings"
 import {
-  attentionFindings,
+  runValidationFindings,
   findingFixAction,
   settingsPathForField,
-} from "@/components/deploy/deploy-check-state"
+} from "@/components/deploy/deployment-findings"
 import type { ConsoleRow } from "@/components/deploy/build-console"
 import {
   CodeBlock,
@@ -643,11 +643,11 @@ function PreflightChecks({
   projectId?: number
 }) {
   const router = useRouter()
-  const attention = attentionFindings(findings)
+  const validation = runValidationFindings(findings)
   const counts = (["blocked", "decision", "warning", "unavailable"] as const)
     .map(
       (severity) =>
-        [severity, attention.filter((item) => item.severity === severity).length] as const,
+        [severity, validation.filter((item) => item.severity === severity).length] as const,
     )
     .filter(([, count]) => count > 0)
     .map(([severity, count]) =>
@@ -678,7 +678,7 @@ function PreflightChecks({
           : `every one of ${plural(findings.length, "check")} passed`}
         {judged && <> · {judged}</>}
       </p>
-      {attention.map((finding, index) => (
+      {validation.map((finding, index) => (
         <FindingRow
           key={`${finding.code}:${finding.fieldId ?? index}`}
           finding={finding}

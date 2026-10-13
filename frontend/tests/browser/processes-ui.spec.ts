@@ -935,9 +935,9 @@ test("a PM2 application's sheet reads its process live and scales its cluster", 
 
   // The worker PM2 gave up on says so, and the press reads its log.
   await page.goto("/processes/pm2?app=deploy:1")
-  await expect(sheet.getByText("PM2 stopped restarting it")).toBeVisible()
+  await expect(sheet.getByText("errored", { exact: true })).toBeVisible()
   await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(0)
-  await sheet.getByRole("button", { name: "Read the log" }).first().click()
+  await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect(sheet.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",

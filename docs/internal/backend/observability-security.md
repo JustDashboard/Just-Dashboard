@@ -24,8 +24,8 @@ since a tab was opened, and charts that start empty every visit cannot show last
   disk cache and its refresh instead of starting a separate walk per sample. It is what makes
   "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a container that has held it for six
   months from one whose disk has two days left. Zero means the walk
-  was unavailable when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
-  measurement rather than as an empty layer.
+  was unavailable when the sample was taken. The anomaly advisor was removed in 0.7.5; native
+  usage history still retains the sample.
 - Samples also retain the observed container ID for release attribution. The additive `container_id`
   column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
   attributed to a release. `ContainerIdentityRange` reads 1..64 distinct IDs in one aggregation with
@@ -85,7 +85,7 @@ They are recorded and charted; with Health removed, nothing judges them into fin
 storage: a sample whose `uptime_seconds` dropped means the machine went down, which also catches
 restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot markers go quiet.
 
-## netsec: exposure, posture, login history
+## netsec: exposure and login history
 
 `netsec` reads records the host already keeps rather than polling: wtmp (`GET /logins`), btmp
 (`/logins/failed`, behind `system.admin` — it holds whatever was typed at a login prompt, sometimes a
@@ -109,8 +109,7 @@ the browser with it.
 
 `BanHistory` reads at most the last `banLogTailBytes` (8 MB) of each fail2ban log and drops the line
 the seek tears in half. fail2ban writes a "Found" line per failed attempt, so a host under a campaign
-has a log of hundreds of megabytes, and the repeat offenders (`/fail2ban/offenders`) and the posture
-check each read it every minute or two; the tail holds the events every reader wants. The Intrusion
+has a log of hundreds of megabytes, and the repeat offenders (`/fail2ban/offenders`) read it when requested; the tail holds the events every reader wants. The Intrusion
 page no longer calls `/fail2ban/history`: its Activity section reads fail2ban's log itself, through
 the `fail2ban` lens on the `/logs` routes, and — unlike the ban table it replaced — a host where
 fail2ban writes only to the journal is read from `journal:fail2ban.service` rather than said to have
@@ -136,101 +135,12 @@ readable at `read`, as it was before the gate** — narrowing it to sshd is what
 reader without the capability can find those lines in the unfiltered journal; that is a known gap, not
 the boundary.
 
-`netsec.Assess` (`GET /security/posture`) takes a position on security: every panel
-in this class shows facts and leaves the reading to somebody who already knows how; the ones that take a
-position sell a score out of a hundred, which is a number to optimise rather than a thing to fix.
-
-- A `SecurityFinding` carries measured / means / do as three fields, plus a `Fix` naming a remedy the
-  dashboard can perform.
-- `Assess` is a **pure function of its inputs** (the handler gathers exposure, firewall, fail2ban, sshd,
-  listeners, certificates, failed logins and updates concurrently), which is what makes it testable with
-  no firewall or network. `posture_test.go` pins each claim, including the two easy to get backwards: an
-  exposed database behind a default-deny firewall is a **warning**, not a critical (otherwise it cries
-  wolf), and "turn off password authentication" stops being offered when no account has a key — there it
-  is a lockout, not advice.
-- `ExposedPort` and `CertSummary` are declared *in* netsec rather than imported from `proxysvc`, so the
-  audit has no dependency on how ports or certificates are discovered.
-- A database or control port is judged by the **address it is bound to and the interface that address
-  is on** (`reach.go`), since `ExposedPort.Exposed` is any bind but loopback. `ReadHostNetwork` places
-  each address on its interface (Go's interface list) and marks the interfaces carrying a default route
-  (`/proc/net/{route,ipv6_route}`, the namespace the sockets are read in). A bridge is told by the
-  kernel's link table (an `RTM_GETLINK` dump: each device's kind and master, `classifyLinks`), not by
-  its name: a Linux bridge whose every port is a veth, tap or dummy is `bridge` whatever it is called
-  (Docker, libvirt, LXD's `lxdbr0`, Incus's `incusbr0`, Podman's `podman1`, a Proxmox internal
-  `vmbr1`), and one that enslaves a NIC, bond, VLAN or VXLAN is that network and `physical`, as is a
-  device named like a bridge that the kernel does not call one (Open vSwitch). `NetworkInfo` classifies
-  the Network page's devices the same way; names (`classifyInterface`) are only the fallback when the
-  table cannot be read. `HostNetwork.Reach` grades a bind: `all` and `public` are critical; `network` (a
-  tailnet — Tailscale's ranges or a `tailscale*` tunnel —, another tunnel, a link-local address on the
-  uplink, or a private address on a physical or default-route interface) and `host` (an address,
-  link-local included, on such a bridge or a veth that carries no default route) are warnings. Only the private address
-  on the uplink, or one on no interface the host listed, gets the clause that a provider mapping a public
-  address onto it makes it the internet's too; a bridge or link-local address cannot be mapped. Every
-  level keeps the catalogue's `Danger` in the advice. A preset marked `InternetOnly` (DNS as an open
-  resolver, RDP, VNC — their danger is strangers, their advice a VPN) is not a finding at a reach the
-  internet cannot share, so libvirt's dnsmasq on `virbr0` raises nothing. A port bound to several
-  addresses is one finding at its widest, as its ID is per port, and its detail names the interface the
-  address is on ("TCP/6379 is bound to 100.110.34.31 on tailscale0"). `HostNetwork.Place` returns the
-  grade with the network it is made of — `tailnet`, `vpn`, `uplink` (a private address on an interface
-  carrying a default route), `private` (one on another NIC, or on no interface the host listed),
-  `docker` (Docker's `docker0` or `br-<network id>`), another `bridge`, `link-local` — and the interface,
-  and `GET /ports` returns all three as `Listener.Reach`, `Network` and `Interface`, so the ports page
-  words a socket as the posture judges it. A firewall that is on and does not allow inbound by default
-  holds a port finding to a warning and is named in its detail — unless the default is not what the
-  socket's traffic meets. A socket `docker-proxy` holds, or one `ExposedPort.Published` marks (a
-  container's published binding names it, whatever holds it, or no socket at all where Docker's NAT
-  alone publishes it), is Docker's published port, forwarded by its NAT rules before the input chain
-  the default belongs to, so it keeps its reach's level and the detail says it is "published by Docker
-  past the firewall's inbound default". A socket an inbound rule admits from
-  anywhere keeps it too, and the detail names the rule ("firewall rule 10 admits it from anywhere"):
-  `admittingRule` walks the rules in order, first match deciding as ufw and iptables do — ufw's and
-  firewalld's `ALLOW`/`LIMIT` or iptables' `ACCEPT` in `INPUT` (its port read from the match text by
-  `iptablesPort`), by a port, list or range, a firewalld service the catalogue names (`Firewalld`), or
-  no port at all; a refusal from anywhere to any address met first ends the walk (not for iptables,
-  whose interface column is not read). A rule limited to an interface, to a tailnet's or bridge's
-  destination address, or naming a ufw application profile is not weighed, so an allow on
-  `tailscale0` still leaves the internet to the default. One whose inbound default could not be read
-  is not counted on. `GradePort` levels one socket by exactly these rules — the same `dangerAt` and
-  `portLevel` `assessPorts` uses — and `GET /ports` returns its result as `Listener.Level`,
-  `InboundDefault`, `PastFirewall` (`docker` or `rule`) and `FirewallRule`, reading the firewall status
-  the posture reads, so the ports page and the proxy overview colour a database as the posture levels
-  it.
-- **One dangerous-service catalogue.** `netsec.ServiceOf` names a socket from `ServiceCatalogue` on
-  port *and* protocol (DNS is 53/udp; a TCP socket on 53 is not flagged), and `GET /ports` returns it
-  as `Listener.Service` and `Danger`. The frontend no longer keeps its own port list for sockets: the
-  ports page, its "Dangerous services exposed" tile and the proxy overview's finding flag whatever
-  carries `danger` and a posture `level`, so RDP, VNC, FTP and an open resolver are flagged there as
-  the posture flags them. (The streams page still judges a stream's listen port by
-  `DANGEROUS_PORTS`, since a stream has no socket to read `danger` from.)
-- **The dashboard's own sockets stay on loopback.** `ExposedPort.Dashboard` marks a `Self` socket
-  other than the dashboard's Caddy (process `caddy`, or compose service `proxy`); `ServiceOf` names it
-  "Just Dashboard", an `InternetOnly` danger, so a backend or web app bound where the internet or the
-  private uplink reaches raises `ports.self.<proto>.<port>` — critical, or a warning where the
-  firewall's inbound default holds it, by the same `portLevel` — and a tailnet or bridge bind raises
-  nothing.
-- **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
-  an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
-  data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from
-  minimal cloud images). Each is reported as a finding — silence in a security verdict reads as
-  "checked, nothing outstanding".
-- **A layer no check can see is named, not passed.** `Posture.Unknowns` (`posture_unknowns.go`) is
-  neither a finding nor a pass. Provider policy is always unknown — no provider adapter exists — and its
-  detail says whether this host has a public address on an interface (`publicHostAddress`) or is only
-  reached through a provider's translation. Other nftables tables come from the gateway's own reading of
-  the ruleset (`GatewayCapability().Layers`, handed in as `AssessInput.Policy`, so the ruleset is not
-  parsed a second way): a base chain at the input, forward or prerouting hook that is not an iptables-nft
-  table, not firewalld's and not the dashboard's own gateway, whose decision is more than an
-  unconditional accept (`blocked` or `unknown`), is listed as a foreign decision this check does not
-  evaluate; an unread or unreadable ruleset is itself an unknown. The Security page lists them under the
-  findings as "Not seen by these checks", and a clean list beside them reads "No findings in the layers
-  these checks can see". The ports sheet says the same of an exposed socket's provider, and the
-  container reachability verdicts end with it: "reachable from outside" is unproven until an external
-  check measures it. `JD_POSTURE_LIVE=1` (`TestLivePostureUnknownsOnThisHost`, run as root from a
-  compiled test binary) grades the actual host read-only and lists its unknowns.
-
-`netsec.Disconnect` ends an interactive login: the PID is matched against the live session list first,
-or the route is a "kill any process on this host" primitive wearing a sensible name. SIGHUP, not
-SIGKILL, so the login is recorded as ended.
+Security pages display exposure, firewall, SSH, intrusion and connection records directly. The
+security posture collector, findings UI and `GET /security/posture` were removed in 0.7.5. Exposure
+returns the observed access arrangement without a recommendation. `port_reach.go` retains the binding
+and firewall attribution used by listener inventory and requested connection diagnostics. The SSH
+editor exposes current values, options and legal constraints without `recommended` or `secure`
+judgements. Its lockout guards, preview, confirmation, audit and recovery still apply.
 
 ## sshd
 
@@ -252,19 +162,15 @@ restore on failure → reload only then.
   key is correct and must never be blocked.
 - The directive list is **closed** — an open set makes this a config editor that can take the machine off
   the network.
-- `Port` is bounded by `LegalMin`/`LegalMax`, not the `Min`/`Max` carrying the recommendation (they were
-  one pair of fields, so the range was treated as advice). `guardSSHPort` refuses a move to a port a
+- `Port` is bounded by `LegalMin`/`LegalMax`. `guardSSHPort` refuses a move to a port a
   default-deny firewall has no rule for.
 - `AllowUsers`/`DenyUsers` are `kind: "list"`: the value is explicitly checked for a newline (one would
   write a directive of the caller's choosing on the next line) and normalised through `strings.Fields`.
   An emptied list is commented out — sshd refuses to start behind a bare keyword.
 - The bastion directives (`allowtcpforwarding`, `gatewayports`, `allowagentforwarding`, `permittunnel`,
-  `maxsessions`) are in the closed list for the SSH page's jump-host section. `allowtcpforwarding` and
-  `maxsessions` are `AlwaysAcceptable` — a jump host exists to forward TCP, so grading "yes" as insecure
-  would put a permanent warning on a legitimate bastion — with the recommendation ("no, unless this
-  server is a jump host") carried as text. The other three are graded against "no". The posture reads
-  none of them, and `guardSSHLockout` does not either: forwarding cannot cost access to SSH itself. It
-  can cost access to the dashboard, though: a request arriving on loopback came through an SSH tunnel,
+  `maxsessions`) are in the closed list for the SSH page's jump-host section. Forwarding choices
+  do not enter `guardSSHLockout`: forwarding cannot cost access to SSH itself. They can cost access
+  to the dashboard, though: a request arriving on loopback came through an SSH tunnel,
   which rides on TCP forwarding, so `handleSSHApply` refuses `allowtcpforwarding no` or `remote` from
   one with `409 would_lock_you_out` (the current tunnel would stay up and the next would be refused).
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
@@ -389,7 +295,7 @@ reboot and leaves a page saying protected in front of a host that is not. `Firew
 each backend declare what it can do and `ReadOnlyReason` explains the absence — a greyed-out button with
 no reason is worse than one that is not there. Its chain verdict arrives in the shared words
 (`iptablesPolicyWord`: ACCEPT → allow, DROP → deny, REJECT → reject; `Default` keeps the verdict
-verbatim). The structured policy is compared against `"allow"` by the posture rules, the exposed-port
+verbatim). The structured policy is compared against `"allow"` by the exposed-port
 grading and `guardSSHPort`, and `"accept"` matched none of them: an iptables host with an ACCEPT
 policy was never told its inbound default was allow, had every exposed database graded as though a
 firewall were refusing it, and was refused an SSH port move as a lockout the policy could not cause.
@@ -548,7 +454,7 @@ empty while ban decisions are in force; otherwise `degraded`. Proxy bouncers alo
 (HTTP only; their drop cannot be read here); an unreadable kernel or an unknown bouncer kind is
 `unverified`; no fresh pull is `stale`; none registered is `unenforced`; a stopped engine is
 `stopped`. An unreadable bouncer list is `unverified`, never `unenforced`. Every read is a listing.
-The panel claims protection only for `enforcing` and `partial`, and the posture raises
+The panel claims protection only for `enforcing` and `partial`. Historical posture rules raised
 `intrusion.crowdsec-unenforced` (warning), `-partial` or `-unverified` (notices) from the same
 verdict. The nft fixtures are nft's own JSON from a throwaway namespace; the ipset one follows
 `ipset list -t`'s format.
@@ -604,7 +510,7 @@ ask the check route; wiring their own forms to it belongs with those owners.
 ## Packages: six managers, one interface
 
 `internal/updates` was apt-only, so every RPM, Alpine and Arch host reported *no package manager* —
-which renders as "nothing to update" rather than "never checked", leaving the posture audit's patch
+which renders as "nothing to update" rather than "never checked", leaving the historical posture audit's patch
 check silently dead on half the servers this runs on. It is a `manager` interface now (apt, dnf, yum,
 zypper, pacman, apk), each a listing command parsed by a pure function plus an upgrade argv. Four
 details were each confirmed by running the tool in a container of its distribution:
@@ -679,8 +585,3 @@ command is a file whose **parent** is a bin directory (`/usr/bin` is in every fi
 `/man/man` (translated pages live under `de/man1`); and the page to render is **ranked**, or coreutils
 shows TEST(1) and openssh-client shows scp. `stripOverstrike` undoes nroff bold in four lines rather than
 shelling to `col -b`, which lives in the same package whose absence already costs the login records.
-
-Security findings without an authorized direct remedy open their owning controls: dashboard network
-allowlist, firewall, SSH, intrusion, listener ownership, certificates or host packages. Firewall and SSH
-remedies retain their administrator/destructive gates and existing confirmations. Inspection remains
-available to limited roles without advertising a mutation they cannot carry out.

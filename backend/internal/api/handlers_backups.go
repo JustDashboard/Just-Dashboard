@@ -124,10 +124,8 @@ func (s *Server) handleBackupJobList(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	now := time.Now()
 	for _, j := range jobs {
 		j.NextRun = s.modules.backupSched.NextRun(j.ID)
-		j.Overdue = j.IsOverdue(now)
 	}
 	httpx.JSON(w, http.StatusOK, jobs)
 	return nil
@@ -221,7 +219,6 @@ func (s *Server) handleBackupJobGet(w http.ResponseWriter, r *http.Request) erro
 		return mapBackupError(err)
 	}
 	job.NextRun = s.modules.backupSched.NextRun(id)
-	job.Overdue = job.IsOverdue(time.Now())
 	httpx.JSON(w, http.StatusOK, job)
 	return nil
 }

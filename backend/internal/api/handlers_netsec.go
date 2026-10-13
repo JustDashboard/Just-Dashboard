@@ -265,3 +265,5 @@ func (s *Server) handleExposure(w http.ResponseWriter, r *http.Request) error {
 	httpx.JSON(w, http.StatusOK, exposure)
 	return nil
 }
+
+const failedLoginWindow = 7 * 24 * time.Hour

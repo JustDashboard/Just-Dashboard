@@ -3,21 +3,12 @@
 import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { get } from "@/lib/api"
-import type { Certificate, Listener, ProxyFindingSnooze, StreamStatus, VHost } from "@/lib/types"
+import type { Certificate, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useNavMarks } from "@/components/nav-scope"
-import { useNow } from "@/components/deploy/vocabulary"
 import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-context"
 import { reading } from "@/components/proxy/freshness"
 import { useConfigTest } from "@/components/proxy/test-result"
-import { certificateFindings } from "@/components/proxy/findings/certificates"
-import { siteFindings } from "@/components/proxy/findings/sites"
-import { streamFindings } from "@/components/proxy/findings/streams"
-import { portFindings } from "@/components/proxy/findings/ports"
-import type { ProxyFinding } from "@/components/proxy/findings/shared"
-import { frontDoorFindings } from "@/components/proxy/front-door"
-import { splitSnoozed } from "@/components/proxy/finding-snooze"
 
 /**
  * The proxy is eight pages — the overview, the sites, the certificates, what
@@ -57,13 +48,6 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
   const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 15_000)
   const configTest = useConfigTest({ status: status.data?.value, admin })
 
-  useProxyMarks({
-    vhosts: vhosts.error ? undefined : vhosts.data?.value,
-    certs: certs.error ? undefined : certs.data?.value,
-    streams: streams.error ? undefined : streams.data?.value,
-    ports: ports.error ? undefined : ports.data?.value,
-  })
-
   const refreshShared = () => {
     status.refresh()
     vhosts.refresh()
@@ -94,39 +78,6 @@ export default function ProxyLayout({ children }: { children: React.ReactNode })
       {configTest.panel}
     </ProxyProvider>
   )
-}
-
-/**
- * A mark on each page in the rail that holds a warning or worse the reader
- * has not put aside. A notice is not marked: a site left disabled on purpose
- * would light the rail for good. A list that could not be read marks
- * nothing, since its page says so itself.
- */
-function useProxyMarks({
-  vhosts,
-  certs,
-  streams,
-  ports,
-}: {
-  vhosts?: VHost[]
-  certs?: Certificate[]
-  streams?: StreamStatus
-  ports?: Listener[]
-}) {
-  const now = useNow(60_000)
-  const snoozes = usePoll(
-    (signal) => get<ProxyFindingSnooze[]>("/proxy/findings/snoozes", undefined, signal),
-    60_000,
-  )
-  const held = snoozes.error ? [] : (snoozes.data ?? [])
-  const pressing = (findings: ProxyFinding[]) =>
-    splitSnoozed(findings, held, now).shown.some((f) => f.level !== "notice")
-  useNavMarks({
-    "/proxy/sites": pressing(siteFindings({ vhosts })),
-    "/proxy/certificates": pressing(certificateFindings({ certs })),
-    "/proxy/streams": pressing(streamFindings({ streams })),
-    "/proxy/ports": pressing([...portFindings({ ports }), ...frontDoorFindings({ ports, vhosts })]),
-  })
 }
 
 /** Where `g` then a letter goes. */

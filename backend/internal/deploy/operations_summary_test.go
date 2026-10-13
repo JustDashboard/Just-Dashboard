@@ -239,10 +239,6 @@ func TestOperationsSummaryReadsEveryOwnerOnceAndDiagnosesNothing(t *testing.T) {
 		operations.Dependencies.Items[0].ResourceKind != "database_connection" {
 		t.Fatalf("dependencies = %#v", operations.Dependencies)
 	}
-	if len(operations.Diagnosis.Findings) != 0 || len(operations.Diagnosis.Silences) != 0 {
-		t.Fatalf("healthy operations diagnosed %v / %v",
-			findingCodes(operations.Diagnosis), silenceSubjects(operations.Diagnosis))
-	}
 	// Four resources, one inventory call. Rendering four rows must not become
 	// four reads of the owning module.
 	if got := dependencies.calls.Load(); got != 1 {
@@ -278,18 +274,12 @@ func TestOperationsSummaryRendersUnavailableEvidenceForEveryAbsentModule(t *test
 			t.Fatalf("%s section = status %q reason %q, want unavailable with a reason", name, section[0], section[1])
 		}
 	}
-	if len(operations.Diagnosis.Findings) != 0 {
-		t.Fatalf("absent modules produced claims %v", findingCodes(operations.Diagnosis))
-	}
-	if operations.Diagnosis.Status != "partial" || len(operations.Diagnosis.Silences) == 0 {
-		t.Fatalf("diagnosis = %#v", operations.Diagnosis)
-	}
 	if operations.Domains.SiteName != deploymentRouteName(fixture.envID) {
 		t.Fatalf("site name = %q", operations.Domains.SiteName)
 	}
 }
 
-func TestOperationsSummaryReportsOwnerObservedFailuresAsDiagnosableFindings(t *testing.T) {
+func TestOperationsSummaryReportsOwnerObservedResourceState(t *testing.T) {
 	t.Parallel()
 	fixture, _ := liveOperationsFixture(t)
 	owners, dependencies, proxy := healthyOperationsOwners(fixture.envID)
@@ -302,15 +292,11 @@ func TestOperationsSummaryReportsOwnerObservedFailuresAsDiagnosableFindings(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	codes := findingCodes(operations.Diagnosis)
-	for _, wanted := range []string{"storage_missing", "certificate_expired", "backup_stale"} {
-		if !contains(codes, wanted) {
-			t.Fatalf("expected %q in %v", wanted, codes)
-		}
+
+	if operations.Storage.Status != statusAvailable || len(operations.Storage.Mounts) == 0 || operations.Storage.Mounts[0].Status != "missing" {
+		t.Fatalf("storage: %+v", operations.Storage)
 	}
-	if operations.Diagnosis.Status != "assessed" {
-		t.Fatalf("status = %q, want assessed: every owner answered", operations.Diagnosis.Status)
-	}
+
 }
 
 // Another site claiming the deployment's hostname is a critical finding, and it
@@ -329,9 +315,6 @@ func TestOperationsSummaryDetectsForeignProxyOwnershipOfADeploymentDomain(t *tes
 	if operations.Domains.Domains[0].Route != "foreign" || operations.Domains.Domains[0].ServedBy != "legacy.conf" {
 		t.Fatalf("domain = %#v", operations.Domains.Domains[0])
 	}
-	if !contains(findingCodes(operations.Diagnosis), "domain_foreign_route") {
-		t.Fatalf("findings = %v", findingCodes(operations.Diagnosis))
-	}
 }
 
 func TestOperationsSummaryForUndeployedProjectNamesItsMissingReleaseInsteadOfGuessing(t *testing.T) {
@@ -349,9 +332,6 @@ func TestOperationsSummaryForUndeployedProjectNamesItsMissingReleaseInsteadOfGue
 	if dependencies.calls.Load() != 0 || proxy.vhostCalls.Load() != 0 {
 		t.Fatalf("undeployed project read owners: %d dependency, %d proxy",
 			dependencies.calls.Load(), proxy.vhostCalls.Load())
-	}
-	if len(operations.Diagnosis.Findings) != 0 {
-		t.Fatalf("undeployed project produced claims %v", findingCodes(operations.Diagnosis))
 	}
 }
 

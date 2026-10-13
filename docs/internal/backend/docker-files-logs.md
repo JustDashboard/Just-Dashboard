@@ -134,21 +134,10 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   compose service, rendered **on the server** so "what does this spec mean" has one implementation. The
   YAML is hand-written, not marshalled — key order carries meaning and a marshaller would sort it into
   something correct and unreadable.
-- **`diagnose.go` is what nothing else in this class has.** Every panel shows a state, an exit code and a
-  restart count and leaves you to read them; this says what 137 means and what the limit was, that a
-  container restarted twelve times in a minute, that a health check is failing and what it last said,
-  that a port is published in front of the firewall, that an unrotated json-file log has reached 800 MB,
-  that data is being written into the container rather than a volume. Deliberately conservative — a panel
-  that cries wolf is ignored wholesale — and `diagnose_test.go` pins the claims, including the
-  **silences** (a finished one-shot job, a loopback-bound port, a well-configured container).
-- **`attention.go` splits the two questions one word was answering.** `Diagnosis.Status` was the worst of
-  a list mixing "this container is not running" with "this container is more exposed than it needs to
-  be", and the overview labelled it *Health* — so a server whose containers were all up and one of which
-  mounted the Docker socket read "All good" above a page of warnings. Runtime health is Docker's own
-  report, counted from the container list so it can say how many are *fine*; Attention is posture,
-  storage, configuration and exposure, which never clears itself. Every finding carries a four-level
-  `Severity` (a recommendation is not a warning) and a `Class` deciding which summary it belongs to;
-  `Level` is derived from `Severity` by `normalizeFinding` so the two cannot drift.
+- Docker inventory reports the Engine's container state, health checks and recorded events.
+  The advisory diagnosis and anomaly scans, `/docker/health`, `/containers/{id}/failure` and
+  `/containers/{id}/anomalies` were removed in 0.7.5. Pages do not collect or display attention findings.
+  `format.go` retains formatting and native health-check presence for inventory consumers.
 - **`exposure.go` is the one definition of what a published port means.** `0.0.0.0:5432` and
   `127.0.0.1:5432` differ by a character and by everything else, and three places computed "is this
   public" with three slightly different rules. The vocabulary is about *binding*, never reachability:
@@ -159,14 +148,9 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   `:latest` to an id, so the daemon read it as the repository `sha256` with a hex tag and answered
   *invalid reference format: repository name (library/sha256…) must be lowercase* — which made every
   dangling image unopenable, since an id is its only handle.
-- **`failure.go`, `writable.go` and `anomaly.go` are the derived layer.** `DiagnoseFailure` assembles exit
-  code, OOM flag, health history and restart cadence into a cause and labels it *likely*, because it is
-  an inference; the cadence comes from the event log, since `RestartCount` cannot tell 17 restarts in
-  twelve minutes from 40 across a year. `AnalyzeWritableLayer` runs one `du` inside the container through
-  `ExecCheck` with explicit argv, reports which directories are not backed by a mount, and states its own
-  failure modes rather than returning an empty result. `PlanMigration` writes the move to a volume out as
-  steps and commands and **never performs it**. `DetectAnomalies` reads the recorded history for a level
-  *held* rather than a spike, a memory floor that only rises, and a writable layer growing by the day.
+- **`writable.go` measures container storage.** `AnalyzeWritableLayer` runs `du` through `ExecCheck`
+  with explicit argv and reports its own failures. `PlanMigration` prepares steps and commands without
+  executing them. These requested storage tools remain independent of the removed advisory scans.
 - **`events.go` keeps what Docker throws away**, so "why did this restart at 04:00" has an answer. An
   in-memory ring: an event log worth keeping across restarts belongs in the audit table. `oom` and
   `health_status: unhealthy` justify the feature alone. `EventFilter{Kinds, Search, Container, Stack}`
@@ -954,45 +938,14 @@ failures report the retained original's parking name.
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
 
-## Actionable Docker findings
+## Container configuration
 
-Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
-Attention keeps observed warning and critical findings; routine recommendations remain actionable
-in the container's Configure tab.
-Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
-interruption and loss of logs/writable-layer data. Compose configuration remedies open the owning stack
-so the source configuration can be changed durably. Storage and reachability actions focus the relevant
-container tab; findings without an automatic remedy can still open configuration evidence. Permission
-fallbacks name inspection instead of claiming an unavailable mutation. Group and singleton dismissals
-use the same finding-kind key; Rescan restores them without changing the server diagnosis.
-
-The resource editor uses the backend's **PATCH** route. RAM-only updates preserve existing swap
-headroom (including explicitly unlimited swap); previously unset swap gets Docker's equal-RAM swap
-allowance. Explicit combined limits are kept. Empty, negative and overflowing updates are refused;
-Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
-keep the running PID and start timestamp.
-
-A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
-entry already returned by that validated directory listing. An explicit click or deselection overrides
-the URL's initial selection. Paths still pass through the existing file service boundary.
-
-Standalone Configuration offers local preparation for readiness commands, image version/digest pins,
-port bindings, privileged mode and Docker socket mounts, plus the full supported replacement spec.
-Only administrators edit the replacement specification because it includes credentials and host
-settings. Restart-policy changes remain available to operators with `service.control`, through the
-existing in-place remedy and confirmation. Preview renders the
-reviewed spec; application readiness is not promised. Applying requires destructive capability and
-reviewed confirmation, reports Engine warnings and navigates to the returned replacement ID. Auto-remove
-containers cannot use this replacement path. Supported settings are carried through; Inspect remains the
-source for additional Engine options. Compose remedies open `?tab=compose&remedy=` with a service-level
-example, then use the existing validation/save/deploy workflow. Live limits link the owning file too.
-Removing Just Dashboard's required socket/host access is explicitly described as breaking its controls.
-
-Docker diagnosis reports unread inspections, disk accounting and log files in `silences`; running
-containers with unread inspections increment runtime `unknown`, rather than `noHealthcheck`. The
-Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
-and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
-its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.
+The Configuration tab uses `components/docker/container-configuration.tsx` for manual editing.
+Compose containers open their owning Compose file. Standalone specifications are read only for an
+administrator, include the supported credentials and host settings, and are previewed before a
+confirmed replacement. The previous configuration is restored if replacement fails. The editor does
+not scan for changes to recommend. Restart policy, resource updates, cleanup and storage APIs retain
+capability, audit, confirmation and ownership checks. Resource updates use the existing PATCH route.
 
 ### Advanced network native acceptance
 

@@ -21,8 +21,9 @@ test("the page opens on where the data goes, not on four figures", async ({ page
   await page.goto("/backups")
   await expect(page.getByRole("heading", { name: "Backups" })).toBeAttached()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
-  // Only jobs are findings: what is not covered is the coverage list's.
-  await expect(page.getByText("Databases nightly failed", { exact: false }).first()).toBeVisible()
+  await expect(jobCards(page).first()).toContainText("Databases nightly")
+  await expect(jobCards(page).first()).toContainText("failed")
+  await expect(page.getByRole("region", { name: "Attention", exact: true })).toHaveCount(0)
   await expect(page.getByText(/things on this server have no backup/)).toHaveCount(0)
   // The totals the Stored tile carried are the jobs' header now, and the picture's middle.
   await expect(page.getByText("3 jobs · 3.7 GB in 29 archives")).toBeVisible()

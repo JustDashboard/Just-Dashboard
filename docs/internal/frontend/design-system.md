@@ -9,6 +9,11 @@ Two earlier documents and the lint plugin's own header pointed at
 `docs/plans/design-system-unification/reference.md`, which was never committed on any branch. This
 file replaces that reference.
 
+Current product behavior (0.7.5): automatic Attention/Needs attention sections, recommendation
+comparisons, Advisor and navigation attention marks have been removed. Historical layout examples
+below describe the earlier pages; their attention blocks are no longer part of those page passes.
+Requested diagnostic reports and operational validation remain.
+
 ## 1. One mode
 
 **The product is dark. There is no light palette, and there is no theme switch.**

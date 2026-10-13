@@ -1,5 +1,7 @@
 "use client"
 
+import { fixTarget } from "@/components/deploy/failure-cause"
+
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { DeploymentPreflightFinding } from "@/lib/types"
@@ -158,3 +160,42 @@ export function FindingRow({
     </div>
   )
 }
+
+export function runValidationFindings(findings: DeploymentPreflightFinding[]) {
+  return findings.filter((finding) => finding.severity !== "pass")
+}
+
+export function settingsPathForField(fieldId: string | undefined) {
+  if (!fieldId) return undefined
+  return FIELD_PAGES.find(
+    (entry) => fieldId === entry.prefix || fieldId.startsWith(`${entry.prefix}.`),
+  )?.path
+}
+
+export function findingFixAction(
+  projectId: number,
+  finding: DeploymentPreflightFinding,
+  navigate: (href: string) => void,
+) {
+  const target = finding.fix && fixTarget(projectId, finding.fix)
+  return target ? { label: target.label, onApply: () => navigate(target.href) } : undefined
+}
+
+const FIELD_PAGES: { prefix: string; path: string }[] = [
+  { prefix: "configuration.build.releaseTasks", path: "/settings/build#release-tasks" },
+  { prefix: "configuration.build.rootDirectory", path: "/settings/build#commands" },
+  { prefix: "configuration.build.startCommand", path: "/settings/build#commands" },
+  { prefix: "configuration.build.buildCommand", path: "/settings/build#commands" },
+  { prefix: "configuration.build.outputDirectory", path: "/settings/build#commands" },
+  { prefix: "configuration.build", path: "/settings/build" },
+  { prefix: "build.startCommand", path: "/settings/build#commands" },
+  { prefix: "build", path: "/settings/build" },
+  { prefix: "source", path: "/settings/general#source" },
+  { prefix: "detection", path: "/settings/build" },
+  { prefix: "runtime.mounts", path: "/settings/storage" },
+  { prefix: "runtime", path: "/settings/runtime" },
+  { prefix: "checks", path: "/settings/runtime#health-checks" },
+  { prefix: "domains", path: "/settings/domains" },
+  { prefix: "variables", path: "/settings/variables" },
+  { prefix: "dependencies", path: "/settings/databases" },
+]

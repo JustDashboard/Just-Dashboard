@@ -34,12 +34,12 @@ const stat = (id, cpuPercent, memUsage, over = {}) => ({ id, cpuPercent, memUsag
 describe("stackBucket", () => {
   // Every stack is counted under exactly one chip, so the chips add up to the
   // stack count and none of them double-counts a stack that is up but wrong.
-  test("puts each stack in one bucket, attention first", () => {
+  test("puts each stack in one bucket, by observed running state", () => {
     expect(stackBucket(stack("a"))).toBe("running")
-    expect(stackBucket(stack("a", { state: "partial" }))).toBe("attention")
-    expect(stackBucket(stack("a", { orphans: ["old"] }))).toBe("attention")
+    expect(stackBucket(stack("a", { state: "partial" }))).toBe("running")
+    expect(stackBucket(stack("a", { orphans: ["old"] }))).toBe("running")
     expect(stackBucket(stack("a", { services: [service("api", { health: "unhealthy" })] }))).toBe(
-      "attention",
+      "running",
     )
     expect(stackBucket(stack("a", { running: 0, state: "stopped" }))).toBe("stopped")
     expect(
@@ -63,7 +63,7 @@ describe("stackLines", () => {
       [],
       {},
     )
-    expect(lines.map((l) => l.stack.name)).toEqual(["monitoring", "alpha", "zeta", "mail", "wiki"])
+    expect(lines.map((l) => l.stack.name)).toEqual(["alpha", "monitoring", "zeta", "mail", "wiki"])
   })
 
   // The socket moves the moment Docker does; the stack list is a poll, so a

@@ -79,10 +79,6 @@ type Job struct {
 	// LastSuccessAt is when the newest successful artifact was taken, so a
 	// job whose last attempt failed still says when it was last protected.
 	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
-	// Overdue says a scheduled job has gone two intervals without a
-	// successful run. It is computed by the API from the schedule and the
-	// run history; a job that only runs by hand is never overdue.
-	Overdue bool `json:"overdue"`
 	// Stored counts the successful artifacts retention has kept and their
 	// total size, which is what the destination is being charged for.
 	Stored StoredSummary `json:"stored"`

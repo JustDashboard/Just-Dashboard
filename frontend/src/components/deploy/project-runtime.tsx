@@ -47,7 +47,6 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FormNote } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { EmptyNote, EmptyState, LoadingRows, Notice } from "@/components/state"
@@ -81,7 +80,6 @@ import { JobCard } from "@/components/backups/job-card"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { ServiceDetails } from "@/components/deploy/runtime-details"
-import { ServiceFailure } from "@/components/deploy/runtime-failure"
 import {
   isImageDigest,
   mountTargetProduct,
@@ -247,7 +245,6 @@ export function ProjectRuntime() {
 
   const operations = project.operations
   const loading = project.operationsLoading
-  const silences = operations?.diagnosis?.silences ?? []
   const domains = operations?.domains
   const storage = operations?.storage
   const backups = operations?.backups
@@ -483,7 +480,6 @@ export function ProjectRuntime() {
               })}
             </ChoiceList>
           )}
-          <Silence subjects={["runtime"]} silences={silences} />
         </PanelBody>
       </Panel>
 
@@ -540,7 +536,6 @@ export function ProjectRuntime() {
               ))}
             </ChoiceList>
           </EvidenceBody>
-          <Silence subjects={["domains", "certificates"]} silences={silences} />
         </PanelBody>
       </Panel>
 
@@ -578,7 +573,6 @@ export function ProjectRuntime() {
                 ))}
               </ChoiceList>
             </EvidenceBody>
-            <Silence subjects={["storage"]} silences={silences} />
           </PanelBody>
         </Panel>
 
@@ -609,7 +603,6 @@ export function ProjectRuntime() {
                 ))}
               </ChoiceList>
             </EvidenceBody>
-            <Silence subjects={["backups"]} silences={silences} />
           </PanelBody>
         </Panel>
       </div>
@@ -658,7 +651,6 @@ export function ProjectRuntime() {
                 })}
               </ChoiceList>
             </EvidenceBody>
-            <Silence subjects={["dependencies"]} silences={silences} />
           </PanelBody>
         </Panel>
       )}
@@ -805,24 +797,6 @@ function EvidenceBody({
     return <EmptyNote className="px-0 py-2 text-left">{block?.reason ?? fallback}</EmptyNote>
   if (empty) return <EmptyNote className="px-0 py-2 text-left">{empty}</EmptyNote>
   return <div className="animate-rise">{children}</div>
-}
-
-/** What the diagnosis chose not to judge here, and why, under the block it concerns. */
-function Silence({
-  subjects,
-  silences,
-}: {
-  subjects: string[]
-  silences: { subject: string; reason: string }[]
-}) {
-  const matches = silences.filter((silence) => subjects.includes(silence.subject))
-  if (matches.length === 0) return null
-  return (
-    <FormNote className="pt-3">
-      <span className="font-medium text-foreground">Not assessed.</span>{" "}
-      {matches.map((silence) => silence.reason).join(" ")}
-    </FormNote>
-  )
 }
 
 /** The lifecycle verbs of Docker's menu that belong on a release's card. */
@@ -1109,13 +1083,6 @@ function ServiceCard({
             <div className="min-w-0 sm:pl-11">
               <RuntimePorts ports={ports} />
             </div>
-          )}
-          {failing && (
-            <ServiceFailure
-              containerId={service.containerId}
-              state={service.state}
-              projectId={projectId}
-            />
           )}
         </>
       )}

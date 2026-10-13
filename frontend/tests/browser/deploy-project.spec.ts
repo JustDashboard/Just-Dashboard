@@ -990,9 +990,7 @@ test("overview, logs and runtime read cleanly at phone and desktop widths", asyn
   }
 })
 
-test("the identity line describes the project as itself and leads from its state to what needs attention", async ({
-  page,
-}) => {
+test("the identity line describes the project and its native state", async ({ page }) => {
   // The showcase's run in flight, ended: a project at rest leads to its findings.
   const dashboard = await mockProject(page, { showcase: true })
   dashboard.setRunState("succeeded")
@@ -1011,10 +1009,8 @@ test("the identity line describes the project as itself and leads from its state
   await expect(
     identity.getByRole("link", { name: "Automatic deployment settings" }),
   ).toHaveAttribute("href", "/deploy/7/settings/general#automatic-deployment")
-  // The finding the diagnosis reported is one press from the state.
-  await identity.getByRole("link", { name: "1 needs attention" }).click()
-  await expect(page).toHaveURL(/\/deploy\/7#attention$/)
-  await expect(page.locator("#attention")).toContainText("A certificate expires in 9 days")
+  await expect(identity.getByRole("link", { name: "1 needs attention" })).toHaveCount(0)
+  await expect(page.locator("#attention")).toHaveCount(0)
 })
 
 test("the rail marks the settings page that holds a change not yet live", async ({ page }) => {

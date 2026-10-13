@@ -4,6 +4,24 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.7.5 — 13 October 2026
+
+**Operate without advisory panels**
+
+Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.
+
+### Changed
+
+- Show updates in a compact notice and a dedicated installation dialog
+  - The update notice compares the installed and available versions, opens the installation progress in its own dialog, and leaves the complete patch notes on the Version page.
+
+### Removed
+
+- Remove automatic attention panels, issue badges and settings recommendations
+  - Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed.
+- Retire advisory detectors and their API endpoints
+  - Docker diagnosis/anomalies, security posture, database Advisor, optional project checks, certificate hygiene and proxy finding snoozes are removed. Network attention collection no longer runs in the background. Existing database migration entries and historical records remain compatible with upgrades.
+
 ## 0.7.4 — 12 October 2026
 
 **A shorter first sign-in**

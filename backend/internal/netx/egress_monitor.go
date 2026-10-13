@@ -638,7 +638,6 @@ type EgressGroupView struct {
 	Fingerprint string             `json:"fingerprint"`
 	Table       int                `json:"table"`
 	Members     []EgressMemberView `json:"members"`
-	Advice      *EgressDecision    `json:"advice,omitempty"`
 	Runtime     *EgressRuntime     `json:"runtime,omitempty"`
 	Readiness   []EgressFinding    `json:"readiness"`
 	Events      []EgressEvent      `json:"events"`
@@ -703,10 +702,7 @@ func (s *Service) Egress(ctx context.Context) (*EgressView, error) {
 		var sources map[int]netip.Addr
 		if st != nil {
 			sources = st.sources
-			if st.advice.Action != "" {
-				advice := st.advice
-				gv.Advice = &advice
-			}
+
 		}
 		for _, mem := range g.Members {
 			mv := EgressMemberView{EgressMember: mem, Table: egressMemberTable(g.Slot, mem.ID), Mark: fmt.Sprintf("0x%x/0x%x", egressMark(g.Slot, mem.ID), egressMarkMask),

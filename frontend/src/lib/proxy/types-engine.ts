@@ -238,10 +238,7 @@ export type ProxySetting = {
   /** Server and location blocks that set it again, where this value does not apply. */
   overrides: number
   default: string
-  level: "ok" | "notice" | "warning"
-  advice: string
   /** The value Apply would write; absent when there is no one value to recommend. */
-  recommended?: string
   /** The values the directive takes, for a closed choice. */
   choices?: string[]
 }

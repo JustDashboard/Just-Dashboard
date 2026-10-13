@@ -33,19 +33,10 @@
 - `run-console.tsx` deliberately **does not** let `useSocket` reconnect: reconnecting re-issues the GET,
   and re-issuing the GET runs the command again — a redeploy fired twice because a VPN blinked is not a
   re-render. A dropped socket ends the run and says so.
-- `attention.tsx` renders priority risks and failures through the product's shared `FindingList`
-  (`components/finding-list.tsx`). Each row shows its consequence and a named action before the
-  measured evidence disclosure. Repeated risks collapse to one row; Review containers opens each
-  target's own evidence and remedy, rather than applying a group-wide change. Routine recommendations
-  remain in Configure. `ContainerFindings` filters the same diagnosis to one container. Configuration
-  remedies preserve credentials and Compose ownership, require review before replacement, and offer
-  inspection when the account cannot change the settings. Dismissal lasts until Rescan.
-  The other half — what is *fine* as well as what is not — was `RuntimeHealthPanel`, a bar of the
-  health-check counts over the containers list, because a list of problems can never say "eight
-  healthy, four with no health check at all" and that last number is what stops "all healthy" meaning
-  "nothing is being watched". The 0.7.1 containers overhaul moved those counts to where they are read:
-  the page's identity line says how many running containers a passing health check vouches for, and
-  every running row says its own verdict, "no health check" included.
+- Docker pages display native state, usage, events and manually editable configuration. The attention
+  list, per-container issue badges, advisory Configuration cards and anomaly/failure suggestion panels
+  were removed in 0.7.5. `container-configuration.tsx` retains reviewed manual replacement; Compose
+  configuration remains owned by its stack. No page polls the deleted advisory endpoints.
 - The containers page (`app/(dashboard)/docker/containers/page.tsx`) is three parts under the engine's
   identity line. `container-band.tsx` draws the five containers using the most processor and memory
   as spans of one bar the size of the host (the Processes band's `ShareBar`), figures gliding to each
@@ -66,8 +57,8 @@
   shows the full trace — binding, reverse proxy, firewall — with the reasoning behind each verdict and
   an explicit *inferred* where one was worked out rather than read.
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
-  memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
-  as 100%), and a Status column carrying the worst security finding underneath the runtime state.
+  memory against an explicit container limit, CPU with its denominator stated (Docker counts one core
+  as 100%), and Docker's runtime state. The security finding underneath that state was removed.
 - `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
   table read the containers socket, so the overview's figures move with every frame where the four
   tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
@@ -114,7 +105,7 @@ that does something.
   container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
   server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
-  published, and the attention verdict that presses the Needs attention chip), then `stack-band.tsx`
+  published), then `stack-band.tsx`
   (the five stacks using the most processor and memory as spans of one bar the size of the machine,
   summed over each stack's containers from the containers socket, a press narrowing the table to that
   stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
@@ -173,8 +164,7 @@ that does something.
   The outline, the line diff, what each service reads from the directory and the history's spans are
   `stack-views.ts`, unit-tested. The stack's menu opens a shell in its directory. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
-  URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
-  Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its
+  URL), the writable-layer investigator, and its logs through the lens its
   image names with an Events view beside them (`container-events.tsx`: the health check's probes,
   Docker's events for the container with crash loops folded and an exit's last lines under it),
   editable limits, raw inspect, every verb `container-actions.tsx` declares (the lifecycle as words
@@ -183,9 +173,8 @@ that does something.
   it days later. The page opens on the container's identity line (`container-identity.tsx`: its
   product with its state in the tile's corner, image, project, ticking uptime, restart policy in
   words, the id, and the verdict from `container.ts`, which reads a crash loop and a failing health
-  check as failing where Docker says "restarting" and "running"), and its Overview on the failure
-  notice, four live readings off its stats socket with their last hour (`container-readings.tsx`),
-  its findings, a picture of how it is reached and what it keeps (`container-picture.tsx`), the
+  check as failing where Docker says "restarting" and "running"), and its Overview on four live
+  readings off its stats socket with their last hour (`container-readings.tsx`), a picture of how it is reached and what it keeps (`container-picture.tsx`), the
   containers of its compose project — or of its own networks — as a live table
   (`container-company.tsx`), its recent events with loops folded (`container-recent.tsx`), how it
   runs, and its ports and networks as tables (`container-tables.tsx`, which also draws the
@@ -214,11 +203,10 @@ that does something.
   (`container-inspect-tab.tsx`, logic in `inspect.ts`) is the run page's Details shape: one frame
   around a rail of the inspect document's sections and the picked one as coloured JSON in the `CODE`
   hues, folding, filterable, credentials still masked and never matched by the filter.
-  **Configuration** (`configuration-remedy.tsx`) is Health's: each finding a lit card on its level's
-  wash that prepares its change (or, compose-owned, opens the service with its YAML coloured), the
-  settings those findings touch as rows in their tone, and the replacement specification as one framed
-  editor whose head names the edited fields in `--git-modified`, a `BorderBeam` and "Replacing…" while
-  it runs. **Shell** (`container-shell-tab.tsx`) is the deploy Console's: one pane, its strip saying
+  **Configuration** (`container-configuration.tsx`) opens the owning Compose file or presents the
+  administrator's manual replacement specification. The framed editor names edited fields and previews
+  the submitted specification before replacement is confirmed; it preserves the reviewed credentials
+  and mounts. A `BorderBeam` and "Replacing…" show the in-flight operation. **Shell** (`container-shell-tab.tsx`) is the deploy Console's: one pane, its strip saying
   `account@container` (root in amber) and the working directory, the run-as switch where the image
   declares a user, and read-only first commands (`id`, `ls -la`, `ps aux`, `df -h`, the OS release)
   that type themselves into the session — no `env`, which would print every credential the
@@ -247,7 +235,7 @@ the click: the page reports it, and a container removed from its own page return
 back/forward restore them; closing clears only that selection parameter.
 
 **Security and proxy** (`components/security/`, `components/proxy/`) follow the same rule — teaching next
-to the control, not in a banner above it. `posture-panel.tsx` names the finding's owning controls;
+to the control, not in a banner above it. Security pages open their owning controls directly;
 SSH fixes focus their directive and retain the full access preview, confirmation and recovery flow.
 Firewall findings open enforcement review, and allowlist findings open Access in configuration.
 `rule-form.tsx` is why the catalogue lives on
@@ -262,23 +250,18 @@ protocol row.
 
 The security section has four reading pages (§15–16): the overview, SSH, Intrusion and Logins.
 The firewall, connections, interfaces and tools moved to the Network section in 0.7.1 and are
-described with it below; the overview's Firewall and Connections tiles open them there. The overview opens on the exposure identity
-line, then the posture's seven checks as a coloured strip (`posture-strip.tsx`; a dashed segment is
-a check that could not run, and a segment narrows the findings to its area), then five area
-readings, then the ways onto the machine as a wiring picture (`perimeter.tsx`: the internet through
-the firewall, fail2ban and sshd, and this browser through the allowlist to the dashboard) in the
-deployment section's `WireNode` and `AnimatedBeam` vocabulary. It describes the layers and their
-states, not the reach of every port on the host. Under it the **Access boundary** lists the five
-boundaries every change is judged against — Caddy-only ingress, the allowlist, the tailnet, SSH for
-a tunnel, tailnet-only previews — each held, broken or unknown (`boundary-view.tsx`). The finding
-severity counts sit in the Findings head.
+described with it below; the overview's Firewall and Connections tiles open them there. The overview
+opens on the observed access identity line, then area readings and the ways onto the machine as a
+wiring picture (`perimeter.tsx`: internet through firewall, fail2ban and sshd, and this browser
+through the allowlist). The **Access boundary** lists Caddy-only ingress, allowlist, tailnet, SSH
+tunnels and preview boundaries as held, broken or unknown. Automatic posture findings and their
+strip were removed in 0.7.5.
 
 - **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
   with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
   shows its effect before it is applied. Authentication, access, session limits and other
   directives are `FormSection aside` groups, two to a row from `xl`, each marked *Edited* while it
-  holds a staged change. Every control occupies the same column; recommendations sit with the
-  setting, explanatory detail is available beside its label, and a sticky apply bar naming what
+  holds a staged change. Every control occupies the same column; explanatory detail is available beside its label, and a sticky apply bar naming what
   changed applies the values together. Reverting a draft to its effective value removes it from the change set. The apply
   dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
   administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
@@ -328,8 +311,8 @@ severity counts sit in the Findings head.
 **The Network section** (`app/(dashboard)/network/`, `components/network/`) is eleven reading pages
 over the network module; [`feature-map.md`](feature-map.md) lists each and
 [`design-system.md`](design-system.md) §15 records how they are drawn. Its layout renders the same
-`SecurityState` the Security section does, so the moved firewall keeps its posture findings and every
-page knows the reader's address. The pages that moved keep their behaviour:
+`SecurityState` the Security section does, so every page knows the reader's address and observed
+service state. The pages that moved keep their behaviour:
 
 - **Firewall** (`/network/firewall`): the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
   rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers

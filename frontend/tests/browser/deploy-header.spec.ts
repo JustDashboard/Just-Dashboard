@@ -48,22 +48,14 @@ test("the project header is one compact row that keeps its readings apart across
     await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
     await expect(identity.getByText("Release #2", { exact: true })).toBeVisible()
     await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
-    await expect(identity.getByText("No priority issues found", { exact: true })).toBeVisible()
+    await expect(identity.getByText("No priority issues found", { exact: true })).toHaveCount(0)
+    await expect(identity.locator('a[href="#attention"]')).toHaveCount(0)
     await expect(
       identity.getByRole("link", { name: "Automatic deployment settings" }),
     ).toHaveAttribute("href", "/deploy/7/settings/general#automatic-deployment")
     // The rail leads back and the address leads to the site: neither is repeated here.
     await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
     await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
-    const [state, assessment] = await Promise.all(
-      ["Ready", "No priority issues found"].map((label) =>
-        identity.getByText(label, { exact: true }).boundingBox(),
-      ),
-    )
-    // The state and the assessment share a line now; they collided when they first did.
-    expect(
-      assessment!.y >= state!.y + state!.height || assessment!.x >= state!.x + state!.width,
-    ).toBe(true)
     // It repeats above every project page, so on a desktop it is the height of
     // its tile and command rather than a block the page's content waits under.
     if (width >= 1280) expect((await identity.boundingBox())!.height).toBeLessThanOrEqual(64)

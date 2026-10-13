@@ -1,6 +1,29 @@
 {
-  "latest": "0.7.4",
+  "latest": "0.7.5",
   "releases": [
+    {
+      "version": "0.7.5",
+      "date": "2026-10-13",
+      "title": "Operate without advisory panels",
+      "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
+      "changes": [
+        {
+          "kind": "removed",
+          "text": "Remove automatic attention panels, issue badges and settings recommendations",
+          "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."
+        },
+        {
+          "kind": "removed",
+          "text": "Retire advisory detectors and their API endpoints",
+          "detail": "Docker diagnosis/anomalies, security posture, database Advisor, optional project checks, certificate hygiene and proxy finding snoozes are removed. Network attention collection no longer runs in the background. Existing database migration entries and historical records remain compatible with upgrades."
+        },
+        {
+          "kind": "changed",
+          "text": "Show updates in a compact notice and a dedicated installation dialog",
+          "detail": "The update notice compares the installed and available versions, opens the installation progress in its own dialog, and leaves the complete patch notes on the Version page."
+        }
+      ]
+    },
     {
       "version": "0.7.4",
       "date": "2026-10-12",

@@ -11,7 +11,6 @@ import {
   Logs,
   MagnifyingGlass,
   SettingsGear,
-  Shield,
   Sparkles,
   Table,
   Terminal,
@@ -68,7 +67,6 @@ export type SectionId =
   | "diagram"
   | "generate"
   | "performance"
-  | "advisor"
   | "logs"
   | "access"
   | "backups"
@@ -265,8 +263,6 @@ const NO_CAPABILITIES: DbCapabilities = {
   privileges: false,
   statements: false,
   statementsReset: false,
-  advisor: false,
-  engineAdvisor: false,
   queryLog: false,
   clickhouseViews: false,
   sqliteFile: false,
@@ -351,12 +347,12 @@ export const CAPABILITY_NAMES = Object.keys(NO_CAPABILITIES) as DbCapabilityName
  * is off until then, so nothing is offered that the server has not vouched for.
  */
 const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
-  postgres: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
-  mysql: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
-  sqlite: ["sql", "console", "dump", "orm", "advisor"],
-  sqlserver: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
-  clickhouse: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
-  oracle: ["sql", "console", "server", "dump", "orm", "advisor"],
+  postgres: ["sql", "console", "server", "dump", "orm", "roles"],
+  mysql: ["sql", "console", "server", "dump", "orm", "roles"],
+  sqlite: ["sql", "console", "dump", "orm"],
+  sqlserver: ["sql", "console", "server", "dump", "orm", "roles"],
+  clickhouse: ["sql", "console", "server", "dump", "orm", "roles"],
+  oracle: ["sql", "console", "server", "dump", "orm"],
   mongodb: ["console", "server", "dump", "roles"],
   redis: ["console", "server", "dump", "roles"],
 }
@@ -621,7 +617,7 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "mongosh",
     env: "MONGODB_URI",
     editor: "json",
-    absent: { advisor: "The advisor's checks are written for SQL engines." },
+    absent: {},
     command: (cli, { url }) => `${cli} ${shellWord(url)}`,
     clients: [
       {
@@ -660,7 +656,7 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "redis-cli",
     env: "REDIS_URL",
     editor: "redis",
-    absent: { advisor: "The advisor's checks are written for SQL engines." },
+    absent: {},
     command: (cli, { url }) => `${cli} -u ${shellWord(url)}`,
     clients: [
       {
@@ -805,15 +801,6 @@ const SECTIONS: SectionSpec[] = [
     thing: "performance readings",
   },
   {
-    id: "advisor",
-    group: "insights",
-    title: "Advisor",
-    icon: Shield,
-    kinds: OPENED,
-    needs: "advisor",
-    thing: "advisor",
-  },
-  {
     id: "logs",
     group: "insights",
     title: "Logs",
@@ -886,7 +873,6 @@ const CARRIES: Partial<Record<EngineKind, Partial<Record<SectionId, readonly Sel
     diagram: ["schema"],
     generate: ["schema"],
     performance: ["schema"],
-    advisor: ["schema"],
   },
   document: {
     data: ["db", "collection"],

@@ -1,10 +1,7 @@
 "use client"
-
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { securityRemedy } from "@/lib/security-remedies"
 import { get } from "@/lib/api"
-import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/types"
+import type { Exposure, FirewallStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { SecurityProvider } from "@/components/security/security-context"
 
@@ -21,32 +18,19 @@ import { SecurityProvider } from "@/components/security/security-context"
  * unavailable check is information here, not an error.
  */
 export function SecurityState({ children }: { children: React.ReactNode }) {
-  const router = useRouter()
-  const { can } = useAuth()
-
-  const posture = usePoll<Posture>((signal) => get("/security/posture", undefined, signal), 120_000)
+  const {} = useAuth()
   const firewall = usePoll<FirewallStatus>((signal) => get("/firewall/", undefined, signal), 20_000)
   const exposure = usePoll<Exposure>((signal) => get("/exposure", undefined, signal), 60_000)
-
-  // Changes are reviewed at their owning controls, including their access checks and recovery flow.
-  const applyFix = (finding: SecurityFinding) => {
-    const remedy = securityRemedy(finding, can)
-    if (remedy.href) router.push(remedy.href)
-  }
 
   return (
     <SecurityProvider
       value={{
-        posture: posture.data,
-        postureLoading: posture.loading,
         firewall: firewall.data,
         firewallLoading: firewall.loading,
         firewallError: firewall.error,
         firewallLastSuccess: firewall.lastSuccess,
         exposure: exposure.data,
-        refreshPosture: posture.refresh,
         refreshFirewall: firewall.refresh,
-        applyFix,
       }}
     >
       {children}

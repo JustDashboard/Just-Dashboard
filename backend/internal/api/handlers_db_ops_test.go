@@ -15,7 +15,6 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // The operations routes, driven through the whole router: the allowlist, the
@@ -719,89 +718,6 @@ func TestCancelOnAnEngineWithNoSessionsSaysSo(t *testing.T) {
 	}
 }
 
-// The findings only this dashboard can make. A database nobody has dumped is
-// said to have no backup; one whose newest dump is old is said to have a
-// stale one; and a viewer is told which checks were an administrator's.
-func TestAdvisorAddsWhatOnlyTheDashboardKnows(t *testing.T) {
-	h := newOpsHarness(t)
-	type report struct {
-		Findings []dbx.Advice `json:"findings"`
-		Silences []string     `json:"silences"`
-	}
-	read := func(c *client) report {
-		t.Helper()
-		rec := c.do(http.MethodGet, h.base+"/advisor", "", nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("advisor: %d %s", rec.Code, rec.Body.String())
-		}
-		var out report
-		decodeOps(t, rec, &out)
-		return out
-	}
-	find := func(r report, id string) *dbx.Advice {
-		for i := range r.Findings {
-			if r.Findings[i].ID == id {
-				return &r.Findings[i]
-			}
-		}
-		return nil
-	}
-
-	first := read(h.viewer)
-	none := find(first, "no-backup")
-	if none == nil || none.Category != dbx.AdviceReliability || none.Link != h.base[len("/api/v1"):]+"/backups" || len(none.Targets) != 1 {
-		t.Fatalf("no-backup finding: %+v in %+v", none, first.Findings)
-	}
-	said := false
-	for _, s := range first.Silences {
-		said = said || strings.Contains(s, "administrator")
-	}
-	if !said {
-		t.Errorf("a viewer was not told which checks were skipped: %v", first.Silences)
-	}
-	for _, s := range read(h.admin).Silences {
-		if strings.Contains(s, "administrator") {
-			t.Errorf("an administrator was told a check was skipped: %s", s)
-		}
-	}
-	// Every finding is in one of the four categories and names its object;
-	// every link is a page of this connection.
-	for _, f := range first.Findings {
-		switch f.Category {
-		case dbx.AdviceSecurity, dbx.AdvicePerformance, dbx.AdviceReliability, dbx.AdviceMaintenance:
-		default:
-			t.Errorf("%s has category %q", f.ID, f.Category)
-		}
-		if len(f.Targets) == 0 {
-			t.Errorf("%s names no object", f.ID)
-		}
-		if f.Link != "" && !strings.HasPrefix(f.Link, fmt.Sprintf("/databases/%d/", h.id)) {
-			t.Errorf("%s links to %q", f.ID, f.Link)
-		}
-	}
-
-	dir := h.s.dbDumpDir("opsdb")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	dump := filepath.Join(dir, "ops-20260101-000000.sqlite")
-	if err := os.WriteFile(dump, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fresh := read(h.viewer)
-	if find(fresh, "no-backup") != nil || find(fresh, "stale-backup") != nil {
-		t.Errorf("a fresh dump still produced a backup finding: %+v", fresh.Findings)
-	}
-	old := time.Now().Add(-10 * 24 * time.Hour)
-	if err := os.Chtimes(dump, old, old); err != nil {
-		t.Fatal(err)
-	}
-	stale := find(read(h.viewer), "stale-backup")
-	if stale == nil || !strings.Contains(stale.Title, "10 days") {
-		t.Errorf("stale finding: %+v", stale)
-	}
-}
-
 // An alter carries what was sent and nothing else. A body with only a
 // password must not say anything about the role's attributes.
 func TestRoleAlterRequestCarriesOnlyWhatWasSent(t *testing.T) {
@@ -909,60 +825,4 @@ func opsDockerEngine(t *testing.T, s *Server, hostPort int, memory int64) {
 	t.Cleanup(engine.Close)
 	s.modules.docker = dockerx.New(engine.URL)
 	t.Cleanup(func() { _ = s.modules.docker.Close() })
-}
-
-// What only an administrator's view reads: a port published to every
-// address, and a container the kernel may let grow until it kills something.
-func TestAdvisorReadsTheContainerForAnAdministratorOnly(t *testing.T) {
-	as := func(s *Server, role auth.Role) *http.Request {
-		req := httptest.NewRequest(http.MethodGet, "/databases/1/advisor", nil)
-		p := &httpx.Principal{User: &auth.User{ID: 1, Username: "tester"}, Role: role, Kind: "session", IP: "127.0.0.1"}
-		return req.WithContext(httpx.WithPrincipal(req.Context(), p))
-	}
-	ids := func(findings []dbx.Advice) string {
-		out := []string{}
-		for _, f := range findings {
-			out = append(out, f.ID)
-		}
-		return strings.Join(out, ",")
-	}
-	for _, c := range []struct {
-		memory int64
-		want   string
-	}{
-		{0, "no-backup,published-everywhere,container-no-memory-limit"},
-		{512 << 20, "no-backup,published-everywhere"},
-	} {
-		s := testServer(t)
-		s.Cfg.BackupLocalDir = t.TempDir()
-		opsDockerEngine(t, s, 55440, c.memory)
-		id := saveOpsConnection(t, s, "shop", dbx.DriverPostgres, "postgres://app:pw@127.0.0.1:55440/shop?sslmode=disable")
-		conn, _, err := s.dbConnRow(t.Context(), id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		admin := as(s, auth.RoleAdmin)
-		findings, silences := s.panelAdvice(admin.Context(), admin, conn)
-		if got := ids(findings); got != c.want {
-			t.Errorf("memory %d: an administrator sees %q, want %q", c.memory, got, c.want)
-		}
-		if len(silences) != 0 {
-			t.Errorf("an administrator was told a check was skipped: %v", silences)
-		}
-		for _, f := range findings {
-			if f.ID == "container-no-memory-limit" && (len(f.Targets) != 1 || f.Targets[0].Kind != "container" || f.Targets[0].Name != "shop-db") {
-				t.Errorf("the finding does not name the container: %+v", f)
-			}
-		}
-		// A viewer may not list containers, so neither finding is made for
-		// one, and that is said rather than left to read as a clean result.
-		viewer := as(s, auth.RoleReadOnly)
-		findings, silences = s.panelAdvice(viewer.Context(), viewer, conn)
-		if got := ids(findings); got != "no-backup" {
-			t.Errorf("a viewer sees %q", got)
-		}
-		if len(silences) != 1 {
-			t.Errorf("a viewer's silences: %v", silences)
-		}
-	}
 }

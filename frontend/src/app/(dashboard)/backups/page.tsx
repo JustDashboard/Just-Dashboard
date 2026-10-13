@@ -8,7 +8,7 @@ import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-s
 import { useSearchParams } from "next/navigation"
 import { Archive, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type {
   BackupJob,
   BackupResource,
@@ -22,7 +22,6 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList } from "@/components/flow"
-import { FindingList, type Finding } from "@/components/finding-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
@@ -30,8 +29,7 @@ import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverag
 import { JobCard } from "@/components/backups/job-card"
 import { ProtectionMap } from "@/components/backups/protection-map"
 import { jobProducts } from "@/components/backups/marks"
-import { scheduleLabel } from "@/components/backups/shared"
-import { runJobNow, useJobVerbs } from "@/components/backups/job-verbs"
+import { useJobVerbs } from "@/components/backups/job-verbs"
 
 /**
  * Backups: where this server's data goes, what needs doing, the jobs, and what
@@ -53,9 +51,8 @@ import { runJobNow, useJobVerbs } from "@/components/backups/job-verbs"
  * and the picture's middle. The last backup is on each job's card beside its
  * name, in the colour of how it went, and on its destination in the picture;
  * the run before it and the thirteen before that are its strip. The next
- * backup is under the picture's middle and under each job's name. What the
- * tiles did beyond the numbers — put a failure first — the Attention list
- * does, and the cards are ordered worst first under it.
+ * backup is under the picture's middle and under each job's name. Cards
+ * retain recorded outcomes and their operation controls.
  *
  * The things on the server are drawn as the products they are, and so are the
  * jobs (by what they cover) and where they write, which is why the page polls
@@ -67,8 +64,6 @@ export default function BackupsPage() {
   const { confirm, dialog } = useConfirm()
   const search = useSearchParams()
   const router = useRouter()
-  /** One job, as a destination. */
-  const open = (job: BackupJob) => router.push(`/backups/${job.id}`)
   // Another page can send a path here to have it backed up: the form opens
   // with the path already in it, and the address is cleaned so a reload does
   // not open it again.
@@ -166,13 +161,6 @@ export default function BackupsPage() {
     onEdit: (job) => setForm({ job }),
     onDeleted: refresh,
   })
-
-  const findings = useMemo(
-    () =>
-      attention(list, open, can("service.control") ? (job) => runJobNow(job, refresh) : undefined),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list, can],
-  )
   const ordered = useMemo(() => [...list].sort((a, b) => rank(a) - rank(b)), [list])
   const stored = list.reduce((sum, j) => sum + j.stored.bytes, 0)
   const archives = list.reduce((sum, j) => sum + j.stored.runs, 0)
@@ -204,14 +192,6 @@ export default function BackupsPage() {
         {/* Only what somebody has to act on: a run that failed, a job that has
           gone quiet. What is not covered is the Coverage list's to say — a
           finding repeating its count was the same sentence twice. */}
-        {findings.length > 0 && (
-          <Panel plain>
-            <PanelHeader title="Attention" />
-            <PanelBody className="py-0">
-              <FindingList emphasize findings={findings} emptyLabel="" />
-            </PanelBody>
-          </Panel>
-        )}
 
         {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
         {jobs.data && list.length === 0 && (
@@ -314,57 +294,6 @@ function prefillFor(res: BackupResource): JobPrefill {
 /** The order the cards are read in: a failure, then a job gone quiet, then the rest by what runs next, paused last. */
 function rank(job: BackupJob) {
   if (job.lastRun?.status === "failed") return 0
-  if (job.overdue) return 1
   if (!job.enabled && job.schedule) return 3
   return 2
-}
-
-/**
- * What needs acting on, as findings rather than as a row of coloured boxes:
- * a job whose last run failed and a job that has gone quiet.
- */
-function attention(
-  list: BackupJob[],
-  open: (job: BackupJob) => void,
-  runNow?: (job: BackupJob) => void | Promise<unknown>,
-): Finding[] {
-  const out: Finding[] = []
-  for (const job of list) {
-    if (job.lastRun?.status === "failed") {
-      const lastLine = job.lastRun.log.trim().split("\n").filter(Boolean).at(-1)
-      out.push({
-        id: `failed-${job.id}`,
-        level: "warning",
-        title: `${job.name} failed ${relativeTime(job.lastRun.startedAt)}`,
-        detail: lastLine?.replace(/^FAILED:\s*/, "") ?? "The run wrote no output.",
-        advice: job.lastSuccessAt
-          ? `Its last good backup is from ${relativeTime(job.lastSuccessAt)}. Read the run log, fix the cause, then run it again.`
-          : "It has never succeeded. Read the run log and check the sources and destination.",
-        meta: "run failed",
-        action: { label: "Read failed run", onClick: () => open(job) },
-      })
-    }
-    if (job.overdue && job.enabled && job.lastRun?.status !== "failed") {
-      out.push({
-        id: `overdue-${job.id}`,
-        level: "warning",
-        title: `${job.name} is overdue`,
-        detail: job.lastSuccessAt
-          ? `Last good backup ${relativeTime(job.lastSuccessAt)}; it should run ${scheduleLabel(job.schedule).toLowerCase()}.`
-          : `It has never succeeded and should run ${scheduleLabel(job.schedule).toLowerCase()}.`,
-        advice:
-          job.lastRun?.status === "running"
-            ? "A backup is already running. Open its history to watch the progress."
-            : "Run a backup and watch the log. If it fails, fix the cause before retrying.",
-        meta: "overdue",
-        action:
-          job.lastRun?.status === "running"
-            ? { label: "Watch backup run", onClick: () => open(job) }
-            : runNow
-              ? { label: "Run backup now", onClick: () => runNow(job) }
-              : { label: "Inspect backup job", onClick: () => open(job) },
-      })
-    }
-  }
-  return out
 }
