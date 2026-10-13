@@ -288,6 +288,7 @@ const LOGOS: Record<string, string> = {
   "stirling-pdf": "stirling-pdf.svg",
   streamlit: "streamlit.svg",
   stripe: "stripe.svg",
+  sunshine: "sunshine.svg",
   supabase: "supabase.svg",
   svelte: "svelte.svg",
   swift: "swift.svg",

@@ -206,3 +206,5 @@ web-shield-128.png from https://firehol.org, resized to 96px WebP.
 Remote Desktop is drawn as the engine it runs: guacamole.svg is the
 collection's apache-guacamole.svg, renamed after the product id the pages use
 and otherwise unchanged.
+Stream mode is drawn as the server it streams from: sunshine.svg is the
+collection's sunshine.svg, unchanged.

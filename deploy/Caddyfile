@@ -104,12 +104,17 @@
 		# fallback covers API, health, static and error responses without
 		# replacing that nonce-bearing header.
 		?Content-Security-Policy "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-		Permissions-Policy "accelerometer=(), ambient-light-sensor=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=()"
+		# Autoplay is the dashboard's own: Remote Desktop's stream starts its
+		# (muted) video without a press, inside a frame of this origin.
+		Permissions-Policy "accelerometer=(), ambient-light-sensor=(), autoplay=(self), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=()"
 		# Only meaningful on the HTTPS configurations; a browser ignores it
 		# over plain HTTP, which is the one place it would be wrong to honour.
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
+		# Only where the response has none: the backend sends DENY itself, and
+		# SAMEORIGIN for the few pages the dashboard frames (a deployment's
+		# preview, Remote Desktop's stream).
+		?X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
 		-Server
 	}

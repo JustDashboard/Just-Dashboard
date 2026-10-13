@@ -2,7 +2,18 @@
 
 Remote Desktop opens the operator's own computers — a Windows PC, a Mac, a Linux desktop — in a
 browser tab, from `/remote-desktop`. The backend is `internal/remotedesk`; the handlers are
-`internal/api/handlers_remote_desktop.go`; the page is `frontend/src/components/remote-desktop/`.
+`internal/api/handlers_remote_desktop.go` and `handlers_remote_desktop_stream.go`; the page is
+`frontend/src/components/remote-desktop/`.
+
+A session draws the computer one of two ways, switched in its header and kept in the address
+(`?mode=stream`):
+
+- **Control** (the default) is guacd speaking RDP or VNC to the computer. It needs nothing installed
+  on the computer beyond its own Remote Desktop or Screen Sharing, but VNC is a pull protocol: each
+  frame is asked for after the last arrived, so a 50 ms path caps it near twenty frames a second, and
+  a Mac's Retina framebuffer makes each frame large.
+- **Stream** is Sunshine on the computer encoding its screen as H.264 at its own frame rate, received
+  by a bridge on this server and played in the page ([Stream mode](#stream-mode)).
 
 ## How a session travels
 
@@ -85,6 +96,71 @@ a container removed by hand reads as missing.
   the label. The image stays, so installing again does not download it. Removal is refused while a
   session is open.
 
+## Stream mode
+
+```
+browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ Moonlight Web ──Moonlight protocol──▶ Sunshine
+ (bridge page in an iframe,     (proxy under                 (container beside       (on the computer,
+  WebCodecs)                     /remote-desktop/bridge)      guacd)                  TCP 47984-48010, UDP 47998-48000)
+```
+
+- **Sunshine** (LizardByte, GPL-3.0) runs on the computer and is the only thing installed there.
+  It encodes the screen in hardware and pushes frames as they change, so the picture runs at the
+  computer's own rate.
+- **The bridge** is Moonlight Web (`mrcreativ3001/moonlight-web-stream` 2.10.0, pinned by digest
+  as `BridgeImage`), an unofficial Moonlight client that speaks Moonlight's protocol to Sunshine and
+  hands the video to a browser page. `stream.go` runs it through the same `engineSpec` machinery as
+  guacd (`bridgeSpec`): container `just-dashboard-remote-stream`, labelled
+  `io.justdashboard.remote-desktop=stream`, on the engine's network, its 8080 published on
+  `127.0.0.1` from 4823, volume `just-dashboard-remote-stream-data` for its pairings, the same
+  hardening with 1 GiB. Its `config.json` is copied into the container before its first start
+  (`bridgeSeed`): the URL prefix the proxy serves it at, the account header it trusts, pairing as
+  *Just Dashboard*.
+- **The picture travels over the dashboard's own connection.** The bridge can send it over WebRTC
+  (UDP) or a WebSocket; the session page sets the WebSocket, and no WebRTC port is published, so
+  nothing new listens on a routable address. The page decodes H.264 with WebCodecs, which needs the
+  secure context the dashboard already is (HTTPS, or loopback).
+- **The bridge's own page draws the stream.** The session page frames
+  `/api/v1/remote-desktop/bridge/stream.html?hostId=…&appId=…` (Sunshine's *Desktop* app). The page
+  reads its settings from this origin's `localStorage` (`mlSettings`), so the session page writes
+  them just before it loads the frame: WebSocket transport, H.264, and the reader's quality (Smooth
+  1080p60 at 20 Mb/s, Sharp 1440p60 at 40 Mb/s, Light 720p60 at 8 Mb/s), over whatever the reader
+  changed in the stream's own menu.
+
+**The proxy** (`mountRemoteDesktopBridge`) is the only way to the bridge. It sits in its own group
+in `routes.go`: authenticated, `system.admin` with a browser session, audited, on a rate limit of
+its own (`streamLim`, 3000 a minute with a burst of 600, since the stream page loads about a hundred
+files at once and would spend the whole API budget). The bridge's page posts without the dashboard's
+CSRF header, which it cannot know, so the group has no `RequireCSRF`; instead every non-GET request
+and every WebSocket upgrade must carry an `Origin` of this dashboard (`wsx.Upgrader.SameSite`).
+Every request is rewritten: the browser's `Cookie`, `Authorization`, CSRF header and any copy of the
+account header are dropped, and the account header is set to `just-dashboard`. The bridge creates
+that one account on first use; who may stream is the dashboard's decision, so every administrator
+sees the same pairings. Responses lose the bridge's own `Set-Cookie`, CSP and `X-Frame-Options` and
+carry the dashboard's instead: a CSP of `'self'` plus the decoder's `wasm-unsafe-eval` and the one
+inline script the pinned page ships (by hash), with `frame-ancestors 'self'`, and
+`X-Frame-Options: SAMEORIGIN`. The stream's socket (`…/api/host/stream`) is audited as
+`remote_desktop.stream.open` and `.close` with its length; the computer is named inside the socket,
+so the record says a stream rather than which computer.
+
+**Pairing.** Sunshine streams only to clients it was paired with, by a PIN typed into Sunshine's
+own page on the computer (`https://localhost:47990`). `Service.Pair` resolves the computer's name
+here (as `Connect` does), probes Sunshine's 47989, adds the address to the bridge
+(`POST /api/host`), saves the bridge's id for it in `remote_desktop_computers.stream_host_id`, and
+asks the bridge to pair. The bridge answers one JSON line with the PIN and holds the request open
+until Sunshine takes it; the PIN goes back to the page at once and a goroutine keeps the request,
+for up to ten minutes. `Service.Stream` reads where it got to. The session page shows the PIN, and
+keeps it over the Control screen when the reader goes there to type it into Sunshine (the computer is
+usually far away, and Control reaches its Sunshine page). Recent Sunshine versions list the waiting
+request by the name Moonlight always pairs under, `roth`, which the page says. A computer whose
+address changes is paired again (the `UPDATE` clears `stream_host_id` when `host` changes), as is
+one the bridge no longer knows (reinstalled, or the host removed there).
+
+**`deploy/Caddyfile`** frames nothing by default: `X-Frame-Options: DENY` is set only where the
+response has none (`?X-Frame-Options`), so the backend's `SAMEORIGIN` on the bridge (and on a
+deployment's preview frame) stands; and `Permissions-Policy` allows `autoplay=(self)`, since the
+stream starts its muted video without a press, inside a frame of this origin.
+
 ## Computers and sessions
 
 `computers.go`. A computer is a name, a system (`windows`, `macos`, `linux`), a host (an IP or a host
@@ -125,6 +201,13 @@ All under `/api/v1/remote-desktop`, inside the authenticated group.
 | `PUT` | `/computers/{id}` | `system.admin` | Edits it | `remote_desktop.computer.update` |
 | `DELETE` | `/computers/{id}` | `destructive` through `s.destructive` | Forgets it and its history; `409` while it is in a session | `remote_desktop.computer.delete` |
 | `GET` | `/computers/{id}/session` | `terminal`, browser session only (`RequireSession`) | The WebSocket the screen travels on | `remote_desktop.session.open`, `.refused`, `.close` |
+| `GET` | `/stream` | `system.admin` | The stream bridge's status | — |
+| `POST` | `/stream` | `system.admin` | Starts the bridge's install job (`remote-desktop.stream.install`), `202` with the job | `remote_desktop.stream.install` |
+| `DELETE` | `/stream` | `destructive` through `s.destructive` | Removes the bridge and its pairings; `409` while a stream is open | `remote_desktop.stream.remove` |
+| `GET` | `/computers/{id}/stream` | `system.admin` | The bridge, Sunshine's port, the pairing (and its PIN while it waits) and Sunshine's apps | — |
+| `POST` | `/computers/{id}/stream/pair` | `system.admin` | Adds the computer to the bridge and starts pairing; answers with the PIN | `remote_desktop.stream.pair` |
+| `DELETE` | `/computers/{id}/stream` | `system.admin` | Forgets the computer on the bridge, to pair it again | `remote_desktop.stream.unpair` |
+| any | `/bridge/*` | `system.admin`, browser session, same-site `Origin` for writes and sockets | The bridge itself, proxied | mutations; `remote_desktop.stream.open`, `.close` |
 
 A session is a keyboard and a mouse on another machine, the same trust as a terminal, so it takes
 the terminal's capability; an API token has no screen to draw it on and is refused. The session is
@@ -136,21 +219,37 @@ logged when it opens, before the upgrade, so a crash mid-session still leaves th
   malformed input; computers' validation and sealing; peer matching and skipped probes; the
   handshake against a fake guacd, whose `connect` values must line up with its `args`; the relay's
   UUID first, whole-instruction frames, echoed pings that never reach guacd; refusals; the history.
+- `stream_test.go`: the bridge's seeded configuration; pairing against a fake bridge (the PIN at
+  once, the bridge handed the address resolved here, a second press joining the waiting pairing,
+  paired when Sunshine takes it, every request as the dashboard's account); a refused PIN that can
+  start again without adding the host twice; a host the bridge lost being forgotten; a closed
+  Sunshine port refused before anything is added; a moved computer unpaired.
 - `handlers_remote_desktop_test.go`: the routes round-trip without the password, are refused to a
-  limited account, validate a probe's address and refuse an install without Docker.
+  limited account, validate a probe's address and refuse an install without Docker. The bridge's
+  proxy sends the dashboard's account whatever the browser claims and never its cookie, replaces the
+  bridge's CSP, `X-Frame-Options` and cookie, refuses a write with no `Origin` or another site's,
+  takes one from this dashboard without the CSRF header, and refuses a limited account and no
+  session; a stopped bridge answers `503`, and pairing without it `409`.
 - `live_test.go`, opt-in: `JD_REMOTE_DESKTOP_LIVE=1 go test ./internal/remotedesk -run Live -v`
   installs the real engine, starts a throwaway XFCE desktop over VNC and one over RDP on its network,
   opens a session to each and waits for the first frame (`img` and `sync`), then removes the engine
-  unless `JD_REMOTE_DESKTOP_KEEP=1`.
+  unless `JD_REMOTE_DESKTOP_KEEP=1`. `TestLiveBridgeServesTheStreamPage` (`-run LiveBridge` alone)
+  installs the real bridge with its seeded configuration and reads its stream page and account under
+  the dashboard's prefix and header.
 - `frontend/tests/browser/remote-desktop.spec.ts` mocks the API and the tunnel: the overview, the
   install, the add flow's instructions, port watch and saved input, a session drawing what the
   tunnel sends, a download, a refusal in the reader's words, removal, a Mac asking for its account
-  answered from the page and saved, and no size update before the first frame.
+  answered from the page and saved, and no size update before the first frame. Stream: pairing
+  shows the PIN, keeps it over Control (which opens only then) until Sunshine takes it, then frames
+  the bridge's page for the Desktop app with the WebSocket and quality settings written; the
+  bridge's install as a job; and a closed Sunshine port answered with the Mac's own steps.
 
 ## Not here
 
-- **Stream mode.** Video-quality streaming (Sunshine on the computer and a WebRTC bridge here) is not
-  part of this module; Guacamole sends the screen as images, which is right for using a computer and
-  wrong for watching video on it.
+- **Which computer a stream was.** The stream's socket names its host inside the socket, so a
+  stream is audited as one but not counted in a computer's session history or time.
+- **WebRTC.** The bridge could send the picture over UDP, which copes with loss better than a
+  WebSocket; that needs its port range published on an address the browser reaches, which nothing
+  here does.
 - **Wake-on-LAN.** A sleeping computer cannot be reached; the add flow says to turn sleep off.
 - **Windows Home** has no RDP server; the add flow sends it to TightVNC as a service, over VNC.

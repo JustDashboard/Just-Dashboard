@@ -25,7 +25,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
   grants no cross-origin browser access. Bearer tokens, agent mTLS and the HMAC webhook do not use
-  ambient cookies and are deliberately outside that check.
+  ambient cookies and are deliberately outside that check. The one browser-session group without it
+  is Remote Desktop's stream bridge (`/remote-desktop/bridge/*`), whose own page cannot know the
+  header: there every write and every socket must carry this dashboard's `Origin` instead
+  (`wsx.Upgrader.SameSite`), on a rate limit of its own.
 - **WebSocket origins** are checked by `wsx` against the request host, port and the scheme Caddy serves:
   HTTPS for `JD_TLS=internal` or `tailscale`, HTTP for `JD_TLS=off` or local development. An explicit
   `JD_ALLOWED_ORIGINS` entry remains the only cross-origin exception. The backend's loopback HTTP hop

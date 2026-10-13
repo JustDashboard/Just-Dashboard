@@ -101,7 +101,7 @@ func newTestService(t *testing.T, engine Engine) *Service {
 	lookup := func(context.Context, string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP("192.0.2.10")}}, nil
 	}
-	return New(Options{DB: st.DB, Seal: seal, Open: open, Engine: engine, Lookup: lookup})
+	return New(Options{DB: st.DB, Seal: seal, Open: open, Engine: engine, Bridge: &fakeEngine{status: EngineStatus{State: EngineMissing}}, Lookup: lookup})
 }
 
 func ptr(s string) *string { return &s }

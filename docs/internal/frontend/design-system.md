@@ -2914,7 +2914,7 @@ the reader through it.
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup, `/welcome` — the first-run question | **Flow** | A sequence with an outcome: the account's sidebar. |
 | Remote Desktop — the computers (`/remote-desktop`) | Reading | The reader arrives to find out which computers can be opened now. |
-| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's frame held to the window around the live screen. |
+| A Remote Desktop session (`/remote-desktop/[id]`) | Reading, as a workbench | The terminal's frame held to the window around the live screen, drawn by guacd (Control) or streamed by Sunshine (Stream); what a stream waits on (its bridge, Sunshine, the PIN) is said in the screen's place, with Sunshine's own mark. |
 | `/remote-desktop/new` — add a computer | **Flow** | Which computer, is its remote desktop on, and the sign-in: ending in the one command that saves it and opens the screen. |
 
 A section does not pick a register — a *page* does. The deployment section has pages in both, which

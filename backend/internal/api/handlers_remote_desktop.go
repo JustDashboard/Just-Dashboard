@@ -39,6 +39,7 @@ func (s *Server) mountRemoteDesktopRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/computers", s.handle(s.handleRemoteDesktopAdd))
 			r.Method(http.MethodGet, "/computers/{id}", s.handle(s.handleRemoteDesktopComputer))
 			r.Method(http.MethodPut, "/computers/{id}", s.handle(s.handleRemoteDesktopUpdate))
+			s.mountRemoteDesktopStreamRoutes(r)
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/engine", s.handle(s.handleRemoteDesktopRemove))
 				r.Method(http.MethodDelete, "/computers/{id}", s.handle(s.handleRemoteDesktopDelete))

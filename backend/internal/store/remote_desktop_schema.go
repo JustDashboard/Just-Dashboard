@@ -3,7 +3,8 @@ package store
 // The computers Remote Desktop opens sessions to, and the sessions it opened.
 // A computer's password is sealed with the master key like every other stored
 // credential; the session history carries who connected and when, never what
-// was on the screen.
+// was on the screen. A computer paired with the stream bridge keeps the
+// bridge's id for it, which is all that is needed to open a stream.
 const remoteDesktopSchema = `
 CREATE TABLE IF NOT EXISTS remote_desktop_computers (
   id TEXT PRIMARY KEY,
@@ -20,7 +21,8 @@ CREATE TABLE IF NOT EXISTS remote_desktop_computers (
   peer_id TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  last_session_at INTEGER NOT NULL DEFAULT 0
+  last_session_at INTEGER NOT NULL DEFAULT 0,
+  stream_host_id INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS remote_desktop_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
