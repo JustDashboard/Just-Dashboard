@@ -264,7 +264,6 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 		"sessions":        {"sql": "/activity", "redis": "/redis/clients", "mongodb": "/mongo/ops"},
 		"replication":     {"sql": "/replication", "redis": "/redis/server", "mongodb": "/mongo/replication"},
 		"statements":      {"sql": "/statements"},
-		"advisor":         {"sql": "/advisor"},
 		"locks":           {"sql": "/locks"},
 		"tableStats":      {"sql": "/tablestats"},
 		"indexStats":      {"sql": "/indexstats"},

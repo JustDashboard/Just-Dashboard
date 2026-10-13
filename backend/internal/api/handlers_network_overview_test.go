@@ -6,12 +6,8 @@ import (
 	"testing"
 )
 
-// TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory reads the
-// Overview of whatever host the test runs on. Its contract is the shape:
-// both families' identities, an outcome for every reading the attention list
-// is judged from, a flow reading with a state, and a history that a second
-// read keeps.
-func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.T) {
+// The network overview retains each native reading and omits retired advisory payloads.
+func TestNetworkOverviewReportsNativeReadingsWithoutAdvisories(t *testing.T) {
 	c, _ := newClient(t)
 	var body struct {
 		Identity []struct {
@@ -27,13 +23,6 @@ func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.
 			State string            `json:"state"`
 			Edges []json.RawMessage `json:"edges"`
 		} `json:"flows"`
-		Findings []struct {
-			ID     string `json:"id"`
-			Source string `json:"source"`
-		} `json:"findings"`
-		Incidents []struct {
-			FindingID string `json:"findingId"`
-		} `json:"incidents"`
 		ReadAt string `json:"readAt"`
 	}
 	for read := 0; read < 2; read++ {
@@ -46,6 +35,15 @@ func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"findings", "incidents", "incidentsError"} {
+			if _, exists := payload[field]; exists {
+				t.Errorf("retired advisory field %s remains", field)
+			}
 		}
 	}
 	if len(body.Identity) != 2 || body.Identity[0].Family != "inet" || body.Identity[1].Family != "inet6" || body.Identity[0].Public == "" {
@@ -61,7 +59,7 @@ func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.
 			t.Fatal("observations are sorted")
 		}
 	}
-	for _, source := range []string{"client", "history", "firewall", "connections", "gateway", "protection", "forwarding", "identity.inet", "identity.inet6"} {
+	for _, source := range []string{"client", "firewall", "connections", "gateway", "protection", "forwarding", "identity.inet", "identity.inet6"} {
 		if !seen[source] {
 			t.Fatalf("no outcome for %s: %+v", source, body.Observations)
 		}
@@ -69,33 +67,17 @@ func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.
 	if body.Flows.State == "" || body.Flows.Edges == nil || body.ReadAt == "" {
 		t.Fatalf("flows: %+v readAt %q", body.Flows, body.ReadAt)
 	}
-	if body.Incidents == nil {
-		t.Fatal("incidents serialise as an array")
-	}
-	open := map[string]bool{}
-	for _, inc := range body.Incidents {
-		open[inc.FindingID] = true
-	}
-	for _, f := range body.Findings {
-		if f.Source == "" {
-			t.Fatalf("finding without a source: %+v", f)
-		}
-		if !open[f.ID] {
-			t.Fatalf("finding %s is not in the recorded history %+v", f.ID, body.Incidents)
-		}
-	}
+
 }
 
-// TestNetworkOverviewScheduledReadRecordsWithoutABrowser is the read the
-// incident schedule makes: no client address, and the same history.
-func TestNetworkOverviewScheduledReadRecordsWithoutABrowser(t *testing.T) {
+// A native read does not require a browser client address.
+func TestNetworkOverviewReadWithoutBrowserClient(t *testing.T) {
 	s := testServer(t)
 	out, err := s.readNetworkOverview(t.Context(), "")
 	if err != nil {
 		t.Skipf("this host cannot read its devices: %v", err)
 	}
 	if out.Client.Address != "" || out.ReadAt.IsZero() {
-		t.Fatalf("a scheduled read has no browser: %+v", out.Client)
+		t.Fatalf("native read: %+v", out.Client)
 	}
-
 }
