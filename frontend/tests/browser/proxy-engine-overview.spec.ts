@@ -74,10 +74,7 @@ test("a source the overview cannot read is reported, never cleared", async ({ pa
   await expect(page.getByText("No certificates were found on this host.")).toHaveCount(0)
 
   sitesFail = false
-  const source = page
-    .getByRole("alert")
-    .filter({ hasText: "could not determine Docker ingress ownership" })
-  await source.getByRole("button", { name: "Try again" }).click()
+  await page.locator("[data-slot=page-context]").getByRole("button", { name: "Refresh" }).click()
   await expect(
     page.getByRole("list", { name: "Sites" }).locator("[data-slot='choice-row']"),
   ).toHaveCount(3)
@@ -1169,7 +1166,7 @@ test("a status that fails after answering is reported rather than drawn as curre
   await expect(header.getByText("Updated just now")).toHaveCount(0)
 
   statusFails = false
-  await page.getByRole("button", { name: "Try again" }).click()
+  await header.getByRole("button", { name: "Refresh" }).click()
   await expect(page.getByText("The proxy status could not be read")).toHaveCount(0)
 })
 
