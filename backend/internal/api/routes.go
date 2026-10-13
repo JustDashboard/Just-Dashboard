@@ -128,6 +128,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountBackupRoutes(r)
 			s.mountDeployRoutes(r)
 			s.mountJobRoutes(r)
+			s.mountRemoteDesktopRoutes(r)
 		})
 	})
 	return r

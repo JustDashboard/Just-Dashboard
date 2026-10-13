@@ -119,7 +119,24 @@ func originFromURL(u *url.URL) (origin, bool) {
 }
 
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
-	c, err := u.up.Upgrade(w, r, nil)
+	return u.upgrade(w, r, nil)
+}
+
+// UpgradeProtocol answers with the subprotocol the client asked for. The
+// Guacamole client asks for "guacamole", and a browser drops a handshake
+// whose answer does not name the protocol it requested.
+func (u *Upgrader) UpgradeProtocol(w http.ResponseWriter, r *http.Request, protocol string) (*Conn, error) {
+	var header http.Header
+	for _, offered := range websocket.Subprotocols(r) {
+		if offered == protocol {
+			header = http.Header{"Sec-Websocket-Protocol": {protocol}}
+		}
+	}
+	return u.upgrade(w, r, header)
+}
+
+func (u *Upgrader) upgrade(w http.ResponseWriter, r *http.Request, header http.Header) (*Conn, error) {
+	c, err := u.up.Upgrade(w, r, header)
 	if err != nil {
 		return nil, err
 	}
