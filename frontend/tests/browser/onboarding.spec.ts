@@ -72,6 +72,7 @@ test("a new account is asked what the server is for, and the answer shapes the s
       "files",
       "network",
       "packages",
+      "remote-desktop",
       "security",
       "stickyboard",
       "system-users",

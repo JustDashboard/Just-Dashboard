@@ -637,6 +637,7 @@ test("an interface is its owner's and a sensor its silicon's, by the name each i
 test("hasProductLogo", () => {
   expect(hasProductLogo("rust")).toBe(true)
   expect(hasProductLogo("vite")).toBe(true)
+  expect(hasProductLogo("guacamole")).toBe(true)
   expect(hasProductLogo("s3")).toBe(false)
   expect(hasProductLogo(undefined)).toBe(false)
 })

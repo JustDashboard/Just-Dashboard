@@ -26,6 +26,7 @@ export const SECTION_KEYS = [
   "terminal",
   "files",
   "git",
+  "remote-desktop",
   "network",
   "proxy",
   "security",
@@ -85,7 +86,7 @@ export const PURPOSES = [
     key: "workspace",
     title: "Work on the server",
     products: ["terminal", "git", "excalidraw"],
-    sections: ["terminal", "files", "git", "excalidraw", "stickyboard"],
+    sections: ["terminal", "files", "git", "excalidraw", "stickyboard", "remote-desktop"],
   },
 ] as const satisfies readonly {
   key: string

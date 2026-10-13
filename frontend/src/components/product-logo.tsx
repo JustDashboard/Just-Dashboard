@@ -168,6 +168,7 @@ const LOGOS: Record<string, string> = {
   gotify: "gotify.svg",
   gradio: "gradio.svg",
   grafana: "grafana.svg",
+  guacamole: "guacamole.svg",
   harbor: "harbor.svg",
   haskell: "haskell.svg",
   headscale: "headscale.svg",
