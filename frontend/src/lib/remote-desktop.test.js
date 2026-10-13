@@ -11,7 +11,6 @@ import {
   reachability,
   sessionMode,
   sessionProblem,
-  sessionTotals,
   streamPageUrl,
   streamStage,
 } from "./remote-desktop"
@@ -139,23 +138,6 @@ describe("overviewVerdict", () => {
     )
     expect(half).toEqual({ tone: "neutral", label: "1 of 2 ready" })
     expect(overviewVerdict(overview([]))).toBeUndefined()
-  })
-})
-
-describe("sessionTotals", () => {
-  test("adds each computer's time, counting an open session to now, busiest first", () => {
-    const totals = sessionTotals(
-      [
-        { id: 1, computerId: "a", actor: "w", startedAt: 0, endedAt: 600, outcome: "closed" },
-        { id: 2, computerId: "b", actor: "w", startedAt: 100, endedAt: 0, outcome: "" },
-        { id: 3, computerId: "a", actor: "w", startedAt: 1000, endedAt: 1300, outcome: "closed" },
-      ],
-      2000,
-    )
-    expect(totals).toEqual([
-      { computerId: "b", seconds: 1900, count: 1 },
-      { computerId: "a", seconds: 900, count: 2 },
-    ])
   })
 })
 

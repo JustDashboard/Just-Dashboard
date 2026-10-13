@@ -133,7 +133,8 @@ the tab and draws it after the page, the one the address names in the page's pla
 hidden but mounted. A hidden frame keeps its document and a hidden Guacamole display its tunnel,
 so a look at another page and back finds the stream still playing and the Mac still signed in;
 only **Disconnect**, a change of mode or leaving the dashboard ends one. While another page is up,
-a dock at the window's corner lists them, one press back to each and one to end it. A held session
+a dock at the window's corner lists them, one press back to each and one to end it, and the rail's
+*Remote Desktop* leads back into the last one shown rather than to the overview. A held session
 stops reading the computers until it is shown again, and Control does not send the computer a new
 size while its frame has none.
 

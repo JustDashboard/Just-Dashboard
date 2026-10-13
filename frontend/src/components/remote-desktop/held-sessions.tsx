@@ -4,11 +4,14 @@ import dynamic from "next/dynamic"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
-import { Cross } from "@/components/icons"
+import { ArrowRight, Cross } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
+import { ProductGlyph } from "@/components/product-logo"
+import { ComputerMark } from "@/components/remote-desktop/marks"
 import { LoadingPanel } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
-import { sessionHref, type SessionMode } from "@/lib/remote-desktop"
+import { Button } from "@/components/ui/button"
+import { sessionHref, type RdOS, type SessionMode } from "@/lib/remote-desktop"
 
 // The Guacamole client draws into the page's own DOM and reads the window's
 // size and keyboard; there is nothing of it to render on the server.
@@ -17,13 +20,26 @@ const RemoteSession = dynamic(
   { ssr: false, loading: () => <LoadingPanel /> },
 )
 
-type Held = { id: string; mode: SessionMode; name?: string; live?: boolean }
+/** What a held session says of itself, for the dock and the rail's link. */
+export type HeldState = {
+  name: string
+  os: RdOS
+  live: boolean
+  /** How the screen is drawn, in the computer's words: Screen Sharing, Remote Desktop, Stream. */
+  drawn: string
+  /** The round trip, said, when it is known. */
+  latency?: string
+}
+
+type Held = { id: string; mode: SessionMode } & Partial<HeldState>
 
 type HeldSessions = {
   held: Held[]
+  /** The session shown last, which the rail's Remote Desktop goes back to. */
+  latest?: Held
   /** Opens a computer's session, or shows the one already open; a mode of null keeps its own. */
   hold: (id: string, mode: SessionMode | null) => void
-  describe: (id: string, state: { name: string; live: boolean }) => void
+  describe: (id: string, state: HeldState) => void
   release: (id: string) => void
 }
 
@@ -41,7 +57,11 @@ const HeldSessionsContext = createContext<HeldSessions | null>(null)
  */
 export function HeldSessionsProvider({ children }: { children: React.ReactNode }) {
   const [held, setHeld] = useState<Held[]>([])
+  // Kept apart from the order of `held`: moving a session in that list would
+  // move its frame in the page, and a frame that moves loads again.
+  const [latestId, setLatestId] = useState<string>()
   const hold = useCallback((id: string, mode: SessionMode | null) => {
+    setLatestId(id)
     setHeld((sessions) => {
       const open = sessions.find((session) => session.id === id)
       if (!open) return [...sessions, { id, mode: mode ?? "control" }]
@@ -49,11 +69,12 @@ export function HeldSessionsProvider({ children }: { children: React.ReactNode }
       return sessions.map((session) => (session.id === id ? { ...session, mode } : session))
     })
   }, [])
-  const describe = useCallback((id: string, state: { name: string; live: boolean }) => {
+  const describe = useCallback((id: string, state: HeldState) => {
     setHeld((sessions) =>
       sessions.some(
         (session) =>
-          session.id === id && (session.name !== state.name || session.live !== state.live),
+          session.id === id &&
+          (Object.keys(state) as (keyof HeldState)[]).some((key) => session[key] !== state[key]),
       )
         ? sessions.map((session) => (session.id === id ? { ...session, ...state } : session))
         : sessions,
@@ -62,7 +83,11 @@ export function HeldSessionsProvider({ children }: { children: React.ReactNode }
   const release = useCallback((id: string) => {
     setHeld((sessions) => sessions.filter((session) => session.id !== id))
   }, [])
-  const value = useMemo(() => ({ held, hold, describe, release }), [held, hold, describe, release])
+  const latest = held.find((session) => session.id === latestId) ?? held.at(-1)
+  const value = useMemo(
+    () => ({ held, latest, hold, describe, release }),
+    [held, latest, hold, describe, release],
+  )
   return <HeldSessionsContext.Provider value={value}>{children}</HeldSessionsContext.Provider>
 }
 
@@ -70,6 +95,11 @@ export function useHeldSessions() {
   const value = useContext(HeldSessionsContext)
   if (!value) throw new Error("useHeldSessions needs HeldSessionsProvider")
   return value
+}
+
+/** Where a held session is shown, in the mode it is in. */
+export function heldHref(session: Pick<Held, "id" | "mode">) {
+  return `${sessionHref(session.id)}?mode=${session.mode}`
 }
 
 /**
@@ -115,38 +145,66 @@ export function HeldSessionsHost() {
 }
 
 /**
- * The sessions still connected while another page is up: one press back to
- * each, one to end it. Without it a stream would play on unseen.
+ * The sessions still connected while another page is up: each one as its
+ * computer, how it is drawn and whether it is live, one press back to it and
+ * one to end it. Without it a stream would play on unseen.
  */
 function HeldSessionsDock({ held, onRelease }: { held: Held[]; onRelease: (id: string) => void }) {
   return (
     <aside
       aria-label="Remote sessions"
       data-slot="held-sessions-dock"
-      className="fixed right-4 bottom-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-hairline bg-popover p-1.5 text-popover-foreground shadow-lg"
+      className="fixed right-4 bottom-4 z-40 flex w-[22rem] max-w-[calc(100vw-2rem)] animate-rise flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-xl backdrop-blur"
     >
+      <p className="px-2 pt-1 pb-0.5 text-hint font-medium text-muted-foreground">
+        Still connected
+      </p>
       {held.map((session) => {
         const name = session.name ?? "Remote session"
+        const href = heldHref(session)
         return (
-          <div key={session.id} className="flex min-w-0 items-center gap-1">
+          <div
+            key={session.id}
+            data-slot="held-session-row"
+            className="group flex min-w-0 items-center gap-3 rounded-xl p-2 transition-colors hover:bg-row-hover"
+          >
             <Link
-              href={`${sessionHref(session.id)}?mode=${session.mode}`}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-2.5 text-body focus-ring transition-colors hover:bg-row-hover"
+              href={href}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-lg focus-ring"
             >
-              <StatusDot
-                tone={session.live ? "running" : "stopped"}
-                live={session.live}
-                className="size-1.5"
-              />
-              <span className="min-w-0 truncate font-medium">{name}</span>
-              <span className="shrink-0 text-hint text-muted-foreground">
-                {!session.live
-                  ? "not connected"
-                  : session.mode === "stream"
-                    ? "streaming"
-                    : "connected"}
+              {session.os ? (
+                <ComputerMark os={session.os} size="sm" />
+              ) : (
+                <span className="size-9 shrink-0 rounded-xl bg-control" />
+              )}
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-body font-semibold">{name}</span>
+                <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                  <StatusDot
+                    tone={session.live ? "running" : "stopped"}
+                    live={session.live}
+                    className="size-1.5"
+                  />
+                  {session.mode === "stream" && <ProductGlyph id="sunshine" />}
+                  <span className="truncate">
+                    {session.live
+                      ? [
+                          session.mode === "stream" ? "Streaming" : (session.drawn ?? "Connected"),
+                          session.latency,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : "Not connected"}
+                  </span>
+                </span>
               </span>
             </Link>
+            <Button size="sm" variant="outline" asChild>
+              <Link href={href} aria-label={`Open ${name}`}>
+                Open
+                <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
             <IconAction label={`Disconnect ${name}`} onClick={() => onRelease(session.id)}>
               <Cross />
             </IconAction>

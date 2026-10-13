@@ -5,42 +5,36 @@ import { useCallback, useEffect, useId, useRef, useState } from "react"
 import type * as Guac from "guacamole-common-js"
 import {
   ArrowLeft,
-  Clipboard,
-  CloudUpload,
-  Copy,
   Fullscreen,
   FullscreenClose,
   Plus,
   RefreshClockwise,
+  SidebarLeftClose,
+  SidebarLeftOpen,
   SidebarRightClose,
   SidebarRightOpen,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
+import { ProductGlyph } from "@/components/product-logo"
 import { PaneHeader } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { Segments } from "@/components/deploy/settings/segments"
-import { del, put, wsUrl } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { put, wsUrl } from "@/lib/api"
 import {
   combosFor,
   displaySize,
-  isoOf,
   latency,
-  osLabel,
   protocolLabel,
   reachability,
   REMOTE_DESKTOP_HREF,
   sessionHref,
   sessionProblem,
-  STREAM_QUALITIES,
   streamStage,
   type KeyCombo,
   type RdComputerView,
@@ -55,6 +49,13 @@ import { ComputerMark, HueKey, reachTone } from "@/components/remote-desktop/mar
 import { draftOf, inputOf } from "@/components/remote-desktop/computer-form"
 import { useRemoteDesktop } from "@/components/remote-desktop/use-remote-desktop"
 import { PinCard, StreamPane, useStream } from "@/components/remote-desktop/stream"
+import {
+  ControlSections,
+  SessionPanel,
+  StreamSections,
+  type Transfer,
+} from "@/components/remote-desktop/session-panel"
+import type { HeldState } from "@/components/remote-desktop/held-sessions"
 
 type Phase =
   | { kind: "connecting" }
@@ -62,15 +63,6 @@ type Phase =
   | { kind: "connected" }
   | { kind: "ended" }
   | { kind: "failed"; code: number; message: string }
-
-type Transfer = {
-  key: string
-  name: string
-  size: number
-  sent: number
-  direction: "up" | "down"
-  state: "moving" | "done" | "failed"
-}
 
 type GuacModule = typeof Guac
 
@@ -122,7 +114,7 @@ export function RemoteSession({
   onMode: (mode: SessionMode) => void
   onDisconnect: () => void
   /** What the shell shows of a session kept connected while another page is up. */
-  onState: (state: { name: string; live: boolean }) => void
+  onState: (state: HeldState) => void
 }) {
   const { data, hueOf, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
   const computer = data?.computers.find((candidate) => candidate.id === id)
@@ -135,11 +127,11 @@ export function RemoteSession({
   const [attempt, setAttempt] = useState(0)
   const [immersive, setImmersive] = useState(false)
   const [tools, setTools] = useViewState("remote-desktop.tools", true)
+  const [rail, setRail] = useViewState("remote-desktop.rail", true)
   const [remoteClip, setRemoteClip] = useState("")
   const [localClip, setLocalClip] = useState("")
   const [drive, setDrive] = useState(false)
   const [transfers, setTransfers] = useState<Transfer[]>([])
-  const [startedAt, setStartedAt] = useState<number>()
   const [quality, setQuality] = useViewState<StreamQuality>(
     "remote-desktop.stream-quality",
     "smooth",
@@ -153,10 +145,17 @@ export function RemoteSession({
   const known = computer !== undefined
   const control = mode === "control"
   const live = control ? phase.kind === "connected" : streamPoll.live !== undefined
+  const latencyMs = control ? computer?.reach.latencyMs : stream?.sunshine.latencyMs
+  const drawn = computer
+    ? control
+      ? protocolLabel(computer.protocol, computer.os)
+      : "Stream"
+    : undefined
   const name = computer?.name
+  const os = computer?.os
   useEffect(() => {
-    if (name) onState({ name, live })
-  }, [name, live, onState])
+    if (name && os && drawn) onState({ name, os, live, drawn, latency: latency(latencyMs) })
+  }, [name, os, live, drawn, latencyMs, onState])
 
   const track = useCallback((key: string, change: Partial<Transfer>) => {
     setTransfers((held) =>
@@ -224,7 +223,6 @@ export function RemoteSession({
           connected = true
           followFrame()
           setPhase({ kind: "connected" })
-          setStartedAt(Math.floor(Date.now() / 1000))
           frame.focus()
           fit()
         }
@@ -465,35 +463,43 @@ export function RemoteSession({
           immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
         )}
       >
-        {!immersive && data && <Rail computers={data.computers} current={id} hueOf={hueOf} />}
+        {!immersive && rail && data && (
+          <Rail computers={data.computers} current={id} hueOf={hueOf} />
+        )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <PaneHeader className="min-h-10 shrink-0 flex-wrap gap-1 py-0.5">
+            {!immersive && (
+              <IconAction
+                label={rail ? "Hide the computers" : "Show the computers"}
+                onClick={() => setRail((held) => !held)}
+                className="max-lg:hidden"
+              >
+                {rail ? <SidebarLeftClose /> : <SidebarLeftOpen />}
+              </IconAction>
+            )}
             <Link
               href={REMOTE_DESKTOP_HREF}
               aria-label="Back to the computers"
-              className="flex size-8 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground lg:hidden"
+              className={cn(
+                "flex size-8 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground",
+                rail && "lg:hidden",
+              )}
             >
               <ArrowLeft className="size-4" />
             </Link>
             {computer && (
-              <span className="flex min-w-0 items-center gap-2 px-1">
+              <span className="flex min-w-0 items-center gap-2.5 px-1">
                 <ComputerMark os={computer.os} size="sm" className="scale-75" />
-                <span className="truncate text-body font-medium">{computer.name}</span>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="truncate text-body font-semibold">{computer.name}</span>
+                  <span className="flex shrink-0 items-center gap-1 self-center text-hint text-muted-foreground max-sm:hidden">
+                    {!control && <ProductGlyph id="sunshine" className="size-3" />}
+                    {drawn}
+                  </span>
+                </span>
               </span>
             )}
-            <Segments
-              label="How the screen is drawn"
-              value={mode}
-              onChange={switchMode}
-              options={[
-                {
-                  value: "control",
-                  label: computer ? protocolLabel(computer.protocol, computer.os) : "Control",
-                },
-                { value: "stream", label: "Stream" },
-              ]}
-            />
             <span className="flex-1" />
             {!control ? (
               <StreamStatus stream={stream} />
@@ -657,31 +663,41 @@ export function RemoteSession({
           )}
         </div>
 
-        {tools && !immersive && computer && !control && (
-          <StreamTools
+        {tools && !immersive && computer && (
+          <SessionPanel
             computer={computer}
-            stream={stream}
-            quality={quality}
-            onQuality={setQuality}
-            pointer={pointer}
-            onPointer={setPointer}
-            onUnpaired={streamPoll.refresh}
-          />
-        )}
-        {tools && !immersive && computer && control && (
-          <Tools
-            computer={computer}
-            connected={phase.kind === "connected"}
-            startedAt={startedAt}
-            remoteClip={remoteClip}
-            localClip={localClip}
-            onLocalClip={setLocalClip}
-            onPaste={paste}
-            drive={drive}
-            transfers={transfers}
-            onUpload={upload}
-            onKeys={send}
-          />
+            mode={mode}
+            live={live}
+            latencyMs={latencyMs}
+            onMode={switchMode}
+          >
+            {control ? (
+              <ControlSections
+                computer={computer}
+                connected={phase.kind === "connected"}
+                remoteClip={remoteClip}
+                localClip={localClip}
+                onLocalClip={setLocalClip}
+                onPaste={paste}
+                drive={drive}
+                transfers={transfers}
+                onUpload={upload}
+                onKeys={send}
+                onFullscreen={() => void toggleImmersive()}
+              />
+            ) : (
+              <StreamSections
+                computer={computer}
+                stream={stream}
+                quality={quality}
+                onQuality={setQuality}
+                pointer={pointer}
+                onPointer={setPointer}
+                onFullscreen={() => void toggleImmersive()}
+                onUnpaired={streamPoll.refresh}
+              />
+            )}
+          </SessionPanel>
         )}
       </div>
     </Page>
@@ -754,206 +770,6 @@ function Rail({
   )
 }
 
-function Tools({
-  computer,
-  connected,
-  startedAt,
-  remoteClip,
-  localClip,
-  onLocalClip,
-  onPaste,
-  drive,
-  transfers,
-  onUpload,
-  onKeys,
-}: {
-  computer: RdComputerView
-  connected: boolean
-  startedAt?: number
-  remoteClip: string
-  localClip: string
-  onLocalClip: (text: string) => void
-  onPaste: () => void
-  drive: boolean
-  transfers: Transfer[]
-  onUpload: (files: FileList) => void
-  onKeys: (combo: KeyCombo) => void
-}) {
-  const picker = useRef<HTMLInputElement>(null)
-  const path = computer.peer
-    ? computer.peer.direct
-      ? "Direct over Tailscale"
-      : computer.peer.relay
-        ? `Relayed via ${computer.peer.relay}`
-        : "Over Tailscale"
-    : "This server's network"
-  return (
-    <aside
-      aria-label="Session tools"
-      className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-hairline xl:flex"
-    >
-      <div className="flex h-10 shrink-0 items-center border-b border-hairline px-4 text-body font-medium">
-        Session
-      </div>
-      <div className="flex flex-col gap-6 p-4">
-        <section aria-label="Connection" className="flex flex-col gap-2 text-hint">
-          <p className="eyebrow">Connection</p>
-          <Fact label="System">
-            {osLabel(computer.os)} · {protocolLabel(computer.protocol, computer.os)}
-          </Fact>
-          <Fact label="Path">{path}</Fact>
-          <Fact label="Round trip">{latency(computer.reach.latencyMs) ?? "—"}</Fact>
-          <Fact label="Signed in as">
-            {computer.username || (computer.hasPassword ? "password only" : "—")}
-          </Fact>
-          {startedAt && <Fact label="Connected">{relativeTime(isoOf(startedAt))}</Fact>}
-        </section>
-
-        <section aria-label="Clipboard" className="flex flex-col gap-2">
-          <label htmlFor="remote-clip" className="eyebrow">
-            Clipboard
-          </label>
-          <Textarea
-            id="remote-clip"
-            rows={3}
-            value={localClip}
-            onChange={(event) => onLocalClip(event.target.value)}
-            placeholder={`Text to paste on ${computer.name}`}
-            className="resize-none text-hint"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            disabled={!connected || localClip === ""}
-            onClick={onPaste}
-          >
-            <Clipboard className="size-3.5" />
-            Send to {computer.name}
-          </Button>
-          {remoteClip && (
-            <div className="flex min-w-0 items-start gap-2 rounded-lg border border-hairline bg-surface-sunken p-2.5">
-              <p className="line-clamp-3 min-w-0 flex-1 font-mono text-hint break-words">
-                {remoteClip}
-              </p>
-              <IconAction
-                label="Copy what the computer copied"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(remoteClip)
-                  notify.success("Copied")
-                }}
-              >
-                <Copy />
-              </IconAction>
-            </div>
-          )}
-        </section>
-
-        {computer.protocol === "rdp" && (
-          <section aria-label="Files" className="flex flex-col gap-2">
-            <p className="eyebrow">Files</p>
-            <button
-              type="button"
-              disabled={!drive}
-              onClick={() => picker.current?.click()}
-              className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-4 text-center text-hint text-muted-foreground focus-ring transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              <CloudUpload className="size-5" />
-              {drive
-                ? `Drop files on the screen, or choose them, to put them in the Just Dashboard drive on ${computer.name}`
-                : "Files can be sent once the session is open"}
-            </button>
-            <input
-              ref={picker}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                if (event.target.files) onUpload(event.target.files)
-                event.target.value = ""
-              }}
-            />
-            <p className="text-hint text-muted-foreground">
-              To send a file here, put it in the drive&apos;s Download folder on the computer.
-            </p>
-            {transfers.length > 0 && (
-              <ul className="flex flex-col gap-1.5">
-                {transfers.slice(0, 6).map((transfer) => (
-                  <li key={transfer.key} className="flex min-w-0 items-center gap-2 text-hint">
-                    <StatusDot
-                      tone={
-                        transfer.state === "done"
-                          ? "running"
-                          : transfer.state === "failed"
-                            ? "danger"
-                            : "notice"
-                      }
-                      live={transfer.state === "moving"}
-                      className="size-1.5"
-                    />
-                    <span className="min-w-0 flex-1 truncate">{transfer.name}</span>
-                    <span className="numeric shrink-0 text-muted-foreground">
-                      {transfer.state === "failed"
-                        ? "failed"
-                        : transfer.direction === "up"
-                          ? `${bytes(transfer.sent)} of ${bytes(transfer.size)}`
-                          : bytes(transfer.sent)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-
-        <KeysNote name={computer.name} />
-
-        <section aria-label="Keys" className="flex flex-col gap-2">
-          <p className="eyebrow">Send keys</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {combosFor(computer.os).map((combo) => (
-              <Button
-                key={combo.key}
-                size="sm"
-                variant="outline"
-                disabled={!connected}
-                onClick={() => onKeys(combo)}
-              >
-                {combo.label}
-              </Button>
-            ))}
-          </div>
-        </section>
-      </div>
-    </aside>
-  )
-}
-
-// Keyboard Lock is Chrome's and Edge's; other browsers keep their own keys
-// even in fullscreen.
-const keyboardLock = Boolean(
-  (navigator as Navigator & { keyboard?: { lock?: unknown } }).keyboard?.lock,
-)
-
-/**
- * Where the keys go. With the screen focused every key a page may have goes
- * to the computer; the system's own (Alt+Tab, the Windows key) and the
- * browser's (Ctrl+W, Ctrl+T) never reach a page at all, except in fullscreen
- * with the keyboard locked, which is what the fullscreen button asks for.
- */
-function KeysNote({ name }: { name: string }) {
-  return (
-    <section aria-label="Keyboard" className="flex flex-col gap-1.5">
-      <p className="eyebrow">Keyboard</p>
-      <p className="text-hint text-muted-foreground">
-        {keyboardLock
-          ? `With the screen focused, keys go to ${name}. Alt+Tab, the Windows key and the browser's own shortcuts stay with this computer until fullscreen, which sends every key to ${name}; hold Esc to leave it.`
-          : `With the screen focused, keys go to ${name}. This browser keeps Alt+Tab, the Windows key and its own shortcuts even in fullscreen; Chrome and Edge send them on in fullscreen.`}
-      </p>
-    </section>
-  )
-}
-
 function StreamStatus({ stream }: { stream: RdStream | undefined }) {
   if (!stream) return <TextShimmer className="px-2 text-xs font-medium">reading…</TextShimmer>
   const stage = streamStage(stream)
@@ -981,129 +797,6 @@ function StreamStatus({ stream }: { stream: RdStream | undefined }) {
       }
       className="px-2"
     />
-  )
-}
-
-/**
- * Stream mode's side of the tools: where the picture comes from, how sharp
- * it is asked to be, and pairing again. The keyboard, mouse modes and the
- * stream's own statistics are in the stream's menu, at its left edge.
- */
-function StreamTools({
-  computer,
-  stream,
-  quality,
-  onQuality,
-  pointer,
-  onPointer,
-  onUnpaired,
-}: {
-  computer: RdComputerView
-  stream: RdStream | undefined
-  quality: StreamQuality
-  onQuality: (quality: StreamQuality) => void
-  pointer: boolean
-  onPointer: (pointer: boolean) => void
-  onUnpaired: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const preset = STREAM_QUALITIES.find((q) => q.key === quality) ?? STREAM_QUALITIES[0]
-  const unpair = async () => {
-    setBusy(true)
-    try {
-      await del(`/remote-desktop/computers/${computer.id}/stream`)
-      onUnpaired()
-    } catch (err) {
-      notify.error(`Could not unpair ${computer.name}`, err)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <aside
-      aria-label="Stream tools"
-      className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-hairline xl:flex"
-    >
-      <div className="flex h-10 shrink-0 items-center border-b border-hairline px-4 text-body font-medium">
-        Stream
-      </div>
-      <div className="flex flex-col gap-6 p-4">
-        <section aria-label="Connection" className="flex flex-col gap-2 text-hint">
-          <p className="eyebrow">Connection</p>
-          <Fact label="From">Sunshine{stream?.address ? ` at ${stream.address}` : ""}</Fact>
-          <Fact label="Through">Moonlight Web on this server</Fact>
-          <Fact label="Picture">H.264 over this dashboard</Fact>
-          <Fact label="Round trip">{latency(stream?.sunshine.latencyMs) ?? "—"}</Fact>
-          <Fact label="Paired">{stream?.paired ? "yes" : "not yet"}</Fact>
-        </section>
-
-        <section aria-label="Quality" className="flex flex-col gap-2">
-          <p className="eyebrow">Quality</p>
-          <Segments
-            label="Stream quality"
-            value={quality}
-            onChange={onQuality}
-            fill
-            options={STREAM_QUALITIES.map((q) => ({ value: q.key, label: q.label }))}
-          />
-          <p className="text-hint text-muted-foreground">
-            {preset.detail}, up to {preset.bitrate / 1000} Mb/s. Sunshine scales the screen to it; a
-            change reloads the stream.
-          </p>
-        </section>
-
-        <section aria-label="In the stream" className="flex flex-col gap-2">
-          <p className="eyebrow">In the stream</p>
-          <label className="flex items-start gap-2 text-hint">
-            <Checkbox
-              checked={pointer}
-              onCheckedChange={(on) => onPointer(on === true)}
-              className="mt-px"
-            />
-            <span>
-              Show this computer&apos;s pointer too
-              <span className="block text-muted-foreground">
-                {computer.name} draws its own into the picture, a round trip behind.
-              </span>
-            </span>
-          </label>
-          <p className="text-hint text-muted-foreground">
-            The arrow at the stream&apos;s left edge opens its menu: the on-screen keyboard, the
-            mouse&apos;s modes, its statistics and leaving fullscreen.
-          </p>
-        </section>
-
-        <KeysNote name={computer.name} />
-
-        {stream?.hostId ? (
-          <section aria-label="Pairing" className="flex flex-col gap-2">
-            <p className="eyebrow">Pairing</p>
-            <p className="text-hint text-muted-foreground">
-              Unpairing forgets {computer.name} on the bridge; it is paired again with a new PIN.
-              Remove the device from Sunshine&apos;s Clients list too to revoke it there.
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="self-start"
-              pending={busy}
-              onClick={() => void unpair()}
-            >
-              Unpair
-            </Button>
-          </section>
-        ) : null}
-      </div>
-    </aside>
-  )
-}
-
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 justify-between gap-3">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right">{children}</span>
-    </div>
   )
 }
 

@@ -63,6 +63,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { heldHref, useHeldSessions } from "@/components/remote-desktop/held-sessions"
+import { REMOTE_DESKTOP_HREF } from "@/lib/remote-desktop"
 
 /**
  * The rail, and everything it can become.
@@ -598,6 +600,7 @@ function NavRow({
   enter?: () => void
 }) {
   const Icon = item.icon
+  const href = useNavHref(item.href)
   const content = (
     <>
       <Icon className="size-4" />
@@ -631,7 +634,7 @@ function NavRow({
       ) : (
         <SidebarMenuButton asChild isActive={active} tooltip={item.title} className="h-8 text-body">
           <Link
-            href={item.href}
+            href={href ?? item.href}
             onClick={
               enter &&
               ((event) => {
@@ -646,6 +649,17 @@ function NavRow({
       )}
     </SidebarMenuItem>
   )
+}
+
+/**
+ * Where a row leads. Remote Desktop leads back into the session still
+ * connected, when there is one: the overview is a step back from it, and a
+ * press on the rail that dropped the reader on the overview had them hunting
+ * for the computer they were just using.
+ */
+function useNavHref(href: string | undefined) {
+  const { latest } = useHeldSessions()
+  return href === REMOTE_DESKTOP_HREF && latest ? heldHref(latest) : href
 }
 
 /**
