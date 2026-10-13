@@ -109,11 +109,11 @@ export function ComputerFields({
       </Field>
       <FieldRow>
         <Field
-          label={mac ? "Mac account (optional)" : "Username"}
+          label={mac ? "Mac account name" : "Username"}
           htmlFor={`${id}-username`}
           hint={
             mac
-              ? "Leave empty to sign in with the Screen Sharing password alone."
+              ? "The short name, as whoami prints it in Terminal."
               : draft.os === "windows"
                 ? "A Microsoft account signs in with its email address."
                 : "The account on the computer."
@@ -128,14 +128,16 @@ export function ComputerFields({
           />
         </Field>
         <Field
-          label={mac ? "Screen Sharing password" : "Password"}
+          label={mac ? "Mac login password" : "Password"}
           htmlFor={`${id}-password`}
           hint={
             editing
               ? "Leave empty to keep the saved one."
-              : draft.os === "windows"
-                ? "The account's password, not its PIN."
-                : "Sealed on this server and never shown again."
+              : mac
+                ? "The password you log in to this Mac with."
+                : draft.os === "windows"
+                  ? "The account's password, not its PIN."
+                  : "Sealed on this server and never shown again."
           }
         >
           <Input
