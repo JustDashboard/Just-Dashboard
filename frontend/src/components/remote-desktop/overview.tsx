@@ -56,8 +56,8 @@ const NEW_HREF = `${REMOTE_DESKTOP_HREF}/new`
  * this browser through guacd on this server to each computer, wired by
  * whether it answers; then the band, which reads the computers three ways
  * the cards cannot: how far each one is, where the fortnight's time went and
- * the sessions themselves. Then the computers, each a card in its own hue
- * that opens its screen, and the tailnet's desktops that are not added yet.
+ * the sessions themselves. Then the computers, each a card that opens its
+ * screen, and the tailnet's desktops that are not added yet.
  *
  * A server that has never had the engine opens on the one thing to do: the
  * install, with its output under it.
@@ -163,7 +163,6 @@ export function RemoteDesktopOverview() {
                 <ComputerCard
                   key={computer.id}
                   computer={computer}
-                  hue={hueOf(computer)}
                   index={index}
                   onEdit={() => setEditing(computer)}
                   onRemove={() => remove(computer)}

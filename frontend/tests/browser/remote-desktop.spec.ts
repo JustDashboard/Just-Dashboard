@@ -37,7 +37,6 @@ test("the overview draws the computers as the picture, the band and cards, witho
 
   const cards = page.locator("[data-card=computer]")
   await expect(cards).toHaveCount(4)
-  await expect(page.locator("[data-slot=computer-hue]")).toHaveCount(4)
   await expect(cards.filter({ hasText: "studio-mac" })).toContainText("macOS · Screen Sharing")
   await expect(cards.filter({ hasText: "office-pc" })).toContainText("In a session")
 

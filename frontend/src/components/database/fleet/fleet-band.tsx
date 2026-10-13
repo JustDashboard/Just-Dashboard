@@ -33,7 +33,7 @@ const rowClass =
  * connected, and how old every database's newest dump is.
  *
  * Every database is drawn in its own hue — the same on its span, its dot, its
- * key in a row and the edge of its card — and as its engine's own mark, so
+ * key in a row and the size bar on its card — and as its engine's own mark, so
  * "the big orange one is analytics" holds from the bar to the card. A row
  * opens the database it is about; a row on the runway opens its dumps.
  *

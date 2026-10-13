@@ -56,7 +56,7 @@ export function SiteMark({
  *
  * It replaced four tiles — sites, on TLS, plain HTTP, disabled — that each
  * gave one count and none of which said *which*. Here every site is drawn in
- * the hue its card's edge carries, every application as its own logo, and a
+ * its own hue, the one its hour bar carries, every application as its own logo, and a
  * row opens the site it is about.
  */
 export function SiteBand({

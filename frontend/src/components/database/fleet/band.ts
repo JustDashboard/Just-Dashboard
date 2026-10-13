@@ -20,7 +20,7 @@ import {
 export const DATABASE_HUES = LANES.filter((hue) => hue !== "var(--tag-slate)")
 
 /**
- * Each database's hue, the same on its card's edge, its span on a bar, its dot
+ * Each database's hue, the same on its card's size bar, its span on a bar, its dot
  * on the backup runway and its key in a row. Dealt in the order the
  * connections were saved rather than hashed from the name: five databases are
  * five hues, where a hash of five names promised nothing, and a database

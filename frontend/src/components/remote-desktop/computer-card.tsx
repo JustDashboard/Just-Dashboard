@@ -26,8 +26,7 @@ import { ComputerMark, reachTone } from "@/components/remote-desktop/marks"
 
 /**
  * One computer on the Remote Desktop page: a card you open, drawn as its
- * system, with its hue down its edge — the same hue as its wire, its key on
- * the band's rows and its span on the time bar.
+ * system.
  *
  * Top to bottom it answers what the reader asks before connecting: which
  * machine and whether it can be reached now; how far it is, by which path,
@@ -38,13 +37,11 @@ import { ComputerMark, reachTone } from "@/components/remote-desktop/marks"
  */
 export function ComputerCard({
   computer,
-  hue,
   index,
   onEdit,
   onRemove,
 }: {
   computer: RdComputerView
-  hue: string
   index: number
   onEdit: () => void
   onRemove: () => void
@@ -70,22 +67,13 @@ export function ComputerCard({
               <BorderBeam size={80} duration={4} />
             </span>
           )}
-          <span
-            aria-hidden
-            data-slot="computer-hue"
-            className={cn(
-              "pointer-events-none absolute inset-y-4 left-0 w-0.75 rounded-r-full",
-              off && "opacity-50",
-            )}
-            style={{ background: hue }}
-          />
           <div
             onClick={(event) => {
               const target = event.target as HTMLElement
               if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
               router.push(href)
             }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4 pl-5"
+            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
           >
             <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
               <ComputerMark os={computer.os} className={cn("row-span-2", off && "opacity-60")} />

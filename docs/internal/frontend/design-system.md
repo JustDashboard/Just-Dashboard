@@ -2339,8 +2339,8 @@ The passes, in order. Each one is a diff you can review on its own.
    the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
-   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else", and
-   it runs down its card's left edge. The card leads with the application tucked over its engine
+   engine's mark. A site's hue is a lane hue without slate, the bar's muted "everything else"; the
+   card's edge carries none (0.7.5, at the operator's request: the stripe read as noise). The card leads with the application tucked over its engine
    (`ProductLogos`), names it in its second line and at the route's far end beside the address, and
    draws a static site's directory as *Files* and a redirect's target as *Redirects to* where both
    read "Served by configuration"; its hour is a short bar against the busiest site's. A site
@@ -2371,8 +2371,9 @@ The passes, in order. Each one is a diff you can review on its own.
    week washed amber because a week is where every other reading of the section calls a dump stale.
    A row opens the database, or on the runway its Backups page. Each database keeps one hue
    (`fleetHues`, a lane hue without slate dealt in the order the connections were saved, so five
-   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row,
-   its card's left edge and its table row; the card's Stored figure carries a short bar in that hue
+   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row
+   and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
 
