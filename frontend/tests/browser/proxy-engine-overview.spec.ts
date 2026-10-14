@@ -2088,6 +2088,7 @@ test("raw config stale saves retain drafts and require review against the newer 
   expect(saves[0].expectedRevision).toBe(originalRevision)
   await expect(editor.getByRole("button", { name: "Save and reload", exact: true })).toBeDisabled()
   await editor.getByText("Compare current file with your draft", { exact: true }).click()
+  await editor.getByText("Current file on disk", { exact: true }).click()
   await expect(
     editor.getByText("server { server_name newer.example.com; }", { exact: true }).first(),
   ).toBeVisible()
