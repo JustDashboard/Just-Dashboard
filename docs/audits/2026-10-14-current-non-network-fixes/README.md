@@ -8,7 +8,9 @@ the target branch and are recorded in [the earlier repair matrix](../2026-10-14-
 
 The task branch includes target `04f7f7af`, which already contains the T-01 auth-recovery test timing
 fix from PR #227. That test waits for the reload's session probe before asserting its count; it passed
-three focused repetitions during this follow-up.
+three focused repetitions during this follow-up. The task branch also integrates target `965fc96a`
+(PR #228's account-page design); required-factor readings follow that design without restoring its
+older tiles.
 
 Cross-review extended the same fixes to delayed image encoding/upload after account cleanup,
 temporary-upload cleanup after a native parent-directory replacement, and raw nginx validation
@@ -27,7 +29,7 @@ before validation or publication during the cleanup-to-remount interval.
 | N-03 | The image canvas loads one immutable binary snapshot with its revision. Overwriting requires that original revision; a conflict retains the transformed canvas for Save as or explicit reload. | Binary snapshot/upload tests, `files-ui.spec.ts` |
 | N-04 | Streamed exports, raw downloads and XHR uploads use the shared authentication-refusal observer while retaining streaming, upload progress and cancellation. | Response/XHR logic tests, database export and auth-recovery browser cases |
 | N-05 | The Security overview reports only measured fail2ban state. An absent, stopped or unreadable fail2ban no longer implies that every repeated-failure blocker is absent. | `security-ui.spec.ts`; before/after captures below |
-| N-06 | User readings, account cards and factor-reset guidance follow the required-2FA policy. Missing enrollment under that policy is described as required before sign-in. | `account-ui.spec.ts`; before/after captures below |
+| N-06 | User identity and coverage readings, cards, filters, factor-reset guidance and Profile/Security diagrams follow the required-2FA policy. Missing enrollment under that policy is described as required before completing sign-in; the diagram has no password-only bypass. | `account-ui.spec.ts`; before/after captures below |
 | N-07 | Raw proxy drafts survive same-document Back/Forward as well as shell navigation, with the original revision preserved across navigation and advanced only by save or explicit conflict review. | Draft logic tests, `proxy-engine-overview.spec.ts` |
 | N-08 | Backup metadata, sealed destination credentials and the revision publish in one database statement. A rejected publication leaves the previous job and credentials intact; credentials cannot publish separately from settings. | Fault-injection and cancellation tests in `internal/backups` |
 | P-01 | The backup form saves against its captured job revision and retains conflicting fields and credentials for explicit review. Pause/resume advances that revision. Deployment native-dump additions use a narrow, bounded compare-and-retry operation rather than overwriting an entire stale job. | Backup/store/API concurrency and migration tests, `backups-ui.spec.ts`, deployment settings regressions |
@@ -74,8 +76,10 @@ and its precise result are recorded below.
 
 ## Visual and interaction evidence
 
-The captures use deterministic API fixtures with a production frontend. They establish the displayed
-policy and editor behavior, rather than live host enforcement.
+The captures use deterministic API fixtures with a production frontend. Before captures reflect the
+original audit baseline; after captures reflect the final repaired tree, including the subsequently
+merged account-page design. They establish displayed policy and editor behavior, rather than live
+host enforcement.
 
 - Required-factor Users: [before](account-required-before.png), [after](account-required-after.png).
 - Fail2ban-specific Security reading: [before](security-fail2ban-before.png),
@@ -120,10 +124,24 @@ browser evidence was restarted from that build on loopback port 43227.
   cursor `fixme`. Active Redis cursor coverage remains in its owning browser suite.
 - The rebuilt account-boundary regressions passed all three cases: same-account draft retention,
   different-account remount and refusal to validate/save after working-state cleanup. The subsequent
-  changed-file gate and target-branch integration results are recorded before push.
+  `scripts/test-changed.sh 1555c049` gate passed all 145 browser cases, along with static checks
+  and all 3,606 Bun tests, before integrating the account-page redesign.
+- The final account-design integration passed Prettier, ESLint, TypeScript and all 3,616 Bun tests;
+  all 146 selected browser cases passed with `scripts/test-changed.sh b228d74b`, including required/
+  optional policy, diagrams, authentication and navigation. The final enabled-only coverage caption
+  also passed a direct disabled-account check on the final production build.
+- `scripts/test-changed.sh 329c3cdc` then passed 145 browser cases and failed one palette touch-target
+  assertion: Chromium reported 43.9999847412 pixels for a settled 44-pixel row. The assertion now
+  rounds to 0.001 CSS-pixel precision, retaining the 44-pixel requirement and still refusing 43.99.
+  `scripts/test-changed.sh 7e5e6b68` passed all 15 palette cases, static checks and all 3,616 Bun tests;
+  the originally failing case also passed three focused repetitions. The original failed run is
+  retained separately from these passing corrections.
+- The final documentation review checked 154 local links with no missing destinations and parsed
+  changed JSON successfully. `git diff --check` passed. The target remained `965fc96a` before push.
 
 ## Documentation review
 
 The owning board, file, proxy, backup, deployment, authentication and observability documents are
 updated in this change. The pre-push review compares the complete diff with `docs/internal/`,
-`AGENTS.md`, `README.md` and `CONTRIBUTING.md`; its result is recorded with final verification.
+`AGENTS.md`, `README.md` and `CONTRIBUTING.md`. [The pre-push review](pre-push-review.md) records
+those updates, the unchanged contributor/installation contracts and the preserved security boundaries.
