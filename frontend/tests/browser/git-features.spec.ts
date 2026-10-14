@@ -1183,3 +1183,67 @@ test("open issues are listed under the pull requests and can be answered", async
     .poll(() => seen.find((r) => r.path === "/git/github/pulls/9/comment")?.body)
     .toEqual({ body: "On it" })
 })
+
+test("inline file drafts survive another preview and retain their opened revision", async ({
+  page,
+}) => {
+  await fixture(page)
+  let revision = "opened"
+  let content = "one\n"
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/files/read**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        path: "/srv/app/a.txt",
+        content,
+        revision,
+        size: content.length,
+        language: "plaintext",
+        binary: false,
+        modeOctal: "0644",
+      }),
+    }),
+  )
+  await page.route("**/api/v1/files/write", (route) => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "content_conflict", message: "Changed on disk" } }),
+    })
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  await page.getByRole("button", { name: "a.txt", exact: true }).click()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("UNSAVED DRAFT")
+  await page.getByRole("button", { name: "Blame", exact: true }).click()
+  revision = "external"
+  content = "native edit\n"
+  await page.getByRole("button", { name: "a.txt", exact: true }).first().click()
+  await expect(page.locator(".monaco-editor")).toContainText("UNSAVED DRAFT")
+  await expect(page.getByRole("alert")).toContainText("Your draft is kept")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].expectedRevision).toBe("opened")
+  const storage = await page.evaluate(() =>
+    JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+  )
+  expect(storage).not.toContain("UNSAVED DRAFT")
+  expect(
+    await page.evaluate(
+      () => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+    ),
+  ).toBe(true)
+  await page.getByRole("button", { name: "Discard draft and reload", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Discard", exact: true }).click()
+  await expect(page.getByRole("button", { name: "1 unsaved file", exact: true })).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      () => !window.dispatchEvent(new Event("beforeunload", { cancelable: true })),
+    ),
+  ).toBe(false)
+})

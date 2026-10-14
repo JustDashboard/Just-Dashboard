@@ -87,6 +87,7 @@ import {
   type Verb,
 } from "@/components/files/file-actions"
 import { usePrompt } from "@/components/files/prompt-dialog"
+import { inspectUpload } from "@/components/files/upload-plan"
 import { useConflicts, type ConflictPolicy } from "@/components/files/conflict-dialog"
 import {
   collectInput,
@@ -94,7 +95,6 @@ import {
   UploadStrip,
   useUploads,
   type Incoming,
-  type UploadJob,
 } from "@/components/files/uploads"
 import {
   baseOf,
@@ -604,51 +604,31 @@ export default function FilesPage() {
   const handleIncoming = async (incoming: Incoming[], dir: string) => {
     if (incoming.length === 0) return
     try {
-      const taken = await namesIn(dir)
-      const top = incoming.filter((i) => !i.rel.includes("/")).map((i) => i.rel)
-      const clashes = top.filter((name) => taken.has(name))
+      const plan = await inspectUpload(incoming, dir, async (path) => {
+        const listing = await get<FileListing>("/files/list", { path, hidden: true })
+        return listing.entries
+      })
       let policy: ConflictPolicy = "keep"
-      if (clashes.length > 0) {
-        const answer = await conflicts.ask(clashes, dir, "uploaded")
+      if (plan.clashes.length > 0 || plan.merge.length > 0) {
+        const answer = await conflicts.ask(plan.clashes, dir, "uploaded", plan.merge)
         if (!answer) return
         policy = answer
       }
-      const dirs = new Set<string>()
-      for (const item of incoming) {
-        const parts = item.rel.split("/")
-        for (let k = 1; k < parts.length; k++) dirs.add(parts.slice(0, k).join("/"))
-      }
-      for (const d of [...dirs].sort((a, b) => a.split("/").length - b.split("/").length)) {
+      const jobs = plan.jobs(policy)
+      for (const relative of plan.create) {
+        const target = joinPath(dir, relative)
         try {
-          await post("/files/mkdir", { path: joinPath(dir, d) })
+          await post("/files/mkdir", { path: target })
         } catch (err) {
+          // Another upload may create the folder during review. A file that
+          // claimed this name must still refuse the operation.
           if (!(err instanceof ApiError && err.status === 409)) throw err
+          const entry = await get<FileEntry>("/files/stat", { path: target })
+          if (!entry.isDir || entry.isSymlink) throw err
         }
-      }
-      const jobs: UploadJob[] = []
-      for (const item of incoming) {
-        const parts = item.rel.split("/")
-        const name = parts.pop() ?? item.file.name
-        const sub = parts.join("/")
-        let finalName = name
-        let overwrite = false
-        if (!sub && taken.has(name)) {
-          if (policy === "skip") continue
-          if (policy === "replace") overwrite = true
-          else finalName = numberedName(name, taken)
-        } else if (sub) {
-          overwrite = policy === "replace"
-        }
-        taken.add(finalName)
-        jobs.push({
-          file: item.file,
-          dir: sub ? joinPath(dir, sub) : dir,
-          name: finalName,
-          overwrite,
-        })
       }
       uploads.enqueue(jobs)
-      if (dirs.size > 0) reload()
+      if (plan.create.length > 0) reload()
     } catch (err) {
       notify.error("Upload failed", err)
     }
@@ -663,25 +643,25 @@ export default function FilesPage() {
    * onto a crumb. The server refuses to clobber, so a taken name is asked
    * about before anything moves rather than found out about per file.
    */
-  const movePaths = async (paths: string[], dir: string, mode: DropMode) => {
+  const movePaths = async (paths: string[], dir: string, mode: DropMode): Promise<string[]> => {
+    const moved = new Set<string>()
     const dest = cleanPath(dir)
     const targets = paths.filter((p) => !(mode === "move" && parentOf(p) === dest))
     if (targets.some((p) => isWithin(dest, p))) {
       notify.error("A folder cannot be moved into itself")
-      return
+      return []
     }
-    if (targets.length === 0) return
+    if (targets.length === 0) return []
     try {
       const taken = await namesIn(dest)
       const clashes = targets.map(baseOf).filter((name) => taken.has(name))
       let policy: ConflictPolicy = "keep"
       if (clashes.length > 0) {
         const answer = await conflicts.ask(clashes, dest, mode === "move" ? "moved" : "copied")
-        if (!answer) return
+        if (!answer) return []
         policy = answer
       }
       let ok = 0
-      const moved = new Set<string>()
       for (const src of targets) {
         const base = baseOf(src)
         let name = base
@@ -721,13 +701,19 @@ export default function FilesPage() {
     } catch (err) {
       notify.error(`Could not ${mode}`, err)
     }
+    return [...moved]
   }
 
   const paste = async () => {
     if (!clip || !path) return
     const held = clip
-    await movePaths(held.paths, path, held.mode === "cut" ? "move" : "copy")
-    if (held.mode === "cut") setClip(null)
+    const moved = await movePaths(held.paths, path, held.mode === "cut" ? "move" : "copy")
+    if (held.mode === "cut") {
+      const remaining = held.paths.filter((path) => !moved.includes(path))
+      setClip((current) =>
+        current === held ? (remaining.length > 0 ? { ...held, paths: remaining } : null) : current,
+      )
+    }
   }
 
   const rename = (entry: FileEntry) =>

@@ -1775,3 +1775,147 @@ test("a failed native move keeps its source preview available", async ({ page })
   await expect(page.getByRole("heading", { name: "notes.md", exact: true })).toBeVisible()
   await expect(page.locator('[data-dragging="true"]')).toHaveCount(0)
 })
+
+test("canceling or skipping a cut conflict keeps the pending clipboard for retry", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+    return json(route, {
+      path: dir,
+      parent: home,
+      roots: ["/"],
+      entries: dir === home ? entries : [entry("notes.md", { path: `${dir}/notes.md` })],
+    })
+  })
+  await openFiles(page)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`).click()
+  await page.keyboard.press("Control+x")
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`).dblclick()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("notes.md")
+  await page.getByRole("dialog").getByRole("button", { name: "Skip it", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeVisible()
+})
+
+test("a stale file save preserves the draft and reviews the current server revision", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  let revision = "opened"
+  let content = "# Notes\nhello\n"
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/files/read**", (route) =>
+    json(route, {
+      path: `${home}/notes.md`,
+      content,
+      revision,
+      size: content.length,
+      language: "markdown",
+      binary: false,
+      modeOctal: "0644",
+    }),
+  )
+  await page.route("**/api/v1/files/write", async (route) => {
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    if (body.expectedRevision !== revision)
+      return json(route, { error: { code: "content_conflict", message: "Changed on disk" } }, 409)
+    content = body.content
+    revision = "saved"
+    return json(route, { revision })
+  })
+  await openFiles(page)
+  await page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`).dblclick()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("MY DRAFT")
+  revision = "external"
+  content = "NATIVE CHANGE\n"
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("alert")).toContainText("Your draft is kept")
+  await expect(page.locator(".monaco-editor")).toContainText("MY DRAFT")
+  expect(writes[0].expectedRevision).toBe("opened")
+  await page.getByRole("button", { name: "Review current file", exact: true }).click()
+  await expect(page.locator("pre").filter({ hasText: "NATIVE CHANGE" })).toBeVisible()
+  await expect(page.locator("pre").filter({ hasText: "MY DRAFT" })).toBeVisible()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(2)
+  expect(writes[1].expectedRevision).toBe("external")
+})
+
+test("folder uploads review nested collisions and keep both within the merged folder", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  const sent: { path: string | null; body: string; overwrite: string | null }[] = []
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+    return json(route, {
+      path: dir,
+      parent: home,
+      roots: ["/"],
+      entries: dir === home ? entries : [entry("a.txt", { path: `${dir}/a.txt` })],
+    })
+  })
+  await page.route("**/api/v1/files/upload**", (route) => {
+    const url = new URL(route.request().url())
+    sent.push({
+      path: url.searchParams.get("path"),
+      overwrite: url.searchParams.get("overwrite"),
+      body: route.request().postDataBuffer()?.toString("latin1") ?? "",
+    })
+    return json(route, { uploaded: ["a (2).txt"] }, 201)
+  })
+  await openFiles(page)
+  // A directory dropped by the desktop entry API retains its relative path.
+  await page.locator("input[webkitdirectory]").evaluate((input: HTMLInputElement) => {
+    const transfer = new DataTransfer()
+    const file = new File(["new contents"], "a.txt", { type: "text/plain" })
+    Object.defineProperty(file, "webkitRelativePath", { value: "photos/a.txt" })
+    transfer.items.add(file)
+    input.files = transfer.files
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("photos/a.txt")
+  await expect(dialog).toContainText("folders will be merged")
+  expect(sent).toHaveLength(0)
+  await dialog.getByRole("button", { name: "Keep both", exact: true }).click()
+  await expect.poll(() => sent.length).toBe(1)
+  expect(sent[0].path).toBe(`${home}/photos`)
+  expect(sent[0].overwrite).toBe("false")
+  expect(sent[0].body).toContain('filename="a (2).txt"')
+})
+
+test("a partially failed cut paste retries only files that have not moved", async ({ page }) => {
+  await mockFiles(page)
+  const moved: string[] = []
+  await page.route("**/api/v1/files/move", (route) => {
+    const body = route.request().postDataJSON()
+    moved.push(body.from)
+    if (body.from.endsWith("logo.png"))
+      return json(
+        route,
+        { error: { code: "permission_denied", message: "Fixture refuses this file" } },
+        403,
+      )
+    return json(route, { ok: true })
+  })
+  await openFiles(page)
+  const listing = page.locator("[data-file-listing]")
+  await listing.locator(`[data-entry-path="${home}/notes.md"]`).getByRole("checkbox").click()
+  await listing.locator(`[data-entry-path="${home}/logo.png"]`).click()
+  await page.getByRole("button", { name: "Cut selection", exact: true }).click()
+  await listing.locator(`[data-entry-path="${home}/photos"]`).dblclick()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect(page.getByText("1 item ready to move", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Paste here", exact: true }).click()
+  await expect.poll(() => moved.length).toBe(3)
+  expect(moved.filter((path) => path.endsWith("notes.md"))).toHaveLength(1)
+  expect(moved.filter((path) => path.endsWith("logo.png"))).toHaveLength(2)
+})

@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -377,6 +379,7 @@ var backupSuffixes = map[string]bool{
 }
 
 type FileContent struct {
+	Revision string `json:"revision"`
 	Path     string `json:"path"`
 	Content  string `json:"content"`
 	Size     int64  `json:"size"`
@@ -405,7 +408,7 @@ func (s *Service) Read(path string) (*FileContent, error) {
 		return nil, err
 	}
 	fc := &FileContent{
-		Path: full, Size: st.Size(),
+		Path: full, Size: int64(len(b)), Revision: contentguard.Revision(string(b)),
 		Language: mimeHint(filepath.Base(full)),
 		Mode:     fmt.Sprintf("%04o", st.Mode().Perm()),
 		Binary:   looksBinary(b),
@@ -435,10 +438,23 @@ func looksBinary(b []byte) bool {
 // temporary file in the same directory and is renamed over the target, so an
 // interrupted save can never leave a half-written config behind.
 func (s *Service) Write(path, content string) error {
+	return s.WriteChecked(path, content, nil)
+}
+
+// WriteChecked refuses a stale revision before touching the target and checks
+// again before publishing, so a native edit during staging is also detected.
+// An empty expected revision requires a destination that does not yet exist.
+func (s *Service) WriteChecked(path, content string, expected *string) error {
 	full, err := s.Resolve(path)
 	if err != nil {
 		return err
 	}
+	unlock := contentguard.Lock(full)
+	defer unlock()
+	if err := checkFileRevision(full, expected); err != nil {
+		return err
+	}
+
 	dir := filepath.Dir(full)
 	perm := os.FileMode(0o644)
 	var uid, gid = -1, -1
@@ -475,7 +491,59 @@ func (s *Service) Write(path, content string) error {
 	if uid >= 0 {
 		os.Chown(tmpName, uid, gid)
 	}
+	resolved, err := s.Resolve(path)
+	if err != nil {
+		return err
+	}
+	if resolved != full {
+		return contentguard.ErrConflict
+	}
+	if err := checkFileRevision(full, expected); err != nil {
+		return err
+	}
+	if expected != nil && *expected == "" {
+		if err := os.Link(tmpName, full); errors.Is(err, fs.ErrExist) {
+			return contentguard.ErrConflict
+		} else {
+			return err
+		}
+	}
 	return os.Rename(tmpName, full)
+}
+
+func checkFileRevision(path string, expected *string) error {
+	if expected == nil {
+		return nil
+	}
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		if *expected == "" {
+			return nil
+		}
+		return contentguard.ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if *expected == "" {
+		return contentguard.ErrConflict
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxEditBytes {
+		return contentguard.ErrConflict
+	}
+	b, err := io.ReadAll(io.LimitReader(file, maxEditBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(b) > maxEditBytes {
+		return contentguard.ErrConflict
+	}
+	return contentguard.Check(string(b), expected)
 }
 
 // Mkdir is the "New folder" verb. Missing parents are created on the way,

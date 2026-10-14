@@ -1693,6 +1693,7 @@ export type FileListing = {
 }
 
 export type FileContent = {
+  revision?: string
   path: string
   content: string
   size: number

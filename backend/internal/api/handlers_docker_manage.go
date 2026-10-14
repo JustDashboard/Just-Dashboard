@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
@@ -853,7 +854,8 @@ func (s *Server) handleStackConfigWrite(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	var req struct {
-		Content string `json:"content"`
+		Content          string  `json:"content"`
+		ExpectedRevision *string `json:"expectedRevision,omitempty"`
 		// Force writes a file compose rejects. Offered because compose
 		// validates variable substitution too, and a file that is correct but
 		// depends on an .env this process cannot read would otherwise be
@@ -888,14 +890,17 @@ func (s *Server) handleStackConfigWrite(w http.ResponseWriter, r *http.Request) 
 	if !validation.Valid && !req.Force {
 		return httpx.Err(http.StatusUnprocessableEntity, "compose_invalid", validation.Error)
 	}
-	if err := dockerx.WriteComposeFile(resolved, req.Content); err != nil {
+	if err := dockerx.WriteComposeFileChecked(resolved, req.Content, req.ExpectedRevision); err != nil {
+		if errors.Is(err, contentguard.ErrConflict) {
+			return httpx.Err(http.StatusConflict, "content_conflict", err.Error())
+		}
 		return httpx.Wrap(http.StatusInternalServerError, "write_failed", err)
 	}
 	httpx.SetAudit(r, "docker.stack.config.write", stack.Name, map[string]any{
 		"path": resolved, "bytes": len(req.Content), "forced": !validation.Valid,
 	})
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"path": resolved, "validation": validation,
+		"path": resolved, "validation": validation, "revision": contentguard.Revision(req.Content),
 		// Saving does not deploy. Compose reads the file on the next command,
 		// so a saved edit changes nothing until the stack is brought up — and
 		// a UI that implied otherwise would be the worst kind of wrong.

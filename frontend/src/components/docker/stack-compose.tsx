@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowRight,
   CheckCircle,
@@ -17,6 +17,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useMemoryState } from "@/lib/view-state"
 import type { ComposeValidation, StackDetail } from "@/lib/types"
+import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor, type EditorCommands } from "@/components/code-editor"
 import { IconAction } from "@/components/icon-action"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
@@ -24,6 +25,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { ContentConflict } from "@/components/files/content-conflict"
 import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
 import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 import {
@@ -41,7 +43,7 @@ import {
  * only in memory, because a compose file holds whatever passwords were
  * written into it.
  */
-export type ComposeDraft = { content: string; from?: string }
+export type ComposeDraft = { content: string; from?: string; original?: string; revision?: string }
 
 export function useComposeDraft(stack: string) {
   return useMemoryState<ComposeDraft | null>(`docker.stack.${stack}.draft`, null)
@@ -82,9 +84,16 @@ export function StackCompose({
   onDeploy?: () => void
   busy: boolean
 }) {
+  const { confirm, dialog } = useConfirm()
   const [original, setOriginal] = useState<string>()
+  const [revision, setRevision] = useState<string>()
+  const [conflict, setConflict] = useState(false)
   const [fetchError, setFetchError] = useState<string>()
   const [draft, setDraft] = useComposeDraft(stack.name)
+  const draftRef = useRef(draft)
+  useEffect(() => {
+    draftRef.current = draft
+  }, [draft])
   const [validation, setValidation] = useState<ComposeValidation>()
   const [working, setWorking] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -103,12 +112,18 @@ export function StackCompose({
   useEffect(() => {
     if (!stack.configPath) return
     const controller = new AbortController()
-    get<{ path: string; content: string }>(
+    get<{ path: string; content: string; revision?: string }>(
       `/docker/stacks/${encodeURIComponent(stack.name)}/config`,
       undefined,
       controller.signal,
     )
-      .then((res) => setOriginal(res.content))
+      .then((res) => {
+        if (controller.signal.aborted) return
+        setOriginal(draftRef.current?.original ?? res.content)
+        setRevision(draftRef.current?.revision ?? res.revision)
+        if (draftRef.current?.original !== undefined && draftRef.current.original !== res.content)
+          setConflict(true)
+      })
       .catch((err) => !controller.signal.aborted && setFetchError(String(err)))
     return () => controller.abort()
   }, [stack.name, stack.configPath])
@@ -128,7 +143,7 @@ export function StackCompose({
   const edit = (next: string) => {
     setSaved(false)
     setValidation(undefined)
-    setDraft(next === original ? null : { content: next, from: draft?.from })
+    setDraft(next === original ? null : { content: next, from: draft?.from, original, revision })
   }
   const jump = (line: number) => {
     setReview(false)
@@ -156,18 +171,21 @@ export function StackCompose({
     if (!dirty || content === undefined) return
     setWorking(true)
     try {
-      const res = await put<{ validation: ComposeValidation }>(
+      const res = await put<{ validation: ComposeValidation; revision?: string }>(
         `/docker/stacks/${encodeURIComponent(stack.name)}/config`,
-        { content, force },
+        { content, force, expectedRevision: revision },
       )
       setOriginal(content)
+      setRevision(res.revision)
+      setConflict(false)
       setDraft(null)
       setValidation(res.validation)
       setReview(false)
       setSaved(true)
       onSaved()
     } catch (err) {
-      if (err instanceof ApiError && err.code === "compose_invalid") {
+      if (err instanceof ApiError && err.code === "content_conflict") setConflict(true)
+      else if (err instanceof ApiError && err.code === "compose_invalid") {
         setValidation({ valid: false, error: err.message, services: [] })
         const line = errorLine(err.message)
         if (line) jump(line)
@@ -176,6 +194,27 @@ export function StackCompose({
       }
     } finally {
       setWorking(false)
+    }
+  }
+
+  const refresh = async (discard = false) => {
+    try {
+      const current = await get<{ content: string; revision?: string }>(
+        `/docker/stacks/${encodeURIComponent(stack.name)}/config`,
+      )
+      setOriginal(current.content)
+      setRevision(current.revision)
+      setDraft(
+        discard || content === undefined
+          ? null
+          : { content, from: draft?.from, original: current.content, revision: current.revision },
+      )
+      setConflict(false)
+      setValidation(undefined)
+      setReview(!discard)
+    } catch (err) {
+      if (discard) throw err
+      notify.error("Could not read the current file", err)
     }
   }
 
@@ -188,6 +227,23 @@ export function StackCompose({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 animate-rise flex-col gap-3 pb-4">
+      {conflict && (
+        <ContentConflict
+          busy={working}
+          onReview={() => void refresh()}
+          onReload={() =>
+            confirm({
+              title: "Discard your changes",
+              description: (
+                <p>Your draft is discarded and the current Compose file is read from disk.</p>
+              ),
+              confirmLabel: "Discard",
+              action: async () => refresh(true),
+            })
+          }
+        />
+      )}
+      {dialog}
       {draft?.from && dirty && (
         <Notice title={`This is the file from ${draft.from}`} icon={ClockRewind}>
           <p className="text-hint leading-relaxed text-muted-foreground">
@@ -279,7 +335,7 @@ export function StackCompose({
               value={content}
               onChange={edit}
               language="yaml"
-              readOnly={!canWrite}
+              readOnly={!canWrite || working}
               wordWrap={wrap}
               filePath={path}
               onSave={canWrite ? () => void save() : undefined}

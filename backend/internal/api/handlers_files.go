@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
@@ -63,6 +64,8 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 
 func mapFileError(err error) error {
 	switch {
+	case errors.Is(err, contentguard.ErrConflict):
+		return httpx.Err(http.StatusConflict, "content_conflict", err.Error())
 	case errors.Is(err, files.ErrOutsideRoot):
 		return httpx.Err(http.StatusForbidden, "outside_root", err.Error())
 	case errors.Is(err, files.ErrTooLarge):
@@ -167,8 +170,9 @@ func (s *Server) handleFileArchive(w http.ResponseWriter, r *http.Request) error
 }
 
 type writeFileRequest struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path             string  `json:"path"`
+	Content          string  `json:"content"`
+	ExpectedRevision *string `json:"expectedRevision,omitempty"`
 }
 
 func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
@@ -176,7 +180,7 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.files.Write(req.Path, req.Content); err != nil {
+	if err := s.modules.files.WriteChecked(req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.write", req.Path, map[string]any{"bytes": len(req.Content)})
@@ -184,7 +188,10 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
-	httpx.JSON(w, http.StatusOK, entry)
+	httpx.JSON(w, http.StatusOK, struct {
+		*files.Entry
+		Revision string `json:"revision"`
+	}{entry, contentguard.Revision(req.Content)})
 	return nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
@@ -922,7 +923,7 @@ func (s *Server) handleStackConfig(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.Wrap(http.StatusInternalServerError, "read_failed", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"path": stack.ConfigFiles[0], "content": content})
+	httpx.JSON(w, http.StatusOK, map[string]any{"path": stack.ConfigFiles[0], "content": content, "revision": contentguard.Revision(content)})
 	return nil
 }
 

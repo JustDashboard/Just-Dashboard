@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
@@ -36,7 +36,7 @@ import type {
   GitStash,
   GitStatus,
 } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
+import { useMemoryState, useViewState } from "@/lib/view-state"
 import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
 import { useGitHubAccount } from "@/hooks/use-github"
@@ -57,7 +57,13 @@ import { GitHubPanel } from "@/components/git/github-panel"
 import { RepoMark } from "@/components/git/languages"
 import { useCheckoutRemoval } from "@/components/git/remove-checkout"
 import { IdentityDialog } from "@/components/git/identity-dialog"
-import { PreviewPanel, type GitPreview, type PreviewContext } from "@/components/git/preview-panel"
+import { guardGitDrafts } from "@/components/git/draft-guard"
+import {
+  PreviewPanel,
+  type GitPreview,
+  type GitFileDraft,
+  type PreviewContext,
+} from "@/components/git/preview-panel"
 import { RemotesDialog } from "@/components/git/remotes-dialog"
 import { WorktreesDialog } from "@/components/git/worktrees-dialog"
 import { PullBlockedDialog, pullBlocked } from "@/components/git/pull-blocked"
@@ -151,6 +157,13 @@ export function RepoWorkspace({
   const [preview, setPreviewState] = useState<GitPreview | null>(() =>
     activePull ? { kind: "pull", number: activePull } : null,
   )
+  const [fileDrafts, setFileDrafts] = useMemoryState<Record<string, GitFileDraft>>(
+    `git.repo.${repo.path}.drafts`,
+    {},
+  )
+  useEffect(() => {
+    guardGitDrafts(repo.path, Object.keys(fileDrafts).length > 0)
+  }, [repo.path, fileDrafts])
   const [graphOpen, setGraphOpen] = useState(false)
   const [historyFile, setHistoryFile] = useState<string>()
   const [remotesOpen, setRemotesOpen] = useState(false)
@@ -275,6 +288,14 @@ export function RepoWorkspace({
   }
 
   const ctx: PreviewContext = {
+    fileDrafts,
+    onFileDraft: (path, draft) =>
+      setFileDrafts((previous) => {
+        const next = { ...previous }
+        if (draft) next[path] = draft
+        else delete next[path]
+        return next
+      }),
     canAdmin: can("system.admin"),
     repoPath: repo.path,
     branch: branch || "HEAD",
@@ -568,6 +589,18 @@ export function RepoWorkspace({
               <TooltipContent>Back to all repositories</TooltipContent>
             </Tooltip>
             <RepoMark repo={repo} size="sm" />
+            {Object.keys(fileDrafts).length > 0 && (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="text-warning"
+                title="Drafts stay in this tab until saved or discarded"
+                onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
+              >
+                {Object.keys(fileDrafts).length} unsaved{" "}
+                {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
+              </Button>
+            )}
             <div className="min-w-0 shrink">
               <p className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-body font-semibold" title={repo.path}>

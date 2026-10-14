@@ -300,4 +300,5 @@ export function forgetMemoryState(prefix: string) {
 export function forgetWorkingState() {
   session.forget("")
   memory.forget("")
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("jd-working-state-cleared"))
 }
