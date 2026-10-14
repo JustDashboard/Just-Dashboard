@@ -177,6 +177,21 @@ export function ImageEditor({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  const saveFlight = useRef<AbortController | null>(null)
+  const lifetime = useRef({ active: true, generation: 0 })
+  useEffect(() => {
+    lifetime.current.active = true
+    const invalidate = () => {
+      lifetime.current.active = false
+      lifetime.current.generation += 1
+      saveFlight.current?.abort()
+    }
+    window.addEventListener("jd-working-state-cleared", invalidate)
+    return () => {
+      window.removeEventListener("jd-working-state-cleared", invalidate)
+      invalidate()
+    }
+  }, [])
   const [cropping, setCropping] = useState(false)
   const [crop, setCrop] = useState<Rect | null>(null)
   const [format, setFormat] = useState(handoff?.format ?? defaultFormat(path))
@@ -380,7 +395,7 @@ export function ImageEditor({
   }
 
   const save = async (asName?: string) => {
-    if (!current || saving) return
+    if (!current || saving || saveFlight.current || !lifetime.current.active) return
     const name = (asName || path.split("/").pop() || "image").trim()
     const finalName = withExtension(name, format)
     if (!finalName || finalName.includes("/") || finalName === "." || finalName === "..") {
@@ -389,6 +404,13 @@ export function ImageEditor({
     }
     const dir = path.slice(0, path.lastIndexOf("/")) || "/"
     const target = (dir + "/" + finalName).replace(/\/{2,}/g, "/")
+    const controller = new AbortController()
+    saveFlight.current = controller
+    const generation = lifetime.current.generation
+    const active = () =>
+      lifetime.current.active &&
+      lifetime.current.generation === generation &&
+      !controller.signal.aborted
     setSaving(true)
     try {
       const output = document.createElement("canvas")
@@ -399,16 +421,21 @@ export function ImageEditor({
       ctx.filter = filterFor(adjust)
       ctx.drawImage(current, 0, 0)
       const blob = await toBlob(output, format, quality / 100)
+      // Encoding outlives a component or sign-in; never publish its old canvas
+      // with the next account's cookie, or announce a departed editor's save.
+      if (!active()) return
       const form = new FormData()
       form.append("file", blob, finalName)
       if (target === path && !revision) throw new Error("Reload the original image before saving")
       const result = await postForm<{ revisions: Record<string, string> }>("/files/upload", form, {
+        signal: controller.signal,
         query: {
           path: dir,
           overwrite: target === path,
           expectedRevision: target === path ? revision : undefined,
         },
       })
+      if (!active()) return
       const savedRevision = result.revisions?.[finalName]
       if (!savedRevision) throw new Error("The server did not return the saved image revision")
       notify.success(`Saved ${finalName}`, {
@@ -425,10 +452,12 @@ export function ImageEditor({
       onSaved(target)
       if (!destination) onClose()
     } catch (err) {
+      if (!active()) return
       if (err instanceof ApiError && err.code === "content_conflict") setConflict(true)
       notify.error("Could not save the image", err)
     } finally {
-      setSaving(false)
+      if (saveFlight.current === controller) saveFlight.current = null
+      if (active()) setSaving(false)
     }
   }
 

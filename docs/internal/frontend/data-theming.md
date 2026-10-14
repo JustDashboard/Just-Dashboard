@@ -437,7 +437,11 @@ reads a refused response once through `responseError`. XHR file uploads, databas
 uploads use the same synchronous `errorFromResponse` parser without changing upload progress.
 SQL table/query exports, MongoDB exports,
 image editing, PDF previews and the diagram keepalive save use that same path; cancellation signals,
-response headers and export completion/truncation checks remain with each reader.
+response headers and export completion/truncation checks remain with each reader. Image saves
+also fence asynchronous canvas encoding and upload completion to their mounted editor and working-state
+generation. Unmounting or clearing account-owned state aborts an in-flight upload; a late encoder never
+starts an old-canvas upload, and late responses cannot announce success or call a departed editor's
+callbacks. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
 
 All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or

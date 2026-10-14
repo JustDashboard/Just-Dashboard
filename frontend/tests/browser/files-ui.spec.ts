@@ -2083,3 +2083,96 @@ test("a stale image save keeps the transformed canvas and original revision thro
   await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "80")
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
 })
+
+async function holdImageEncoding(page: Page) {
+  await page.addInitScript(() => {
+    const encode = HTMLCanvasElement.prototype.toBlob
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...options) {
+      const encodeCanvas = encode.bind(this)
+      Object.assign(window, {
+        imageEncodingStarted: true,
+        finishImageEncoding: () =>
+          new Promise<void>((resolve) => {
+            encodeCanvas(
+              (blob) => {
+                callback(blob)
+                queueMicrotask(resolve)
+              },
+              ...options,
+            )
+          }),
+      })
+    }
+  })
+}
+
+for (const exit of ["account cleanup", "editor departure"] as const) {
+  test(`an image encoded after ${exit} cannot publish the departed canvas`, async ({ page }) => {
+    await holdImageEncoding(page)
+    await mockFiles(page)
+    await mockPicture(page)
+    let uploads = 0
+    await page.route("**/api/v1/files/upload**", async (route) => {
+      uploads += 1
+      return json(route, { revisions: { "logo.png": "2".repeat(64) } }, 201)
+    })
+    await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/logo.png`)}`)
+    await page.getByRole("button", { name: "Right", exact: true }).click()
+    await page.getByRole("button", { name: "Save over original", exact: true }).click()
+    await expect
+      .poll(() => page.evaluate(() => Reflect.get(window, "imageEncodingStarted")))
+      .toBe(true)
+    if (exit === "account cleanup") {
+      await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+    } else {
+      await page.getByRole("button", { name: "Files", exact: true }).click()
+      await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
+      await expect(page.getByLabel("Image editing canvas")).toHaveCount(0)
+    }
+    await page.evaluate(() => Reflect.get(window, "finishImageEncoding")())
+    expect(uploads).toBe(0)
+    await expect(page.getByText("Saved logo.png", { exact: true })).toHaveCount(0)
+  })
+}
+
+test("account cleanup aborts a pending image upload and suppresses late completion", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const fetch = window.fetch
+    window.fetch = (...args) => {
+      if (String(args[0]).includes("/files/upload")) {
+        return new Promise<Response>((resolve) => {
+          const signal = args[1]?.signal
+          signal?.addEventListener("abort", () =>
+            Object.assign(window, { imageUploadAborted: true }),
+          )
+          Object.assign(window, {
+            imageUploadStarted: true,
+            finishImageUpload: () => {
+              resolve(
+                new Response(JSON.stringify({ revisions: { "logo.png": "2".repeat(64) } }), {
+                  status: 201,
+                  headers: { "Content-Type": "application/json" },
+                }),
+              )
+              return new Promise<void>((settled) => setTimeout(settled, 0))
+            },
+          })
+        })
+      }
+      return fetch(...args)
+    }
+  })
+  await mockFiles(page)
+  await mockPicture(page)
+  await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/logo.png`)}`)
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "imageUploadStarted"))).toBe(true)
+  await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "imageUploadAborted"))).toBe(true)
+  await page.evaluate(() => Reflect.get(window, "finishImageUpload")())
+  await expect(page.getByText("Saved logo.png", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+})
