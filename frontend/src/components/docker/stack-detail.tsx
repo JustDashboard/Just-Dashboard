@@ -197,7 +197,7 @@ function StackBody({ name }: { name: string }) {
   const query = useSearchParams()
   const { snapshot } = useMetrics()
   const [rememberedTab, rememberTab] = useViewState("docker.stack.tab", "services")
-  const [tab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
+  const [requestedTab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
   const setTab = (value: string) => {
     setRequestedTab(value)
     rememberTab(value)
@@ -479,6 +479,7 @@ function StackBody({ name }: { name: string }) {
     { value: "history", label: "History" },
     { value: "logs", label: "Logs" },
   ]
+  const tab = tabs.some((entry) => entry.value === requestedTab) ? requestedTab : "services"
 
   return (
     <Workspace
