@@ -361,6 +361,8 @@ test("a held backup draft keeps its original revision after dashboard navigation
   current = { ...current, revision: 2, retention: 10 }
   await page.locator('a[href="/backups"]').first().click()
   await page.getByRole("link", { name: "Databases nightly", exact: true }).click()
+  await expect(page).toHaveURL(/\/backups\/2$/)
+  await expect(page.getByRole("heading", { name: "Databases nightly", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Edit", exact: true }).click()
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Held draft")
   await dialog.getByRole("button", { name: "Save", exact: true }).click()
