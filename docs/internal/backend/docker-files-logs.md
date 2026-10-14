@@ -362,6 +362,17 @@ competing dashboard save returns `409 content_conflict`; its transformed canvas 
 Save as or review, and reloading the server image requires confirmed discard. Subsequent successful
 original saves use the returned saved revision. Legacy uploads without a revision keep their previous
 overwrite behavior. The same narrow native comparison/rename window described below still applies.
+Uploads open the resolved parent through the allowed root and keep its directory handle for staging,
+final revision reads, publication and cleanup. Mode and ownership changes use the still-open staging
+file descriptor and must succeed before publication. A moved parent followed by a replacement
+directory or symlink at its old pathname
+cannot redirect staging cleanup or metadata to an unrelated file. Publication rechecks both the
+resolved client path and the parent directory's identity; outward retargets retain the resolver's
+refusal and in-root parent replacements conflict, including replacement directories with identical
+file bytes. New-name publication uses directory-relative no-replace rename with a pinned-root hard
+link fallback. `upload_parent_test.go` covers legacy and revisioned uploads, complete and interrupted
+transfers, outward/inward symlink retargets, same-path replacement directories, untouched shadow files
+and cleanup of staging in the original moved directory.
 `image_snapshot_test.go` and `handlers_files_revision_test.go` cover bounded regular-file snapshots,
 exact binary revisions, changes during staging, concurrent text/image writers and the HTTP contract;
 `files-ui.spec.ts` checks conflict retention, Save as, confirmed reload and full-editor handoff.

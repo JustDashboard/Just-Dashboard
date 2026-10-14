@@ -5,6 +5,7 @@
 package files
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -849,12 +850,32 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 	if err != nil {
 		return 0, err
 	}
-	if err := checkFileRevisionLimit(full, expected, maxImageEditBytes); err != nil {
+	allowed, relative, err := s.openRootEntry(full)
+	if err != nil {
+		return 0, err
+	}
+	defer allowed.Close()
+	parent, err := allowed.OpenRoot(filepath.Dir(relative))
+	if err != nil {
+		return 0, err
+	}
+	defer parent.Close()
+	directory, err := parent.Open(".")
+	if err != nil {
+		return 0, err
+	}
+	defer directory.Close()
+	parentInfo, err := directory.Stat()
+	if err != nil {
+		return 0, err
+	}
+	name := filepath.Base(relative)
+	if err := checkUploadRevision(parent, name, expected); err != nil {
 		return 0, err
 	}
 	perm := os.FileMode(0o644)
 	uid, gid := -1, -1
-	if st, err := os.Lstat(full); err == nil {
+	if st, err := parent.Lstat(name); err == nil {
 		if st.IsDir() {
 			return 0, ErrIsDir
 		}
@@ -871,37 +892,45 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 	} else if !os.IsNotExist(err) {
 		return 0, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(full), ".jd-upload-*")
+	token := make([]byte, 16)
+	if _, err := rand.Read(token); err != nil {
+		return 0, err
+	}
+	tmpName := fmt.Sprintf(".jd-upload-%x", token)
+	tmp, err := parent.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer tmp.Close()
+	// Cleanup must follow the directory we opened, even if a native writer
+	// moves it and installs a symlink or another directory at its old name.
+	defer parent.Remove(tmpName)
 
 	n, err := io.Copy(tmp, r)
 	if err != nil {
 		tmp.Close()
 		return n, err
 	}
+	if uid >= 0 {
+		if err := tmp.Chown(uid, gid); err != nil {
+			return n, err
+		}
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		return n, err
+	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
 		return n, err
 	}
 	if err := tmp.Close(); err != nil {
 		return n, err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		return n, err
-	}
-	if uid >= 0 {
-		os.Chown(tmpName, uid, gid)
 	}
 	// Transfers stage outside the lock so a slow browser cannot hold other
 	// saves hostage. The final comparison and publication are one locked step.
 	unlock := contentguard.Lock(full)
 	defer unlock()
 	if !overwrite {
-		if _, err := os.Lstat(full); err == nil {
+		if _, err := parent.Lstat(name); err == nil {
 			return n, fmt.Errorf("%w: %s", fs.ErrExist, path)
 		} else if !os.IsNotExist(err) {
 			return n, err
@@ -914,21 +943,67 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 	if resolved != full {
 		return n, contentguard.ErrConflict
 	}
-	if err := checkFileRevisionLimit(full, expected, maxImageEditBytes); err != nil {
+	currentParent, err := os.Stat(filepath.Dir(resolved))
+	if err != nil {
+		return n, err
+	}
+	if !os.SameFile(parentInfo, currentParent) {
+		return n, contentguard.ErrConflict
+	}
+	if err := checkUploadRevision(parent, name, expected); err != nil {
 		return n, err
 	}
 	if !overwrite || (expected != nil && *expected == "") {
 		// A network transfer leaves time for another writer to claim the
 		// destination. Publish only if the name is still free; a hard link
 		// keeps this atomic on filesystems without no-replace rename support.
-		err := unix.Renameat2(unix.AT_FDCWD, tmpName, unix.AT_FDCWD, full, unix.RENAME_NOREPLACE)
+		fd := int(directory.Fd())
+		err := unix.Renameat2(fd, tmpName, fd, name, unix.RENAME_NOREPLACE)
 		if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EOPNOTSUPP) {
-			return n, os.Link(tmpName, full)
+			return n, parent.Link(tmpName, name)
 		}
 		if err != nil {
 			return n, &os.LinkError{Op: "rename", Old: tmpName, New: full, Err: err}
 		}
 		return n, nil
 	}
-	return n, os.Rename(tmpName, full)
+	return n, parent.Rename(tmpName, name)
+}
+
+func checkUploadRevision(parent *os.Root, name string, expected *string) error {
+	if expected == nil {
+		return nil
+	}
+	file, err := parent.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	if os.IsNotExist(err) {
+		if *expected == "" {
+			return nil
+		}
+		return contentguard.ErrConflict
+	}
+	if errors.Is(err, syscall.ELOOP) {
+		return contentguard.ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if *expected == "" {
+		return contentguard.ErrConflict
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxImageEditBytes {
+		return contentguard.ErrConflict
+	}
+	revision, n, err := contentguard.RevisionReader(io.LimitReader(file, maxImageEditBytes+1))
+	if err != nil {
+		return err
+	}
+	if n > maxImageEditBytes || revision != *expected {
+		return contentguard.ErrConflict
+	}
+	return nil
 }
