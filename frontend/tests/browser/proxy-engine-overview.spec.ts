@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
 import {
@@ -16,6 +17,11 @@ import {
  * the host's caddy for a Docker ingress, and a Caddy "running as a container"
  * that had not been started yet.
  */
+
+const configRevision = (content: string) => createHash("sha256").update(content).digest("hex")
+const configRead = (content: string) => ({ content, revision: configRevision(content) })
+const configContents = (path: string) =>
+  `# ${path}\nserver {\n    listen 80;\n    server_name app.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\n`
 
 function failWith(status: number, error: Record<string, unknown>) {
   return (route: Route) =>
@@ -234,7 +240,7 @@ test("restart is refused with nginx's own reason when its configuration fails", 
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
+    return json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n"))
   })
   await page.goto("/proxy")
 
@@ -368,7 +374,7 @@ test("a file opened from a refusal closes back into it, with the keyboard on its
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
+    return json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n"))
   })
   await page.goto("/proxy")
 
@@ -409,18 +415,25 @@ test("a fix saved while nginx is stopped is saved, and says it was not reloaded"
   await mockUnit(page, stopped)
   await page.route("**/api/v1/proxy/engine/start", refusedBy("started"))
   await page.route("**/api/v1/proxy/config?**", (route) =>
-    json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" }),
+    json(route, configRead("server {\n    listen 80;\n    frobnicate on;\n}\n")),
   )
   const saved: { reload: boolean; content: string }[] = []
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saved.push(route.request().postDataJSON())
     // The file passed its test and was written; the reload had no nginx to signal.
-    return failWith(502, {
-      code: "reload_failed",
-      message:
-        'reload failed: nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)',
-    })(route)
+    return route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "reload_failed",
+          message:
+            'reload failed: nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)',
+        },
+        revision: configRevision(route.request().postDataJSON().content),
+      }),
+    })
   })
   await page.goto("/proxy")
 
@@ -1223,7 +1236,7 @@ async function watchConfigReads(page: Page) {
   const reads: string[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => {
     reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
-    return json(route, { content: siteFile })
+    return json(route, configRead(siteFile))
   })
   return reads
 }
@@ -1565,7 +1578,10 @@ test("a file saved from the test's editor is tested again when it closes", async
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saved.push(route.request().postDataJSON())
-    return json(route, { validation: passingTest })
+    return json(route, {
+      validation: passingTest,
+      revision: configRevision(route.request().postDataJSON().content),
+    })
   })
   await page.goto("/proxy")
 
@@ -1635,9 +1651,7 @@ async function watchConfigFiles(page: Page) {
   await page.route("**/api/v1/proxy/config?**", (route) => {
     const path = new URL(route.request().url()).searchParams.get("path") ?? ""
     reads.push(path)
-    return json(route, {
-      content: `# ${path}\nserver {\n    listen 80;\n    server_name app.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\n`,
-    })
+    return json(route, configRead(configContents(path)))
   })
   return reads
 }
@@ -1851,7 +1865,11 @@ test("the config editor shows the change before it saves, places a refusal in th
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
     saves.push(route.request().postDataJSON())
-    if (!refuse) return json(route, { validation: passingTest })
+    if (!refuse)
+      return json(route, {
+        validation: passingTest,
+        revision: configRevision(route.request().postDataJSON().content),
+      })
     return route.fulfill({
       status: 422,
       contentType: "application/json",
@@ -1978,6 +1996,18 @@ test("raw config drafts survive Back and Forward with an unload guard while clos
   await mockProxy(page, { included: true })
   await watchConfigFiles(page)
   const file = "/etc/nginx/nginx.conf"
+  const revisions: string[] = []
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    revisions.push(route.request().postDataJSON().expectedRevision)
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "Save temporarily unavailable" },
+      }),
+    })
+  })
   await page.goto("/proxy/config")
   await page.getByRole("button", { name: "Edit nginx.conf", exact: true }).click()
   const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
@@ -1993,6 +2023,13 @@ test("raw config drafts survive Back and Forward with an unload guard while clos
   ).toBe(true)
   await page.goForward()
   await expect(page).toHaveURL(new RegExp(`file=${encodeURIComponent(file)}`))
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
+    "# retained through history",
+  )
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect.poll(() => revisions.length).toBe(1)
+  expect(revisions[0]).toBe(configRevision(configContents(file)))
   await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
     "# retained through history",
   )
@@ -2019,7 +2056,8 @@ test("raw config stale saves retain drafts and require review against the newer 
   await mockProxy(page, { included: true })
   const file = "/etc/nginx/nginx.conf"
   let content = "server { server_name original.example.com; }\n"
-  let revision = "original-revision"
+  const originalRevision = configRevision(content)
+  let revision = originalRevision
   const saves: { content: string; expectedRevision: string }[] = []
   await page.route("**/api/v1/proxy/config?**", (route) => json(route, { content, revision }))
   await page.route("**/api/v1/proxy/config", (route) => {
@@ -2033,20 +2071,21 @@ test("raw config stale saves retain drafts and require review against the newer 
         body: JSON.stringify({ error: { code: "config_conflict", message: "File changed" } }),
       })
     content = body.content
-    revision = "saved-revision"
+    revision = configRevision(content)
     return json(route, { revision, validation: passingTest })
   })
   await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
   const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
   await typeInEditor(page, editor, "# my retained draft")
   content = "server { server_name newer.example.com; }\n"
-  revision = "newer-revision"
+  const newerRevision = configRevision(content)
+  revision = newerRevision
   await editor.getByRole("button", { name: "Save only", exact: true }).click()
   await editor.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(editor.getByText("File changed — draft retained", { exact: true })).toBeVisible()
   await expect(editor.locator(".monaco-editor .view-lines")).toContainText("# my retained draft")
   expect(content).toContain("newer.example.com")
-  expect(saves[0].expectedRevision).toBe("original-revision")
+  expect(saves[0].expectedRevision).toBe(originalRevision)
   await expect(editor.getByRole("button", { name: "Save and reload", exact: true })).toBeDisabled()
   await editor.getByText("Compare current file with your draft", { exact: true }).click()
   await expect(
@@ -2056,6 +2095,6 @@ test("raw config stale saves retain drafts and require review against the newer 
   await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
   await editor.getByRole("button", { name: "Save only", exact: true }).click()
   await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
-  expect(saves[1].expectedRevision).toBe("newer-revision")
+  expect(saves[1].expectedRevision).toBe(newerRevision)
   expect(content).toContain("# my retained draft")
 })
