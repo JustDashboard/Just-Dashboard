@@ -477,3 +477,52 @@ test("leaving drains edits made during the first save and stays when the next sa
   await page.getByRole("button", { name: "Stay", exact: true }).click()
   await expect(canvasNote(page, "Keep this")).toBeVisible()
 })
+
+test("sticky drafts retain failed edits through sidebar and Back, and explicit discard clears them", async ({
+  page,
+}) => {
+  const board = await mockStickyboards(page, {
+    version: 1,
+    background: "dots",
+    notes: [note("a", "Retain this", 0, 0)],
+    links: [],
+  })
+  board.refuse = { status: 503, code: "unavailable", message: "Save temporarily unavailable" }
+  await openBoard(page)
+  await canvasNote(page, "Retain this").click()
+  await page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Violet" }).click()
+  await expect(page.getByRole("status")).toContainText("Save failed")
+  await page.locator('a[href="/excalidraw"]').first().click()
+  await expect(page).toHaveURL(/\/excalidraw$/)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
+  await page.goBack()
+  await canvasNote(page, "Retain this").click()
+  await expect(
+    page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Violet" }),
+  ).toHaveAttribute("aria-checked", "true")
+  expect(board.doc.notes[0].color).toBe("yellow")
+  await page.getByRole("button", { name: "Back to Stickyboard" }).click()
+  await page
+    .getByRole("dialog", { name: "Leave without saving?" })
+    .getByRole("button", { name: "Leave without saving" })
+    .click()
+  await expect(page).toHaveURL(/\/stickyboard$/)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
+  await page.goBack()
+  await canvasNote(page, "Retain this").click()
+  await expect(
+    page.getByRole("toolbar", { name: "Format" }).getByRole("radio", { name: "Yellow" }),
+  ).toHaveAttribute("aria-checked", "true")
+})

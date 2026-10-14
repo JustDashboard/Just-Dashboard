@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,7 +189,11 @@ func TestConfigSaveRefusalCarriesTheTest(t *testing.T) {
 	dir := configHost(t, s)
 	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	file := filepath.Join(dir, "sites-available/app")
-	body, _ := json.Marshal(map[string]any{"kind": "nginx", "path": file, "content": "server {\n    frobnicate on;\n}\n"})
+	snapshot, err := s.modules.proxy.ReadConfigSnapshot(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"expectedRevision": snapshot.Revision, "kind": "nginx", "path": file, "content": "server {\n    frobnicate on;\n}\n"})
 	w := admin.do(http.MethodPut, "/api/v1/proxy/config", string(body), nil)
 	var refusal struct {
 		Error      struct{ Code, Message string }
@@ -211,5 +216,58 @@ func TestConfigSaveRefusalCarriesTheTest(t *testing.T) {
 	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'proxy.config.write'
 		AND detail LIKE '%rejected%'`).Scan(&audited); err != nil || audited != 1 {
 		t.Fatalf("the refusal was audited %d times (%v)", audited, err)
+	}
+}
+
+func TestRawConfigRequiresRevisionAndRetainsNewerContent(t *testing.T) {
+	for _, kind := range []proxysvc.Kind{proxysvc.KindNginx, proxysvc.KindCaddy} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, bin := engineHost(t, map[string]string{"nginx": "exit 0\n", "caddy": "exit 0\n"})
+			dir := configHost(t, s)
+			file := filepath.Join(dir, "nginx.conf")
+			if kind == proxysvc.KindCaddy {
+				// Missing preconditions and stale revisions are refused before
+				// any validator runs, independently of native Caddy availability.
+				file = filepath.Join(dir, "Caddyfile")
+				if err := os.WriteFile(file, []byte("original"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				s.Cfg.CaddyFile = file
+				s.initModules()
+			}
+			admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+			read := admin.do(http.MethodGet, "/api/v1/proxy/config?path="+url.QueryEscape(file), "", nil)
+			var snapshot proxysvc.ConfigSnapshot
+			if err := json.Unmarshal(read.Body.Bytes(), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if read.Code != http.StatusOK || snapshot.Revision != proxysvc.ContentDigest(snapshot.Content) {
+				t.Fatalf("read: %d %s", read.Code, read.Body.String())
+			}
+			body := map[string]any{"kind": kind, "path": file, "content": "stale"}
+			encoded, _ := json.Marshal(body)
+			if w := admin.do(http.MethodPut, "/api/v1/proxy/config", string(encoded), nil); w.Code != http.StatusBadRequest {
+				t.Fatalf("missing revision: %d %s", w.Code, w.Body.String())
+			}
+			if err := os.WriteFile(file, []byte("newer native edit"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			body["expectedRevision"] = snapshot.Revision
+			encoded, _ = json.Marshal(body)
+			w := admin.do(http.MethodPut, "/api/v1/proxy/config", string(encoded), nil)
+			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "config_conflict") {
+				t.Fatalf("stale revision: %d %s", w.Code, w.Body.String())
+			}
+			if got, _ := os.ReadFile(file); string(got) != "newer native edit" {
+				t.Fatalf("newer edit lost: %q", got)
+			}
+			if got := shimLog(t, bin, "nginx") + shimLog(t, bin, "caddy"); got != "" {
+				t.Fatalf("refusal ran validator: %q", got)
+			}
+			var audited int
+			if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'proxy.config.write' AND detail LIKE '%conflict%'`).Scan(&audited); err != nil || audited != 1 {
+				t.Fatalf("conflict audit: count=%d err=%v", audited, err)
+			}
+		})
 	}
 }

@@ -1971,3 +1971,91 @@ test("the configuration page and its editor's diff fit a phone", async ({ page }
   )
   expect(wide).toBe(false)
 })
+
+test("raw config drafts survive Back and Forward with an unload guard while closed", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  const file = "/etc/nginx/nginx.conf"
+  await page.goto("/proxy/config")
+  await page.getByRole("button", { name: "Edit nginx.conf", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# retained through history")
+  await page.goBack()
+  await expect(editor).toHaveCount(0)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
+  await page.goForward()
+  await expect(page).toHaveURL(new RegExp(`file=${encodeURIComponent(file)}`))
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
+    "# retained through history",
+  )
+  await editor.getByRole("button", { name: "Discard", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Discard changes?" })
+    .getByRole("button", { name: "Discard", exact: true })
+    .click()
+  await expect(editor.locator(".monaco-editor .view-lines")).not.toContainText(
+    "# retained through history",
+  )
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
+})
+
+test("raw config stale saves retain drafts and require review against the newer revision", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const file = "/etc/nginx/nginx.conf"
+  let content = "server { server_name original.example.com; }\n"
+  let revision = "original-revision"
+  const saves: { content: string; expectedRevision: string }[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => json(route, { content, revision }))
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    const body = route.request().postDataJSON()
+    saves.push(body)
+    if (body.expectedRevision !== revision)
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "config_conflict", message: "File changed" } }),
+      })
+    content = body.content
+    revision = "saved-revision"
+    return json(route, { revision, validation: passingTest })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# my retained draft")
+  content = "server { server_name newer.example.com; }\n"
+  revision = "newer-revision"
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect(editor.getByText("File changed — draft retained", { exact: true })).toBeVisible()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("# my retained draft")
+  expect(content).toContain("newer.example.com")
+  expect(saves[0].expectedRevision).toBe("original-revision")
+  await expect(editor.getByRole("button", { name: "Save and reload", exact: true })).toBeDisabled()
+  await editor.getByText("Compare current file with your draft", { exact: true }).click()
+  await expect(
+    editor.getByText("server { server_name newer.example.com; }", { exact: true }).first(),
+  ).toBeVisible()
+  await editor.getByRole("button", { name: "Review draft against current file" }).click()
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
+  expect(saves[1].expectedRevision).toBe("newer-revision")
+  expect(content).toContain("# my retained draft")
+})

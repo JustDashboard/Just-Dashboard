@@ -78,7 +78,7 @@ func (s *Server) handleProxyConfigRead(w http.ResponseWriter, r *http.Request) e
 	if path == "" {
 		return httpx.BadRequest("path query parameter is required")
 	}
-	content, err := s.modules.proxy.ReadConfig(path)
+	snapshot, err := s.modules.proxy.ReadConfigSnapshot(path)
 	// The path comes from a list read earlier, and a site can be deleted or
 	// renamed in between. That is a state of the host, not a bad request,
 	// and reading again once the file is back is the remedy.
@@ -90,15 +90,16 @@ func (s *Server) handleProxyConfigRead(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return mapProxyError(err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"path": path, "content": content})
+	httpx.JSON(w, http.StatusOK, map[string]any{"path": path, "content": snapshot.Content, "revision": snapshot.Revision})
 	return nil
 }
 
 type proxyConfigRequest struct {
-	Kind    proxysvc.Kind `json:"kind"`
-	Path    string        `json:"path"`
-	Content string        `json:"content"`
-	Reload  bool          `json:"reload"`
+	Kind             proxysvc.Kind `json:"kind"`
+	Path             string        `json:"path"`
+	Content          string        `json:"content"`
+	Reload           bool          `json:"reload"`
+	ExpectedRevision string        `json:"expectedRevision"`
 }
 
 // decode reads a file the config editor validates or saves. The service
@@ -142,8 +143,15 @@ func (s *Server) handleProxyConfigWrite(w http.ResponseWriter, r *http.Request) 
 	if err := req.decode(r); err != nil {
 		return err
 	}
-	res, err := s.modules.proxy.WriteConfig(r.Context(), req.Kind, req.Path, req.Content)
+	if req.ExpectedRevision == "" {
+		return httpx.BadRequest("expectedRevision from the file read is required; read the file before saving")
+	}
+	res, err := s.modules.proxy.WriteConfigChecked(r.Context(), req.Kind, req.Path, req.Content, req.ExpectedRevision)
 	if err != nil {
+		if errors.Is(err, proxysvc.ErrConfigChanged) {
+			httpx.SetAudit(r, "proxy.config.write", req.Path, map[string]any{"result": "conflict"})
+			return httpx.Err(http.StatusConflict, "config_conflict", "The file changed or was removed. Your draft was not saved; read the current file and review your changes before trying again.")
+		}
 		if errors.Is(err, proxysvc.ErrInvalidConf) {
 			httpx.SetAudit(r, "proxy.config.write", req.Path, map[string]any{"result": "rejected"})
 			// The test beside the error, as a refused reload's, so the
@@ -152,13 +160,19 @@ func (s *Server) handleProxyConfigWrite(w http.ResponseWriter, r *http.Request) 
 		}
 		return mapProxyError(err)
 	}
-	out := map[string]any{"validation": res}
+	revision := proxysvc.ContentDigest(req.Content)
+	out := map[string]any{"validation": res, "revision": revision}
 	if req.Reload {
 		reload, err := s.modules.proxy.Reload(r.Context(), req.Kind)
 		out["reload"] = reload
 		if err != nil {
 			httpx.SetAudit(r, "proxy.config.write", req.Path, map[string]any{"reloaded": false})
-			return httpx.Err(http.StatusBadGateway, "reload_failed", err.Error())
+			refusal := httpx.Err(http.StatusBadGateway, "reload_failed", err.Error())
+			if p, ok := httpx.PrincipalFrom(r.Context()); ok {
+				p.FailureReason = refusal.Message
+			}
+			httpx.JSON(w, refusal.Status, map[string]any{"error": refusal, "revision": revision})
+			return nil
 		}
 	}
 	httpx.SetAudit(r, "proxy.config.write", req.Path,

@@ -2878,6 +2878,27 @@ containers/volumes/networks.
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
+- **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
+  returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose
+  another operator's transient nginx validation candidate. `PUT /proxy/config` requires that
+  `expectedRevision` (400 when missing); `WriteConfigChecked` compares the original bytes under the
+  same lock before any staging or native validation. A stale or removed file answers 409
+  `config_conflict`, audited as a refused conflict, without replacing it. Caddy validates a private
+  copy and checks the revision again immediately before atomic publication. nginx stages the checked
+  candidate once, runs its native validator and verifies the candidate is still on disk: a native
+  writer that replaced it is preserved and causes a conflict, rather than being overwritten by a
+  rollback. Invalid or interrupted candidates are restored only while their own bytes still occupy
+  the file. Successful responses, including `reload_failed` after a completed save, carry the saved
+  revision. Internal generated writes and history restore retain their existing `WriteConfig` owner.
+  The shared raw editor keeps its dirty buffer and original revision in RAM per engine/path across
+  SPA navigation and Back/Forward. Conflict UI pauses saving, preserves the draft, shows a diff
+  against the current file and requires an explicit review against that version before retrying.
+  Discard rereads a changed file; a removed/unreadable file retains the draft with a retry action.
+  Its unload warning remains active even while the editor is closed. Explicit discard and account
+  working-state cleanup clear the buffer; no config text is written to Web Storage. Service/API
+  regressions cover both nginx and Caddy, simultaneous stale writers, native edits during validation,
+  refused-candidate restoration and missing preconditions; `proxy-engine-overview.spec.ts` covers
+  retained history drafts and conflict review.
 - **The editor's read route is not a password reader.** `ReadConfig` refuses the dashboard's own
   `jd-auth` directory and any `.ht*`/`htpasswd` file with `ErrProtectedFile` (403 `protected_file`):
   `GET /proxy/config` is held by every signed-in account and a list of bcrypt hashes is not

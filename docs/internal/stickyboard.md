@@ -130,6 +130,15 @@ also used by Excalidraw). Navigation checks that the latest document is clean be
 failed later request retains the editor and its leave choice. The browser's reload/close warning
 remains active for a dirty document after a conflict or missing-board response.
 
+Dirty documents, their saved document/revision, conflict state and undo/redo history are retained in
+this tab's memory across sidebar, palette and browser history exits. Returning waits for any save
+still owned by the previous editor before taking its acknowledged revision; failed saves never
+throw away the retained document. The shared unload warning stays active while away from the board.
+Explicit Leave without saving, successful deletion and sign-out clear retained contents; a generation
+fence prevents late responses from restoring another account's draft. No board content goes into
+Web Storage, and a confirmed reload still discards memory. `stickyboard-ui.spec.ts` covers failed
+sidebar navigation, Back restoring the note's colour and explicit discard clearing the warning.
+
 Duplicate first requires a successful flush: a failed or conflicted save leaves the operator with the
 original document instead of copying an older server document and navigating away. If edits arrive
 while the duplicate request itself is pending, the copy is created but the editor stays with those

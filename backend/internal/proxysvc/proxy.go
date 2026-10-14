@@ -546,6 +546,18 @@ func writeAtomic(path, content string) error {
 }
 
 func writeAtomicMode(path, content string, mode os.FileMode) error {
+	return writeAtomicModeChecked(path, content, mode, "")
+}
+
+func writeAtomicChecked(path, content, expected string) error {
+	var mode os.FileMode = 0o644
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	return writeAtomicModeChecked(path, content, mode, expected)
+}
+
+func writeAtomicModeChecked(path, content string, mode os.FileMode, expected string) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".vpsd-*")
 	if err != nil {
@@ -561,6 +573,11 @@ func writeAtomicMode(path, content string, mode os.FileMode) error {
 	}
 	if err := os.Chmod(tmp.Name(), mode); err != nil {
 		return err
+	}
+	if expected != "" {
+		if _, err := checkConfigRevision(path, expected); err != nil {
+			return err
+		}
 	}
 	return os.Rename(tmp.Name(), path)
 }

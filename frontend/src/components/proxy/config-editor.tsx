@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { CheckCircle, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, errorMessage, get, post, put } from "@/lib/api"
+import { createEditorDraftStore } from "@/lib/editor-drafts"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { ProxyValidation, VHost } from "@/lib/types"
@@ -43,21 +44,13 @@ type ConfigEditorProps = {
   onSaved?: (reloaded: boolean) => void
 }
 
-/**
- * The file itself, for a site the form does not own — and for the operator
- * who would rather see the nginx than the form. Every opening starts over:
- * the file is read afresh and nothing typed before a close survives it, and
- * opening another file never inherits the previous one's buffer. Saving a
- * stale buffer over the file on disk, or over the wrong file, would be a real
- * outage. `open` and `path` are independent, so a caller may keep the path
- * while the editor is closed.
- *
- * Until the read answers there is no buffer at all: an editor drawn empty
- * while loading, or after a read that failed, read as an empty site file,
- * and a save from it would have written that emptiness over the real one.
- */
+type ConfigRead = { content: string; revision: string }
+type ConfigDraft = ConfigRead & { original: string }
+const configDrafts = createEditorDraftStore<ConfigDraft>()
+
+/** Each file retains its dirty buffer and base revision across SPA navigation. */
 export function ConfigEditor(props: ConfigEditorProps) {
-  return <ConfigEditorBody key={props.open ? props.path : ""} {...props} />
+  return <ConfigEditorBody key={props.open ? `${props.kind}:${props.path}` : ""} {...props} />
 }
 
 /** A test's result as the editor shows it: Test config's, or the one that refused a save. */
@@ -68,8 +61,8 @@ type Shown = { from: "test" | "save"; validation: ProxyValidation }
  * changes, as a diff against the file as it was read, and the same command
  * under it writes it. nginx's own test still decides; the diff is the
  * reader's look at what they are about to put in front of it, on a file
- * that keeps every site up. Closing with changes, by any of the ways out,
- * asks first, and so does the tab.
+ * that keeps every site up. Panel Close asks before discarding changes;
+ * other SPA exits retain them, and the tab warns before losing its memory.
  */
 function ConfigEditorBody({
   open,
@@ -83,8 +76,35 @@ function ConfigEditorBody({
   siteDisabled = false,
   onSaved,
 }: ConfigEditorProps) {
-  const [content, setContent] = useState("")
-  const [original, setOriginal] = useState("")
+  const key = `${kind}:${path}`
+  const [owner] = useState(() => configDrafts.generation())
+  const [retained] = useState(() => (open ? configDrafts.get(key) : undefined))
+  const [content, setContent] = useState(retained?.content ?? "")
+  const [original, setOriginal] = useState(retained?.original ?? "")
+  const originalRef = useRef(retained?.original ?? "")
+  const contentRef = useRef(retained?.content ?? "")
+  const revisionRef = useRef(retained?.revision ?? "")
+  const [stale, setStale] = useState<ConfigRead | "gone" | "unread" | null>(null)
+
+  const retain = () => {
+    if (contentRef.current === originalRef.current) configDrafts.forget(key, owner)
+    else
+      configDrafts.set(
+        key,
+        {
+          content: contentRef.current,
+          original: originalRef.current,
+          revision: revisionRef.current,
+        },
+        owner,
+      )
+  }
+  const acknowledge = (savedContent: string, revision: string) => {
+    originalRef.current = savedContent
+    revisionRef.current = revision
+    setOriginal(savedContent)
+    retain()
+  }
   const [busy, setBusy] = useState<"test" | "save">()
   const [shown, setShown] = useState<Shown | null>(null)
   // Whether the file has been read: undefined while the read is out.
@@ -100,18 +120,37 @@ function ConfigEditorBody({
   useEffect(() => {
     if (!open || !path) return
     const controller = new AbortController()
-    get<{ content: string }>("/proxy/config", { path }, controller.signal)
+    configDrafts
+      .settled(key)
+      .then(() => get<ConfigRead>("/proxy/config", { path }, controller.signal))
       .then((r) => {
-        setContent(r.content)
-        setOriginal(r.content)
+        if (controller.signal.aborted) return
+        const draft = configDrafts.get(key)
+        if (draft) {
+          contentRef.current = draft.content
+          originalRef.current = draft.original
+          revisionRef.current = draft.revision
+          setContent(draft.content)
+          setOriginal(draft.original)
+          if (r.revision !== draft.revision) setStale(r)
+        } else {
+          contentRef.current = r.content
+          originalRef.current = r.content
+          revisionRef.current = r.revision
+          setContent(r.content)
+          setOriginal(r.content)
+        }
         setRead({ ok: true })
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
-        setRead({ ok: false, error: err instanceof Error ? err : new Error(String(err)) })
+        if (configDrafts.get(key)) {
+          setRead({ ok: true })
+          setStale(err instanceof ApiError && err.status === 404 ? "gone" : "unread")
+        } else setRead({ ok: false, error: err instanceof Error ? err : new Error(String(err)) })
       })
     return () => controller.abort()
-  }, [open, path, attempt])
+  }, [open, path, key, attempt])
 
   const loaded = read?.ok === true
   const failed = read?.ok === false ? read.error : undefined
@@ -147,15 +186,25 @@ function ConfigEditorBody({
   }
 
   const save = async (reload: boolean) => {
+    const task = saveDraft(reload)
+    configDrafts.track(key, task, owner)
+    await task
+  }
+
+  const saveDraft = async (reload: boolean) => {
+    const savedContent = contentRef.current
+    const expectedRevision = revisionRef.current
     setBusy("save")
     try {
-      const res = await put<{ validation?: ProxyValidation }>("/proxy/config", {
+      const res = await put<{ validation?: ProxyValidation; revision: string }>("/proxy/config", {
         kind,
         path,
-        content,
+        content: savedContent,
+        expectedRevision,
         reload,
       })
-      setOriginal(content)
+      acknowledge(savedContent, res.revision)
+      setStale(null)
       setReview(null)
       setShown(null)
       // Saved and tested, but nginx never reads the file, so neither the
@@ -170,7 +219,15 @@ function ConfigEditorBody({
       onSaved?.(reload)
     } catch (err) {
       const refusal = refusalOf(err)
-      if (refusal) {
+      if (err instanceof ApiError && err.code === "config_conflict") {
+        setReview(null)
+        setStale("unread")
+        try {
+          setStale(await get<ConfigRead>("/proxy/config", { path }))
+        } catch (readError) {
+          setStale(readError instanceof ApiError && readError.status === 404 ? "gone" : "unread")
+        }
+      } else if (refusal) {
         // Nothing was written. The refusal is drawn under the editor with
         // each of nginx's lines, which a toast would cut short.
         setReview(null)
@@ -189,7 +246,9 @@ function ConfigEditorBody({
         // leaves it saved, which "Not applied" and a buffer still marked
         // unsaved hid.
         notify.warning("Saved, not reloaded", { description: errorMessage(err) })
-        setOriginal(content)
+        const revision = (err.body as { revision?: string } | undefined)?.revision
+        acknowledge(savedContent, revision ?? "")
+        if (!revision) readAgain()
         setReview(null)
         onSaved?.(false)
       } else {
@@ -215,7 +274,7 @@ function ConfigEditorBody({
   })
 
   const requestClose = (next: boolean) => {
-    if (busy) return
+    if (busy || (!loaded && dirty)) return
     if (next || !dirty) onOpenChange(next)
     else setLeaving("close")
   }
@@ -225,6 +284,8 @@ function ConfigEditorBody({
   const diff = review ? unifiedDiff(original, content, name) : undefined
   const stat = diff ? diffStat(diff) : undefined
   const saving = busy === "save"
+  const currentDiff =
+    stale && typeof stale === "object" ? unifiedDiff(stale.content, content, name) : undefined
 
   return (
     <>
@@ -281,7 +342,7 @@ function ConfigEditorBody({
                 size="sm"
                 variant="outline"
                 onClick={() => setLeaving("discard")}
-                disabled={busy !== undefined || !dirty}
+                disabled={!loaded || busy !== undefined || !dirty}
               >
                 Discard
               </Button>
@@ -289,14 +350,14 @@ function ConfigEditorBody({
                 size="sm"
                 variant="outline"
                 onClick={() => setReview({ reload: false })}
-                disabled={busy !== undefined || !dirty}
+                disabled={!loaded || busy !== undefined || !dirty || stale !== null}
               >
                 Save only
               </Button>
               <Button
                 size="sm"
                 onClick={() => setReview({ reload: true })}
-                disabled={busy !== undefined || !dirty}
+                disabled={!loaded || busy !== undefined || !dirty || stale !== null}
               >
                 Save and reload
               </Button>
@@ -304,6 +365,51 @@ function ConfigEditorBody({
           )
         }
       >
+        {stale && (
+          <Notice
+            tone="warning"
+            title={
+              stale === "gone" ? "File removed — draft retained" : "File changed — draft retained"
+            }
+          >
+            <p>Your draft is still here. Saving is paused until you review the current file.</p>
+            {typeof stale === "object" ? (
+              <>
+                <Disclosure quiet summary="Compare current file with your draft">
+                  {currentDiff ? (
+                    <DiffView body={currentDiff} singleFile lineNumbers />
+                  ) : (
+                    <Well>
+                      {currentDiff === null
+                        ? "Too many changes to line up; review the current file below."
+                        : "Only the final line feed differs."}
+                    </Well>
+                  )}
+                  <Disclosure quiet summary="Current file on disk">
+                    <Well className="max-h-48 overflow-auto whitespace-pre-wrap">
+                      {stale.content}
+                    </Well>
+                  </Disclosure>
+                </Disclosure>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    acknowledge(stale.content, stale.revision)
+                    setStale(null)
+                    setReview({ reload: false })
+                  }}
+                >
+                  Review draft against current file
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="outline" onClick={readAgain}>
+                Read current file again
+              </Button>
+            )}
+          </Notice>
+        )}
         {unread && (
           <Notice tone="warning" icon={Warning} title="nginx is not reading this file">
             The site is disabled, so a config test cannot see it — it will pass whatever is in it.
@@ -356,14 +462,16 @@ function ConfigEditorBody({
                   className="h-full"
                   language="ini"
                   value={content}
-                  readOnly={readOnly}
+                  readOnly={readOnly || busy !== undefined}
                   revealLine={goTo?.line ?? initialLine}
                   revealAgain={goTo?.asked}
                   onSave={() => {
-                    if (!readOnly && dirty && !busy) setReview({ reload: false })
+                    if (!readOnly && dirty && !busy && !stale) setReview({ reload: false })
                   }}
                   onChange={(v) => {
+                    contentRef.current = v
                     setContent(v)
+                    retain()
                     setShown(null)
                   }}
                 />
@@ -399,9 +507,16 @@ function ConfigEditorBody({
               onClick={() => {
                 const was = leaving
                 setLeaving(null)
+                configDrafts.forget(key, owner)
                 if (was === "close") {
                   onOpenChange(false)
+                } else if (stale) {
+                  setStale(null)
+                  contentRef.current = originalRef.current
+                  setContent(originalRef.current)
+                  readAgain()
                 } else {
+                  contentRef.current = original
                   setContent(original)
                   setShown(null)
                 }
