@@ -512,6 +512,10 @@ func (s *Service) WriteChecked(path, content string, expected *string) error {
 }
 
 func checkFileRevision(path string, expected *string) error {
+	return checkFileRevisionLimit(path, expected, maxEditBytes)
+}
+
+func checkFileRevisionLimit(path string, expected *string, limit int64) error {
 	if expected == nil {
 		return nil
 	}
@@ -536,17 +540,17 @@ func checkFileRevision(path string, expected *string) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxEditBytes {
+	if !info.Mode().IsRegular() || info.Size() > limit {
 		return contentguard.ErrConflict
 	}
-	b, err := io.ReadAll(io.LimitReader(file, maxEditBytes+1))
+	revision, n, err := contentguard.RevisionReader(io.LimitReader(file, limit+1))
 	if err != nil {
 		return err
 	}
-	if len(b) > maxEditBytes {
+	if n > limit || revision != *expected {
 		return contentguard.ErrConflict
 	}
-	return contentguard.Check(string(b), expected)
+	return nil
 }
 
 // Mkdir is the "New folder" verb. Missing parents are created on the way,
@@ -835,8 +839,17 @@ func (s *Service) Open(path string) (*os.File, os.FileInfo, error) {
 // An existing file keeps its owner and mode across the replacement, which is
 // what lets the image editor save over a picture the web server owns.
 func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error) {
+	return s.UploadChecked(path, r, overwrite, nil)
+}
+
+// UploadChecked shares the Files/Compose path lock and checks the opened bytes
+// again after staging. Native edits made during the transfer refuse publication.
+func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expected *string) (int64, error) {
 	full, err := s.Resolve(path)
 	if err != nil {
+		return 0, err
+	}
+	if err := checkFileRevisionLimit(full, expected, maxImageEditBytes); err != nil {
 		return 0, err
 	}
 	perm := os.FileMode(0o644)
@@ -883,7 +896,28 @@ func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error
 	if uid >= 0 {
 		os.Chown(tmpName, uid, gid)
 	}
+	// Transfers stage outside the lock so a slow browser cannot hold other
+	// saves hostage. The final comparison and publication are one locked step.
+	unlock := contentguard.Lock(full)
+	defer unlock()
 	if !overwrite {
+		if _, err := os.Lstat(full); err == nil {
+			return n, fmt.Errorf("%w: %s", fs.ErrExist, path)
+		} else if !os.IsNotExist(err) {
+			return n, err
+		}
+	}
+	resolved, err := s.Resolve(path)
+	if err != nil {
+		return n, err
+	}
+	if resolved != full {
+		return n, contentguard.ErrConflict
+	}
+	if err := checkFileRevisionLimit(full, expected, maxImageEditBytes); err != nil {
+		return n, err
+	}
+	if !overwrite || (expected != nil && *expected == "") {
 		// A network transfer leaves time for another writer to claim the
 		// destination. Publish only if the name is still free; a hard link
 		// keeps this atomic on filesystems without no-replace rename support.

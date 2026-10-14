@@ -18,14 +18,14 @@ import {
   External,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { API_BASE, mutationHeaders } from "@/lib/api"
+import { ApiError, errorMessage, fetchResponse, postForm } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { SidePanel } from "@/components/side-panel"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FileIcon } from "./file-icon"
 import { editorHref } from "./search"
-import { Spinner } from "@/components/state"
+import { Notice, Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -122,6 +122,8 @@ export function ImageEditorSheet({
 type Rect = { x: number; y: number; w: number; h: number }
 
 type ImageDraft = {
+  revision: string
+  conflict: boolean
   history: HTMLCanvasElement[]
   redo: HTMLCanvasElement[]
   original: HTMLCanvasElement
@@ -131,6 +133,9 @@ type ImageDraft = {
   adjust: { brightness: number; contrast: number; saturate: number }
 }
 const imageDrafts = new Map<string, ImageDraft>()
+if (typeof window !== "undefined") {
+  window.addEventListener("jd-working-state-cleared", () => imageDrafts.clear())
+}
 
 export function ImageEditor({
   path,
@@ -150,11 +155,16 @@ export function ImageEditor({
   onDirtyChange?: (dirty: boolean) => void
 }) {
   const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const [handoff] = useState(() => {
     const value = destination ? imageDrafts.get(path) : undefined
     imageDrafts.delete(path)
     return value
   })
+  const [revision, setRevision] = useState(handoff?.revision)
+  const [conflict, setConflict] = useState(handoff?.conflict ?? false)
+  const [loadVersion, setLoadVersion] = useState(0)
+  const [openedModified] = useState(modified)
   const [redo, setRedo] = useState<HTMLCanvasElement[]>(handoff?.redo ?? [])
   const [original, setOriginal] = useState<HTMLCanvasElement | null>(handoff?.original ?? null)
   const [savedCanvas, setSavedCanvas] = useState<HTMLCanvasElement | null>(
@@ -190,38 +200,77 @@ export function ImageEditor({
   }, [dirty, onDirtyChange])
 
   useEffect(() => {
-    if (handoff) {
-      // A microtask keeps restored editor state on the same asynchronous load
-      // path as an image decoded from disk.
+    if (handoff && loadVersion === 0) {
       queueMicrotask(() => {
         setHistory(handoff.history)
         setLoading(false)
       })
       return
     }
+    const controller = new AbortController()
     const image = new Image()
+    let objectUrl: string | undefined
     image.onload = () => {
+      if (controller.signal.aborted) return
       const canvas = document.createElement("canvas")
-      // An SVG with no intrinsic size decodes to 0×0 and would silently save
-      // an empty file; 1024 is a sane raster for one, and the notice below
-      // says that saving rasterises it.
+      // SVGs without intrinsic dimensions still need a raster canvas to edit.
       canvas.width = image.naturalWidth || 1024
       canvas.height = image.naturalHeight || 1024
       canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height)
       setOriginal(canvas)
       setHistory([canvas])
+      setSavedCanvas(null)
+      setRedo([])
+      setAdjust({ brightness: 100, contrast: 100, saturate: 100 })
+      setConflict(false)
       setLoading(false)
     }
     image.onerror = () => {
       setError("This image could not be decoded by the browser.")
       setLoading(false)
     }
-    image.src = rawUrl(path, modified)
+    void fetchResponse(
+      "/files/raw",
+      { signal: controller.signal, cache: "no-store" },
+      { path, revision: true, v: openedModified },
+    )
+      .then(async (res) => {
+        const openedRevision = res.headers.get("X-JD-Content-Revision")
+        if (!openedRevision || !/^[a-f0-9]{64}$/.test(openedRevision)) {
+          throw new Error("The server did not return an image revision. Reload before editing.")
+        }
+        const blob = await res.blob()
+        if (controller.signal.aborted) return
+        // Decode exactly the bytes named by the revision, never a second URL read.
+        setRevision(openedRevision)
+        objectUrl = URL.createObjectURL(blob)
+        image.src = objectUrl
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        setError(errorMessage(err))
+        setLoading(false)
+      })
     return () => {
+      controller.abort()
       image.onload = null
       image.onerror = null
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [handoff, path, modified])
+  }, [handoff, path, openedModified, loadVersion])
+
+  const reload = () => {
+    confirm({
+      title: "Discard edits and reload the image?",
+      description: <p>Your unsaved edits will be replaced with the current image on the server.</p>,
+      confirmLabel: "Discard and reload",
+      action: async () => {
+        setError(undefined)
+        setLoading(true)
+        setLoadVersion((value) => value + 1)
+      },
+    })
+  }
 
   // The visible canvas is repainted from the committed one plus the live
   // adjustment sliders, which are deliberately *not* committed until applied:
@@ -352,15 +401,22 @@ export function ImageEditor({
       const blob = await toBlob(output, format, quality / 100)
       const form = new FormData()
       form.append("file", blob, finalName)
-      const res = await fetch(
-        `${API_BASE}/files/upload?path=${encodeURIComponent(dir)}&overwrite=${target === path}`,
-        { method: "POST", credentials: "include", headers: mutationHeaders(), body: form },
-      )
-      if (!res.ok) throw new Error((await res.json()).error?.message ?? res.statusText)
+      if (target === path && !revision) throw new Error("Reload the original image before saving")
+      const result = await postForm<{ revisions: Record<string, string> }>("/files/upload", form, {
+        query: {
+          path: dir,
+          overwrite: target === path,
+          expectedRevision: target === path ? revision : undefined,
+        },
+      })
+      const savedRevision = result.revisions?.[finalName]
+      if (!savedRevision) throw new Error("The server did not return the saved image revision")
       notify.success(`Saved ${finalName}`, {
         description: `${bytes(blob.size)} · ${current.width}×${current.height}`,
       })
       if (target === path) {
+        setRevision(savedRevision)
+        setConflict(false)
         setSavedCanvas(output)
         setHistory([output])
         setAdjust({ brightness: 100, contrast: 100, saturate: 100 })
@@ -369,6 +425,7 @@ export function ImageEditor({
       onSaved(target)
       if (!destination) onClose()
     } catch (err) {
+      if (err instanceof ApiError && err.code === "content_conflict") setConflict(true)
       notify.error("Could not save the image", err)
     } finally {
       setSaving(false)
@@ -440,8 +497,10 @@ export function ImageEditor({
             variant="outline"
             className="ml-auto"
             onClick={() => {
-              if (!original) return
+              if (!original || !revision) return
               imageDrafts.set(path, {
+                revision,
+                conflict,
                 history,
                 redo,
                 original,
@@ -694,6 +753,27 @@ export function ImageEditor({
           </div>
         </div>
       </div>
+      {conflict && (
+        <div role="alert">
+          <Notice title="Image changed on the server" tone="warning" className="mx-3 my-2">
+            <p>Your edits are kept. Save as a new file to keep both.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <a
+                  href={rawUrl(path, new Date().toISOString())}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Review current image
+                </a>
+              </Button>
+              <Button size="sm" variant="outline" onClick={reload}>
+                Reload current image
+              </Button>
+            </div>
+          </Notice>
+        </div>
+      )}
       <PaneFooter className="flex-wrap gap-2 px-3 py-2">
         <Select value={format} onValueChange={setFormat}>
           <SelectTrigger size="sm" aria-label="Image format" className="w-24">
@@ -736,13 +816,23 @@ export function ImageEditor({
         >
           Save as
         </Button>
-        <Button size="sm" onClick={() => save()} pending={saving} disabled={cropping}>
+        <Button
+          size="sm"
+          onClick={() => save()}
+          pending={saving}
+          disabled={
+            cropping ||
+            (conflict &&
+              withExtension(path.split("/").pop() ?? "", format) === path.split("/").pop())
+          }
+        >
           <FloppyDisk className="size-4" />
           {withExtension(path.split("/").pop() ?? "", format) === path.split("/").pop()
             ? "Save over original"
             : "Save converted copy"}
         </Button>
       </PaneFooter>
+      {dialog}
     </div>
   )
 }

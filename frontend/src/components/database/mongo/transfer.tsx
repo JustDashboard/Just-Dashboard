@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { OperationProgress, type OperationReading } from "@/components/operation-progress"
-import { ApiError, downloadUrl, errorMessage, type ApiErrorBody } from "@/lib/api"
+import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -32,17 +32,6 @@ export type ExportRequest = {
   limit: number
   /** The query whose matches are exported; absent = the whole collection. */
   draft?: QueryDraft
-}
-
-/** A refused request as the error every other read throws. */
-async function refused(response: Response): Promise<ApiError> {
-  const text = await response.text()
-  try {
-    const body = (JSON.parse(text) as ApiErrorBody).error
-    return new ApiError(response.status, body.code, body.message)
-  } catch {
-    return new ApiError(response.status, "unknown", text.slice(0, 300) || response.statusText)
-  }
 }
 
 /**
@@ -78,8 +67,10 @@ export function useMongoExport() {
     })
     try {
       const text = (value: string | undefined) => (value?.trim() ? value : undefined)
-      const response = await fetch(
-        downloadUrl(`/databases/${target.id}/mongo/export`, {
+      const response = await fetchResponse(
+        `/databases/${target.id}/mongo/export`,
+        { signal: controller.signal },
+        {
           database: target.database || undefined,
           collection: target.collection,
           filter: text(draft?.filter),
@@ -91,10 +82,9 @@ export function useMongoExport() {
           limit: request.limit,
           format,
           relaxed: request.relaxed && format !== "csv" ? 1 : undefined,
-        }),
-        { credentials: "include", signal: controller.signal },
+        },
       )
-      if (!response.ok || !response.body) throw await refused(response)
+      if (!response.body) throw new Error("The export response has no body")
 
       const parts: BlobPart[] = []
       const reader = response.body.getReader()

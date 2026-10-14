@@ -432,6 +432,13 @@ not a connected/live state. The shared naming dialog snapshots its discriminated
 
 ## Recovering an ended session
 
+`lib/api.ts` owns `fetchResponse`, which returns successful binary/streaming bodies untouched and
+reads a refused response once through `responseError`. XHR file uploads, database imports and dump
+uploads use the same synchronous `errorFromResponse` parser without changing upload progress.
+SQL table/query exports, MongoDB exports,
+image editing, PDF previews and the diagram keepalive save use that same path; cancellation signals,
+response headers and export completion/truncation checks remain with each reader.
+
 All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
 code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a

@@ -189,68 +189,110 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     headers["X-Confirm-Encoding"] = "uri"
   }
 
-  const res = await fetch(buildUrl(path, options.query), {
-    method,
-    headers,
-    credentials: "include",
-    signal: options.signal,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  })
-
-  const networkChange = res.headers.get("X-JD-Network-Change")
-  if (networkChange && typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))
-  }
+  const res = await fetchResponse(
+    path,
+    {
+      method,
+      headers,
+      credentials: "include",
+      signal: options.signal,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    },
+    options.query,
+  )
 
   return readResponse<T>(res, path)
 }
 
-async function readResponse<T>(res: Response, path: string): Promise<T> {
-  if (res.status === 204) return undefined as T
+/**
+ * Read a refused response once, preserving the API's details and session recovery.
+ * Successful binary and streaming responses never pass through this reader.
+ */
+export async function responseError(res: Response, path: string): Promise<ApiError> {
+  return errorFromResponse(res.status, await res.text(), path, res.statusText)
+}
 
-  const text = await res.text()
-  let parsed: unknown = undefined
-  if (text) {
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      if (!res.ok) throw new ApiError(res.status, "unknown", text.slice(0, 300))
-    }
+/** XHR upload readers share the same error and recovery contract as fetch. */
+export function errorFromResponse(
+  status: number,
+  text: string,
+  path: string,
+  statusText = "",
+): ApiError {
+  let parsed: ApiErrorBody | undefined
+  try {
+    parsed = text ? JSON.parse(text) : undefined
+  } catch {
+    // A proxy failure can be plain text; only recognized API codes trigger recovery.
   }
-
-  if (!res.ok) {
-    const body = parsed as ApiErrorBody | undefined
-    if (body?.error?.code === "password_change_required" && typeof window !== "undefined") {
+  const body = parsed?.error
+  if (typeof window !== "undefined") {
+    if (body?.code === "password_change_required") {
       window.dispatchEvent(new Event("jd:password-change-required"))
     }
     if (
       !path.startsWith("/auth/") &&
-      typeof window !== "undefined" &&
-      ((res.status === 401 &&
-        ["unauthorized", "totp_required", "totp_enrollment_required"].includes(
-          body?.error?.code ?? "",
-        )) ||
-        body?.error?.code === "account_disabled")
+      ((status === 401 &&
+        ["unauthorized", "totp_required", "totp_enrollment_required"].includes(body?.code ?? "")) ||
+        body?.code === "account_disabled")
     ) {
       window.dispatchEvent(new Event("jd:authentication-lost"))
     }
-    throw new ApiError(
-      res.status,
-      body?.error?.code ?? "unknown",
-      body?.error?.message ?? res.statusText,
-      body?.error?.phrase,
-      {
-        resource: body?.error?.resource,
-        operation: body?.error?.operation,
-        reason: body?.error?.reason,
-        raw: body?.error?.raw,
-        retryable: body?.error?.retryable,
-        field: body?.error?.field,
-        body: parsed,
-      },
-    )
   }
-  return parsed as T
+  return new ApiError(
+    status,
+    body?.code ?? "unknown",
+    body?.message ?? (text.slice(0, 300) || statusText || `HTTP ${status}`),
+    body?.phrase,
+    {
+      resource: body?.resource,
+      operation: body?.operation,
+      reason: body?.reason,
+      raw: body?.raw,
+      retryable: body?.retryable,
+      field: body?.field,
+      body: parsed,
+    },
+  )
+}
+
+/**
+ * Fetch an authenticated response without consuming a successful body. Exports
+ * keep their original stream and abort signal, while refusals share JSON recovery.
+ */
+export async function fetchResponse(
+  path: string,
+  options: RequestInit = {},
+  query?: Query,
+): Promise<Response> {
+  const headers = new Headers(options.headers)
+  const method = options.method ?? "GET"
+  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) {
+    for (const [key, value] of Object.entries({
+      ...mutationHeaders(),
+      ...networkPendingHeaders(path, method),
+    }))
+      headers.set(key, value)
+  }
+  const res = await fetch(buildUrl(path, query), { ...options, headers, credentials: "include" })
+  const networkChange = res.headers.get("X-JD-Network-Change")
+  if (networkChange && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))
+  }
+  if (!res.ok) throw await responseError(res, path)
+  return res
+}
+
+async function readResponse<T>(res: Response, path: string): Promise<T> {
+  if (!res.ok) throw await responseError(res, path)
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return undefined as T
+  }
 }
 
 /** Multipart POST through the same authenticated fetch/error path as JSON. */
@@ -259,13 +301,17 @@ export async function postForm<T>(
   body: FormData,
   opts: Pick<RequestOptions, "query" | "signal"> = {},
 ): Promise<T> {
-  const res = await fetch(buildUrl(path, opts.query), {
-    method: "POST",
-    headers: mutationHeaders(),
-    credentials: "include",
-    signal: opts.signal,
-    body,
-  })
+  const res = await fetchResponse(
+    path,
+    {
+      method: "POST",
+      headers: mutationHeaders(),
+      credentials: "include",
+      signal: opts.signal,
+      body,
+    },
+    opts.query,
+  )
   return readResponse<T>(res, path)
 }
 
@@ -310,7 +356,7 @@ export async function postFile(
     headers["X-Confirm"] = encodeURIComponent(opts.confirm)
     headers["X-Confirm-Encoding"] = "uri"
   }
-  const res = await fetch(buildUrl(path), {
+  const res = await fetchResponse(path, {
     method: "POST",
     headers,
     credentials: "include",
@@ -325,7 +371,7 @@ export async function postFile(
 
 /** A plain-text read — a transcript — through the same authenticated fetch and errors. */
 export async function getText(path: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(buildUrl(path), { credentials: "include", signal })
+  const res = await fetchResponse(path, { credentials: "include", signal })
   if (!res.ok) return readResponse<string>(res, path)
   return res.text()
 }

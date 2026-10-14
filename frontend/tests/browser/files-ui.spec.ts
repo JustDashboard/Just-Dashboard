@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { createHash } from "node:crypto"
 import { heldResponse, recordProgress } from "./progress-recording"
 
 test.use({
@@ -109,7 +110,16 @@ async function mockPicture(page: Page, width = 80, height = 40) {
     { width, height },
   )
   await page.route("**/api/v1/files/raw**", (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(picture, "base64") }),
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      headers: {
+        "X-JD-Content-Revision": createHash("sha256")
+          .update(Buffer.from(picture, "base64"))
+          .digest("hex"),
+      },
+      body: Buffer.from(picture, "base64"),
+    }),
   )
 }
 
@@ -157,7 +167,12 @@ async function mockFiles(
       // error and fall back to the icon, which is also correct but not what
       // this test is about.
       if ((url.searchParams.get("path") ?? "").endsWith(".mp4")) return new Promise(() => undefined)
-      return route.fulfill({ status: 200, contentType: "image/png", body: png })
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        headers: { "X-JD-Content-Revision": createHash("sha256").update(png).digest("hex") },
+        body: png,
+      })
     }
     if (path === "/files/preview") {
       const target = url.searchParams.get("path") ?? ""
@@ -1197,7 +1212,7 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   let upload: { url: string; body: Buffer } | undefined
   await page.route("**/api/v1/files/upload**", async (route) => {
     upload = { url: route.request().url(), body: route.request().postDataBuffer()! }
-    await json(route, { ok: true })
+    await json(route, { revisions: { "copy.png": "1".repeat(64), "logo.png": "2".repeat(64) } })
   })
   await page.goto(
     `/files/editor?path=${encodeURIComponent(home + "/logo.png")}&root=${encodeURIComponent(home)}`,
@@ -1236,6 +1251,13 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page.getByRole("button", { name: "Save over original", exact: true }).click()
   await expect.poll(() => upload?.url).toContain("overwrite=true")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect
+    .poll(() => upload && new URL(upload.url).searchParams.get("expectedRevision"))
+    .toBe("2".repeat(64))
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
 })
 
@@ -2011,3 +2033,53 @@ for (const width of [1280, 390]) {
     expect(held.calls()).toBe(1)
   })
 }
+
+test("a stale image save keeps the transformed canvas and original revision through handoff", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  let savedName = ""
+  let expectedRevision = ""
+  let originalSaves = 0
+  await page.route("**/api/v1/files/upload**", async (route) => {
+    const query = new URL(route.request().url()).searchParams
+    expectedRevision = query.get("expectedRevision") ?? ""
+    const body = route.request().postDataBuffer()!.toString("latin1")
+    savedName = /filename="([^"]+)"/.exec(body)?.[1] ?? ""
+    if (query.get("overwrite") === "true") {
+      originalSaves += 1
+      return json(route, { error: { code: "content_conflict", message: "Image changed" } }, 409)
+    }
+    return json(route, { revisions: { [savedName]: "1".repeat(64) } }, 201)
+  })
+  await openFiles(page)
+  await page.locator(`tr[data-entry-path="${home}/logo.png"]`).click()
+  await page.getByRole("button", { name: "Crop, rotate, resize" }).click()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect(page.getByRole("alert").filter({ hasText: "Your edits are kept" })).toContainText(
+    "Your edits are kept",
+  )
+  expect(expectedRevision).toMatch(/^[a-f0-9]{64}$/)
+  expect(originalSaves).toBe(1)
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Save over original", exact: true })).toBeDisabled()
+  await page.getByRole("textbox", { name: "Save image as" }).fill("edited-copy.png")
+  await page.getByRole("button", { name: "Save as", exact: true }).click()
+  await expect.poll(() => savedName).toBe("edited-copy.png")
+  expect(expectedRevision).toBe("")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Reload current image", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Discard edits and reload the image?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Reload current image", exact: true }).click()
+  await page.getByRole("button", { name: "Discard and reload", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "80")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
+})

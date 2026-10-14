@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -201,6 +203,17 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("path query parameter is required")
 	}
 	overwrite := r.URL.Query().Get("overwrite") == "true"
+	var expected *string
+	if r.URL.Query().Has("expectedRevision") {
+		revision := r.URL.Query().Get("expectedRevision")
+		if revision != "" {
+			digest, err := hex.DecodeString(revision)
+			if err != nil || len(digest) != sha256.Size {
+				return httpx.BadRequest("expectedRevision must be a SHA-256 revision or empty for a new file")
+			}
+		}
+		expected = &revision
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	reader, err := r.MultipartReader()
@@ -208,6 +221,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("expected a multipart upload: %v", err)
 	}
 	written := []string{}
+	revisions := map[string]string{}
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
@@ -228,18 +242,20 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 			part.Close()
 			continue
 		}
-		_, err = s.modules.files.Upload(filepath.Join(dir, name), part, overwrite)
+		hash := sha256.New()
+		_, err = s.modules.files.UploadChecked(filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected)
 		part.Close()
 		if err != nil {
 			return uploadError(err)
 		}
 		written = append(written, name)
+		revisions[name] = hex.EncodeToString(hash.Sum(nil))
 	}
 	if len(written) == 0 {
 		return httpx.BadRequest("no file part found in the upload")
 	}
 	httpx.SetAudit(r, "file.upload", dir, map[string]any{"files": written})
-	httpx.JSON(w, http.StatusCreated, map[string]any{"uploaded": written, "path": dir})
+	httpx.JSON(w, http.StatusCreated, map[string]any{"uploaded": written, "path": dir, "revisions": revisions})
 	return nil
 }
 

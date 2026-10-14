@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ApiError, downloadUrl, get, type ApiErrorBody } from "@/lib/api"
+import { fetchResponse, get } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { DbExportFormat } from "@/lib/types"
@@ -28,20 +28,6 @@ export interface ExportRequest {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-/** A refused request as the error every other read throws. */
-async function refused(response: Response): Promise<ApiError> {
-  const text = await response.text()
-  try {
-    const body = (JSON.parse(text) as ApiErrorBody).error
-    return new ApiError(response.status, body.code, body.message, undefined, {
-      reason: body.reason,
-      raw: body.raw,
-    })
-  } catch {
-    return new ApiError(response.status, "unknown", text.slice(0, 300) || response.statusText)
-  }
-}
 
 /** The server's record of how an export went, once it has stopped running. */
 async function settled(id: number, exportId: string): Promise<DbExportState | null> {
@@ -91,8 +77,10 @@ export function useExport(id: number) {
       })
       let received = 0
       try {
-        const response = await fetch(
-          downloadUrl(`/databases/${id}/export`, {
+        const response = await fetchResponse(
+          `/databases/${id}/export`,
+          { signal: controller.signal },
+          {
             ...rowsQuery(
               request.schema,
               request.table,
@@ -103,10 +91,9 @@ export function useExport(id: number) {
             format: request.format,
             limit,
             exportId,
-          }),
-          { credentials: "include", signal: controller.signal },
+          },
         )
-        if (!response.ok || !response.body) throw await refused(response)
+        if (!response.body) throw new Error("The export response has no body")
 
         const parts: BlobPart[] = []
         const reader = response.body.getReader()

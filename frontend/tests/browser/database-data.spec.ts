@@ -1945,3 +1945,30 @@ test("progress: a SQL import separates upload from database processing", async (
     },
   )
 })
+
+test("an expired streamed export rechecks once and returns to sign-in", async ({ page }) => {
+  let expired = false
+  let rechecks = 0
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (!expired) return route.fallback()
+    rechecks += 1
+    return json(route, {
+      authenticated: false,
+      needsTotp: false,
+      needsEnrollment: false,
+      require2fa: false,
+    })
+  })
+  await page.route("**/api/v1/databases/1/export**", async (route) => {
+    expired = true
+    return json(route, { error: { code: "unauthorized", message: "Session expired" } }, 401)
+  })
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^CSV/ }).click()
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
+  expect(rechecks).toBe(1)
+})

@@ -2729,3 +2729,33 @@ test("progress: MongoDB import waits for document writes after sending the file"
     },
   )
 })
+
+test("an expired streamed export rechecks once and returns to sign-in", async ({ page }) => {
+  let expired = false
+  let rechecks = 0
+  await mockMongo(page)
+  await page.goto(collection("orders"))
+  await expect(page.getByRole("button", { name: "Export", exact: true })).toBeVisible()
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (!expired) return route.fallback()
+    rechecks += 1
+    return json(route, {
+      authenticated: false,
+      needsTotp: false,
+      needsEnrollment: false,
+      require2fa: false,
+    })
+  })
+  await page.route("**/api/v1/databases/5/mongo/export**", async (route) => {
+    expired = true
+    return json(route, { error: { code: "unauthorized", message: "Session expired" } }, 401)
+  })
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Export orders" })
+    .getByRole("button", { name: "Export", exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
+  expect(rechecks).toBe(1)
+})

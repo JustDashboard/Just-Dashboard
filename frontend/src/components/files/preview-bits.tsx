@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import type { FilePreview } from "@/lib/types"
 import { LoadingRows } from "@/components/state"
 import { Well } from "@/components/panel"
-import { rawUrl } from "@/components/files/media"
+import { fetchResponse } from "@/lib/api"
 
 /**
  * The pieces a preview is made of, shared by the inspector beside the listing
@@ -58,8 +58,8 @@ export function PdfPreview({
   useEffect(() => {
     let objectUrl: string | undefined
     const controller = new AbortController()
-    fetch(rawUrl(path, modified), { credentials: "include", signal: controller.signal })
-      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(res.statusText))))
+    fetchResponse("/files/raw", { signal: controller.signal }, { path, v: Date.parse(modified) })
+      .then((res) => res.blob())
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob)
         setUrl(objectUrl)

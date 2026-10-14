@@ -344,6 +344,28 @@ request per file from the page, maps a body over `maxUploadBytes` (2 GiB per req
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
 
+Image editor reads use `GET /files/raw?revision=true`. The server takes a bounded 64 MiB
+snapshot of a regular image file, returns `X-JD-Content-Revision` for exactly its served bytes,
+and disables caching and partial reads on this path. The ordinary media preview keeps its existing
+range/cache behavior and allowlist; requesting an image revision does not permit other media or HTML.
+The editor decodes that response through a Blob URL, so the opened canvas and revision cannot come
+from separate native readings. Opening the full editor keeps the revision beside its RAM canvas
+handoff; modification-time refreshes do not replace unsaved canvases.
+
+`POST /files/upload` accepts an optional `expectedRevision` query parameter and returns a `revisions`
+map keyed by uploaded name. Image saves over the original always send the opened revision; converted
+copies and Save as retain the no-overwrite publication rule. `UploadChecked` compares binary content
+before staging and under the Files/Compose path lock immediately before publishing, re-resolves the
+client path and preserves the target's owner and mode. Staging runs outside the lock so a slow browser
+transfer cannot block other saves. A changed or removed image, a changed symlink destination, or a
+competing dashboard save returns `409 content_conflict`; its transformed canvas remains available for
+Save as or review, and reloading the server image requires confirmed discard. Subsequent successful
+original saves use the returned saved revision. Legacy uploads without a revision keep their previous
+overwrite behavior. The same narrow native comparison/rename window described below still applies.
+`image_snapshot_test.go` and `handlers_files_revision_test.go` cover bounded regular-file snapshots,
+exact binary revisions, changes during staging, concurrent text/image writers and the HTTP contract;
+`files-ui.spec.ts` checks conflict retention, Save as, confirmed reload and full-editor handoff.
+
 Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read. The Files
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
 returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"hash/fnv"
+	"io"
 	"sync"
 )
 
@@ -13,8 +14,22 @@ var ErrConflict = errors.New("the content changed since it was opened; review th
 
 // Revision identifies bytes, independent of timestamp precision or file size.
 func Revision(content string) string {
-	sum := sha256.Sum256([]byte(content))
+	return RevisionBytes([]byte(content))
+}
+
+func RevisionBytes(content []byte) string {
+	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
+}
+
+// RevisionReader hashes binary content without retaining another copy of it.
+func RevisionReader(reader io.Reader) (string, int64, error) {
+	hash := sha256.New()
+	n, err := io.Copy(hash, reader)
+	if err != nil {
+		return "", n, err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), n, nil
 }
 
 // Check permits older API clients that do not supply a precondition.
