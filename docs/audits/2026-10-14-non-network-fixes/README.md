@@ -28,7 +28,7 @@ coverage, rather than declaring every live host integration certified.
 | HT-03 | Images can display a green current verdict when registry checks are unknown | Include matching secondary tags/digests; distinguish unknown checks from verified current status. | `images.test.js; docker-images.spec.ts` |
 | HT-05 | Folder uploads bypass nested-name collision review | Plan folder-upload collisions in each actual directory, with explicit existing-folder merge and collision policy. | `upload-plan.test.js; files-ui.spec.ts` |
 | HT-07 | Cron previews use browser timezone and can hide that disclosure | Report measured host and positional CRON_TZ metadata, forecast in that zone and disclose browser date display/fallback. | `cron_test.go; cron.test.js; schedule.test.js; processes-ui.spec.ts` |
-| HT-09 | Native log exports are silently limited to 20,000 lines | Disclose native export limits, scans, missing sources and default journal window in downloaded coverage metadata; propagate read failures. | `handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-ui.spec.ts` |
+| HT-09 | Native log exports are silently limited to 20,000 lines | Disclose native export limits, scans, missing sources and default journal window in downloaded coverage metadata; propagate read failures. | `handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-lens.spec.ts` |
 | HT-10 | Failed package installs remain marked Started and cannot be retried from result row | Track accepted package jobs independently of console, allow failed/canceled retries and refresh readings at terminal outcomes. | `install-jobs.test.js; packages-ui.spec.ts` |
 | HT-11 | Package upgrade confirmation promises constraints not applied by every manager | Describe actual manager-specific dependency/replacement scope and possible service restarts. | `packages-ui.spec.ts` |
 | HT-12 | File/config/crontab saves do not protect against concurrent external edits | Add guarded content revisions to Files/Git/Compose/crontab writes; retain conflicted drafts and serialize dashboard saves. | `revision_test.go; revision_shared_test.go; handlers_files_revision_test.go; compose_revision_test.go; cron_test.go; files-ui.spec.ts; git-features.spec.ts; stack-detail.spec.ts; processes-ui.spec.ts` |
@@ -40,7 +40,7 @@ coverage, rather than declaring every live host integration certified.
 | DDP-05 | Backup job detail reopens a retained stale edit draft | Clear job editor drafts on explicit close and successful save. | `backups-ui.spec.ts` |
 | HT-04 | Canceling a Cut paste clears the clipboard | Clear only successfully moved Cut sources; preserve canceled, skipped or failed sources. | `files-ui.spec.ts` |
 | HT-08 | Cron schedule parser accepts malformed trailing syntax and can show invalid previews | Reject malformed field separators/bounds/steps, preserve environment whitespace and native leading-star day semantics. | `cron_test.go; cron.test.js` |
-| HT-13 | Export crashes on a valid five-digit-year datetime input | Parse extended HTML years then show RFC3339 range/order errors; disable invalid exports/search and validate server download bounds. | `datetime-local.test.js; logs-ui.spec.ts; handlers_logs_export_test.go` |
+| HT-13 | Export crashes on a valid five-digit-year datetime input | Parse extended HTML years then show RFC3339 range/order errors; disable invalid exports/search and validate server download bounds. | `log-filter.test.js; logs-lens.spec.ts; handlers_logs_export_test.go` |
 | HT-15 | Administrator filter/count omits UID 0 accounts and other root routes | Include UID 0 and known sudo/wheel/admin/docker group routes; state direct sudoers rules are not inspected. | `access.test.js; system-ui.spec.ts` |
 
 ## Remaining operational limits
@@ -48,7 +48,7 @@ coverage, rather than declaring every live host integration certified.
 - **HT-14:** Authorized keys are a known route; actual SSH acceptance depends on host SSH/PAM/account policy. No live account changes were exercised.
 - **AW-06:** Canvas/WebCodecs-only or inaccessible player documents have no observed HTML video playback; their honest status remains Ready.
 - **HT-07:** Native daemon CRON_TZ/DST behavior varies. POSIX or unavailable zones cannot be predicted; the page discloses forecast absence or estimates.
-- **HT-09:** Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours. Omitted coverage is marked PARTIAL.
+- **HT-09:** Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours unless Current boot is selected. Omitted coverage is marked PARTIAL.
 - **HT-12:** Legacy API callers may omit revision. Uncoordinated native writers can race between final comparison and publication; dashboard writes are serialized.
 - **HT-15:** Direct sudoers rules and other unknown privilege routes are not parsed.
 

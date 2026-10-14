@@ -4400,6 +4400,7 @@ so it is built around the moment the page watching it loses its API.
 ## SQL handoff at tab capacity
 
 A saved-query URL stays pending when all 24 SQL tabs are occupied. Its intent is consumed only after
-an existing blank tab or a newly available slot accepts it. Closing a tab therefore opens the pending
+an existing tab for the same saved query is focused, a blank tab accepts it, or a newly available
+slot accepts it. Closing a tab therefore opens the pending
 query once rather than silently dropping it. No extra query runs or connection mutations are caused
 by this handoff. `database-query.spec.ts` covers the full-capacity case.

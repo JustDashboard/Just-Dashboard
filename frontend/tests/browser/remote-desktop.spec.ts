@@ -557,16 +557,20 @@ for (const path of ["/remote-desktop/new", `/remote-desktop/${MAC}`]) {
           error: {
             code: "unavailable",
             message: "Computer inventory unavailable",
-            retryable: true,
+            retryable: false,
           },
         }),
       })
     })
     await page.goto(path)
-    await expect(page.getByRole("alert")).toContainText("Computer inventory unavailable")
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Computer inventory unavailable" }),
+    ).toContainText("Computer inventory unavailable")
     fail = false
     await page.getByRole("button", { name: "Try again" }).click()
-    await expect(page.getByRole("alert")).toHaveCount(0)
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Computer inventory unavailable" }),
+    ).toHaveCount(0)
     if (path.endsWith("/new"))
       await expect(page.getByRole("button", { name: "Add workshop-pc" })).toBeVisible()
     else await expect(page.getByText("Connecting to studio-mac…")).toBeVisible()

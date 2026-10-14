@@ -1837,7 +1837,9 @@ test("a stale file save preserves the draft and reviews the current server revis
   revision = "external"
   content = "NATIVE CHANGE\n"
   await page.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(page.getByRole("alert")).toContainText("Your draft is kept")
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
   await expect(page.locator(".monaco-editor")).toContainText("MY DRAFT")
   expect(writes[0].expectedRevision).toBe("opened")
   await page.getByRole("button", { name: "Review current file", exact: true }).click()

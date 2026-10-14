@@ -304,7 +304,7 @@ test("security is a form with its state under each head", async ({ page }) => {
   await expect(page.getByText("12 characters or more")).toHaveClass(/text-success/)
   await expect(page.getByText(/three of upper case/)).toHaveClass(/text-success/)
 
-  await expect(page.getByText("3 sessions signed in · 1 on a password alone")).toBeVisible()
+  await expect(page.getByText("3 sessions signed in · 1 awaiting a second factor")).toBeVisible()
 })
 
 for (const width of [1280, 1720, 390]) {

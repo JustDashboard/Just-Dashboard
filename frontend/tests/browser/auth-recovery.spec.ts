@@ -216,3 +216,31 @@ test("a different account after expiry clears the previous account's working dra
   await expect(page).toHaveURL(/\/$/)
   expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBeNull()
 })
+
+test("draft ownership survives a reload before a different account signs in", async ({ page }) => {
+  const key = `jd.session.state.entry.${encodeURIComponent("audit.reload.secret")}`
+  const fixture = await authFixture(page)
+  await page.goto("/account/keys")
+  await expect(
+    page.getByRole("button", { name: "Account menu for Ion", exact: true }),
+  ).toBeVisible()
+  await page.evaluate(
+    (storageKey) => sessionStorage.setItem(storageKey, JSON.stringify("prior-account")),
+    key,
+  )
+  await rejectKeyCreation(page, () => {
+    fixture.account.signedIn = false
+  })
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await page.reload()
+  await expect(page.getByLabel("Username")).toBeVisible()
+  expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBe(
+    JSON.stringify("prior-account"),
+  )
+  await page.route("**/api/v1/auth/login", (route) =>
+    json(route, { ...user, user: { ...user.user, id: 2, username: "second-owner" } }),
+  )
+  await signIn(page)
+  await expect(page).toHaveURL(/\/$/)
+  expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBeNull()
+})

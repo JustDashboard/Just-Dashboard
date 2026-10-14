@@ -145,11 +145,14 @@ export function ErrorState({
   error,
   className,
   onRetry,
+  retryable,
 }: {
   error: Error
   className?: string
   /** Offered only when the server said the failure is worth trying again. */
   onRetry?: () => void
+  /** Safe read operations can explicitly offer another attempt after transport failure. */
+  retryable?: boolean
 }) {
   const api = error instanceof ApiError ? error : undefined
   const unavailable =
@@ -208,7 +211,7 @@ export function ErrorState({
               </pre>
             </details>
           )}
-          {onRetry && api?.retryable && (
+          {onRetry && (retryable ?? api?.retryable) && (
             <Button size="xs" variant="outline" onClick={onRetry}>
               Try again
             </Button>

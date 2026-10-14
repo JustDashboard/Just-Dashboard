@@ -202,7 +202,7 @@ export function AddComputer({ peer: first }: { peer?: string }) {
         steps={<FlowSteps steps={STEPS} current={step} />}
       />
       {error && !data ? (
-        <ErrorState error={error} onRetry={refresh} />
+        <ErrorState error={error} onRetry={refresh} retryable />
       ) : !data ? (
         <Skeleton className="h-72 rounded-xl" />
       ) : step === 0 ? (

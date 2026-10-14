@@ -440,7 +440,7 @@ export function RemoteSession({
   if (!data) {
     return (
       <Page fill className="p-6">
-        {error ? <ErrorState error={error} onRetry={refresh} /> : <LoadingPanel />}
+        {error ? <ErrorState error={error} onRetry={refresh} retryable /> : <LoadingPanel />}
       </Page>
     )
   }

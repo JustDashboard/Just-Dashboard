@@ -265,8 +265,8 @@
       ],
       "original_kind": "Defect",
       "resolution": "Disclose native export limits, scans, missing sources and default journal window in downloaded coverage metadata; propagate read failures.",
-      "regressions": "handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-ui.spec.ts",
-      "limits": "Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours. Omitted coverage is marked PARTIAL.",
+      "regressions": "handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-lens.spec.ts",
+      "limits": "Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours unless Current boot is selected. Omitted coverage is marked PARTIAL. Completeness is relative to available retained source output; source or decoder errors are recorded as missing coverage.",
       "status": "implemented; combined validation pending"
     },
     {
@@ -276,7 +276,7 @@
         "/packages"
       ],
       "original_kind": "Defect",
-      "resolution": "Track accepted package jobs independently of console, allow failed/canceled retries and refresh readings at terminal outcomes.",
+      "resolution": "Track accepted package jobs independently of console, allow failed/canceled retries and refresh catalogue flags and inventory/update readings at terminal outcomes.",
       "regressions": "install-jobs.test.js; packages-ui.spec.ts",
       "limits": "",
       "status": "implemented; combined validation pending"
@@ -328,7 +328,7 @@
         "/account/keys"
       ],
       "original_kind": "Defect",
-      "resolution": "Revalidate recognized feature authentication failures, redirect confirmed expiry to sign-in, retain identity on transient failures and fence login/logout response races.",
+      "resolution": "Revalidate recognized feature authentication failures, redirect confirmed expiry to sign-in, retain identity on transient failures and fence login/logout response races. Keep a nonsensitive account owner ID through reload and clear a prior or unknown owner's working stores on sign-in.",
       "regressions": "api-auth-recovery.test.js; auth-recovery.spec.ts",
       "limits": "",
       "status": "implemented; combined validation pending"
@@ -413,7 +413,7 @@
       ],
       "original_kind": "Defect",
       "resolution": "Parse extended HTML years then show RFC3339 range/order errors; disable invalid exports/search and validate server download bounds.",
-      "regressions": "datetime-local.test.js; logs-ui.spec.ts; handlers_logs_export_test.go",
+      "regressions": "log-filter.test.js; logs-lens.spec.ts; handlers_logs_export_test.go",
       "limits": "",
       "status": "implemented; combined validation pending"
     },

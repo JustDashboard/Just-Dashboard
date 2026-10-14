@@ -239,6 +239,6 @@ entered a code. Fresh sessions record `password`, and successful factor completi
 `recovery`. This provenance is exposed as `authMethod` separately from `twoFactorPassed`, which is
 an access-policy/elevation flag. Optional two-factor policy can complete a password-only session;
 that does not make it a password-and-code session. Enrolment proves its code, while later policy-off
-elevation retains password provenance. Account session summaries use this distinction and display
+elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
 legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
 password/code/recovery completion; route authorization and per-account enforcement are unchanged.

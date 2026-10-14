@@ -30,11 +30,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const workingOwner = useRef<number | null>(null)
   const router = useRouter()
 
-  const applyStatus = useCallback((next: AuthStatus | null) => {
+  const applyStatus = useCallback((next: AuthStatus | null, clearUnknownOwner = false) => {
     if (next?.user?.id !== undefined) {
-      if (workingOwner.current !== null && workingOwner.current !== next.user.id)
+      let owner = workingOwner.current
+      try {
+        const stored = sessionStorage.getItem("jd.working.owner")
+        if (owner === null && stored !== null && /^\d+$/.test(stored)) owner = Number(stored)
+      } catch {
+        // Storage can be unavailable; the in-memory owner still fences SPA sign-ins.
+      }
+      if ((owner !== null && owner !== next.user.id) || (owner === null && clearUnknownOwner))
         forgetWorkingState()
       workingOwner.current = next.user.id
+      try {
+        sessionStorage.setItem("jd.working.owner", String(next.user.id))
+      } catch {
+        // Reauthentication within this document still has the owner above.
+      }
     }
     currentStatus.current = next
     setStatus(next)
@@ -133,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const next = await post<AuthStatus>("/auth/login", { username, password })
       if (requested !== generation.current) return next
       setSessionEnded(false)
-      applyStatus(next)
+      applyStatus(next, true)
       return next
     },
     [applyStatus],

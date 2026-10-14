@@ -595,8 +595,8 @@ such as `127.0.0.0/8` correctly covers `127.0.0.1` without accepting unrelated p
 
 Package installation outcomes are tracked by accepted package/job identity, independently of the
 currently viewed console and retained across tab changes. A failed or canceled attempt can be retried;
-a terminal job poll wins over stale console frames, and old attempts cannot overwrite the latest one.
-Completion refreshes package metadata, installed searches and inventory/update readings.
+a terminal job poll wins over stale running console status, and old attempts cannot overwrite the latest one.
+Completion re-reads catalogue installed flags, installed searches and inventory/update readings.
 Upgrade confirmations describe the native manager: ordinary APT holds back dependency additions and
 removals, security-only APT retains its simulated exact candidate contract, dnf/yum and zypper may add
 or replace dependencies, pacman may also remove replacements, and apk may add/replace dependencies.

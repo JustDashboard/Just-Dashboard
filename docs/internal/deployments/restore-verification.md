@@ -77,10 +77,12 @@ atomic application snapshot. SQLite warns that VACUUM can change implicit ROWIDs
 explicit INTEGER PRIMARY KEY. Applications depending on those identities need a suitable alternative
 capture protocol. Other files retain ordinary filesystem capture and its changed-file refusal.
 
-This implementation does not yet provide deployment-integrated native PostgreSQL/MySQL/MongoDB/Redis
-capture, multi-container restore orchestration, external-service recovery or PITR. Copying their live
-data directories is not promoted to an application-consistent backup by this feature. Application
-checker coverage and actual production RPO/RTO must be established for each supported workload.
+Native dumps of saved PostgreSQL/MySQL/MongoDB/Redis connections are supported through the Databases
+owner and recorded manifests, including jobs with no filesystem source; see
+[deployment backup coverage](backup-coverage.md). Multi-container restore orchestration,
+external-service recovery and PITR remain outside this implementation. Copying live database data
+directories is not promoted to an application-consistent backup by this feature. Application checker
+coverage and actual production RPO/RTO must be established for each supported workload.
 
 ## Verification
 

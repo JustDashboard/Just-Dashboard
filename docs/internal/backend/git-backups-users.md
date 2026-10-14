@@ -300,8 +300,8 @@ A backup job requires at least one filesystem source **or** one native database 
 jobs use the existing manifest, retention, coverage, extraction and database-restore paths without
 inventing a host file source. The `?database=` handoff is consumed only when the resource report can
 open its suggested job. The picker tracks explicitly owned contributions: unselecting a resource
-removes only its exclusive inputs, preserving manual and shared inputs. Closing or saving the job
-editor clears its held draft. Failed run-history reads show an error/retry or an older-data warning;
+removes only its exclusive inputs, preserving manual and shared inputs. Explicit close or successful save of the job
+editor clears its held draft; SPA navigation retains it. Failed run-history reads show an error/retry or an older-data warning;
 they never become a successful empty history. `database_dumps_test.go`, `resource-picks.test.js` and
 `backups-ui.spec.ts` exercise these behaviors.
 

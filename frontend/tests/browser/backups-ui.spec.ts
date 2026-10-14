@@ -262,12 +262,16 @@ test("failed run history shows its read error and retries without claiming there
         }),
   )
   await page.goto("/backups/1")
-  await expect(page.getByRole("alert")).toContainText("Run history unavailable")
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Run history unavailable" }),
+  ).toContainText("Run history unavailable")
   await expect(page.getByText("No runs yet. Run now takes the first one.")).toHaveCount(0)
   failed = false
   await page.getByRole("button", { name: "Retry run history" }).click()
   await expect(page.getByRole("button", { name: /^Run 400,/ })).toBeVisible()
-  await expect(page.getByRole("alert")).toHaveCount(0)
+  await expect(page.getByRole("alert").filter({ hasText: "Run history unavailable" })).toHaveCount(
+    0,
+  )
   failed = true
   await expect(page.getByText("Run history could not refresh")).toBeVisible({ timeout: 10_000 })
   await expect(page.getByRole("button", { name: /^Run 400,/ })).toBeVisible()

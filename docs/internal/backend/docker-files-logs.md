@@ -1011,14 +1011,14 @@ verified current answer contributes to the green current verdict.
 Native Docker/stack/journal log exports remain bounded to 20,000 selected lines and the native scan
 budget. Their downloaded text begins with coverage metadata: returned/matching/scanned counts,
 selected-line limit, unfinished scans, unread stack sources, and the journal's implicit last-48-hours
-scope when no start date is requested. Any such omission makes coverage PARTIAL. The pane states the
+scope when no start date is requested and Current boot is not selected. Any such omission makes coverage PARTIAL. The pane states the
 native bound before download; file and PM2 exports remain uncapped. A native read error is returned
 before attachment headers, and journal process exit failures are checked. Streaming file failures
 before output return an error; a failure after output appends an explicit incomplete-artifact warning.
 Consumers of native text exports must account for the comment-prefixed coverage header.
 
 Custom time windows share validation between pane, time-window dialog and export. Native HTML
-extended-year values are parsed, then years outside RFC3339's four-digit range, missing endpoints and
+extended-year values are parsed, then years outside RFC3339's four-digit range, an empty custom window and
 reversed windows receive field errors. Invalid ranges do not trigger search or enable Download;
 server downloads also reject malformed bounds. Export fixture tests exceed 20,000 records, exercise
 native failures and partial coverage, and verify uncapped file output. Datetime unit and browser tests

@@ -408,7 +408,11 @@ An unavailable recheck retains the current identity for retry. Request generatio
 session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
 never starts expiry recovery. Reauthentication by a different account clears the prior account's
-working drafts; the same account retains its work through an ended session. `api-auth-recovery.test.js` and `auth-recovery.spec.ts` cover this contract.
+working drafts; the same account retains values held in the shared session/memory stores. Local
+component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
+account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
+is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership
+clears shared working drafts conservatively. `api-auth-recovery.test.js` and `auth-recovery.spec.ts` cover this contract.
 
 API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
 not become the next key's form. Session views use actual `authMethod` provenance rather than treating
