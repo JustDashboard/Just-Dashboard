@@ -36,6 +36,7 @@ export function useRunConsole() {
   const [query, setQuery] = useState<Record<string, string | number | undefined>>({})
   const [exitCode, setExitCode] = useState<number>()
   const finish = useRef<((code: number) => void) | undefined>(undefined)
+  const output = useRef<((line: string) => void) | undefined>(undefined)
   // The state as the socket callbacks see it. They are created once and would
   // otherwise close over the first render's value.
   const live = useRef<RunState>("idle")
@@ -46,11 +47,14 @@ export function useRunConsole() {
     setPath(undefined)
     finish.current?.(code ?? -1)
     finish.current = undefined
+    output.current = undefined
   }
 
   const onMessage = useCallback((envelope: Envelope) => {
     if (envelope.type === "output") {
       const batch = envelope.data as RunLine[]
+      const latest = batch.at(-1)?.text
+      if (latest) output.current?.(latest)
       // Bounded, for the same reason the log panel is: a build with a verbose
       // dependency install can emit tens of thousands of lines, and keeping
       // all of them in React state makes the tab unusable long before it
@@ -97,7 +101,12 @@ export function useRunConsole() {
 
   /** Starts a run and resolves with its exit code when it finishes. */
   const run = useCallback(
-    (socketPath: string, params: Record<string, string | number | undefined> = {}) => {
+    (
+      socketPath: string,
+      params: Record<string, string | number | undefined> = {},
+      onOutput?: (line: string) => void,
+    ) => {
+      output.current = onOutput
       setLines([])
       setExitCode(undefined)
       live.current = "running"

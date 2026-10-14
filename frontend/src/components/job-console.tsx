@@ -12,6 +12,7 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
 import { Pane, PaneHeader } from "@/components/panel"
+import { OperationProgress } from "@/components/operation-progress"
 
 /**
  * Watching an operation that outlives the page.
@@ -181,9 +182,12 @@ export function JobConsole({
         </p>
       )}
       {running && (
-        <p className="border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
-          This keeps running if you close the page — reopen it from the recent list.
-        </p>
+        <div className="shrink-0 space-y-2 border-b border-hairline px-3 py-3">
+          <OperationProgress label={`${job.title}…`} startedAt={job.startedAt} />
+          <p className="text-hint text-muted-foreground">
+            This keeps running if you close the page — reopen it from the recent list.
+          </p>
+        </div>
       )}
 
       <div
@@ -193,7 +197,7 @@ export function JobConsole({
           if (!el) return
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
         }}
-        className="max-h-80 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
+        className="max-h-80 min-h-0 flex-1 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
       >
         {dropped > 0 && (
           <div className="mb-1.5 text-muted-foreground">

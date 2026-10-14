@@ -1,4 +1,5 @@
-import { del, get, patch, post, postForm, put } from "@/lib/api"
+import { del, get, patch, post, put } from "@/lib/api"
+import { uploadForm } from "@/components/database/data/upload"
 import type {
   MongoAggregateResult,
   MongoClassification,
@@ -411,6 +412,7 @@ export function importFile(
   file: Blob,
   name: string,
   options: MongoImportOptions,
+  onProgress?: (sent: number, total: number) => void,
 ) {
   const form = new FormData()
   form.append(
@@ -418,5 +420,5 @@ export function importFile(
     JSON.stringify({ schema: target.database || undefined, table: target.collection, ...options }),
   )
   form.append("file", file, name)
-  return postForm<MongoImportReport>(`${at(target.id)}/import/upload`, form)
+  return uploadForm<MongoImportReport>(`${at(target.id)}/import/upload`, form, { onProgress })
 }

@@ -1,4 +1,5 @@
 "use client"
+import { OperationProgress } from "@/components/operation-progress"
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -545,6 +546,14 @@ export function SqlQuery() {
 
   return (
     <SectionFrame section="query">
+      {exporter.progress && (
+        <div className="flex shrink-0 items-center gap-3 px-3 py-3">
+          <OperationProgress {...exporter.progress} className="flex-1" />
+          <Button size="sm" variant="outline" onClick={exporter.cancel}>
+            Cancel export
+          </Button>
+        </div>
+      )}
       {/* One frame around the whole workbench: the rail and the editor are
           columns of one working surface, with a hairline between them. */}
       <div

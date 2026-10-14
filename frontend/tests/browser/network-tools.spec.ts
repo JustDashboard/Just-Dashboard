@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 import type {
   DiagnosticComparison,
   DiagnosticHistory,
@@ -745,4 +746,23 @@ test("a port check's endpoint is watched as a probe on the watch list's schedule
   await panel(page).getByRole("button", { name: "Watch on a schedule" }).click()
   await expect(page.getByText(`192.0.2.10:${sent} is already watched`)).toBeVisible()
   await expect(page.getByText("whose handshake checks the connection too")).toBeVisible()
+})
+
+test("progress: one-off diagnostics stay visible without losing their prior result", async ({
+  page,
+}) => {
+  await tools(page, { ping: pingUnknown })
+  const held = await heldResponse(page, "/network/probe", pingUnknown)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/network/tools?tool=ping&target=192.0.2.9")
+  await recordProgress(
+    page,
+    "network-diagnostic",
+    () => run(page).click(),
+    page.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(panel(page).getByText(pingUnknown.summary!, { exact: true })).toBeVisible()
+    },
+  )
 })

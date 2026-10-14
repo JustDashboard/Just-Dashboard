@@ -1,4 +1,5 @@
 "use client"
+import { OperationProgress } from "@/components/operation-progress"
 
 import { useState } from "react"
 import Link from "next/link"
@@ -318,6 +319,7 @@ export function RequestTester() {
         </div>
       </form>
 
+      {busy && <OperationProgress label="Testing the request…" />}
       {error && !busy && <ErrorState error={error} />}
       {admin && !result && !error && !busy && (
         <EmptyState

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 
 const now = "2026-09-16T12:00:00Z"
 const image = `sha256:${"a".repeat(64)}`
@@ -440,3 +441,52 @@ test("workspace: archive ranges and the selected run survive Back and reload", a
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/run=/)
 })
+
+for (const action of ["files", "database", "verify"]) {
+  test(`progress: backup ${action} work remains visible until it finishes`, async ({ page }) => {
+    await mockBackups(page, true)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/backups")
+    await openJob(page)
+    const path =
+      action === "files"
+        ? "/backups/runs/8/restore"
+        : action === "database"
+          ? "/backups/runs/8/restore-database"
+          : "/backups/runs/8/verify-restore"
+    const held = await heldResponse(
+      page,
+      path,
+      action === "files"
+        ? { entries: 2, bytes: 120, destination: "/srv/restore" }
+        : action === "database"
+          ? { output: "Restored" }
+          : { state: "passed" },
+    )
+    let start: () => Promise<unknown>
+    if (action === "verify") {
+      start = () => runMenu(page, /Verify restore/)
+    } else {
+      await runMenu(page, action === "files" ? /Restore files/ : /Restore database/)
+      if (action === "files")
+        await page
+          .getByRole("textbox", { name: "Destination directory", exact: true })
+          .fill("/srv/restore")
+      else await page.getByRole("textbox", { name: "Target database" }).fill("shop_drill")
+      await page.getByRole("button", { name: "Continue", exact: true }).click()
+      start = () =>
+        page
+          .getByRole("dialog")
+          .getByRole("button", {
+            name: action === "files" ? "Restore" : "Restore database",
+            exact: true,
+          })
+          .click()
+    }
+    const progress = page.locator("[data-slot=operation-progress]")
+    await recordProgress(page, `backup-${action}`, start, progress, async () => {
+      held.release()
+      await expect(progress).toHaveCount(0)
+    })
+  })
+}

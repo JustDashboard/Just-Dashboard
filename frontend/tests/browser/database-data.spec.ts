@@ -1,4 +1,5 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
+import { heldResponse, recordProgress, streamedExport } from "./progress-recording"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -1878,3 +1879,58 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "a key being added to a document")
   })
 }
+
+test("progress: a table export reports received bytes and can be cancelled", async ({ page }) => {
+  await mockEditor(page)
+  await streamedExport(page, "/databases/1/export")
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await recordProgress(
+    page,
+    "database-table-export",
+    () => page.getByRole("menuitem", { name: /^CSV/ }).click(),
+    page.locator("[data-slot=operation-progress]"),
+    async () => {
+      await expect(page.locator("[data-slot=operation-progress]")).toContainText(/received/)
+      await page.getByRole("button", { name: "Cancel export", exact: true }).click()
+    },
+  )
+  await expect(page.getByText("The export of items was cancelled")).toBeVisible()
+})
+
+test("progress: a SQL import separates upload from database processing", async ({ page }) => {
+  await mockEditor(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import into items" })
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "items.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Name,Quantity\nImported one,7\n,9\n"),
+  })
+  await expect(dialog.getByRole("combobox", { name: "Where Name goes" })).toContainText("name")
+  const held = await heldResponse(page, "/databases/1/import/upload", {
+    dryRun: false,
+    rowsRead: 2,
+    inserted: 2,
+    skipped: 0,
+    warnings: [],
+    errors: [],
+    atomic: true,
+    columns: [],
+  })
+  await recordProgress(
+    page,
+    "database-sql-import",
+    () => dialog.getByRole("button", { name: "Import", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog.getByRole("button", { name: "Done", exact: true })).toBeVisible()
+    },
+  )
+})

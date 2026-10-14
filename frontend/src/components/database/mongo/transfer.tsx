@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { OperationProgress, type OperationReading } from "@/components/operation-progress"
 import { ApiError, downloadUrl, errorMessage, type ApiErrorBody } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -56,6 +57,7 @@ async function refused(response: Response): Promise<ApiError> {
  */
 export function useMongoExport() {
   const [running, setRunning] = useState<string | null>(null)
+  const [progress, setProgress] = useState<OperationReading & { startedAt: number }>()
   const flight = useRef<AbortController | null>(null)
   useEffect(() => () => flight.current?.abort(), [])
 
@@ -65,6 +67,11 @@ export function useMongoExport() {
     const controller = new AbortController()
     flight.current = controller
     setRunning(target.collection)
+    setProgress({
+      label: `Exporting ${target.collection}…`,
+      detail: "0 B received",
+      startedAt: Date.now(),
+    })
     const name = target.collection
     const toast = notify.loading(`Exporting ${name}…`, {
       action: { label: "Cancel", onClick: () => controller.abort() },
@@ -93,6 +100,7 @@ export function useMongoExport() {
       const reader = response.body.getReader()
       let received = 0
       let said = 0
+      let lastRead = 0
       for (;;) {
         // The server ends a failed export by breaking the connection: the
         // read throws, and nothing is saved.
@@ -100,8 +108,10 @@ export function useMongoExport() {
         if (done) break
         parts.push(value)
         received += value.byteLength
-        if (received - said >= 1 << 20) {
+        if (received - said >= 1 << 20 || Date.now() - lastRead >= 250) {
           said = received
+          lastRead = Date.now()
+          setProgress((held) => held && { ...held, detail: `${bytes(received)} received` })
           notify.raw.loading(`Exporting ${name}… ${bytes(received)}`, { id: toast })
         }
       }
@@ -157,10 +167,11 @@ export function useMongoExport() {
     } finally {
       flight.current = null
       setRunning(null)
+      setProgress(undefined)
     }
   }
 
-  return { run, running }
+  return { run, running, progress, cancel: () => flight.current?.abort() }
 }
 
 /** What to export and how, before the file is asked for. */
@@ -345,6 +356,8 @@ export function ImportDialog({
   const [report, setReport] = useState<MongoImportReport | null>(null)
   const [refused, setRefused] = useState("")
   const [busy, setBusy] = useState<"reading" | "importing" | null>(null)
+  const [sent, setSent] = useState(0)
+  const [sendTotal, setSendTotal] = useState(0)
 
   const formats = IMPORT_FORMATS.filter((entry) =>
     engine.capabilities.importFormats.includes(entry),
@@ -389,13 +402,24 @@ export function ImportDialog({
     if (!file) return
     setRefused("")
     setBusy("importing")
+    setSent(0)
+    setSendTotal(0)
     try {
-      const done = await importFile(target, file, file.name, {
-        format,
-        mode: replace ? "replace" : "insert",
-        skipBadRows: skipBad,
-        dryRun: false,
-      })
+      const done = await importFile(
+        target,
+        file,
+        file.name,
+        {
+          format,
+          mode: replace ? "replace" : "insert",
+          skipBadRows: skipBad,
+          dryRun: false,
+        },
+        (loaded, total) => {
+          setSent(loaded)
+          setSendTotal(total)
+        },
+      )
       setReport(done)
       onImported()
     } catch (err) {
@@ -420,9 +444,20 @@ export function ImportDialog({
         ) : (
           <>
             {busy === "importing" && (
-              <p className="mr-auto text-hint text-muted-foreground">
-                The request stays open until the last document is in.
-              </p>
+              <OperationProgress
+                label={
+                  sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…"
+                }
+                detail={
+                  sendTotal > 0 && sent < sendTotal
+                    ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
+                    : "Waiting for the database to finish the import"
+                }
+                completed={sendTotal > 0 && sent < sendTotal ? sent : undefined}
+                total={sendTotal > 0 && sent < sendTotal ? sendTotal : undefined}
+                showCount={false}
+                className="basis-full pb-2"
+              />
             )}
             <Button variant="outline" disabled={busy !== null} onClick={() => close(false)}>
               Cancel

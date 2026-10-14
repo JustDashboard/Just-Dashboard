@@ -223,6 +223,7 @@ export default function DockerVolumesPage() {
     confirm({
       title: "Prune volumes",
       confirmLabel: "Prune",
+      workingLabel: "Removing unused volumes…",
       description: (
         <>
           <p className="text-destructive">

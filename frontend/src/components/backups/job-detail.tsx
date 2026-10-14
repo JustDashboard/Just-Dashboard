@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
+import { OperationProgress } from "@/components/operation-progress"
 import { Detail, DetailList, Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
@@ -397,6 +398,7 @@ export function JobPage() {
                         <RunInspector
                           key={shown.id}
                           run={shown}
+                          verifying={verifying === shown.id}
                           verbs={runVerbs(shown)}
                           browsing={browsing}
                           onBrowse={() => browse(shown)}
@@ -449,6 +451,7 @@ export function JobPage() {
  */
 function RunInspector({
   run,
+  verifying,
   verbs,
   browsing,
   canRestore,
@@ -456,6 +459,7 @@ function RunInspector({
   onRestorePaths,
 }: {
   run: BackupRun
+  verifying: boolean
   verbs: Verb[]
   browsing: BackupRun | null
   canRestore: boolean
@@ -537,6 +541,16 @@ function RunInspector({
         </div>
       )}
 
+      {run.status === "running" && (
+        <OperationProgress
+          label="Taking backup…"
+          startedAt={run.startedAt}
+          detail="Output and archive size are recorded when the run finishes"
+        />
+      )}
+      {(verifying || verification?.state === "running") && (
+        <OperationProgress label="Verifying backup recovery…" />
+      )}
       <RunLog log={run.log} />
       {run.manifest && <RunContents manifest={run.manifest} />}
       {run.artifact && (
@@ -750,6 +764,7 @@ function RestoreFilesDialog({
     void confirm({
       title: inPlace ? "Put the files back where they came from" : "Restore into a directory",
       confirmLabel: "Restore",
+      workingLabel: "Restoring files from the backup…",
       description: inPlace ? (
         <div className="space-y-2">
           <p className="text-destructive">
@@ -901,6 +916,7 @@ function RestoreDatabaseDialog({
             void confirm({
               title: `Restore ${selected.name} into ${target}`,
               confirmLabel: "Restore database",
+              workingLabel: `Restoring ${target} from the backup…`,
               description: (
                 <p>
                   The <span className="font-mono">{selected.method}</span> dump of{" "}

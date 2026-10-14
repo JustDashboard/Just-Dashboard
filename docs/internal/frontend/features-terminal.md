@@ -1,5 +1,13 @@
 # Feature panels and terminal workspace
 
+Docker's image, build-cache, container, volume and network prunes and the overview cleanup keep a
+named working bar and elapsed time in the active confirmation. These routes still return a final
+report rather than intermediate category progress. Compose confirmations can receive the latest
+streamed output through the runner's optional output callback; the page's full transcript remains
+available after the dialog settles. Nothing reconnects or replays a Compose command to obtain
+progress. One-off network diagnostics, fetched blocklist refreshes, reviewed DNS provisioning/apply
+and the proxy request tester use the same working reading while awaiting their existing requests.
+
 ## Feature panels
 
 **Docker** (`components/docker/`) is where the product's opinion about newcomers lives.
