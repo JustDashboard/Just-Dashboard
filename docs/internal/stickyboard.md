@@ -125,6 +125,17 @@ editing and says so, with Reload on a conflict, rather than overwriting another 
 the server does not have asks before leaving without them. A reader without `service.control` sees the
 board read-only: no tools, no format bar, no editing, and nothing that would save.
 
+Each flush drains every snapshot changed during the requests already in flight (`lib/board-save.ts`,
+also used by Excalidraw). Navigation checks that the latest document is clean before routing, and a
+failed later request retains the editor and its leave choice. The browser's reload/close warning
+remains active for a dirty document after a conflict or missing-board response.
+
+Duplicate first requires a successful flush: a failed or conflicted save leaves the operator with the
+original document instead of copying an older server document and navigating away. If edits arrive
+while the duplicate request itself is pending, the copy is created but the editor stays with those
+newer edits. The name field saves on blur or Enter; Escape restores the saved name and suppresses the
+blur's rename request.
+
 ## Design
 
 The nine colours are tokens on `:root` (`--note-*`), labels the operator applied, like a folder's
@@ -138,5 +149,6 @@ with a border, as the database diagram's do. React Flow's own node wrappers are 
 `.stickyboard-canvas` in `globals.css`.
 
 `tests/browser/stickyboard-ui.spec.ts` drives the list, templates, editing, links, the format bar,
-conflicts and the read-only board against a mock of the handler's rules; the Go rules are held by
+conflicts, rename cancellation, failed duplication, saves made during navigation and the read-only
+board against a mock of the handler's rules; the Go rules are held by
 `handlers_stickyboards_test.go` and the pure model by `lib/stickyboard.test.js`.

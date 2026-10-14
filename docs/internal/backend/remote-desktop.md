@@ -149,6 +149,22 @@ browser ──HTTPS / WebSocket──▶ backend ──HTTP 127.0.0.1──▶ M
   computer whose screen runs at 60 Hz sends 60), over whatever the reader changed in the stream's
   own menu.
 
+**Ready to stream is a preparation verdict.** A running bridge, Sunshine answering and completed
+pairing permit opening the player; they do not prove that the browser receives a picture. The session
+header says *ready to stream* until HTML video playback is observed inside the same-origin player.
+Playing video makes the header and held-session dock live; pause, waiting, stall, error, end and a
+new player document clear that evidence. A final `timeupdate` after a stall does not count as playback
+resuming. A canvas-only WebCodecs renderer supplies no HTML video playback evidence and remains at the
+readiness verdict. A paired Sunshine with no offered application displays its setup instruction and
+does not claim a live session. Initial computer-inventory and stream-read failures display their
+reason, with retry when the response permits it, instead of an indefinite skeleton or connecting
+screen.
+
+**Session tools fit narrow screens.** Below 1280 px the visible tools button opens a `SidePanel`
+containing the same mode switch, clipboard, file transfer, quality, pointer and pairing controls as
+the desktop column. Switching modes closes the panel; Close and Escape return keyboard focus to the
+tools button so it can be opened again with Enter. Each mode exposes its own applicable controls.
+
 **A session outlives its page.** Sessions are drawn by the shell, not the session page
 (`components/remote-desktop/held-sessions.tsx`): the dashboard layout holds every session opened in
 the tab and draws it after the page, the one the address names in the page's place and the rest

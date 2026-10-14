@@ -37,6 +37,13 @@ saves at once on Ctrl/Cmd+S (Excalidraw's own save-to-file shortcut is disabled)
 saving, saved, failed, unnamed, conflict and deleted states. When changes cannot be saved, Back and
 in-board links ask before leaving without saving instead of doing nothing.
 
+A flush waits for every edit, including changes made while an earlier request was in flight.
+`lib/board-save.ts` drains successive snapshots against their acknowledged revisions, and navigation
+checks that the drawing is still clean before routing. A failed later save keeps the editor open with
+the leave choice. Reloading or closing the browser tab also warns while changes remain unsaved,
+including after a conflict or missing-drawing response; an explicit choice to leave without saving or
+delete the drawing suppresses that warning.
+
 `DELETE /boards/{id}` uses `s.destructive`: the `destructive` capability, tighter rate limit and
 audit. The editor uses ordinary confirmation before deleting the drawing. A failed save does not block
 deletion. All mutations
