@@ -1612,6 +1612,9 @@ for (const [surface, width] of (["live", "pm2", "services", "timers"] as const).
     await expect.poll(() => reads).toBeGreaterThan(finalReads)
     await expect(rows.first()).toContainText(fixture.reading)
     await page.keyboard.press("Escape")
+    await expect(menu).toBeHidden()
+    // The menu restores trigger focus asynchronously before inspection can be released.
+    await expect(rows.first().getByRole("button", { name: "More actions" })).toBeFocused()
     await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
     await page.mouse.move(0, 0)
     await expect
