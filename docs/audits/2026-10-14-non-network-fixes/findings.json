@@ -265,7 +265,7 @@
       ],
       "original_kind": "Defect",
       "resolution": "Disclose native export limits, scans, missing sources and default journal window in downloaded coverage metadata; propagate read failures.",
-      "regressions": "handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-lens.spec.ts",
+      "regressions": "handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-lens.spec.ts; containers_logs_test.go",
       "limits": "Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours unless Current boot is selected. Omitted coverage is marked PARTIAL. Completeness is relative to available retained source output; source or decoder errors are recorded as missing coverage.",
       "status": "implemented; combined validation pending"
     },

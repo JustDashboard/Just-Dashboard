@@ -1013,7 +1013,10 @@ budget. Their downloaded text begins with coverage metadata: returned/matching/s
 selected-line limit, unfinished scans, unread stack sources, and the journal's implicit last-48-hours
 scope when no start date is requested and Current boot is not selected. Any such omission makes coverage PARTIAL. The pane states the
 native bound before download; file and PM2 exports remain uncapped. A native read error is returned
-before attachment headers, and journal process exit failures are checked. Streaming file failures
+before attachment headers, and journal process exit failures are checked. Stack member read failures
+are retained by source; a partially readable stack is PARTIAL, and an entirely unreadable stack returns
+503 before attachment headers. Docker scan and incomplete multiplexed-frame errors are retained by the
+reader and consumed by buffered searches, so a closed channel does not certify successful EOF. Streaming file failures
 before output return an error; a failure after output appends an explicit incomplete-artifact warning.
 Consumers of native text exports must account for the comment-prefixed coverage header.
 

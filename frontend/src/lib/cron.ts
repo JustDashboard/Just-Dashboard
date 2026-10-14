@@ -238,12 +238,12 @@ export function describeCron(expression: string): string {
   const dom = [...cron.dayOfMonth].sort((a, b) => a - b)
   const dow = [...cron.dayOfWeek].sort((a, b) => a - b)
   const months = [...cron.month].sort((a, b) => a - b)
-  const domRestricted = !cron.anyDayOfMonth
-  const dowRestricted = !cron.anyDayOfWeek
+  const domRestricted = !cron.anyDayOfMonth || !full(cron.dayOfMonth, SPECS[2])
+  const dowRestricted = !cron.anyDayOfWeek || cron.dayOfWeek.size < 7
 
   if (domRestricted && dowRestricted) {
     parts.push(
-      `on the ${listOf(dom, ordinal)} of the month or on ${listOf(dow, (d) => DAY_NAMES[d])}`,
+      `on the ${listOf(dom, ordinal)} of the month ${cron.anyDayOfMonth || cron.anyDayOfWeek ? "and" : "or"} on ${listOf(dow, (d) => DAY_NAMES[d])}`,
     )
   } else if (domRestricted) {
     parts.push(`on the ${listOf(dom, ordinal)}`)

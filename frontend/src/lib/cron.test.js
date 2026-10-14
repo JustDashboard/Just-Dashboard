@@ -185,4 +185,7 @@ test("star steps use native day intersection and reject unsupported step grammar
   expect(isValidCron("5/5 * * * *")).toBe(false)
   expect(isValidCron("*/999999999999999999999999 * * * *")).toBe(false)
   expect(isValidCron("5-59/5 * * * *")).toBe(true)
+  expect(describeCron("0 0 */2 * 1")).toContain("and on Monday")
+  expect(describeCron("0 0 */2 * 1")).not.toContain("or on Monday")
+  expect(describeCron("0 0 * * */2")).toBe("At 00:00 on Sunday, Tuesday, Thursday and Saturday")
 })
