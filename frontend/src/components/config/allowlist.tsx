@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Cross, Globe, Router, Terminal, type Icon } from "@/components/icons"
+import { coversLoopback } from "@/lib/allowlist"
 import { networkOf } from "@/lib/clients"
 import { Field } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
@@ -106,10 +107,6 @@ export function Allowlist({
       )}
     </Field>
   )
-}
-
-function coversLoopback(entry: string) {
-  return entry.startsWith("127.") || entry.endsWith("/0")
 }
 
 function CidrText({ cidr }: { cidr: string }) {

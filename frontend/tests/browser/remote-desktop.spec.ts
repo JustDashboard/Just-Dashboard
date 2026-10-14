@@ -503,3 +503,87 @@ test("a browser on the tailnet is sent the stream over WebRTC, at up to Max", as
     videoFrameQueueSize: 1,
   })
 })
+
+for (const width of [390, 1024]) {
+  test(`session tools remain accessible at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 })
+    await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+    await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+    await page.getByRole("button", { name: "Show the session tools" }).click()
+    const tools = page.getByRole("dialog", { name: "Session tools" })
+    await expect(tools.getByRole("radiogroup", { name: "How the screen is drawn" })).toBeVisible()
+    await expect(tools.getByRole("radiogroup", { name: "Stream quality" })).toBeVisible()
+    await expect(
+      tools.getByRole("switch", { name: "Show this computer's pointer too" }),
+    ).toBeVisible()
+    await tools.getByRole("radio", { name: /Control/ }).click()
+    await page.getByRole("button", { name: "Show the session tools" }).click()
+    await expect(tools.getByLabel("Text to paste on studio-mac")).toBeVisible()
+    await tools.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(page.getByRole("button", { name: "Show the session tools" })).toBeVisible()
+  })
+}
+
+for (const path of ["/remote-desktop/new", `/remote-desktop/${MAC}`]) {
+  test(`inventory failures show their reason and retry on ${path}`, async ({ page }) => {
+    await mockRemoteDesktop(page)
+    let fail = true
+    await page.route("**/api/v1/remote-desktop/", async (route) => {
+      if (!fail) return route.fallback()
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "unavailable",
+            message: "Computer inventory unavailable",
+            retryable: true,
+          },
+        }),
+      })
+    })
+    await page.goto(path)
+    await expect(page.getByRole("alert")).toContainText("Computer inventory unavailable")
+    fail = false
+    await page.getByRole("button", { name: "Try again" }).click()
+    await expect(page.getByRole("alert")).toHaveCount(0)
+    if (path.endsWith("/new"))
+      await expect(page.getByRole("button", { name: "Add workshop-pc" })).toBeVisible()
+    else await expect(page.getByText("Connecting to studio-mac…")).toBeVisible()
+  })
+}
+
+test("a paired Sunshine without applications is ready but has no live session", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, { stream: streamView({ ...PAIRED, apps: [] }) })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  await expect(page.getByText("ready to stream", { exact: true })).toBeVisible()
+  await expect(page.getByText(/offers nothing to stream/)).toBeVisible()
+  await expect(page.locator('iframe[data-slot="remote-stream"]')).toHaveCount(0)
+  await expect(page.getByText("streaming", { exact: true })).toHaveCount(0)
+})
+
+test("streaming status requires playback and returns to ready when video stalls", async ({
+  page,
+}) => {
+  await mockRemoteDesktop(page, { stream: streamView(PAIRED) })
+  await page.goto(`/remote-desktop/${MAC}?mode=stream`)
+  const frame = page.frameLocator('iframe[data-slot="remote-stream"]')
+  await expect(frame.getByText("The bridge's stream page")).toBeVisible()
+  await expect(page.getByText("ready to stream", { exact: true })).toBeVisible()
+  await frame.locator("body").evaluate((body) => {
+    const video = body.ownerDocument.createElement("video")
+    Object.defineProperties(video, {
+      paused: { value: false },
+      ended: { value: false },
+      readyState: { value: 3 },
+      videoWidth: { value: 1920 },
+    })
+    body.append(video)
+    video.dispatchEvent(new Event("playing"))
+  })
+  await expect(page.getByText("streaming", { exact: true })).toBeVisible()
+  await frame.locator("video").evaluate((video) => video.dispatchEvent(new Event("waiting")))
+  await expect(page.getByText("ready to stream", { exact: true })).toBeVisible()
+})

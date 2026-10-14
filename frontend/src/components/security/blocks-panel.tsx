@@ -107,7 +107,7 @@ export function BlocksPanel({
         {shown.length === 0 ? (
           <p className="px-4 py-4 text-body text-muted-foreground">
             {data.entries.length === 0
-              ? "No engine is refusing an address right now."
+              ? "No blocked addresses are listed in this reading."
               : "Nothing under this filter."}
           </p>
         ) : (

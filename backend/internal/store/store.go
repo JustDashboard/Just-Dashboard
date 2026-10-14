@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash   TEXT NOT NULL UNIQUE,
   twofa_passed INTEGER NOT NULL DEFAULT 0,
+  auth_method  TEXT NOT NULL DEFAULT 'unknown',
   ip           TEXT NOT NULL DEFAULT '',
   user_agent   TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL,
@@ -1241,6 +1242,8 @@ END;
 // list of steps between every shipped schema and the current one, and dropping
 // one strands whichever installs stopped at that version.
 var addedColumns = []struct{ table, column, spec string }{
+	// Access completion predates factor provenance; old sessions cannot prove a method.
+	{"sessions", "auth_method", "TEXT NOT NULL DEFAULT 'unknown'"},
 	{"users", "totp_last_step", "INTEGER NOT NULL DEFAULT -1"},
 	// An account gained a name to show and a picture beside it. The sign-in
 	// name stays the lower-cased key it always was; the display name is what

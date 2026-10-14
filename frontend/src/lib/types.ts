@@ -5121,6 +5121,7 @@ export type ApiToken = {
 }
 
 export type SessionInfo = {
+  authMethod?: "unknown" | "password" | "totp" | "recovery"
   id: string
   userId: number
   twoFactorPassed: boolean

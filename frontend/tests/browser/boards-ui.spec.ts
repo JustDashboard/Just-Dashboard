@@ -320,3 +320,42 @@ test("the list draws each drawing, names what it links to, and the old address l
   await card.getByRole("button", { name: "Production map", exact: true }).click()
   await expect(page).toHaveURL(/\/excalidraw\/1$/)
 })
+
+test("drawing navigation keeps later edits when a drained save fails", async ({ page }) => {
+  await mockBoards(page)
+  const writes: Put[] = []
+  let release = () => {}
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/boards/1", async (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes.push(route.request().postDataJSON() as Put)
+    if (writes.length === 1) {
+      await pending
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ name: writes[0].name, revision: 2 }),
+      })
+    }
+    return route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "Second save failed" } }),
+    })
+  })
+  await page.goto("/excalidraw/1")
+  const name = page.getByLabel("Drawing name")
+  await expect(name).toHaveValue("Untitled board")
+  await name.fill("First revision")
+  await page.getByRole("button", { name: "Back to Excalidraw" }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  await name.fill("Latest revision")
+  release()
+  await expect(page.getByRole("dialog", { name: "Leave without saving?" })).toBeVisible()
+  expect(writes[1].name).toBe("Latest revision")
+  await expect(page).toHaveURL(/\/excalidraw\/1$/)
+  await page.getByRole("button", { name: "Stay", exact: true }).click()
+  await expect(name).toHaveValue("Latest revision")
+})

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { drainBoardSaves } from "@/lib/board-save"
 import { ApiError, put } from "@/lib/api"
 import type { StickyBoard, StickyDocument, StickySummary } from "@/lib/stickyboard"
 import { notify } from "@/lib/toast"
@@ -45,9 +46,6 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef<Promise<boolean> | null>(null)
   const errorToast = useRef<string | number | undefined>(undefined)
-  // The save and its scheduling call each other; the save reaches the
-  // scheduler through this so neither has to be declared first.
-  const scheduleRef = useRef<() => void>(() => {})
 
   const syncHistory = useCallback(
     () => setHistory({ undo: past.current.length, redo: future.current.length }),
@@ -58,45 +56,45 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
 
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    // A second caller waits out the save in flight and whatever is queued
-    // behind it, rather than reporting success while the latest change is unsent.
-    while (savingRef.current) await savingRef.current
-    if (stoppedRef.current || !canWrite) return false
-    if (!isDirty()) return true
-    const snapshot = docRef.current
-    setSaveState("saving")
-    const task = put<StickySummary>(`/stickyboards/${board.id}`, {
-      document: snapshot,
-      revision: revisionRef.current,
-    })
-      .then((saved) => {
-        revisionRef.current = saved.revision
-        savedRef.current = snapshot
-        if (errorToast.current !== undefined) notify.dismiss(errorToast.current)
-        errorToast.current = undefined
-        setSaveState(isDirty() ? "pending" : "saved")
-        return true
+    if (savingRef.current) return savingRef.current
+    const task = drainBoardSaves(isDirty, async () => {
+      if (stoppedRef.current || !canWrite) return false
+      const snapshot = docRef.current
+      setSaveState("saving")
+      return put<StickySummary>(`/stickyboards/${board.id}`, {
+        document: snapshot,
+        revision: revisionRef.current,
       })
-      .catch((cause) => {
-        if (cause instanceof ApiError && cause.code === "stickyboard_conflict") {
-          stoppedRef.current = "conflict"
-          setSaveState("conflict")
-        } else if (cause instanceof ApiError && cause.code === "stickyboard_not_found") {
-          stoppedRef.current = "missing"
-          setSaveState("missing")
-        } else {
-          setSaveState("error")
+        .then((saved) => {
+          revisionRef.current = saved.revision
+          savedRef.current = snapshot
           if (errorToast.current !== undefined) notify.dismiss(errorToast.current)
-          errorToast.current = notify.error("Board was not saved", cause)
-        }
-        return false
-      })
+          errorToast.current = undefined
+          setSaveState(isDirty() ? "pending" : "saved")
+          return true
+        })
+        .catch((cause) => {
+          if (cause instanceof ApiError && cause.code === "stickyboard_conflict") {
+            stoppedRef.current = "conflict"
+            setSaveState("conflict")
+          } else if (cause instanceof ApiError && cause.code === "stickyboard_not_found") {
+            stoppedRef.current = "missing"
+            setSaveState("missing")
+          } else {
+            setSaveState("error")
+            if (errorToast.current !== undefined) notify.dismiss(errorToast.current)
+            errorToast.current = notify.error("Board was not saved", cause)
+          }
+          return false
+        })
+    })
     savingRef.current = task
-    const saved = await task
-    if (savingRef.current === task) savingRef.current = null
-    // Changes made while this save was out go in the next one.
-    if (saved && isDirty()) scheduleRef.current()
-    return saved
+    try {
+      return await task
+    } finally {
+      if (savingRef.current === task) savingRef.current = null
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
   }, [board.id, canWrite, isDirty])
 
   const schedule = useCallback(() => {
@@ -109,9 +107,6 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
     setSaveState((state) => (state === "saving" ? state : "pending"))
     timerRef.current = setTimeout(() => void flush(), SAVE_DELAY)
   }, [canWrite, flush, isDirty])
-  useEffect(() => {
-    scheduleRef.current = schedule
-  }, [schedule])
 
   const write = useCallback(
     (next: StickyDocument) => {

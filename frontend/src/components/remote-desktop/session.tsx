@@ -18,7 +18,9 @@ import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
 import { PaneHeader } from "@/components/panel"
-import { EmptyState } from "@/components/state"
+import { SidePanel } from "@/components/side-panel"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -116,7 +118,7 @@ export function RemoteSession({
   /** What the shell shows of a session kept connected while another page is up. */
   onState: (state: HeldState) => void
 }) {
-  const { data, hueOf, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
+  const { data, error, hueOf, refresh } = useRemoteDesktop(visible ? 15_000 : 0)
   const computer = data?.computers.find((candidate) => candidate.id === id)
   const workspace = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
@@ -126,6 +128,9 @@ export function RemoteSession({
   const [phase, setPhase] = useState<Phase>({ kind: "connecting" })
   const [attempt, setAttempt] = useState(0)
   const [immersive, setImmersive] = useState(false)
+  const narrow = useMediaQuery("(max-width: 1279px)")
+  const [mobileTools, setMobileTools] = useState(false)
+  const [playing, setPlaying] = useState(false)
   const [tools, setTools] = useViewState("remote-desktop.tools", true)
   const [rail, setRail] = useViewState("remote-desktop.rail", true)
   const [remoteClip, setRemoteClip] = useState("")
@@ -138,13 +143,14 @@ export function RemoteSession({
   )
   const [streamAttempt, setStreamAttempt] = useState(0)
   const [pointer, setPointer] = useViewState("remote-desktop.stream-pointer", false)
+  const toolsOpen = narrow ? mobileTools : tools
   const streamFrame = useRef<HTMLIFrameElement>(null)
   const streamPoll = useStream(id, visible && mode === "stream")
   const stream = streamPoll.data
   const pin = stream?.pairing ? stream.pin : undefined
   const known = computer !== undefined
   const control = mode === "control"
-  const live = control ? phase.kind === "connected" : streamPoll.live !== undefined
+  const live = control ? phase.kind === "connected" : playing
   const latencyMs = control ? computer?.reach.latencyMs : stream?.sunshine.latencyMs
   const drawn = computer
     ? control
@@ -339,6 +345,8 @@ export function RemoteSession({
   }
 
   const switchMode = (next: SessionMode) => {
+    setMobileTools(false)
+    setPlaying(false)
     if (next === mode) return
     // The Control session is closed in Stream and opened afresh on the way back.
     if (next === "control") setPhase({ kind: "connecting" })
@@ -428,6 +436,14 @@ export function RemoteSession({
     void factory?.getAudioContext()?.resume()
   }
 
+  if (!data) {
+    return (
+      <Page fill className="p-6">
+        {error ? <ErrorState error={error} onRetry={refresh} /> : <LoadingPanel />}
+      </Page>
+    )
+  }
+
   if (data && !computer) {
     return (
       <Page className="animate-rise">
@@ -449,6 +465,43 @@ export function RemoteSession({
     phase.kind === "failed" && computer
       ? sessionProblem(phase.code, phase.message, computer)
       : undefined
+
+  const sessionPanel = computer ? (
+    <SessionPanel
+      computer={computer}
+      mode={mode}
+      live={live}
+      latencyMs={latencyMs}
+      onMode={switchMode}
+    >
+      {control ? (
+        <ControlSections
+          computer={computer}
+          connected={phase.kind === "connected"}
+          remoteClip={remoteClip}
+          localClip={localClip}
+          onLocalClip={setLocalClip}
+          onPaste={paste}
+          drive={drive}
+          transfers={transfers}
+          onUpload={upload}
+          onKeys={send}
+          onFullscreen={() => void toggleImmersive()}
+        />
+      ) : (
+        <StreamSections
+          computer={computer}
+          stream={stream}
+          quality={quality}
+          onQuality={setQuality}
+          pointer={pointer}
+          onPointer={setPointer}
+          onFullscreen={() => void toggleImmersive()}
+          onUnpaired={streamPoll.refresh}
+        />
+      )}
+    </SessionPanel>
+  ) : null
 
   return (
     <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
@@ -502,7 +555,7 @@ export function RemoteSession({
             )}
             <span className="flex-1" />
             {!control ? (
-              <StreamStatus stream={stream} />
+              <StreamStatus stream={stream} playing={playing} />
             ) : phase.kind === "connected" ? (
               <Status
                 tone="running"
@@ -543,11 +596,10 @@ export function RemoteSession({
               </IconAction>
             )}
             <IconAction
-              label={tools ? "Hide the session tools" : "Show the session tools"}
-              onClick={() => setTools((held) => !held)}
-              className="max-xl:hidden"
+              label={toolsOpen ? "Hide the session tools" : "Show the session tools"}
+              onClick={() => (narrow ? setMobileTools((held) => !held) : setTools((held) => !held))}
             >
-              {tools ? <SidebarRightClose /> : <SidebarRightOpen />}
+              {toolsOpen ? <SidebarRightClose /> : <SidebarRightOpen />}
             </IconAction>
             <IconAction
               label={
@@ -571,7 +623,9 @@ export function RemoteSession({
               <StreamPane
                 computer={computer}
                 stream={stream}
-                live={streamPoll.live}
+                readyStream={streamPoll.readyStream}
+                error={streamPoll.error}
+                onPlayback={setPlaying}
                 quality={quality}
                 attempt={streamAttempt}
                 pointer={pointer}
@@ -663,42 +717,21 @@ export function RemoteSession({
           )}
         </div>
 
-        {tools && !immersive && computer && (
-          <SessionPanel
-            computer={computer}
-            mode={mode}
-            live={live}
-            latencyMs={latencyMs}
-            onMode={switchMode}
-          >
-            {control ? (
-              <ControlSections
-                computer={computer}
-                connected={phase.kind === "connected"}
-                remoteClip={remoteClip}
-                localClip={localClip}
-                onLocalClip={setLocalClip}
-                onPaste={paste}
-                drive={drive}
-                transfers={transfers}
-                onUpload={upload}
-                onKeys={send}
-                onFullscreen={() => void toggleImmersive()}
-              />
-            ) : (
-              <StreamSections
-                computer={computer}
-                stream={stream}
-                quality={quality}
-                onQuality={setQuality}
-                pointer={pointer}
-                onPointer={setPointer}
-                onFullscreen={() => void toggleImmersive()}
-                onUnpaired={streamPoll.refresh}
-              />
-            )}
-          </SessionPanel>
-        )}
+        {!immersive &&
+          computer &&
+          (narrow ? (
+            <SidePanel
+              open={mobileTools}
+              onOpenChange={setMobileTools}
+              title="Session tools"
+              width="sm"
+              bodyClassName="p-0"
+            >
+              {sessionPanel}
+            </SidePanel>
+          ) : tools ? (
+            sessionPanel
+          ) : null)}
       </div>
     </Page>
   )
@@ -770,18 +803,11 @@ function Rail({
   )
 }
 
-function StreamStatus({ stream }: { stream: RdStream | undefined }) {
+function StreamStatus({ stream, playing }: { stream: RdStream | undefined; playing: boolean }) {
+  if (playing) return <Status tone="running" live label="streaming" className="px-2" />
   if (!stream) return <TextShimmer className="px-2 text-xs font-medium">reading…</TextShimmer>
   const stage = streamStage(stream)
-  if (stage === "ready")
-    return (
-      <Status
-        tone="running"
-        live
-        label={latency(stream.sunshine.latencyMs) ?? "streaming"}
-        className="px-2"
-      />
-    )
+  if (stage === "ready") return <Status tone="notice" label="ready to stream" className="px-2" />
   if (stage === "pin") return <Status tone="notice" label="waiting for the PIN" className="px-2" />
   return (
     <Status

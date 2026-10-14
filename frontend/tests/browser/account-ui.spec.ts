@@ -48,6 +48,7 @@ const sessions = [
     id: "s1",
     userId: 1,
     twoFactorPassed: true,
+    authMethod: "totp",
     ip: "100.101.7.12",
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
@@ -60,6 +61,7 @@ const sessions = [
     id: "s2",
     userId: 1,
     twoFactorPassed: true,
+    authMethod: "recovery",
     ip: "192.168.1.20",
     userAgent:
       "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1",
@@ -72,6 +74,7 @@ const sessions = [
     id: "s3",
     userId: 1,
     twoFactorPassed: false,
+    authMethod: "password",
     ip: "203.0.113.7",
     userAgent: "curl/8.5.0",
     createdAt: iso(now - 9 * DAY),
@@ -214,7 +217,7 @@ test("sessions are the browser, the system and the network each came from", asyn
   // This device is the identity line, drawn as Chrome, with macOS and the
   // tailnet among its facts.
   await expect(page.getByText("this device")).toBeVisible()
-  await expect(page.getByText("password and code").first()).toBeVisible()
+  await expect(page.getByText("password and authenticator code").first()).toBeVisible()
 
   const rows = page.locator("[data-slot=row]")
   await expect(rows).toHaveCount(2)
@@ -324,5 +327,50 @@ for (const width of [1280, 1720, 390]) {
     await page.goto("/account/security")
     await page.waitForLoadState("networkidle")
     await page.screenshot({ path: `test-results/account-security-${width}.png`, fullPage: true })
+  })
+}
+
+test("Done discards a one-time key and the next creation starts with a blank form", async ({
+  page,
+}) => {
+  await mockAccount(page)
+  let minted = 0
+  await page.route("**/api/v1/tokens/", async (route) => {
+    if (route.request().method() === "POST")
+      return json(route, { secret: `synthetic-key-${++minted}` })
+    return json(route, tokens)
+  })
+  await page.goto("/account/keys")
+  await page.getByRole("button", { name: "New key" }).click()
+  await page.getByLabel("Name").fill("first key")
+  await page.getByRole("button", { name: "Create key" }).click()
+  await expect(page.getByRole("dialog")).toContainText("synthetic-key-1")
+  await page.getByRole("button", { name: "Done", exact: true }).click()
+  await page.getByRole("button", { name: "New key" }).click()
+  await expect(page.getByLabel("Name")).toHaveValue("")
+  await expect(page.getByRole("dialog")).not.toContainText("synthetic-key-1")
+  await page.getByLabel("Name").fill("second key")
+  await page.getByRole("button", { name: "Create key" }).click()
+  await expect(page.getByRole("dialog")).toContainText("synthetic-key-2")
+  expect(minted).toBe(2)
+})
+
+for (const method of ["password", "unknown"]) {
+  test(`completed ${method} session reports its recorded proof honestly`, async ({ page }) => {
+    await mockAccount(page, session(false, false))
+    await page.route("**/api/v1/account/sessions", (route) =>
+      json(route, [{ ...sessions[0], authMethod: method }]),
+    )
+    await page.goto("/account/sessions")
+    await expect(page.locator("[data-slot=host-identity]")).toContainText(
+      method === "password" ? "password only" : "authentication method not recorded",
+    )
+    await expect(page.locator("[data-slot=host-identity]")).not.toContainText("password and")
+    await page.goto("/account/security")
+    await expect(
+      page.getByText(
+        method === "password" ? /1 on a password alone/ : /1 authentication method not recorded/,
+      ),
+    ).toBeVisible()
   })
 }

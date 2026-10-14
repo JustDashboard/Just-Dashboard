@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { Download, Key, Play, TerminalWindow, Warning } from "@/components/icons"
 import { ProductLogo } from "@/components/product-logo"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -33,10 +33,9 @@ import type { Job } from "@/lib/types"
 export function useStream(id: string, active: boolean) {
   const [waiting, setWaiting] = useState(false)
   const [pinOut, setPinOut] = useState(false)
-  // The stream last seen ready. A stream that is playing stays up through a
-  // read that missed Sunshine for a moment; only unpairing or the bridge
-  // stopping takes it down.
-  const [live, setLive] = useState<RdStream>()
+  // Keep the last usable bridge connection through a transient Sunshine probe miss.
+  // Readiness permits mounting the player; playback is observed separately.
+  const [readyStream, setReadyStream] = useState<RdStream>()
   const poll = usePoll(
     async (signal) => {
       const stream = await get<RdStream>(
@@ -47,15 +46,15 @@ export function useStream(id: string, active: boolean) {
       const ready = streamStage(stream) === "ready"
       setWaiting(!ready)
       setPinOut(stream.pairing)
-      if (ready) setLive(stream)
-      else if (!stream.paired || stream.bridge.state !== "running") setLive(undefined)
+      if (ready) setReadyStream(stream)
+      else if (!stream.paired || stream.bridge.state !== "running") setReadyStream(undefined)
       return stream
     },
     waiting ? 2000 : 10_000,
     [id],
     { enabled: active || pinOut },
   )
-  return { ...poll, live }
+  return { ...poll, readyStream }
 }
 
 /**
@@ -67,7 +66,9 @@ export function useStream(id: string, active: boolean) {
 export function StreamPane({
   computer,
   stream,
-  live,
+  readyStream,
+  error,
+  onPlayback,
   quality,
   attempt,
   pointer,
@@ -77,7 +78,9 @@ export function StreamPane({
 }: {
   computer: RdComputerView
   stream: RdStream | undefined
-  live: RdStream | undefined
+  readyStream: RdStream | undefined
+  error: Error | undefined
+  onPlayback: (playing: boolean) => void
   quality: StreamQuality
   attempt: number
   pointer: boolean
@@ -85,16 +88,23 @@ export function StreamPane({
   onRefresh: () => void
   onControl: () => void
 }) {
-  if (live)
+  if (readyStream)
     return (
       <StreamFrame
         computer={computer}
-        stream={live}
+        stream={readyStream}
+        onPlayback={onPlayback}
         quality={quality}
         attempt={attempt}
         pointer={pointer}
         onFrame={onFrame}
       />
+    )
+  if (error && !stream)
+    return (
+      <Centered>
+        <ErrorState error={error} onRetry={onRefresh} />
+      </Centered>
     )
   if (!stream)
     return (
@@ -547,6 +557,7 @@ function StreamFrame({
   attempt,
   pointer,
   onFrame,
+  onPlayback,
 }: {
   computer: RdComputerView
   stream: RdStream
@@ -554,12 +565,22 @@ function StreamFrame({
   attempt: number
   pointer: boolean
   onFrame: (frame: HTMLIFrameElement | null) => void
+  onPlayback: (playing: boolean) => void
 }) {
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
+  const stopObserving = useRef<() => void>(() => {})
   const transport = stream.transport
   const key = `${stream.hostId}:${app?.id}:${quality}:${transport}:${attempt}`
   const src = app ? streamPageUrl(stream.hostId, app.id) : undefined
+  useEffect(() => {
+    onPlayback(false)
+    stopObserving.current()
+    return () => {
+      stopObserving.current()
+      onPlayback(false)
+    }
+  }, [key, onPlayback])
   useEffect(() => {
     if (!src || !frame.current) return
     let held: Record<string, unknown> = {}
@@ -601,8 +622,48 @@ function StreamFrame({
       // The bridge draws its page on a blue gradient of its own; framed here
       // it is a screen, so the margins round the picture go black.
       onLoad={(event) => {
+        stopObserving.current()
         const doc = event.currentTarget.contentDocument
         if (!doc?.head) return
+        let interrupted = false
+        const update = (event?: Event) => {
+          if (event && (event.target as HTMLElement | null)?.tagName !== "VIDEO") return
+          if (
+            event &&
+            ["pause", "ended", "waiting", "stalled", "error", "emptied"].includes(event.type)
+          )
+            interrupted = true
+          else if (event && ["playing", "timeupdate"].includes(event.type)) interrupted = false
+          onPlayback(
+            !interrupted &&
+              [...doc.querySelectorAll("video")].some(
+                (video) =>
+                  !video.paused &&
+                  !video.ended &&
+                  !video.error &&
+                  video.readyState >= 2 &&
+                  video.videoWidth > 0,
+              ),
+          )
+        }
+        const events = [
+          "playing",
+          "timeupdate",
+          "pause",
+          "ended",
+          "waiting",
+          "stalled",
+          "error",
+          "emptied",
+        ]
+        for (const name of events) doc.addEventListener(name, update, true)
+        const observer = new MutationObserver(() => update())
+        observer.observe(doc.body, { childList: true, subtree: true })
+        stopObserving.current = () => {
+          observer.disconnect()
+          for (const name of events) doc.removeEventListener(name, update, true)
+        }
+        update()
         const style = doc.createElement("style")
         style.textContent = "body::before { background: #000 !important; }"
         doc.head.append(style)

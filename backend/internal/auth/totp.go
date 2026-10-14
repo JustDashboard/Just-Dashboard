@@ -43,7 +43,7 @@ func (s *Service) ConfirmTOTPEnrollmentForSession(ctx context.Context, userID in
 		return nil, err
 	}
 	if sessionID != "" {
-		if err := elevateTx(ctx, tx, sessionID, userID); err != nil {
+		if err := elevateTx(ctx, tx, sessionID, userID, "totp"); err != nil {
 			return nil, err
 		}
 	}
@@ -82,6 +82,7 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 		return ErrInvalidTOTP
 	}
 	consumed := false
+	method := "totp"
 	if step, ok := s.validTOTPStep(sealed, code); ok {
 		res, err := tx.ExecContext(ctx, `UPDATE users SET totp_last_step = ?
 			WHERE id = ? AND totp_enabled = 1 AND totp_secret = ? AND totp_last_step < ?`, step, userID, sealed, step)
@@ -94,6 +95,7 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 		}
 		consumed = n == 1
 	} else {
+		method = "recovery"
 		code = strings.TrimSpace(strings.ReplaceAll(code, " ", ""))
 		res, err := tx.ExecContext(ctx, `UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at = 0`, time.Now().Unix(), userID, HashToken(code))
 		if err != nil {
@@ -108,14 +110,14 @@ func (s *Service) verifySecondFactor(ctx context.Context, sessionID string, user
 	if !consumed {
 		return ErrInvalidTOTP
 	}
-	if err := elevateTx(ctx, tx, sessionID, userID); err != nil {
+	if err := elevateTx(ctx, tx, sessionID, userID, method); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func elevateTx(ctx context.Context, tx *sql.Tx, sessionID string, userID int64) error {
-	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1 WHERE id = ? AND user_id = ? AND expires_at > ?`, sessionID, userID, time.Now().Unix())
+func elevateTx(ctx context.Context, tx *sql.Tx, sessionID string, userID int64, method string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE sessions SET twofa_passed = 1, auth_method = ? WHERE id = ? AND user_id = ? AND expires_at > ?`, method, sessionID, userID, time.Now().Unix())
 	if err != nil {
 		return err
 	}
