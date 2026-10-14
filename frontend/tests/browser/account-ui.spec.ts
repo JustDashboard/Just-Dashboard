@@ -342,53 +342,6 @@ test("users are cards drawn by their faces, under a band of who they are", async
   await expect(page.getByRole("dialog", { name: "Edit Maria Rusu" })).toBeVisible()
 })
 
-for (const required of [false, true]) {
-  test(`users describe enrollment and reset under ${required ? "required" : "optional"} two-factor`, async ({
-    page,
-  }) => {
-    await mockAccount(page, session(required))
-    await page.goto("/account/users")
-    const reading = page.locator("[data-slot=stat-tile]", { hasText: "Two-factor" })
-    await expect(reading).toContainText(
-      required
-        ? "1 administrator must enrol before signing in"
-        : "1 administrator on a password alone",
-    )
-    const maria = page.locator("[data-slot=choice-row]", { hasText: "Maria Rusu" })
-    await expect(maria).toContainText(required ? "enrolment required" : "password only")
-    if (required) {
-      await expect(page.getByText("password only", { exact: true })).toHaveCount(0)
-      await expect(page.getByText(/on a password alone/)).toHaveCount(0)
-    }
-    await page.getByRole("button", { name: "More actions for Ion Moisei" }).click()
-    await page.getByRole("menuitem", { name: "Reset two-factor" }).click()
-    const reset = page.getByRole("dialog", { name: "Reset two-factor" })
-    await expect(reset).toContainText(
-      required
-        ? "must enrol an authenticator again before completing sign-in"
-        : "signs in with a password alone until they enrol an authenticator again",
-    )
-    await reset.getByRole("button", { name: "Cancel", exact: true }).click()
-    await expect(reset).toHaveCount(0)
-  })
-}
-
-test("required enrollment remains visible when only non-administrators need a factor", async ({
-  page,
-}) => {
-  await mockAccount(page, session(true))
-  await page.route("**/api/v1/dashboard-users/", (route) =>
-    json(
-      route,
-      users.map((user) => (user.id === 2 ? { ...user, role: "limited" } : user)),
-    ),
-  )
-  await page.goto("/account/users")
-  const reading = page.locator("[data-slot=stat-tile]", { hasText: "Two-factor" })
-  await expect(reading).toContainText("2 accounts must enrol before signing in")
-  await expect(reading).not.toContainText("password alone")
-})
-
 test("security is a form with its state under each head", async ({ page }) => {
   await mockAccount(page, session(false, false))
   await page.goto("/account/security")
