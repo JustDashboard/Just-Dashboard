@@ -99,6 +99,7 @@ export const releaseOwner = {
  */
 export function backupJob(fields: { id: number; name: string } & Record<string, unknown>) {
   return {
+    revision: 1,
     sources: ["/srv/app"],
     excludes: [],
     targetKind: "local",
@@ -1849,6 +1850,7 @@ const showcaseBackupRuns: BackupRun[] = Array.from({ length: 14 }, (_, index) =>
 const showcaseBackupJobs: BackupJob[] = [
   {
     id: 4,
+    revision: 1,
     name: "api-nightly",
     sources: ["/var/lib/docker/volumes/api-data/_data"],
     excludes: [],
@@ -1868,6 +1870,7 @@ const showcaseBackupJobs: BackupJob[] = [
   },
   {
     id: 5,
+    revision: 1,
     name: "uploads-offsite",
     sources: ["/srv/uploads"],
     excludes: [],

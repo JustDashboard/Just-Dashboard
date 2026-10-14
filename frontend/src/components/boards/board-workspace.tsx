@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { drainBoardSaves } from "@/lib/board-save"
+import { createEditorDraftStore } from "@/lib/editor-drafts"
 import { useRouter } from "next/navigation"
 import {
   CaptureUpdateAction,
@@ -51,6 +52,18 @@ type Snapshot = {
   signature: string
 }
 
+type DrawingDraft = {
+  board: Board
+  name: string
+  savedName: string
+  scene: Snapshot | null
+  savedSignature: string | null
+  revision: number
+  state: SaveState
+  stopped: "conflict" | "missing" | null
+}
+const drawingDrafts = createEditorDraftStore<DrawingDraft>()
+
 // Excalidraw calls onChange for every pointer move and selection, and a scene
 // can carry megabytes of image data. Element versions and the appState fields
 // a saved file keeps say whether anything worth saving changed; the whole
@@ -74,12 +87,28 @@ export default function BoardWorkspace({ id }: { id: number }) {
   useEffect(() => {
     if (!Number.isSafeInteger(id) || id < 1) return
     let cancelled = false
-    get<Board>(`/boards/${id}`)
+    drawingDrafts
+      .settled(String(id))
+      .then(() => get<Board>(`/boards/${id}`))
       .then((data) => {
         if (!cancelled) setBoard(data)
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause : new Error(String(cause)))
+        if (cancelled) return
+        const draft = drawingDrafts.get(String(id))
+        if (draft) {
+          const missing = cause instanceof ApiError && cause.code === "board_not_found"
+          drawingDrafts.set(
+            String(id),
+            {
+              ...draft,
+              state: missing ? "missing" : "error",
+              stopped: missing ? "missing" : draft.stopped,
+            },
+            drawingDrafts.generation(),
+          )
+          setBoard(draft.board)
+        } else setError(cause instanceof Error ? cause : new Error(String(cause)))
       })
     return () => {
       cancelled = true
@@ -112,20 +141,22 @@ function LoadedBoard({ board }: { board: Board }) {
   const { can } = useAuth()
   const canWrite = can("service.control")
   const { confirm, dialog } = useConfirm()
-  const [name, setName] = useState(board.name)
-  const [saveState, setSaveState] = useState<SaveState>("saved")
+  const [retained] = useState(() => drawingDrafts.get(String(board.id)))
+  const [owner] = useState(() => drawingDrafts.generation())
+  const [name, setName] = useState(retained?.name ?? board.name)
+  const [saveState, setSaveState] = useState<SaveState>(retained?.state ?? "saved")
   const [leaving, setLeaving] = useState<string | null>(null)
   const [insertOpen, setInsertOpen] = useState(false)
   const [projects, setProjects] = useState<DeployProject[]>([])
   const [databases, setDatabases] = useState<DbFleet["connections"]>([])
   const [catalogError, setCatalogError] = useState<Error | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
-  const nameRef = useRef(board.name)
-  const savedNameRef = useRef(board.name)
-  const sceneRef = useRef<Snapshot | null>(null)
-  const savedSignatureRef = useRef<string | null>(null)
-  const revisionRef = useRef(board.revision)
-  const stoppedRef = useRef<"conflict" | "missing" | null>(null)
+  const nameRef = useRef(retained?.name ?? board.name)
+  const savedNameRef = useRef(retained?.savedName ?? board.name)
+  const sceneRef = useRef<Snapshot | null>(retained?.scene ?? null)
+  const savedSignatureRef = useRef<string | null>(retained?.savedSignature ?? null)
+  const revisionRef = useRef(retained?.revision ?? board.revision)
+  const stoppedRef = useRef<"conflict" | "missing" | null>(retained?.stopped ?? null)
   const abandonedRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef<Promise<boolean> | null>(null)
@@ -148,11 +179,37 @@ function LoadedBoard({ board }: { board: Board }) {
     [],
   )
 
+  const retain = useCallback(
+    (state: SaveState) => {
+      const key = String(board.id)
+      if (abandonedRef.current || !isDirty()) {
+        drawingDrafts.forget(key, owner)
+        return
+      }
+      drawingDrafts.set(
+        key,
+        {
+          board,
+          name: nameRef.current,
+          savedName: savedNameRef.current,
+          scene: sceneRef.current,
+          savedSignature: savedSignatureRef.current,
+          revision: revisionRef.current,
+          state,
+          stopped: stoppedRef.current,
+        },
+        owner,
+      )
+    },
+    [board, isDirty, owner],
+  )
+
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (savingRef.current) return savingRef.current
     const task = drainBoardSaves(isDirty, async () => {
-      if (stoppedRef.current || abandonedRef.current) return false
+      if (owner !== drawingDrafts.generation() || stoppedRef.current || abandonedRef.current)
+        return false
       const title = nameRef.current.trim()
       if (!title) {
         setSaveState("unnamed")
@@ -178,6 +235,7 @@ function LoadedBoard({ board }: { board: Board }) {
           if (snapshot) savedSignatureRef.current = snapshot.signature
           clearSaveError()
           setSaveState(!isDirty() ? "saved" : nameRef.current.trim() ? "pending" : "unnamed")
+          retain("pending")
           return true
         })
         .catch((cause) => {
@@ -192,20 +250,23 @@ function LoadedBoard({ board }: { board: Board }) {
             clearSaveError()
             errorToastRef.current = notify.error("Drawing was not saved", cause)
           }
+          retain(stoppedRef.current ?? "error")
           return false
         })
     })
     savingRef.current = task
+    drawingDrafts.track(String(board.id), task, owner)
     try {
       return await task
     } finally {
       if (savingRef.current === task) savingRef.current = null
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [board.id, board.scene, clearSaveError, isDirty])
+  }, [board.id, board.scene, clearSaveError, isDirty, owner, retain])
 
   const changed = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
+    retain(stoppedRef.current ?? "pending")
     if (stoppedRef.current || abandonedRef.current) return
     if (!isDirty()) {
       if (!savingRef.current) setSaveState("saved")
@@ -217,7 +278,7 @@ function LoadedBoard({ board }: { board: Board }) {
     }
     setSaveState("pending")
     timerRef.current = setTimeout(() => void flush(), 900)
-  }, [flush, isDirty])
+  }, [flush, isDirty, retain])
 
   const onChange: NonNullable<ExcalidrawProps["onChange"]> = useCallback(
     (elements, appState, files) => {
@@ -242,7 +303,6 @@ function LoadedBoard({ board }: { board: Board }) {
     return () => {
       window.removeEventListener("beforeunload", warn)
       if (timerRef.current) clearTimeout(timerRef.current)
-      if (isDirty()) void flush()
     }
   }, [flush, isDirty])
 
@@ -358,6 +418,7 @@ function LoadedBoard({ board }: { board: Board }) {
       confirmLabel: "Delete drawing",
       action: async () => {
         abandonedRef.current = true
+        drawingDrafts.forget(String(board.id), owner)
         if (timerRef.current) clearTimeout(timerRef.current)
         try {
           await del(`/boards/${board.id}`)
@@ -442,7 +503,18 @@ function LoadedBoard({ board }: { board: Board }) {
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
           <Excalidraw
-            initialData={board.scene as unknown as ExcalidrawInitialDataState}
+            initialData={
+              (retained?.scene
+                ? JSON.parse(
+                    serializeAsJSON(
+                      retained.scene.elements,
+                      retained.scene.appState,
+                      retained.scene.files,
+                      "local",
+                    ),
+                  )
+                : board.scene) as ExcalidrawInitialDataState
+            }
             excalidrawAPI={(api) => {
               apiRef.current = api
             }}
@@ -557,6 +629,7 @@ function LoadedBoard({ board }: { board: Board }) {
               variant="destructive"
               onClick={() => {
                 abandonedRef.current = true
+                drawingDrafts.forget(String(board.id), owner)
                 if (leaving) router.push(leaving)
               }}
             >

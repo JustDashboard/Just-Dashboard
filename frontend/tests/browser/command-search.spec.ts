@@ -324,7 +324,10 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   expect(box.x + box.width).toBeLessThanOrEqual(390)
   expect(box.y + box.height).toBeLessThanOrEqual(844)
   for (const option of await palette(page).getByRole("listbox").getByRole("option").all()) {
-    expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    // A settled transformed DOMRect can differ by floating-point noise;
+    // keep the 44px target at subpixel precision.
+    const height = (await option.boundingBox())!.height
+    expect(Number(height.toFixed(3))).toBeGreaterThanOrEqual(44)
   }
   // The preview needs the width a desk has; a phone keeps the whole width for the list.
   await expect(preview(page)).toBeHidden()

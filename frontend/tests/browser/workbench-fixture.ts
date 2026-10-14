@@ -53,6 +53,7 @@ export const run = (id: number, jobId: number, ago: number, status: string, size
 export const jobs = [
   {
     id: 1,
+    revision: 1,
     name: "Nginx configuration",
     sources: ["/etc/nginx"],
     excludes: [],
@@ -72,6 +73,7 @@ export const jobs = [
   },
   {
     id: 2,
+    revision: 1,
     name: "Databases nightly",
     sources: [],
     excludes: [],
@@ -92,6 +94,7 @@ export const jobs = [
   },
   {
     id: 3,
+    revision: 1,
     name: "n8n data",
     sources: ["/var/lib/docker/volumes/n8n_data/_data"],
     excludes: [],

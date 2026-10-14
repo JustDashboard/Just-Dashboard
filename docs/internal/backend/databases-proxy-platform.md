@@ -2878,10 +2878,43 @@ containers/volumes/networks.
   dashboard credential does not reconfigure an external timer; an IAM-role-only installation can leave
   the credential form empty.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
+- **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
+  returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose
+  another operator's transient nginx validation candidate. `PUT /proxy/config` requires that
+  `expectedRevision` (400 when missing); `WriteConfigChecked` compares the original bytes under the
+  same lock before any staging or native validation. A stale or removed file answers 409
+  `config_conflict`, audited as a refused conflict, without replacing it. Caddy validates a private
+  copy and checks the revision again immediately before atomic publication. nginx stages the checked
+  candidate once, runs its native validator and verifies the candidate is still on disk: a native
+  writer that replaced it is preserved and causes a conflict, rather than being overwritten by a
+  rollback. Invalid or interrupted candidates are restored only while their own bytes still occupy
+  the file. Successful responses, including `reload_failed` after a completed save, carry the saved
+  revision. Internal generated writes and history restore retain their existing `WriteConfig` owner.
+  The shared raw editor keeps its dirty buffer and original revision in RAM per engine/path across
+  SPA navigation and Back/Forward. Conflict UI pauses saving, preserves the draft, shows a diff
+  against the current file and requires an explicit review against that version before retrying.
+  Discard rereads a changed file; a removed/unreadable file retains the draft with a retry action.
+  Raw Test config uses the same conflict display if a native writer changes the candidate during
+  validation. The config editor's nginx dry runs restore only their own candidate's bytes, including
+  prior absence, and refuse to erase a newer native edit. Raw reads, writes and restoration pin the approved parent
+  directory through `os.Root`; temporary contents, FD-based permissions, publication and cleanup stay
+  on that captured directory. A renamed, replaced or outwardly retargeted parent causes a conflict;
+  a candidate still held by the original directory is restored there while replacement directories
+  and their files stay untouched. `files.Resolve` rejects outward symlink ancestors even when the
+  requested suffix does not exist. Raw file reads are nonblocking and require a regular file, so a
+  native FIFO replacement cannot hold the writer lock forever. The native check-to-publish interval
+  cannot atomically compare bytes against independent host writers; descriptor confinement prevents
+  that remaining interval from redirecting metadata, writes or cleanup into a replacement ancestor.
+  Its unload warning remains active even while the editor is closed. Explicit discard and account
+  working-state cleanup clear the buffer; no config text is written to Web Storage. Service/API
+  regressions cover both nginx and Caddy, simultaneous stale writers, native edits during validation,
+  refused-candidate restoration and missing preconditions; `proxy-engine-overview.spec.ts` covers
+  retained history drafts and conflict review.
 - **The editor's read route is not a password reader.** `ReadConfig` refuses the dashboard's own
   `jd-auth` directory and any `.ht*`/`htpasswd` file with `ErrProtectedFile` (403 `protected_file`):
   `GET /proxy/config` is held by every signed-in account and a list of bcrypt hashes is not
-  configuration. A file inside the proxy's directories that is not on disk (removed or renamed
+  configuration. The protected-directory comparison uses its absolute and resolved path, so
+  relative configured roots and internal `jd-auth` directory aliases retain the same refusal. A file inside the proxy's directories that is not on disk (removed or renamed
   after the list naming it was read) is a 404 `not_found` marked retryable, which the editor shows
   as an error with Try again; a missing path outside them is still 403 `outside_root`. `Validate` now carries a `Note` when the file is outside nginx's include tree —
   no `sites-enabled` link, a `conf.d` file without `.conf`, a stream with no include — because

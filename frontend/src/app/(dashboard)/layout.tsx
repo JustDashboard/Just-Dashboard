@@ -34,8 +34,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (loading || !status?.authenticated || onboarding) return <ShellSplash />
 
+  // A recovery probe can discover another tab's sign-in without leaving this
+  // route. Recreate mounted editors before the new account can reuse their buffers.
   return (
-    <WorkspaceCommandsProvider>
+    <WorkspaceCommandsProvider key={status.user?.id}>
       <CommandPaletteProvider>
         {/* One poll of the dashboard's own version for the whole shell: the
           sidebar notice and the Updates page are on screen together, and the

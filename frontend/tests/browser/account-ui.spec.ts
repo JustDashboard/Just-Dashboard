@@ -428,3 +428,87 @@ for (const method of ["password", "unknown"]) {
     ).toBeVisible()
   })
 }
+
+for (const required of [false, true]) {
+  test(`users describe enrollment and reset under ${required ? "required" : "optional"} two-factor`, async ({
+    page,
+  }) => {
+    await mockAccount(page, session(required))
+    await page.goto("/account/users")
+    const reading = page.locator("[data-slot=host-identity]")
+    await expect(reading).toContainText(
+      required
+        ? "1 administrator must enrol before signing in"
+        : "1 administrator on a password alone",
+    )
+    const band = page.locator("[data-slot=people-band]")
+    await expect(band).toContainText(required ? /1\s*of 3 enrolled/ : /1\s*of 3 ask for a code/)
+    const chip = page
+      .getByRole("group", { name: "Show" })
+      .getByRole("button", { name: required ? /^Enrollment required/ : /^Password only/ })
+    await expect(chip).toContainText("2")
+    const maria = page.locator("[data-slot=choice-row]", { hasText: "Maria Rusu" })
+    await expect(maria).toContainText(required ? "enrolment required" : "password only")
+    if (required) {
+      await expect(reading).toContainText("3 enabled accounts")
+      await expect(page.getByText("password only", { exact: true })).toHaveCount(0)
+      await expect(page.getByText(/on a password alone/)).toHaveCount(0)
+    }
+    await chip.click()
+    await expect(page.locator("[data-slot=choice-row]")).toHaveCount(2)
+    await expect(page.locator("[data-slot=choice-row]", { hasText: "Guest" })).toHaveCount(0)
+    await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
+    await page.getByRole("button", { name: "More actions for Ion Moisei" }).click()
+    await page.getByRole("menuitem", { name: "Reset two-factor" }).click()
+    const reset = page.getByRole("dialog", { name: "Reset two-factor" })
+    await expect(reset).toContainText(
+      required
+        ? "must enrol an authenticator again before completing sign-in"
+        : "signs in with a password alone until they enrol an authenticator again",
+    )
+    await reset.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(reset).toHaveCount(0)
+  })
+}
+
+test("required enrollment remains visible when only non-administrators need a factor", async ({
+  page,
+}) => {
+  await mockAccount(page, session(true))
+  await page.route("**/api/v1/dashboard-users/", (route) =>
+    json(
+      route,
+      users.map((user) => (user.id === 2 ? { ...user, role: "limited" } : user)),
+    ),
+  )
+  await page.goto("/account/users")
+  const reading = page.locator("[data-slot=host-identity]")
+  await expect(reading).toContainText("2 accounts must enrol before signing in")
+  await expect(reading).not.toContainText("password alone")
+  await expect(page.locator("[data-slot=people-band]")).toContainText(/1\s*of 3 enrolled/)
+  await expect(
+    page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^Enrollment required/ }),
+  ).toContainText("2")
+})
+
+test("profile and sign-in pictures distinguish required enrollment from a password-only path", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const required of [false, true]) {
+    await mockAccount(page, session(required, false))
+    await page.goto("/account")
+    await expect(
+      page.getByText(required ? "enrolment required" : "password only", { exact: true }).first(),
+    ).toBeVisible()
+    if (required) await expect(page.getByText("password only", { exact: true })).toHaveCount(0)
+    await page.goto("/account/security")
+    const path = page.getByRole("list", { name: "What a sign-in passes" })
+    await expect(path).toContainText("Not enrolled")
+    await expect(path).toContainText(
+      required ? "must enrol before completing sign-in" : "a password alone gets in",
+    )
+    // Only an optional second factor has a wire bypassing the empty authenticator.
+    await expect(path.locator("..").locator(":scope > svg")).toHaveCount(required ? 3 : 4)
+  }
+})

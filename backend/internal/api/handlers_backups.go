@@ -34,6 +34,7 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/", s.handle(s.handleBackupJobCreate))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleBackupJobUpdate))
 			r.Method(http.MethodPost, "/{id}/enabled", s.handle(s.handleBackupJobEnabled))
+			r.Method(http.MethodPost, "/{id}/database-dumps", s.handle(s.handleBackupJobAddDatabaseDump))
 			r.Method(http.MethodPost, "/{id}/test", s.handle(s.handleBackupTestTarget))
 			r.Method(http.MethodPost, "/runs/{runID}/verify-restore", s.handle(s.handleBackupVerifyRestore))
 			// An archive is the whole of what it covers — dumps, secrets,
@@ -56,6 +57,7 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 // jobRequest carries credentials inbound only. They are sealed on arrival and
 // never echoed back in any response.
 type jobRequest struct {
+	ExpectedRevision       int64                  `json:"expectedRevision,omitempty"`
 	Name                   string                 `json:"name"`
 	Sources                []string               `json:"sources"`
 	Excludes               []string               `json:"excludes"`
@@ -79,7 +81,8 @@ func (req *jobRequest) toJob() *backups.Job {
 		req.Recovery.ExpectedOutputDigest = "sha256:" + hex.EncodeToString(digest[:])
 	}
 	return &backups.Job{
-		Name: req.Name, Sources: req.Sources, Excludes: req.Excludes,
+		Revision: req.ExpectedRevision,
+		Name:     req.Name, Sources: req.Sources, Excludes: req.Excludes,
 		TargetKind: req.TargetKind, Target: req.Target,
 		Schedule: req.Schedule, Retention: req.Retention, RetentionDays: req.RetentionDays, Enabled: req.Enabled,
 		Recovery: req.Recovery, SQLitePaths: req.SQLitePaths, DatabaseDumps: req.DatabaseDumps,
@@ -110,6 +113,8 @@ func mapBackupError(err error) error {
 	switch {
 	case errors.Is(err, backups.ErrNotFound):
 		return httpx.ErrNotFound
+	case errors.Is(err, backups.ErrConflict):
+		return httpx.Err(http.StatusConflict, "backup_job_conflict", err.Error())
 	case errors.Is(err, backups.ErrAlreadyRunning):
 		return httpx.Err(http.StatusConflict, "already_running", err.Error())
 	case errors.Is(err, backups.ErrRecoveryUnavailable):
@@ -253,6 +258,9 @@ func (s *Server) handleBackupJobUpdate(w http.ResponseWriter, r *http.Request) e
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	if req.ExpectedRevision < 0 {
+		return httpx.BadRequest("expectedRevision must be positive when supplied")
+	}
 	if err := backups.ValidateSchedule(req.Schedule); err != nil {
 		return httpx.BadRequest("schedule is not a valid cron expression: %v", err)
 	}
@@ -265,6 +273,32 @@ func (s *Server) handleBackupJobUpdate(w http.ResponseWriter, r *http.Request) e
 	}
 	httpx.SetAudit(r, "backup.job.update", job.Name,
 		map[string]any{"target": job.TargetKind, "schedule": job.Schedule, "enabled": job.Enabled, "recoveryCheck": job.Recovery != nil, "sqliteSnapshots": len(job.SQLitePaths), "databaseDumps": len(job.DatabaseDumps)})
+	httpx.JSON(w, http.StatusOK, job)
+	return nil
+}
+
+func (s *Server) handleBackupJobAddDatabaseDump(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	var req struct {
+		ConnectionID int64 `json:"connectionId"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.ConnectionID <= 0 {
+		return httpx.BadRequest("connectionId is required")
+	}
+	job, err := s.modules.backupStore.AddDatabaseDump(r.Context(), id, req.ConnectionID)
+	if err != nil {
+		return mapBackupError(err)
+	}
+	if err := s.modules.backupSched.Reload(r.Context()); err != nil {
+		s.Log.Warn("backup schedule reload failed", "err", err)
+	}
+	httpx.SetAudit(r, "backup.job.database_dump.add", job.Name, map[string]any{"connectionId": req.ConnectionID})
 	httpx.JSON(w, http.StatusOK, job)
 	return nil
 }

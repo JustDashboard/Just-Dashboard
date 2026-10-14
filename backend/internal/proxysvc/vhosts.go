@@ -393,7 +393,10 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.Modified = info.ModTime().UTC()
 	}
 	if _, err := s.allowedPath(path); errors.Is(err, ErrUnsafePath) {
-		v.ResolvesTo = resolvedFile(path)
+		// A dangling link already has its own broken state and resolves nowhere.
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			v.ResolvesTo = resolved
+		}
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

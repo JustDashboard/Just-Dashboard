@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   database_dumps TEXT NOT NULL DEFAULT '[]',
   retention_days INTEGER NOT NULL DEFAULT 0,
   pause_containers TEXT NOT NULL DEFAULT '[]',
+  revision    INTEGER NOT NULL DEFAULT 1,
   created_at  INTEGER NOT NULL
 );
 
@@ -1267,6 +1268,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	// they archive the volumes those containers write to.
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
+	{"backup_jobs", "revision", "INTEGER NOT NULL DEFAULT 1"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's

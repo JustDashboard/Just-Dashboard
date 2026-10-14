@@ -97,12 +97,14 @@ function RolePicker({
 function UserCard({
   user,
   me,
+  require2fa,
   onEdit,
   onUpdate,
   verbs,
 }: {
   user: DashboardUser
   me: boolean
+  require2fa: boolean
   onEdit: () => void
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
@@ -120,10 +122,12 @@ function UserCard({
           onChange={(role) => onUpdate({ role })}
         />
       </span>
-      <span className="flex w-28">
+      <span className="flex w-36">
         <Status
           tone={user.totpEnabled ? "running" : user.role === "admin" ? "warning" : "notice"}
-          label={user.totpEnabled ? "two-factor on" : "password only"}
+          label={
+            user.totpEnabled ? "two-factor on" : require2fa ? "enrolment required" : "password only"
+          }
         />
       </span>
       <span className="w-36 truncate text-xs text-muted-foreground">
@@ -190,10 +194,12 @@ const SCOPES: { key: UserScope; label: string; warn?: boolean }[] = [
  */
 function PeopleIdentity({
   users,
+  require2fa,
   onScope,
   action,
 }: {
   users: DashboardUser[]
+  require2fa: boolean
   onScope: (scope: UserScope) => void
   action: React.ReactNode
 }) {
@@ -202,7 +208,7 @@ function PeopleIdentity({
   const latest = users
     .filter((u) => !neverSignedIn(u))
     .sort((a, b) => b.lastLoginAt.localeCompare(a.lastLoginAt))[0]
-  const verdict = peopleVerdict(users)
+  const verdict = peopleVerdict(users, require2fa)
   return (
     <HostIdentity
       logo={<FaceStack users={[...admins, ...active.filter((u) => u.role !== "admin")]} />}
@@ -210,9 +216,11 @@ function PeopleIdentity({
       facts={
         <>
           <span>
-            {active.length === users.length
-              ? "every one can sign in"
-              : `${active.length} can sign in`}
+            {require2fa
+              ? plural(active.length, "enabled account")
+              : active.length === users.length
+                ? "every one can sign in"
+                : `${active.length} can sign in`}
           </span>
           <FactDot />
           <span className="inline-flex items-center gap-1.5">
@@ -236,20 +244,24 @@ function PeopleIdentity({
               type="button"
               onClick={() => onScope("bare")}
               className="rounded-sm focus-ring"
-              aria-label="Only the accounts a password alone opens"
+              aria-label={
+                require2fa
+                  ? "Only accounts requiring enrollment"
+                  : "Only the accounts a password alone opens"
+              }
             >
               <Status
                 className="text-body"
                 tone={verdict.tone}
-                label={
-                  verdict.admins > 0
-                    ? `${plural(verdict.admins, "administrator")} on a password alone`
-                    : `${plural(verdict.bare, "account")} on a password alone`
-                }
+                label={`${plural(verdict.admins > 0 ? verdict.admins : verdict.bare, verdict.admins > 0 ? "administrator" : "account")} ${require2fa ? "must enrol before signing in" : "on a password alone"}`}
               />
             </button>
           ) : (
-            <Status className="text-body" verdict="ok" label="every account asks for a code" />
+            <Status
+              className="text-body"
+              verdict="ok"
+              label="every enabled account asks for a code"
+            />
           )}
           {action}
         </span>
@@ -288,6 +300,7 @@ function FaceStack({ users }: { users: DashboardUser[] }) {
  */
 export function DashboardUsersView({ users }: { users: ReturnType<typeof useDashboardUsers> }) {
   const { status, refresh: refreshAuth } = useAuth()
+  const require2fa = Boolean(status?.require2fa)
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<DashboardUser | null>(null)
   const [scope, setScope] = useState<UserScope>("all")
@@ -334,8 +347,11 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
                   confirmLabel: "Reset",
                   description: (
                     <p>
-                      <b>{name}</b> signs in with a password alone until they enrol an authenticator
-                      again. Do this when they have lost theirs and their recovery codes.
+                      <b>{name}</b>{" "}
+                      {require2fa
+                        ? "must enrol an authenticator again before completing sign-in."
+                        : "signs in with a password alone until they enrol an authenticator again."}{" "}
+                      Do this when they have lost theirs and their recovery codes.
                     </p>
                   ),
                   action: async () => {
@@ -399,6 +415,7 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
   const shown = ordered.filter((u) => inUserScope(u, scope))
   const chips = SCOPES.map((chip) => ({
     ...chip,
+    label: chip.key === "bare" && require2fa ? "Enrollment required" : chip.label,
     count: data.filter((u) => inUserScope(u, chip.key)).length,
   })).filter((chip) => chip.key === "all" || chip.count > 0)
 
@@ -406,10 +423,11 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
     <>
       <PeopleIdentity
         users={data}
+        require2fa={require2fa}
         onScope={narrow}
         action={<CreateDashboardUserDialog onDone={refresh} />}
       />
-      <PeopleBand users={data} onScope={narrow} />
+      <PeopleBand users={data} require2fa={require2fa} onScope={narrow} />
       <Panel plain ref={list} className="scroll-mt-6">
         <PanelHeader
           title="Accounts"
@@ -440,6 +458,7 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
                 key={user.id}
                 user={user}
                 me={user.id === status?.user?.id}
+                require2fa={require2fa}
                 onEdit={() => setEditing(user)}
                 onUpdate={(body) => update(user, body)}
                 verbs={verbsFor(user)}

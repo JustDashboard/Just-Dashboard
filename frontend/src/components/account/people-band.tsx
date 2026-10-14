@@ -16,7 +16,7 @@ import {
   ROLES,
   WINDOWS,
   lastSignIns,
-  onPasswordAlone,
+  unenrolled,
   placeOn,
   type UserScope,
   type WindowKey,
@@ -50,9 +50,11 @@ function hueOf(user: Pick<DashboardUser, "username">) {
  */
 export function PeopleBand({
   users,
+  require2fa,
   onScope,
 }: {
   users: DashboardUser[]
+  require2fa: boolean
   onScope: (scope: UserScope) => void
 }) {
   return (
@@ -61,7 +63,7 @@ export function PeopleBand({
       className="grid min-w-0 gap-x-10 gap-y-6 lg:grid-cols-2 xl:grid-cols-3"
     >
       <SignInsBlock users={users} />
-      <GuardBlock users={users} onScope={onScope} />
+      <GuardBlock users={users} require2fa={require2fa} onScope={onScope} />
       <RolesBlock users={users} onScope={onScope} />
     </div>
   )
@@ -186,21 +188,23 @@ function SignInsBlock({ users }: { users: DashboardUser[] }) {
 
 /**
  * What stands between a stolen password and each account: the accounts that
- * can sign in as one bar, the share asking for a code in green and the share
- * a password alone opens in amber, then the second named, administrators
- * first — those are root on this server for whoever holds the password.
+ * are enabled as one bar, the enrolled share in green and the accounts
+ * without authenticators in amber. Required two-factor makes that second
+ * share need enrollment; optional two-factor permits password-only sign-in.
  */
 function GuardBlock({
   users,
+  require2fa,
   onScope,
 }: {
   users: DashboardUser[]
+  require2fa: boolean
   onScope: (scope: UserScope) => void
 }) {
   const active = users.filter((u) => !u.disabled)
   const coded = active.filter((u) => u.totpEnabled)
   const bare = active
-    .filter(onPasswordAlone)
+    .filter(unenrolled)
     .sort(
       (a, b) =>
         ROLES.indexOf(a.role) - ROLES.indexOf(b.role) ||
@@ -222,7 +226,7 @@ function GuardBlock({
             >
               <NumberTicker value={coded.length} />
             </span>
-            of {active.length} ask for a code
+            of {active.length} {require2fa ? "enrolled" : "ask for a code"}
           </span>
         }
       />
@@ -236,13 +240,13 @@ function GuardBlock({
               key: "code",
               value: coded.length,
               color: "var(--success)",
-              label: `${coded.length} ask for a code`,
+              label: `${coded.length} ${require2fa ? "enrolled" : "ask for a code"}`,
             },
             {
               key: "bare",
               value: bare.length,
               color: "var(--warning)",
-              label: `${bare.length} on a password alone`,
+              label: `${bare.length} ${require2fa ? "must enrol" : "on a password alone"}`,
             },
           ]}
           format={(value) => plural(value, "account")}
@@ -258,13 +262,13 @@ function GuardBlock({
                 <button
                   type="button"
                   onClick={() => onScope("bare")}
-                  aria-label={`Only accounts on a password alone, like ${displayNameOf(user)}`}
+                  aria-label={`Only accounts ${require2fa ? "requiring enrollment" : "on a password alone"}, like ${displayNameOf(user)}`}
                   className="flex w-full min-w-0 items-center gap-2.5 rounded-sm px-3 py-2 text-left focus-ring transition-colors hover:bg-row-hover"
                 >
                   <UserAvatar user={user} scope="admin" size="xs" />
                   <span className="min-w-0 flex-1 truncate text-body">{displayNameOf(user)}</span>
                   <Status
-                    tone={user.role === "admin" ? "warning" : "notice"}
+                    tone={require2fa || user.role === "admin" ? "warning" : "notice"}
                     label={user.role === "admin" ? "administrator" : user.role}
                   />
                 </button>
@@ -274,7 +278,7 @@ function GuardBlock({
         )}
         {bare.length > shown.length && (
           <p className="text-hint text-muted-foreground">
-            {bare.length - shown.length} more on a password alone
+            {bare.length - shown.length} more {require2fa ? "must enrol" : "on a password alone"}
           </p>
         )}
       </PanelBody>

@@ -78,8 +78,9 @@ async function mockBackups(page: Page, existing = false) {
   let verification: Record<string, unknown> | undefined
   const restores: { body: Record<string, unknown>; confirm: string | undefined }[] = []
   const enabled: boolean[] = []
-  const job = {
+  let job = {
     id: 5,
+    revision: 1,
     name: "Application backup",
     sources: ["/srv/app"],
     excludes: [],
@@ -146,7 +147,8 @@ async function mockBackups(page: Page, existing = false) {
     } else if (path === "/backups/5/enabled") {
       const body = route.request().postDataJSON() as { enabled: boolean }
       enabled.push(body.enabled)
-      result = { ...job, enabled: body.enabled }
+      job = { ...job, enabled: body.enabled, revision: job.revision + 1 }
+      result = job
     } else if (path === "/backups/runs/8/contents") {
       result = [
         { name: "source-0001", size: 0, mode: "0755", isDir: true },
@@ -169,7 +171,12 @@ async function mockBackups(page: Page, existing = false) {
     } else if (path === "/backups/") {
       if (route.request().method() === "POST") {
         saved = route.request().postDataJSON()
-        result = { ...job, ...saved }
+        const definition = { ...saved }
+        delete definition.expectedRevision
+        delete definition.expectedRecoveryOutput
+        delete definition.secrets
+        job = { ...job, ...definition, revision: 1 }
+        result = job
         status = 201
       } else {
         result = existing ? [job] : []
@@ -177,7 +184,22 @@ async function mockBackups(page: Page, existing = false) {
     } else if (path === "/backups/5") {
       // The job's own page reads the job itself rather than finding it in the
       // list it used to be opened from.
-      result = job
+      if (route.request().method() === "PUT") {
+        saved = route.request().postDataJSON()
+        if (saved?.expectedRevision !== job.revision) {
+          status = 409
+          result = {
+            error: { code: "backup_job_conflict", message: "The backup job changed" },
+          }
+        } else {
+          const definition = { ...saved }
+          delete definition.expectedRevision
+          delete definition.expectedRecoveryOutput
+          delete definition.secrets
+          job = { ...job, ...definition, revision: job.revision + 1 }
+          result = job
+        }
+      } else result = job
     } else if (path === "/backups/5/runs") {
       result = {
         running: false,
@@ -232,6 +254,7 @@ async function mockBackups(page: Page, existing = false) {
     checks: () => checks,
     restores: () => restores,
     enabled: () => enabled,
+    job: () => job,
   }
 }
 
@@ -326,7 +349,8 @@ test("a backup job dumps saved databases natively and a run restores one into a 
   await cache.click()
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByText("Job updated", { exact: true })).toBeVisible()
-  expect(api.saved()).toBeNull()
+  expect(api.saved()).toMatchObject({ expectedRevision: 1, databaseDumps: [3, 4] })
+  expect(api.job()).toMatchObject({ revision: 2, databaseDumps: [3, 4] })
 
   await openJob(page)
   await runMenu(page, /Restore database/)
@@ -391,6 +415,7 @@ test("a job is paused from its menu and files are put back in place or restored 
   await page.getByRole("menuitem", { name: /Pause schedule/ }).click()
   await expect(page.getByText("Application backup paused", { exact: true })).toBeVisible()
   expect(api.enabled()).toEqual([false])
+  expect(api.job()).toMatchObject({ enabled: false, revision: 2 })
 
   await openJob(page)
   await runMenu(page, /Restore files/)

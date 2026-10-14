@@ -110,6 +110,10 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-14-current-non-network-fixes/README.md`](../audits/2026-10-14-current-non-network-fixes/README.md)
+  — follow-up repairs for retained board/proxy drafts, image revisions, streamed authentication,
+  measured account/security wording and atomic concurrent backup edits.
+
 - [`../audits/2026-10-14-non-network-fixes/README.md`](../audits/2026-10-14-non-network-fixes/README.md)
   — all 34 non-network audit findings, their fixes, focused regressions and operational limits.
 

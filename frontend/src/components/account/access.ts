@@ -181,8 +181,8 @@ export function neverSignedIn(user: Pick<DashboardUser, "lastLoginAt">) {
 /** The narrowings over the accounts: a role, or a question asked of all of them. */
 export type UserScope = "all" | Role | "bare" | "never" | "disabled"
 
-/** An account a stolen password alone would open. */
-export function onPasswordAlone(user: Pick<DashboardUser, "totpEnabled" | "disabled">) {
+/** The enabled accounts without an authenticator, regardless of the install policy. */
+export function unenrolled(user: Pick<DashboardUser, "totpEnabled" | "disabled">) {
   return !user.disabled && !user.totpEnabled
 }
 
@@ -194,7 +194,7 @@ export function inUserScope(
     case "all":
       return true
     case "bare":
-      return onPasswordAlone(user)
+      return unenrolled(user)
     case "never":
       return neverSignedIn(user)
     case "disabled":
@@ -205,20 +205,22 @@ export function inUserScope(
 }
 
 /**
- * The users page's verdict: how many accounts that can sign in a password
- * alone would open, and how many of those administer everything — amber
- * while one does, since that account is root on this server for whoever
- * holds the password.
+ * The users page counts missing authenticators, including administrators.
+ * With required two-factor every missing authenticator blocks sign-in;
+ * otherwise the warning highlights administrators reachable with a password.
  */
-export function peopleVerdict(users: Pick<DashboardUser, "role" | "totpEnabled" | "disabled">[]): {
+export function peopleVerdict(
+  users: Pick<DashboardUser, "role" | "totpEnabled" | "disabled">[],
+  require2fa = false,
+): {
   tone: "warning" | "notice" | "running"
   bare: number
   admins: number
 } {
-  const bare = users.filter(onPasswordAlone)
+  const bare = users.filter(unenrolled)
   const admins = bare.filter((u) => u.role === "admin").length
   if (bare.length === 0) return { tone: "running", bare: 0, admins: 0 }
-  return { tone: admins > 0 ? "warning" : "notice", bare: bare.length, admins }
+  return { tone: require2fa || admins > 0 ? "warning" : "notice", bare: bare.length, admins }
 }
 
 /** The windows the sign-in axis can span, shortest first. */

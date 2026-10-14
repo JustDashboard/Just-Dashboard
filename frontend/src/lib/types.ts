@@ -2715,6 +2715,7 @@ export type LoginSession = {
 
 export type BackupJob = {
   id: number
+  revision: number
   name: string
   sources: string[]
   excludes: string[]

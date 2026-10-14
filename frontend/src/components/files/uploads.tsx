@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Cross } from "@/components/icons"
-import { API_BASE, mutationHeaders } from "@/lib/api"
+import { API_BASE, errorFromResponse, mutationHeaders } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -163,13 +163,9 @@ export function useUploads(onSettled: (dir: string) => void) {
 }
 
 function failureOf(xhr: XMLHttpRequest): string {
-  try {
-    const body = JSON.parse(xhr.responseText) as { error?: { message?: string; code?: string } }
-    if (body.error?.code === "already_exists") return "A file with this name already exists."
-    if (body.error?.message) return body.error.message
-  } catch {
-    // Not JSON; the status line is what there is.
-  }
+  const error = errorFromResponse(xhr.status, xhr.responseText, "/files/upload", xhr.statusText)
+  if (error.code === "already_exists") return "A file with this name already exists."
+  if (error.code !== "unknown") return error.message
   if (xhr.status === 413) return "Too large for one request."
   return xhr.statusText || `Failed (${xhr.status})`
 }

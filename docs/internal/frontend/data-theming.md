@@ -432,6 +432,18 @@ not a connected/live state. The shared naming dialog snapshots its discriminated
 
 ## Recovering an ended session
 
+`lib/api.ts` owns `fetchResponse`, which returns successful binary/streaming bodies untouched and
+reads a refused response once through `responseError`. XHR file uploads, database imports and dump
+uploads use the same synchronous `errorFromResponse` parser without changing upload progress.
+SQL table/query exports, MongoDB exports,
+image editing, PDF previews and the diagram keepalive save use that same path; cancellation signals,
+response headers and export completion/truncation checks remain with each reader. Image saves
+also fence asynchronous canvas encoding and upload completion to their mounted editor and working-state
+generation. Unmounting or clearing account-owned state aborts an in-flight upload; a late encoder never
+starts an old-canvas upload, and late responses cannot announce success or call a departed editor's
+callbacks. Image revision conflicts use the inline warning without a second error toast, keeping
+Save as and reload controls reachable. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
+
 All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
 code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
@@ -440,7 +452,18 @@ An unavailable recheck retains the current identity for retry. Request generatio
 session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
 never starts expiry recovery. Reauthentication by a different account clears the prior account's
-working drafts; the same account retains values held in the shared session/memory stores. Local
+working drafts; the same account retains values held in the shared session/memory stores. The
+mounted dashboard workspace is keyed by authenticated account ID. A recovery probe that discovers
+another usable account remounts its providers and pages at the current route, removing the prior
+account's local editors, canvases and active work as well as its shared drafts. Raw proxy validation
+and save callbacks also check their retained-draft generation before sending, fencing the synchronous
+cleanup interval before React remounts; a cleared owner cannot start another validation or save
+from its old buffer. Cleanup does not retract an already-sent authorized request or prove its
+publication outcome.
+A same-account recovery
+keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
+PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.
+Local
 component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
 account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
 is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership
@@ -449,3 +472,11 @@ clears shared working drafts conservatively. `api-auth-recovery.test.js` and `au
 API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
 not become the next key's form. Session views use actual `authMethod` provenance rather than treating
 an access-elevation bit as proof of a code; legacy provenance is unknown.
+
+The redesigned account identity, authenticator coverage band, user cards and account filters use the
+current `require2fa` policy. An enabled account without an authenticator is password-only under the
+optional policy and requires enrollment under the required policy; disabled accounts are excluded
+from both coverage counts and those filters. Reset-two-factor guidance follows the same distinction.
+The Profile picture labels required enrollment, and the Security sign-in picture draws a direct
+password-to-server path only when two-factor is optional. Session pictures continue to describe each
+session's recorded authentication method, independently of the current policy.

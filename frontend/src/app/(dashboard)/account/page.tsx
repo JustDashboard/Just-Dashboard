@@ -121,6 +121,7 @@ function Profile() {
         {sessions.data && (keys.data || keys.error) ? (
           <AccessPicture
             user={user}
+            required={Boolean(status?.require2fa)}
             sessions={sessions.data}
             // An administrator is handed everyone's keys; only this account's act as it.
             keys={keys.data?.filter((k) => k.userId === user.id)}

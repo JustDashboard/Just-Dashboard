@@ -122,7 +122,7 @@ import {
   type BoardActions,
   type NoteNodeType,
 } from "@/components/stickyboard/note-node"
-import { useBoardDocument, type SaveState } from "@/components/stickyboard/use-board"
+import { stickyDrafts, useBoardDocument, type SaveState } from "@/components/stickyboard/use-board"
 
 const nodeTypes = { note: NoteNode }
 const edgeTypes = { link: LinkEdge }
@@ -143,12 +143,27 @@ export default function StickyWorkspace({ id }: { id: number }) {
   useEffect(() => {
     if (!valid) return
     let cancelled = false
-    get<StickyBoard>(`/stickyboards/${id}`)
+    stickyDrafts
+      .settled(String(id))
+      .then(() => get<StickyBoard>(`/stickyboards/${id}`))
       .then((data) => !cancelled && setBoard(data))
-      .catch(
-        (cause) =>
-          !cancelled && setError(cause instanceof Error ? cause : new Error(String(cause))),
-      )
+      .catch((cause) => {
+        if (cancelled) return
+        const draft = stickyDrafts.get(String(id))
+        if (draft) {
+          const missing = cause instanceof ApiError && cause.code === "stickyboard_not_found"
+          stickyDrafts.set(
+            String(id),
+            {
+              ...draft,
+              state: missing ? "missing" : "error",
+              stopped: missing ? "missing" : draft.stopped,
+            },
+            stickyDrafts.generation(),
+          )
+          setBoard(draft.board)
+        } else setError(cause instanceof Error ? cause : new Error(String(cause)))
+      })
     return () => {
       cancelled = true
     }
@@ -294,6 +309,7 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
     redo,
     flush,
     isDirty,
+    discard,
     saveState,
     canUndo,
     canRedo,
@@ -658,10 +674,11 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
         } catch (cause) {
           if (!(cause instanceof ApiError && cause.code === "stickyboard_not_found")) throw cause
         }
+        discard()
         router.push("/stickyboard")
       },
     })
-  }, [board.id, confirm, docRef, flush, router])
+  }, [board.id, confirm, discard, docRef, flush, router])
 
   // ---- What notes and links ask of the board --------------------------------
 
@@ -1587,7 +1604,13 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
               <Button variant="outline" onClick={() => setLeaving(null)}>
                 Stay
               </Button>
-              <Button variant="destructive" onClick={() => leaving && router.push(leaving)}>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  discard()
+                  if (leaving) router.push(leaving)
+                }}
+              >
                 Leave without saving
               </Button>
             </>

@@ -1432,6 +1432,39 @@ test("the overview reads the access boundary and names the part that broke", asy
   await expect(boundary).toContainText("21001 is funnelled")
 })
 
+for (const available of [false, true]) {
+  test(`the overview names ${available ? "stopped" : "absent"} fail2ban without judging other blockers`, async ({
+    page,
+  }) => {
+    await mockSecurity(page, [], {
+      overrides: { "/fail2ban/": { available, running: false, jails: [] } },
+    })
+    await page.goto("/security")
+    const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
+    await expect(reading).toContainText(
+      available ? "fail2ban is not running" : "fail2ban is not installed",
+    )
+    await expect(reading).not.toContainText("nothing is blocking")
+  })
+}
+
+test("an unreadable fail2ban status is unknown rather than absent protection", async ({ page }) => {
+  await mockSecurity(page)
+  await page.route("**/api/v1/fail2ban/", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "Status read failed" } }),
+    }),
+  )
+  await page.goto("/security")
+  const reading = page.getByRole("main").getByRole("link", { name: "Intrusion", exact: true })
+  await expect(reading).toContainText("Unreadable")
+  await expect(reading).toContainText("fail2ban status could not be read")
+  await expect(reading).not.toContainText("nothing is blocking")
+  await expect(reading).not.toContainText("No fail2ban")
+})
+
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)

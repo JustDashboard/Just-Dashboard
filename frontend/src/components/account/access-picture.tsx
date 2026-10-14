@@ -38,10 +38,12 @@ const SHOWN = 4
  */
 export function AccessPicture({
   user,
+  required,
   sessions,
   keys,
 }: {
   user: DashboardUser
+  required: boolean
   sessions: SessionInfo[]
   /** Undefined while they could not be read: the side is left off rather than drawn empty. */
   keys?: ApiToken[]
@@ -160,7 +162,11 @@ export function AccessPicture({
     </>
   )
 
-  const guard = user.totpEnabled ? "two-factor on" : "password only"
+  const guard = user.totpEnabled
+    ? "two-factor on"
+    : required
+      ? "enrolment required"
+      : "password only"
 
   return (
     <div ref={container} className="relative mx-auto w-full max-w-5xl py-2">

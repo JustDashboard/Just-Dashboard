@@ -118,17 +118,26 @@ end of a link.
 ## Saving
 
 `components/stickyboard/use-board.ts` saves 700 ms after the last change, at once on Ctrl/⌘+S and
-before leaving, and compares the document with the object last saved, so undoing back to it leaves
-nothing to save and opening, panning, zooming or selecting never writes a revision. The status says
+before editor-owned Back and resource-link navigation, and compares the document with the object last
+saved, so undoing back to it leaves nothing to save and opening, panning, zooming or selecting never writes a revision. The status says
 saved, unsaved, saving, failed, conflict or deleted. A conflict or a deleted board stops saving and
 editing and says so, with Reload on a conflict, rather than overwriting another tab; Back with changes
 the server does not have asks before leaving without them. A reader without `service.control` sees the
 board read-only: no tools, no format bar, no editing, and nothing that would save.
 
 Each flush drains every snapshot changed during the requests already in flight (`lib/board-save.ts`,
-also used by Excalidraw). Navigation checks that the latest document is clean before routing, and a
-failed later request retains the editor and its leave choice. The browser's reload/close warning
+also used by Excalidraw). Editor-owned Back and resource-link navigation checks that the latest
+document is clean before routing, and a failed later request retains the editor and its leave choice. The browser's reload/close warning
 remains active for a dirty document after a conflict or missing-board response.
+
+Dirty documents, their saved document/revision, conflict state and undo/redo history are retained in
+this tab's memory across sidebar, palette and browser history exits. Returning waits for any save
+still owned by the previous editor before taking its acknowledged revision; failed saves never
+throw away the retained document. The shared unload warning stays active while away from the board.
+Explicit Leave without saving, successful deletion and sign-out clear retained contents; a generation
+fence prevents late responses from restoring another account's draft. No board content goes into
+Web Storage, and a confirmed reload still discards memory. `stickyboard-ui.spec.ts` covers failed
+sidebar navigation, Back restoring the note's colour and explicit discard clearing the warning.
 
 Duplicate first requires a successful flush: a failed or conflicted save leaves the operator with the
 original document instead of copying an older server document and navigating away. If edits arrive

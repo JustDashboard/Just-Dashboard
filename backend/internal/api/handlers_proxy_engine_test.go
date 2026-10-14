@@ -269,7 +269,14 @@ func TestEngineTestAndReloadTakeOnlyAKnownEngine(t *testing.T) {
 	}
 
 	// An unnamed engine is still nginx, as the editor has always sent it.
-	body, _ := json.Marshal(map[string]any{"path": file, "content": "server { listen 20001; }\n"})
+	if err := os.WriteFile(file, []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.modules.proxy.ReadConfigSnapshot(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"expectedRevision": snapshot.Revision, "path": file, "content": "server { listen 20001; }\n"})
 	if w := c.do(http.MethodPut, "/api/v1/proxy/config", string(body), nil); w.Code != http.StatusOK {
 		t.Fatalf("a save naming no engine: %d %s", w.Code, w.Body.String())
 	}

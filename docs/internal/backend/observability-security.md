@@ -87,6 +87,11 @@ restarts nobody initiated here. Works with `JD_METRICS_RETENTION=0`; only reboot
 
 ## netsec: exposure and login history
 
+The Security overview's Intrusion reading describes fail2ban only: its current bans and jails,
+whether it is installed or running, or a status read that failed. It never infers that no engine
+blocks repeated failures from a missing fail2ban. CrowdSec and the combined engine evidence remain
+on Intrusion; a failed overview read stays unknown rather than being described as no protection.
+
 `netsec` reads records the host already keeps rather than polling: wtmp (`GET /logins`), btmp
 (`/logins/failed`, behind `system.admin` — it holds whatever was typed at a login prompt, sometimes a
 password in the username field) and fail2ban's log (`/fail2ban/history`). Polling a jail would invent

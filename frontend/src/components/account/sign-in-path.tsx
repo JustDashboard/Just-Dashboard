@@ -51,7 +51,7 @@ export function SignInPath({
   return (
     <div className="relative min-w-0 py-4">
       <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
-      <div ref={container} className={cn("relative min-w-0", !enrolled && "lg:pt-12")}>
+      <div ref={container} className={cn("relative min-w-0", !enrolled && !required && "lg:pt-12")}>
         <AnimatedBeam containerRef={container} fromRef={you} toRef={password} duration={2.4} />
         <AnimatedBeam
           containerRef={container}
@@ -75,7 +75,7 @@ export function SignInPath({
         />
         {/* A column has no room to bow a line round the ring, so on a phone
             the dashed wires through it carry the amber instead. */}
-        {!enrolled && wide && (
+        {!enrolled && !required && wide && (
           // The way a sign-in actually goes without a second factor, bowed
           // over the ring it skips.
           <AnimatedBeam
@@ -140,7 +140,7 @@ export function SignInPath({
                   </span>
                 ) : (
                   <span className="text-warning">
-                    {required ? "required on this install" : "a password alone gets in"}
+                    {required ? "must enrol before completing sign-in" : "a password alone gets in"}
                   </span>
                 )
               }

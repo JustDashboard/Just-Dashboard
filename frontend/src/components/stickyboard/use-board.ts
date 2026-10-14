@@ -2,11 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { drainBoardSaves } from "@/lib/board-save"
+import { createEditorDraftStore } from "@/lib/editor-drafts"
 import { ApiError, put } from "@/lib/api"
 import type { StickyBoard, StickyDocument, StickySummary } from "@/lib/stickyboard"
 import { notify } from "@/lib/toast"
 
 export type SaveState = "saved" | "pending" | "saving" | "error" | "conflict" | "missing"
+
+type StickyDraft = {
+  board: StickyBoard
+  document: StickyDocument
+  saved: StickyDocument
+  revision: number
+  state: SaveState
+  stopped: "conflict" | "missing" | null
+  past: StickyDocument[]
+  future: StickyDocument[]
+}
+export const stickyDrafts = createEditorDraftStore<StickyDraft>()
 
 /** How a change enters the history. */
 export type ChangeMode =
@@ -33,16 +46,22 @@ const SAVE_DELAY = 700
  * says so, as Boards does, rather than silently overwriting the other tab.
  */
 export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
-  const [doc, setDoc] = useState(board.document)
-  const [saveState, setSaveState] = useState<SaveState>("saved")
-  const [history, setHistory] = useState({ undo: 0, redo: 0 })
-  const docRef = useRef(board.document)
-  const savedRef = useRef(board.document)
-  const revisionRef = useRef(board.revision)
-  const past = useRef<StickyDocument[]>([])
-  const future = useRef<StickyDocument[]>([])
+  const [retained] = useState(() => stickyDrafts.get(String(board.id)))
+  const [owner] = useState(() => stickyDrafts.generation())
+  const [doc, setDoc] = useState(retained?.document ?? board.document)
+  const [saveState, setSaveState] = useState<SaveState>(retained?.state ?? "saved")
+  const [history, setHistory] = useState({
+    undo: retained?.past.length ?? 0,
+    redo: retained?.future.length ?? 0,
+  })
+  const docRef = useRef(retained?.document ?? board.document)
+  const savedRef = useRef(retained?.saved ?? board.document)
+  const revisionRef = useRef(retained?.revision ?? board.revision)
+  const past = useRef<StickyDocument[]>(retained?.past ?? [])
+  const future = useRef<StickyDocument[]>(retained?.future ?? [])
   const lastMerge = useRef<{ key: string; at: number } | null>(null)
-  const stoppedRef = useRef<"conflict" | "missing" | null>(null)
+  const stoppedRef = useRef<"conflict" | "missing" | null>(retained?.stopped ?? null)
+  const abandonedRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef<Promise<boolean> | null>(null)
   const errorToast = useRef<string | number | undefined>(undefined)
@@ -54,11 +73,48 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
 
   const isDirty = useCallback(() => docRef.current !== savedRef.current, [])
 
+  const retain = useCallback(
+    (state: SaveState) => {
+      const key = String(board.id)
+      if (abandonedRef.current || !isDirty()) {
+        stickyDrafts.forget(key, owner)
+        return
+      }
+      stickyDrafts.set(
+        key,
+        {
+          board,
+          document: docRef.current,
+          saved: savedRef.current,
+          revision: revisionRef.current,
+          state,
+          stopped: stoppedRef.current,
+          past: past.current,
+          future: future.current,
+        },
+        owner,
+      )
+    },
+    [board, isDirty, owner],
+  )
+
+  const discard = useCallback(() => {
+    abandonedRef.current = true
+    if (timerRef.current) clearTimeout(timerRef.current)
+    stickyDrafts.forget(String(board.id), owner)
+  }, [board.id, owner])
+
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
     if (savingRef.current) return savingRef.current
     const task = drainBoardSaves(isDirty, async () => {
-      if (stoppedRef.current || !canWrite) return false
+      if (
+        owner !== stickyDrafts.generation() ||
+        stoppedRef.current ||
+        abandonedRef.current ||
+        !canWrite
+      )
+        return false
       const snapshot = docRef.current
       setSaveState("saving")
       return put<StickySummary>(`/stickyboards/${board.id}`, {
@@ -71,6 +127,7 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
           if (errorToast.current !== undefined) notify.dismiss(errorToast.current)
           errorToast.current = undefined
           setSaveState(isDirty() ? "pending" : "saved")
+          retain("pending")
           return true
         })
         .catch((cause) => {
@@ -85,28 +142,31 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
             if (errorToast.current !== undefined) notify.dismiss(errorToast.current)
             errorToast.current = notify.error("Board was not saved", cause)
           }
+          retain(stoppedRef.current ?? "error")
           return false
         })
     })
     savingRef.current = task
+    stickyDrafts.track(String(board.id), task, owner)
     try {
       return await task
     } finally {
       if (savingRef.current === task) savingRef.current = null
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [board.id, canWrite, isDirty])
+  }, [board.id, canWrite, isDirty, owner, retain])
 
   const schedule = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    if (stoppedRef.current || !canWrite) return
+    retain(stoppedRef.current ?? "pending")
+    if (stoppedRef.current || abandonedRef.current || !canWrite) return
     if (!isDirty()) {
       if (!savingRef.current) setSaveState("saved")
       return
     }
     setSaveState((state) => (state === "saving" ? state : "pending"))
     timerRef.current = setTimeout(() => void flush(), SAVE_DELAY)
-  }, [canWrite, flush, isDirty])
+  }, [canWrite, flush, isDirty, retain])
 
   const write = useCallback(
     (next: StickyDocument) => {
@@ -174,14 +234,13 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (!isDirty() && !savingRef.current) return
+      if (abandonedRef.current || (!isDirty() && !savingRef.current)) return
       event.preventDefault()
     }
     window.addEventListener("beforeunload", warn)
     return () => {
       window.removeEventListener("beforeunload", warn)
       if (timerRef.current) clearTimeout(timerRef.current)
-      if (isDirty()) void flush()
     }
   }, [flush, isDirty])
 
@@ -198,5 +257,6 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
     redo,
     flush,
     isDirty,
+    discard,
   }
 }

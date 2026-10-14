@@ -2,8 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react"
 import { CloudUpload } from "@/components/icons"
-import { ApiError, downloadUrl, errorMessage, mutationHeaders } from "@/lib/api"
-import type { ApiErrorBody } from "@/lib/api"
+import { downloadUrl, errorFromResponse, errorMessage, mutationHeaders } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { Field, FormFact, FormNote } from "@/components/form"
 import { Meter } from "@/components/meter"
@@ -51,12 +50,12 @@ function sendDump(
         resolve(parsed as DbBackupFile)
         return
       }
-      const error = (parsed as ApiErrorBody | undefined)?.error
       reject(
-        new ApiError(
+        errorFromResponse(
           request.status,
-          error?.code ?? "unknown",
-          error?.message ?? (request.statusText || "The server refused the upload."),
+          request.responseText,
+          "/databases/backups/upload",
+          request.statusText,
         ),
       )
     }

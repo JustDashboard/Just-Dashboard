@@ -2230,3 +2230,32 @@ test("progress: a query export reports its byte stream until the download finish
     finish,
   )
 })
+
+test("an expired streamed export rechecks once and returns to sign-in", async ({ page }) => {
+  let expired = false
+  let rechecks = 0
+  await mockWork(page)
+  await openEditor(page)
+  await write(page, "select * from customers")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect(results(page)).toContainText("3 rows")
+  await page.route("**/api/v1/auth/session", async (route) => {
+    if (!expired) return route.fallback()
+    rechecks += 1
+    return json(route, {
+      authenticated: false,
+      needsTotp: false,
+      needsEnrollment: false,
+      require2fa: false,
+    })
+  })
+  await page.route("**/api/v1/databases/1/export/query**", async (route) => {
+    expired = true
+    return json(route, { error: { code: "unauthorized", message: "Session expired" } }, 401)
+  })
+  await results(page).getByRole("button", { name: "Export" }).click()
+  await page.getByRole("menuitem", { name: /CSV/ }).click()
+  await expect(page).toHaveURL(/\/login\?reason=session$/)
+  await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
+  expect(rechecks).toBe(1)
+})
