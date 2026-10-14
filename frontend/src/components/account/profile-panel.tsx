@@ -1,11 +1,12 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { del, patch, postForm } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DashboardUser } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { Field, FieldRow } from "@/components/form"
+import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
@@ -57,14 +58,25 @@ async function squareImage(file: File): Promise<Blob> {
 }
 
 /**
- * The picture and the two names, side by side.
+ * The picture and the two names, beside the card the rail will draw from
+ * them.
  *
- * No frame: the section title above is the block's edge. The form only offers
- * to save what has actually changed, so the button is the reader's answer to
- * "did that take" — it goes quiet again once the profile in the auth status
- * matches what is typed.
+ * No frame: the section title above is the block's edge. The picture applies
+ * the moment it is chosen; the names are a draft on the settings pages' one
+ * Save at the foot of the window, which comes up with the first keystroke and
+ * leaves when the profile in the auth status matches what is typed — where a
+ * Save sat greyed under the fields for as long as nothing had changed. The
+ * card beside them is the rail's own, drawn from the draft, so the initials
+ * and their hue (taken from the username) change as the names are typed.
  */
-export function ProfilePanel({ user }: { user: DashboardUser }) {
+export function ProfilePanel({
+  user,
+  onDirty,
+}: {
+  user: DashboardUser
+  /** Whether the names hold an unsaved edit, for the section's head. */
+  onDirty?: (dirty: boolean) => void
+}) {
   const { refresh } = useAuth()
   const [displayName, setDisplayName] = useState(displayNameOf(user))
   const [username, setUsername] = useState(user.username)
@@ -72,25 +84,48 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const dirty = displayName.trim() !== displayNameOf(user) || username.trim() !== user.username
+  const nameChanged = displayName.trim() !== displayNameOf(user)
+  const usernameChanged = username.trim() !== user.username
+  const dirty = nameChanged || usernameChanged
+  const invalid = !displayName.trim() || !username.trim()
 
-  const save = async () => {
-    setSaving(true)
-    try {
-      const body: { displayName?: string; username?: string } = {}
-      if (displayName.trim() !== displayNameOf(user)) body.displayName = displayName.trim()
-      if (username.trim() !== user.username) body.username = username.trim()
-      const updated = await patch<DashboardUser>("/account/profile", body)
-      setDisplayName(updated.displayName)
-      setUsername(updated.username)
-      await refresh()
-      notify.success("Profile saved")
-    } catch (err) {
-      notify.error("Could not save the profile", err)
-    } finally {
-      setSaving(false)
-    }
-  }
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty])
+
+  useSaveBarEntry(
+    true,
+    {
+      name: "Profile",
+      dirty,
+      changes: Number(nameChanged) + Number(usernameChanged),
+      saving,
+      invalid,
+      applies: "immediately",
+    },
+    {
+      save: async () => {
+        setSaving(true)
+        try {
+          const body: { displayName?: string; username?: string } = {}
+          if (nameChanged) body.displayName = displayName.trim()
+          if (usernameChanged) body.username = username.trim()
+          const updated = await patch<DashboardUser>("/account/profile", body)
+          setDisplayName(updated.displayName)
+          setUsername(updated.username)
+          await refresh()
+          return true
+        } catch (err) {
+          notify.error("Could not save the profile", err)
+          return false
+        } finally {
+          setSaving(false)
+        }
+      },
+      discard: () => {
+        setDisplayName(displayNameOf(user))
+        setUsername(user.username)
+      },
+    },
+  )
 
   const upload = async (file: File | undefined) => {
     if (!file) return
@@ -123,11 +158,17 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
     }
   }
 
+  const draft = {
+    ...user,
+    displayName: displayName.trim() || user.username,
+    username: username.trim() || user.username,
+  }
+
   return (
-    <div className="grid gap-6 md:grid-cols-[auto_minmax(0,1fr)] md:gap-10">
-      <div className="flex items-start gap-4">
-        <UserAvatar key={user.avatarVersion} user={user} size="xl" />
-        <div className="space-y-2">
+    <div className="grid min-w-0 items-start gap-x-10 gap-y-6 lg:grid-cols-[14rem_minmax(0,1fr)_15rem]">
+      <div className="flex min-w-0 items-start gap-4 lg:flex-col">
+        <UserAvatar key={user.avatarVersion} user={draft} size="xl" />
+        <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -158,53 +199,56 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
         </div>
       </div>
 
-      <div className="max-w-xl space-y-4">
-        <FieldRow>
-          <Field
-            label="Name"
-            htmlFor="profile-name"
-            hint="How you appear in the rail and the users list."
-          >
-            <Input
-              id="profile-name"
-              value={displayName}
-              maxLength={64}
-              onChange={(e) => setDisplayName(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Username"
-            htmlFor="profile-username"
-            hint="What you sign in with, and how the audit log names you. One word; case does not matter."
-          >
-            <Input
-              id="profile-username"
-              value={username}
-              maxLength={64}
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </Field>
-        </FieldRow>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={save} disabled={!dirty || saving} pending={saving}>
-            Save changes
-          </Button>
-          {dirty && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setDisplayName(displayNameOf(user))
-                setUsername(user.username)
-              }}
-            >
-              Discard
-            </Button>
-          )}
+      <FieldRow>
+        <Field
+          label="Name"
+          htmlFor="profile-name"
+          hint="How you appear in the rail and the users list."
+        >
+          <Input
+            id="profile-name"
+            value={displayName}
+            maxLength={64}
+            onChange={(e) => setDisplayName(e.target.value)}
+          />
+        </Field>
+        <Field
+          label="Username"
+          htmlFor="profile-username"
+          hint="What you sign in with, and how the audit log names you. One word; case does not matter."
+        >
+          <Input
+            id="profile-username"
+            value={username}
+            maxLength={64}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+        </Field>
+      </FieldRow>
+
+      <div className="min-w-0 space-y-2">
+        <p className="eyebrow">In the rail</p>
+        <div
+          role="img"
+          aria-label={`The rail draws this account as ${displayNameOf(draft)}, ${user.role}`}
+          className="flex w-full max-w-64 min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2"
+        >
+          <UserAvatar key={user.avatarVersion} user={draft} size="md" />
+          <span className="grid min-w-0 flex-1 gap-0.5">
+            <span className="truncate text-body leading-tight font-semibold">
+              {displayNameOf(draft)}
+            </span>
+            <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
+              {user.role}
+            </span>
+          </span>
         </div>
+        <p className="truncate font-mono text-hint text-muted-foreground">
+          <span className="text-[var(--tag-blue)]">@{draft.username}</span> in the audit log
+        </p>
       </div>
     </div>
   )
