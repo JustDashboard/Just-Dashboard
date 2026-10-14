@@ -177,6 +177,7 @@ export default function DockerImagesPage() {
     confirm({
       title: "Prune untagged images",
       confirmLabel: "Prune",
+      workingLabel: "Removing untagged images…",
       description: (
         <p>
           Removes <Term name="dangling">dangling images</Term> — layers left behind when a tag moved

@@ -18,11 +18,13 @@ export type GitRun = (label: string, fn: () => Promise<GitResult>) => Promise<Gi
  * inert and saying nothing. A pull blocked by what is in the working tree is
  * not toasted: the caller opens `PullBlockedDialog` on it instead.
  */
-export function useGitRun(onChanged: () => void): { busy?: string; run: GitRun } {
+export function useGitRun(onChanged: () => void) {
   const [busy, setBusy] = useState<string>()
+  const [startedAt, setStartedAt] = useState(0)
   const run = useCallback<GitRun>(
     async (label, fn) => {
       setBusy(label)
+      setStartedAt(Date.now())
       try {
         const res = await fn()
         notify.success(label, { description: res.output?.split("\n").slice(0, 3).join("\n") })
@@ -40,5 +42,19 @@ export function useGitRun(onChanged: () => void): { busy?: string; run: GitRun }
     },
     [onChanged],
   )
-  return { busy, run }
+  const words: Record<string, string> = {
+    Fetched: "Fetching from the remote…",
+    Pulled: "Pulling from the remote…",
+    Pushed: "Pushing to the remote…",
+    "Submodule updated": "Updating submodules…",
+    "Git LFS updated": "Updating Git LFS…",
+  }
+  const progress = busy
+    ? {
+        label: words[busy] ?? "Running Git operation…",
+        detail: words[busy] ? undefined : busy,
+        startedAt,
+      }
+    : undefined
+  return { busy, run, progress }
 }

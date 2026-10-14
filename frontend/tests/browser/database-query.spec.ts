@@ -1,4 +1,5 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
+import { recordProgress, streamedExport } from "./progress-recording"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -2210,3 +2211,22 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "a generator the engine lacks")
   })
 }
+
+test("progress: a query export reports its byte stream until the download finishes", async ({
+  page,
+}) => {
+  await mockWork(page)
+  const finish = await streamedExport(page, "/databases/1/export/query")
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await openEditor(page)
+  await write(page, "select * from customers")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await results(page).getByRole("button", { name: "Export", exact: true }).click()
+  await recordProgress(
+    page,
+    "database-query-export",
+    () => page.getByRole("menuitem", { name: /CSV/ }).click(),
+    page.locator("[data-slot=operation-progress]"),
+    finish,
+  )
+})

@@ -56,6 +56,8 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { GitHubPanel } from "@/components/git/github-panel"
 import { RepoMark } from "@/components/git/languages"
 import { useCheckoutRemoval } from "@/components/git/remove-checkout"
+import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import { guardGitDrafts } from "@/components/git/draft-guard"
 import {
@@ -249,7 +251,7 @@ export function RepoWorkspace({
     status.refresh()
     onRepoChanged()
   }, [status, onRepoChanged])
-  const { busy, run } = useGitRun(onChanged)
+  const { busy, run, progress } = useGitRun(onChanged)
   const [pullBlockedBy, setPullBlockedBy] = useState<GitPullBlocked>()
 
   // The tree badges changed files; git reports them relative to the repo root.
@@ -786,6 +788,12 @@ export function RepoWorkspace({
               <GitHelp compact />
             </div>
           </PaneHeader>
+
+          {progress && (
+            <OperationOverlay>
+              <OperationProgress {...progress} />
+            </OperationOverlay>
+          )}
 
           {/* The three columns. Side by side they share the frame's height and
             each scrolls inside itself. Stacked on a small screen they cannot

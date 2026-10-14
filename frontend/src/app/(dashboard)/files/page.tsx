@@ -49,6 +49,9 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
+import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
+import { useOperations } from "@/hooks/use-operations"
 import { Page } from "@/components/page"
 import { PaneFooter, PaneHeader } from "@/components/panel"
 import { GitHubAccountControl } from "@/components/git/github-account"
@@ -151,6 +154,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 export default function FilesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const operations = useOperations()
   const { prompt, dialog: promptDialog } = usePrompt()
   const conflicts = useConflicts()
   const canWrite = can("file.write")
@@ -652,55 +656,62 @@ export default function FilesPage() {
       return []
     }
     if (targets.length === 0) return []
-    try {
-      const taken = await namesIn(dest)
-      const clashes = targets.map(baseOf).filter((name) => taken.has(name))
-      let policy: ConflictPolicy = "keep"
-      if (clashes.length > 0) {
-        const answer = await conflicts.ask(clashes, dest, mode === "move" ? "moved" : "copied")
-        if (!answer) return []
-        policy = answer
-      }
-      let ok = 0
-      for (const src of targets) {
-        const base = baseOf(src)
-        let name = base
-        let overwrite = false
-        if (taken.has(base)) {
-          if (policy === "skip") continue
-          if (policy === "replace") overwrite = true
-          else if (mode === "copy" && parentOf(src) === dest) name = uniqueName(base, taken)
-          else name = numberedName(base, taken)
-        }
+    await operations.run(
+      `${mode === "move" ? "Moving" : "Copying"} ${plural(targets.length, "item")}…`,
+      async (report) => {
+        report({ completed: 0, total: targets.length })
         try {
-          await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
-          taken.add(name)
-          if (mode === "move") moved.add(src)
-          ok++
+          const taken = await namesIn(dest)
+          const clashes = targets.map(baseOf).filter((name) => taken.has(name))
+          let policy: ConflictPolicy = "keep"
+          if (clashes.length > 0) {
+            const answer = await conflicts.ask(clashes, dest, mode === "move" ? "moved" : "copied")
+            if (!answer) return
+            policy = answer
+          }
+          let ok = 0
+          for (const [index, src] of targets.entries()) {
+            const base = baseOf(src)
+            report({ completed: index, detail: base })
+            let name = base
+            let overwrite = false
+            if (taken.has(base)) {
+              if (policy === "skip") continue
+              if (policy === "replace") overwrite = true
+              else if (mode === "copy" && parentOf(src) === dest) name = uniqueName(base, taken)
+              else name = numberedName(base, taken)
+            }
+            try {
+              await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
+              taken.add(name)
+              if (mode === "move") moved.add(src)
+              ok++
+            } catch (err) {
+              notify.error(`Could not ${mode} ${base}`, err)
+            }
+          }
+          if (ok > 0) {
+            const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
+            notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
+            if (mode === "move") {
+              afterLabelledChange([...moved])
+              setActive((previous) => {
+                const entry = previous?.entry
+                return entry &&
+                  previous.dir === path &&
+                  [...moved].some((src) => isWithin(entry.path, src))
+                  ? { dir: previous.dir, entry: null }
+                  : previous
+              })
+            }
+          }
+          clearSelection()
+          reload()
         } catch (err) {
-          notify.error(`Could not ${mode} ${base}`, err)
+          notify.error(`Could not ${mode}`, err)
         }
-      }
-      if (ok > 0) {
-        const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
-        notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
-        if (mode === "move") {
-          afterLabelledChange([...moved])
-          setActive((previous) => {
-            const entry = previous?.entry
-            return entry &&
-              previous.dir === path &&
-              [...moved].some((src) => isWithin(entry.path, src))
-              ? { dir: previous.dir, entry: null }
-              : previous
-          })
-        }
-      }
-      clearSelection()
-      reload()
-    } catch (err) {
-      notify.error(`Could not ${mode}`, err)
-    }
+      },
+    )
     return [...moved]
   }
 
@@ -743,7 +754,9 @@ export default function FilesPage() {
   const duplicate = async (entry: FileEntry) => {
     const name = uniqueName(entry.name, names)
     try {
-      await post("/files/copy", { from: entry.path, to: joinPath(path ?? "/", name) })
+      await operations.run(`Duplicating ${entry.name}…`, () =>
+        post("/files/copy", { from: entry.path, to: joinPath(path ?? "/", name) }),
+      )
       notify.success(`Duplicated as ${name}`)
       reload()
     } catch (err) {
@@ -753,10 +766,12 @@ export default function FilesPage() {
 
   const extract = async (entry: FileEntry) => {
     try {
-      const res = await post<{ extracted: number }>("/files/extract", {
-        archive: entry.path,
-        destination: path,
-      })
+      const res = await operations.run(`Extracting ${entry.name}…`, () =>
+        post<{ extracted: number }>("/files/extract", {
+          archive: entry.path,
+          destination: path,
+        }),
+      )
       notify.success(`Extracted ${plural(res.extracted, "item")}`)
       reload()
     } catch (err) {
@@ -791,6 +806,7 @@ export default function FilesPage() {
     confirm({
       title: `Delete ${plural(targets.length, "item")}`,
       confirmLabel: "Delete all",
+      workingLabel: "Deleting selected files…",
       description: (
         <p className="text-destructive">
           {plural(targets.length, "selected item")} {targets.length === 1 ? "is" : "are"} deleted
@@ -798,9 +814,11 @@ export default function FilesPage() {
           {dirs.length > 0 ? ", folders and everything inside them included." : "."}
         </p>
       ),
-      action: async () => {
+      action: async (_, report) => {
         let failed = 0
-        for (const entry of targets) {
+        report({ completed: 0, total: targets.length })
+        for (const [index, entry] of targets.entries()) {
+          report({ detail: entry.name, completed: index })
           try {
             await del("/files/delete", {
               query: { path: entry.path, recursive: entry.isDir },
@@ -808,12 +826,16 @@ export default function FilesPage() {
           } catch {
             failed++
           }
+          report({ completed: index + 1 })
         }
         clearSelection()
         setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange(targets.map((e) => e.path))
-        if (failed) notify.error(`${plural(failed, "item")} could not be deleted`)
+        if (failed) {
+          notify.error(`${plural(failed, "item")} could not be deleted`)
+          return "reported" as const
+        }
       },
     })
   }
@@ -1592,6 +1614,13 @@ export default function FilesPage() {
                   sticky header sticks to its nearest scrolling ancestor. The
                   right-click menu is scoped to the body too, so the path field
                   in the strip above keeps the browser's own. */}
+              {operations.operations.length > 0 && (
+                <OperationOverlay>
+                  {operations.operations.map((operation) => (
+                    <OperationProgress key={operation.id} {...operation} />
+                  ))}
+                </OperationOverlay>
+              )}
               <ListingContextMenu
                 caps={caps}
                 resolve={(p) => byPath.get(p)}

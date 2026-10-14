@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 import {
   dnsChange,
   dnsPolicyChange,
@@ -1137,3 +1138,83 @@ test("a detected server's connection opens its inventory and reads its native DH
   expect(control.reads).toContain(`/network/dns/services/${control.view.connection.id}/dhcp`)
   expect(control.unexpectedReads).toEqual([])
 })
+
+test("progress: reviewed DNS apply keeps its working feedback in the confirmation", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  control.changes = [dnsChange()]
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await openChange(page)
+  const held = await heldResponse(page, "/network/dns/services/changes/change-fixture/apply", {
+    ...dnsChange(),
+    state: "verified",
+  })
+  await sheet(page)
+    .getByRole("button", { name: "Apply reviewed native change", exact: true })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Apply reviewed DNS change", exact: true })
+  await recordProgress(
+    page,
+    "network-dns-apply",
+    () => dialog.getByRole("button", { name: "Apply native change", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog).toHaveCount(0)
+    },
+  )
+})
+
+for (const action of ["create", "remove"]) {
+  test(`progress: owned DNS ${action} keeps feedback beside its command`, async ({ page }) => {
+    const control = await mockDNSServicePage(page)
+    const setup = dnsProvision()
+    if (action === "remove") {
+      setup.state = "verified"
+      setup.resources.phase = "verified"
+      setup.resources.containerId = "fixture-container-id"
+      setup.resources.networkId = "fixture-network-id"
+    }
+    control.provisions = [setup]
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.getByRole("button", { name: "Refresh", exact: true }).last().click()
+    await page
+      .getByRole("button", { name: "Review owned DNS setup Owned fixture DNS", exact: true })
+      .click()
+    const result = { ...setup, state: action === "remove" ? "removed" : "verified" }
+    const held = await heldResponse(
+      page,
+      action === "remove"
+        ? "/network/dns/services/provisions/setup-fixture"
+        : "/network/dns/services/provisions/setup-fixture/apply",
+      result,
+    )
+    await sheet(page)
+      .getByRole("button", {
+        name: action === "remove" ? "Remove owned service and data" : "Create reviewed DNS service",
+        exact: true,
+      })
+      .click()
+    const dialog = page.getByRole("dialog", {
+      name: action === "remove" ? "Remove owned DNS service and data" : "Create owned DNS service",
+      exact: true,
+    })
+    await recordProgress(
+      page,
+      `network-dns-${action}`,
+      () =>
+        dialog
+          .getByRole("button", {
+            name: action === "remove" ? "Remove service and data" : "Create owned service",
+            exact: true,
+          })
+          .click(),
+      dialog.locator("[data-slot=operation-progress]"),
+      async () => {
+        held.release()
+        await expect(dialog).toHaveCount(0)
+      },
+    )
+  })
+}

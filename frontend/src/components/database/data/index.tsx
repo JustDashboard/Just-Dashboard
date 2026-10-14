@@ -1,4 +1,6 @@
 "use client"
+import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
@@ -332,6 +334,14 @@ export function SqlData() {
 
   return (
     <SectionFrame section="data">
+      {exporter.progress && (
+        <OperationOverlay>
+          <OperationProgress {...exporter.progress} />
+          <Button size="sm" variant="outline" onClick={exporter.cancel}>
+            Cancel export
+          </Button>
+        </OperationOverlay>
+      )}
       {/* One frame around the whole workbench (§7.2): the rail, the table and
           the row are columns of one working surface, with a hairline between
           them rather than a gutter and three borders. */}

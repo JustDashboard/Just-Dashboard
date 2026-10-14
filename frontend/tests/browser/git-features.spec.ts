@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 
 const now = "2026-09-22T12:00:00Z"
 const sha = "a".repeat(40)
@@ -1249,3 +1250,57 @@ test("inline file drafts survive another preview and retain their opened revisio
     ),
   ).toBe(false)
 })
+
+test("progress: cloning a repository keeps the task and elapsed time visible", async ({ page }) => {
+  await fixture(page)
+  const held = await heldResponse(page, "/git/clone", {
+    path: "/srv/new",
+    result: { command: "git clone", output: "Cloned", ok: true },
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/git")
+  await page.getByRole("button", { name: "Add repository", exact: true }).click()
+  await page.getByLabel("Repository URL", { exact: true }).fill("https://github.com/acme/new.git")
+  const dialog = page.getByRole("dialog", { name: "Add a repository" })
+  await recordProgress(
+    page,
+    "git-clone",
+    () => dialog.getByRole("button", { name: "Clone", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog).toHaveCount(0)
+    },
+  )
+  expect(held.calls()).toBe(1)
+})
+
+for (const action of ["submodule", "lfs"]) {
+  test(`progress: Git ${action} work uses the workspace's working strip`, async ({ page }) => {
+    await fixture(page)
+    const held = await heldResponse(page, action === "submodule" ? "/git/submodule" : "/git/lfs", {
+      command: "git",
+      output: "Done",
+      ok: true,
+    })
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto("/git?repo=%2Fsrv%2Fapp")
+    await openAction(page, action === "submodule" ? "Submodules" : "Git LFS")
+    await recordProgress(
+      page,
+      `git-${action}`,
+      () =>
+        page
+          .getByRole("button", {
+            name: action === "submodule" ? "Update to recorded commit" : "Fetch objects",
+            exact: true,
+          })
+          .click(),
+      page.locator("[data-slot=operation-progress]"),
+      async () => {
+        held.release()
+        await expect(page.locator("[data-slot=operation-progress]")).toHaveCount(0)
+      },
+    )
+  })
+}

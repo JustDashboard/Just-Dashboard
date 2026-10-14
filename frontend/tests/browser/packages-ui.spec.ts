@@ -350,7 +350,7 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await htop.getByRole("button", { name: "Install" }).click()
   await expect(htop).toContainText("Installing…")
   // The job's output opens at the top of the page.
-  await expect(page.getByText("Install htop")).toBeVisible()
+  await expect(page.getByText("Install htop", { exact: true })).toBeVisible()
 })
 
 for (const outcome of ["failed", "cancelled"] as const) {

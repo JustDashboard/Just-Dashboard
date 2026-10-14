@@ -327,15 +327,19 @@ function StackBody({ name }: { name: string }) {
 
   const run = async (
     action: ComposeActionKey,
-    opts: { confirmPhrase?: string; service?: string } = {},
+    opts: { confirmPhrase?: string; service?: string; onOutput?: (line: string) => void } = {},
   ) => {
     setPending({ service: opts.service, label: PARTICIPLE[action] })
     const code = await runner
-      .run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
-        action,
-        service: opts.service,
-        confirm: opts.confirmPhrase,
-      })
+      .run(
+        `/docker/stacks/${encodeURIComponent(name)}/run`,
+        {
+          action,
+          service: opts.service,
+          confirm: opts.confirmPhrase,
+        },
+        opts.onOutput,
+      )
       .finally(() => {
         setPending(undefined)
         setEpoch((n) => n + 1)
@@ -366,7 +370,12 @@ function StackBody({ name }: { name: string }) {
       phrase: action === "down" ? name : undefined,
       confirmLabel: title.split(" ")[0],
       description,
-      action: (phrase) => run(action, { confirmPhrase: phrase }),
+      workingLabel: `${PARTICIPLE[action]} ${name}…`,
+      action: (phrase, report) =>
+        run(action, {
+          confirmPhrase: phrase,
+          onOutput: (line) => report({ detail: line.slice(-500) }),
+        }),
     })
 
   const control = Boolean(data?.managed) && can("system.admin")
@@ -393,7 +402,13 @@ function StackBody({ name }: { name: string }) {
             <p className="font-mono text-hint text-muted-foreground">{meta.command(service)}</p>
           </>
         ),
-        action: (phrase) => run(action, { service, confirmPhrase: phrase }),
+        workingLabel: `${PARTICIPLE[action]} ${service}…`,
+        action: (phrase, report) =>
+          run(action, {
+            service,
+            confirmPhrase: phrase,
+            onOutput: (line) => report({ detail: line.slice(-500) }),
+          }),
       })
     }
     const verbs: Verb[] = []

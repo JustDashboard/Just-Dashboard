@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
+import { heldResponse, recordProgress, streamedExport } from "./progress-recording"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -2662,3 +2663,69 @@ for (const [label, viewport] of [
     }
   })
 }
+
+test("progress: MongoDB export exposes bytes in the workbench", async ({ page }) => {
+  await mockMongo(page)
+  const finish = await streamedExport(page, "/databases/5/mongo/export")
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(collection("orders"))
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Export orders" })
+  await recordProgress(
+    page,
+    "database-mongo-export",
+    () => dialog.getByRole("button", { name: "Export", exact: true }).click(),
+    page.locator("[data-slot=operation-progress]"),
+    finish,
+  )
+})
+
+test("progress: MongoDB import waits for document writes after sending the file", async ({
+  page,
+}) => {
+  await mockMongo(page)
+  const report = {
+    dryRun: true,
+    schema: DB,
+    table: "orders",
+    format: "ndjson",
+    mode: "insert",
+    columns: [],
+    rowsRead: 1,
+    inserted: 0,
+    skipped: 0,
+    errors: [],
+    errorsTruncated: false,
+    preview: { columns: ["id"], rows: [["1"]] },
+    atomic: false,
+    warnings: [],
+  }
+  await page.route("**/api/v1/databases/5/import/upload", (route) =>
+    route.fulfill({ json: report }),
+  )
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(collection("orders"))
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import into orders" })
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "orders.ndjson",
+    mimeType: "application/x-ndjson",
+    buffer: Buffer.from('{"id":1}\n'),
+  })
+  await expect(dialog.getByRole("button", { name: "Import", exact: true })).toBeEnabled()
+  const held = await heldResponse(page, "/databases/5/import/upload", {
+    ...report,
+    dryRun: false,
+    inserted: 1,
+  })
+  await recordProgress(
+    page,
+    "database-mongo-import",
+    () => dialog.getByRole("button", { name: "Import", exact: true }).click(),
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      held.release()
+      await expect(dialog.getByRole("button", { name: "Done", exact: true })).toBeVisible()
+    },
+  )
+})
