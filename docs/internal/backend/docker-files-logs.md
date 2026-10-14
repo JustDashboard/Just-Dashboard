@@ -219,6 +219,14 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   through a temp file in the same directory and keeps `<name>.bak`, guarding what validation cannot catch
   — a correct file that says the wrong thing. `DeclaredServices` costs a subprocess per stack and is read
   on demand for administrators; other users receive the static declared-service list from discovery.
+  Compose config reads return a SHA-256 `revision`, and config saves may carry
+  `expectedRevision`. The editor retains that revision with a draft across view changes; a forced
+  save of invalid YAML still checks it. `WriteComposeFileChecked` shares the Files path lock,
+  compares the current bytes before staging and again before replacement, and refuses stale saves
+  with `409 content_conflict`. A stale save does not update the source or its backup. A failure to
+  write the backup also refuses replacement. The editor keeps the draft and offers **Review current
+  file** or confirmed **Discard draft and reload**; reviewing explicitly adopts the newly read
+  revision before the next guarded Save.
 - **`Build` drives the `docker` binary** because BuildKit is a separate builder the classic API path never
   reaches, and silently building with the legacy one produces images differing from the same Dockerfile
   from a shell.
@@ -335,6 +343,20 @@ is what permits the replacement at all. The handler sends one
 request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
+
+Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read. The Files
+and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
+returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
+with Compose saves to the same resolved path, checks the bytes before staging and immediately
+before publish, and reports a stale, removed or oversized backing file as `409 content_conflict`.
+The editor retains the draft after refusal and offers a fresh comparison or confirmed discard and
+reload. **Save as** sends an empty expected revision, requiring a name that remains unoccupied when
+it is published. API clients that omit the precondition keep their previous unconditional behavior.
+These are optimistic guards: an independent native writer can still change a path between the final
+comparison and rename. They do not make outside processes participate in a filesystem transaction.
+`revision_test.go`, `revision_shared_test.go`, `compose_revision_test.go` and
+`handlers_files_revision_test.go` cover stale/native edits, removal, concurrent Files/Compose
+saves, Save as occupancy and the HTTP conflict contract on temporary files.
 
 `ResolveArchive` checks an archive download before a header goes out — the base directory, and each
 member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a
@@ -499,14 +521,26 @@ metadata to the inspector and details view; all tile sizes use compact fixed col
 dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`
 asks once per operation (replace, keep both, skip) before an upload, move or paste touches a name that
 is taken; "keep both" is `photo (2).jpg` for a transfer and `photo copy.jpg` for a duplicate.
+`upload-plan.ts` reads every relevant destination folder before creating directories or enqueueing
+files, keeps names separately per directory, and reviews nested conflicts by their relative paths.
+Existing folders are explicitly approved for merging; the chosen Keep both, Skip or Replace policy
+applies to matching files inside each folder. Files or symlinks blocking a directory, directory
+replacement by an uploaded file and duplicate incoming targets under Replace are refused before
+uploads begin. A Cut paste removes only successfully moved source paths from its clipboard;
+cancellation, skipped items and failed moves remain available for another paste. Pure upload
+planning is checked by `upload-plan.test.js`; `files-ui.spec.ts` covers the transfer and review flows.
 `media-viewer.tsx` is the full-screen look (a `Modal` at `size="full"`): pictures fit or 1:1, video,
 audio, PDF through a blob, and the same head or archive listing the inspector shows for anything else;
 Space in the listing opens it, the arrows walk the folder's files. Text and image editors open beside
-that listing. **Open full editor** transfers the current draft in memory to `/files/editor`, which
+that listing. **Open full editor** transfers the current draft and its opened content/revision
+in memory to `/files/editor`, which
 shares the same editor controls beside a collapsible `FileTree`, which unfolds the current file's
 ancestors; on a phone the tree opens over the editor. Contents are never put in browser storage. Monaco exposes Find, Replace, commands, undo/redo,
 formatting, language, indentation, wrap, minimap and font size, with a cursor/UTF-8 size status and a
 diff review (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few million cells) drawn by `DiffView`.
+Ordinary review compares the draft with the opened version. After a save conflict, **Review current
+file** reads the current bytes while retaining the draft, then compares those versions before a
+subsequent guarded Save.
 Content-search results reveal their matching line. `quick-open.tsx` shares one keyboard palette for
 names (Ctrl/Cmd+P) and contents (Ctrl/Cmd+Shift+F), with immediate current-listing name matches,
 cancelled stale requests, hidden/case/regex controls, a wider scope and explicit partial/error states.

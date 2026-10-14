@@ -6,6 +6,16 @@ The frontend keeps a commit-message draft per checkout for the tab, walks change
 Alt+Up/Down, and returns focus to the selected file when Escape closes its preview. These read and
 navigation interactions are specified in [workspace interactions](../frontend/workspace-interactions.md).
 
+Inline file edits keep each draft and its opened content/revision in memory per checkout and path.
+Selecting another file or preview, History, Blame, Close and dashboard navigation preserve them;
+the workspace's unsaved-file count reopens a held draft. Contents never reach browser storage or the
+URL. Save uses the Files revision precondition, retains the draft on `409 content_conflict`, and
+offers **Review current file** or confirmed discard/reload. A successful save or confirmed discard
+clears that file's held draft. The unload guard remains active while any repository has a draft,
+including previews closed or left on another page; signing out clears the memory store and guard.
+A reload or closed tab still loses those in-memory drafts after the browser's confirmation.
+`git-features.spec.ts` checks preserved drafts, stale revisions, storage exclusion and unload cleanup.
+
 `internal/gitx` discovers repositories at most five levels below `JD_GIT_ROOTS`, skips generated and
 hidden trees, and stops descending once it finds `.git` — a `.git` *file* counts as much as a directory,
 because that is what a linked worktree and a submodule checkout carry. Hidden directories are where
