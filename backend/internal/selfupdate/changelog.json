@@ -24,8 +24,8 @@
         },
         {
           "kind": "changed",
-          "text": "Start the first-run question with the stable purposes and mark the experimental ones",
-          "detail": "Ship apps (Deployments, Proxy & TLS), Run databases (Databases, Backups) and Work on the server (the Workspace tools) are chosen to begin with; Manage containers (Docker), Route the network (Network) and Secure the server (Security) sit on their own Experimental shelf. Every section belongs to one purpose only, so each choice adds something, and Packages, System users and the audit log stay in every answer. Account → Workspace shows the same purposes beside the sidebar itself, with a switch on every section it can hide."
+          "text": "Start the first-run question with the stable purposes and mark the experimental one",
+          "detail": "Ship apps (Deployments, Proxy & TLS), Run databases (Databases, Backups), Work on the server (the Workspace tools), Manage containers (Docker) and Secure the server (Security) are chosen to begin with; Route the network (Network) is marked Experimental, working but still being tested. Every section belongs to one purpose only, so each choice adds something, and Packages, System users and the audit log stay in every answer. Account → Workspace shows the same purposes beside the sidebar itself, with a switch on every section it can hide."
         }
       ]
     },

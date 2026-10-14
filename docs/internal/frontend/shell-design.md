@@ -83,9 +83,9 @@ six Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System u
 log — and the purposes the question offers, each the sections it brings. Every section belongs to
 exactly one purpose or to the base, so every card turns on something no other card does: Ship apps
 is Deployments and Proxy & TLS, Run databases is Databases and Backups, Work on the server is the six
-Workspace tools, and the experimental three are Docker, Network and Security, one each. Until this
-was a partition, Manage containers brought nothing the stable three had not, and Route the network
-and Secure the server brought the same two rows. Overview, Monitoring,
+Workspace tools, Manage containers is Docker, Secure the server is Security and Route the network is
+Network. Until this was a partition, Manage containers brought nothing the other purposes had not,
+and Route the network and Secure the server brought the same two rows. Overview, Monitoring,
 Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
 or back to the switch. Packages, System users and the audit log can be, but every answer keeps them
 (`BASE_SECTIONS`): they are how the machine itself is changed and checked, whatever it is for.
@@ -119,14 +119,14 @@ screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the
 
 1. **The question**: the purposes as big `ChoiceCard`s and nothing beside them — any number, each
    drawn as the three products it means (`PURPOSES[].products` in `lib/sidebar-sections.ts`) and its
-   name, on two shelves (`STAGES`): **Stable** — Ship apps, Run databases and Work on the server,
-   finished and tested, and chosen to begin with (`STABLE_PURPOSES`) — and **Experimental** —
-   Manage containers, Route the network and Secure the server, which work but are still being
-   tested, so they say so beside their shelf's name and are taken only by somebody who presses them.
-   On a server that already has projects or saved databases, those cards carry the count.
-   *Continue* saves the sidebar they keep (`hiddenFor`, which always keeps `BASE_SECTIONS`), so the
-   defaults leave out exactly what the experimental three bring — Docker, Network and Security;
-   *Show me everything* hides nothing and goes straight to the dashboard.
+   name. Five are stable — finished and tested — and come first, chosen to begin with
+   (`STABLE_PURPOSES`). Route the network works but is still being tested (`stage: "experimental"`),
+   so it comes last, carries `ExperimentalMark` (an amber *Experimental* tag and *Working, still
+   being tested*) and is taken only by somebody who presses it; stable is the rule and carries no
+   mark, so there is no shelf of one card. On a server that already has projects or saved databases,
+   those cards carry the count. *Continue* saves the sidebar they keep (`hiddenFor`, which always
+   keeps `BASE_SECTIONS`), so the defaults leave out only Network; *Show me everything* hides
+   nothing and goes straight to the dashboard.
 2. **The answer**: `ServerPicture` (`components/onboarding/server-picture.tsx`) filling the screen —
    this server's rack in the middle, named and marked with its distribution, each purpose chosen a
    card of its products around it on an ellipse, with an `AnimatedBeam` running out to each — and one
@@ -143,9 +143,9 @@ have.
 
 Nothing is saved until *Continue* or *Show me everything*. `/account/workspace` is the answer after
 the fact, in the reading register (`components/account/workspace.tsx`), and nothing on it is framed
-but the rail. *What you use this server for* is the question's purposes on the same two shelves as
-lit cards (`PurposePicker`), each its three products, its name and the sections it means with the
-ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
+but the rail. *What you use this server for* is the question's purposes in its order as lit cards
+(`PurposePicker`), each its three products, its name — with the same mark on Route the network —
+and the sections it brings with the ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
 purpose is chosen when every section of it the role is offered is shown (`purposeShown`); pressing a
 chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
 Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked

@@ -179,7 +179,7 @@ taking a frame:
   the run page's Details shape; the six account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
   in a `ChoiceList`, Security as `FormSection aside`s, and Workspace as the first-run purposes'
-  lit cards on their Stable and Experimental shelves beside the rail itself, the one frame, in the
+  lit cards, the experimental one carrying its amber tag, beside the rail itself, the one frame, in the
   sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip

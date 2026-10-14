@@ -4,7 +4,6 @@ import {
   PURPOSES,
   SECTION_KEYS,
   STABLE_PURPOSES,
-  STAGES,
   hiddenFor,
   pressPurpose,
   purposeShown,
@@ -48,8 +47,8 @@ describe("hiddenFor", () => {
   })
 
   // The answer a new account gets if it only presses Continue.
-  test("the stable three leave out exactly what the experimental three bring", () => {
-    expect(hiddenFor(STABLE_PURPOSES)).toEqual(["docker", "network", "security"])
+  test("the stable five leave out exactly what the experimental one brings", () => {
+    expect(hiddenFor(STABLE_PURPOSES)).toEqual(["network"])
   })
 
   test("hides all but the base when nothing is chosen, and nothing when everything is", () => {
@@ -78,15 +77,16 @@ describe("categories", () => {
     }
   })
 
-  test("a new account starts with the three finished purposes, and they come first", () => {
-    expect(STABLE_PURPOSES).toEqual(["ship", "databases", "workspace"])
-    expect(PURPOSES.slice(0, 3).map((purpose) => purpose.key)).toEqual(STABLE_PURPOSES)
+  test("a new account starts with the five finished purposes, and they come first", () => {
+    expect(STABLE_PURPOSES).toEqual(["ship", "databases", "workspace", "containers", "secure"])
+    expect(PURPOSES.slice(0, 5).map((purpose) => purpose.key)).toEqual(STABLE_PURPOSES)
   })
 
-  test("every purpose is on one of the shelves", () => {
-    const shelves = STAGES.map((stage) => stage.key)
-    for (const purpose of PURPOSES) expect(shelves).toContain(purpose.stage)
-    expect(PURPOSES.filter((purpose) => purpose.stage === "experimental")).toHaveLength(3)
+  test("only routing the network is experimental, and it comes last", () => {
+    expect(
+      PURPOSES.filter((purpose) => purpose.stage === "experimental").map((p) => p.key),
+    ).toEqual(["network"])
+    expect(PURPOSES.at(-1)?.key).toBe("network")
   })
 })
 
@@ -104,7 +104,7 @@ describe("pressPurpose", () => {
   test("takes a shown purpose out and leaves every other card as it was", () => {
     const shown = new Set(hiddenFor(STABLE_PURPOSES))
     const next = pressPurpose("databases", shown, all)
-    expect([...next].sort()).toEqual(["backups", "databases", "docker", "network", "security"])
+    expect([...next].sort()).toEqual(["backups", "databases", "network"])
     expect(purposeShown("ship", next, all)).toBe(true)
     expect(purposeShown("workspace", next, all)).toBe(true)
   })

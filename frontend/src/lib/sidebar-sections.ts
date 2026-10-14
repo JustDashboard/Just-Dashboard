@@ -50,13 +50,13 @@ export function sectionOf(pathname: string): SectionKey | null {
  * The answers to "what will you use this server for?", each the sections it
  * brings into the rail. No two share a section, and none takes one of the
  * base's: Manage containers used to be Docker, Files and Terminal, which the
- * stable three already brought, so pressing it changed nothing, and Route the
- * network and Secure the server brought the same two rows. Now every card
+ * other purposes already brought, so pressing it changed nothing, and Route
+ * the network and Secure the server brought the same two rows. Now every card
  * turns on something no other card does.
  *
- * The stable three come first and a new account starts with them chosen; the
- * experimental three work but are still being tested, so they are offered
- * under their own name and taken only by somebody who presses them.
+ * The stable five come first and a new account starts with them chosen.
+ * Route the network works but is still being tested, so it comes last, says
+ * so on its card, and is taken only by somebody who presses it.
  */
 export const PURPOSES = [
   {
@@ -83,9 +83,16 @@ export const PURPOSES = [
   {
     key: "containers",
     title: "Manage containers",
-    stage: "experimental",
+    stage: "stable",
     products: ["docker", "docker-compose", "terminal"],
     sections: ["docker"],
+  },
+  {
+    key: "secure",
+    title: "Secure the server",
+    stage: "stable",
+    products: ["crowdsec", "fail2ban", "netfilter"],
+    sections: ["security"],
   },
   {
     key: "network",
@@ -93,13 +100,6 @@ export const PURPOSES = [
     stage: "experimental",
     products: ["wireguard", "tailscale", "adguard"],
     sections: ["network"],
-  },
-  {
-    key: "secure",
-    title: "Secure the server",
-    stage: "experimental",
-    products: ["crowdsec", "fail2ban", "netfilter"],
-    sections: ["security"],
   },
 ] as const satisfies readonly {
   key: string
@@ -111,12 +111,6 @@ export const PURPOSES = [
 }[]
 
 export type PurposeStage = "stable" | "experimental"
-
-/** The two shelves the purposes are offered on, in the order they are offered. */
-export const STAGES = [
-  { key: "stable", title: "Stable" },
-  { key: "experimental", title: "Experimental", hint: "Working, still being tested" },
-] as const satisfies readonly { key: PurposeStage; title: string; hint?: string }[]
 
 export type PurposeKey = (typeof PURPOSES)[number]["key"]
 

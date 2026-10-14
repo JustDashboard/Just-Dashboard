@@ -3,17 +3,12 @@
 import { Fragment } from "react"
 import { Check } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import {
-  PURPOSES,
-  STAGES,
-  pressPurpose,
-  purposeShown,
-  type SectionKey,
-} from "@/lib/sidebar-sections"
+import { PURPOSES, pressPurpose, purposeShown, type SectionKey } from "@/lib/sidebar-sections"
 import { cn } from "@/lib/utils"
 import { NAV, hideableSections, shownFor, type NavChild, type NavEntry } from "@/components/nav"
 import { ChoiceCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
+import { Tag } from "@/components/tag"
 import { Switch } from "@/components/ui/switch"
 
 const NOTHING_HIDDEN: ReadonlySet<string> = new Set()
@@ -42,27 +37,26 @@ export function useSectionCount(hidden: ReadonlySet<string>) {
   }
 }
 
-/** The name of a shelf of purposes, and for the experimental one what that means. */
-export function StageLabel({
-  stage,
-  className,
-}: {
-  stage: (typeof STAGES)[number]
-  className?: string
-}) {
+/**
+ * What an experimental purpose says on its card. Stable is the rule and
+ * carries no mark; the one purpose still being tested is the exception, so
+ * it is flagged where it is chosen rather than on a shelf of its own.
+ */
+export function ExperimentalMark({ className }: { className?: string }) {
   return (
-    <p className={cn("flex min-w-0 items-baseline gap-2 leading-4", className)}>
-      <span className="eyebrow shrink-0 leading-4">{stage.title}</span>
-      {"hint" in stage && (
-        <span className="truncate text-hint leading-4 text-muted-foreground">{stage.hint}</span>
-      )}
-    </p>
+    <span className={cn("flex min-w-0 items-baseline gap-2", className)}>
+      <Tag tone="warning" className="shrink-0">
+        Experimental
+      </Tag>
+      <span className="truncate text-hint text-muted-foreground">Working, still being tested</span>
+    </span>
   )
 }
 
 /**
- * The first-run question's purposes, after the first run, on the same two
- * shelves. A purpose is chosen when every section it needs is in the rail —
+ * The first-run question's purposes, after the first run, in its order and
+ * with its mark on the experimental one. A purpose is chosen when every
+ * section it needs is in the rail —
  * only the sections are stored — so a card reads what the switches beside it
  * say, and pressing one brings its sections back or takes them out. Under
  * each name are the sections it means, the ones out of the rail dimmed, which
@@ -78,58 +72,53 @@ export function PurposePicker({
   const { sections, offered } = useOffered()
 
   return (
-    <div className="grid min-w-0 gap-6 2xl:grid-cols-2">
-      {STAGES.map((stage) => (
-        <div
-          key={stage.key}
-          role="group"
-          aria-label={stage.title}
-          className="grid min-w-0 content-start gap-2.5"
-        >
-          <StageLabel stage={stage} />
-          {PURPOSES.filter((purpose) => purpose.stage === stage.key).map((purpose) => {
-            const on = purposeShown(purpose.key, hidden, offered)
-            const uses = sections.filter(({ key }) =>
-              (purpose.sections as readonly SectionKey[]).includes(key),
-            )
-            return (
-              <ChoiceCard
-                key={purpose.key}
-                selected={on}
-                aria-label={purpose.title}
-                onClick={() => onChange(pressPurpose(purpose.key, hidden, offered))}
-                className="min-h-18 flex-row items-center gap-3.5 px-4 py-3"
-              >
-                <span className="flex shrink-0 gap-1.5">
-                  {purpose.products.map((product) => (
-                    <ProductLogo key={product} id={product} size="sm" />
-                  ))}
+    <div role="group" aria-label="Purposes" className="grid min-w-0 gap-2.5 2xl:grid-cols-2">
+      {PURPOSES.map((purpose) => {
+        const on = purposeShown(purpose.key, hidden, offered)
+        const uses = sections.filter(({ key }) =>
+          (purpose.sections as readonly SectionKey[]).includes(key),
+        )
+        return (
+          <ChoiceCard
+            key={purpose.key}
+            selected={on}
+            aria-label={purpose.title}
+            onClick={() => onChange(pressPurpose(purpose.key, hidden, offered))}
+            className="min-h-18 flex-row items-center gap-3.5 px-4 py-3"
+          >
+            <span className="flex shrink-0 gap-1.5">
+              {purpose.products.map((product) => (
+                <ProductLogo key={product} id={product} size="sm" />
+              ))}
+            </span>
+            <span className="grid min-w-0 flex-1 gap-1">
+              <span className="flex min-w-0 items-baseline gap-2.5">
+                <span className="shrink-0 text-title leading-tight font-semibold">
+                  {purpose.title}
                 </span>
-                <span className="grid min-w-0 flex-1 gap-1">
-                  <span className="text-title leading-tight font-semibold">{purpose.title}</span>
-                  <span className="line-clamp-2 text-hint text-muted-foreground">
-                    {uses.map(({ key, entry }, index) => (
-                      <Fragment key={key}>
-                        {index > 0 && " · "}
-                        <span className={cn(hidden.has(key) && "text-muted-foreground/45")}>
-                          {entry.title}
-                        </span>
-                      </Fragment>
-                    ))}
-                  </span>
-                </span>
-                <Check
-                  aria-hidden
-                  className={cn(
-                    "size-4 shrink-0 text-brand transition-opacity",
-                    on ? "opacity-100" : "opacity-0",
-                  )}
-                />
-              </ChoiceCard>
-            )
-          })}
-        </div>
-      ))}
+                {purpose.stage === "experimental" && <ExperimentalMark />}
+              </span>
+              <span className="line-clamp-2 text-hint text-muted-foreground">
+                {uses.map(({ key, entry }, index) => (
+                  <Fragment key={key}>
+                    {index > 0 && " · "}
+                    <span className={cn(hidden.has(key) && "text-muted-foreground/45")}>
+                      {entry.title}
+                    </span>
+                  </Fragment>
+                ))}
+              </span>
+            </span>
+            <Check
+              aria-hidden
+              className={cn(
+                "size-4 shrink-0 text-brand transition-opacity",
+                on ? "opacity-100" : "opacity-0",
+              )}
+            />
+          </ChoiceCard>
+        )
+      })}
     </div>
   )
 }

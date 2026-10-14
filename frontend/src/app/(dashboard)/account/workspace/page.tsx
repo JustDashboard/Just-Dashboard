@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 
 /**
  * The first-run answer, after the first run: what this account uses the
- * server for, on the question's two shelves, beside the rail itself with a
+ * server for, as the question's purposes, beside the rail itself with a
  * switch on every row it may hide. The cards are the coarse answer and the
  * switches the fine one; both edit one draft, so pressing a purpose throws
  * its switches and throwing a switch can leave a purpose partly shown.
@@ -84,7 +84,7 @@ function Workspace() {
         <Section
           title="Sidebar"
           actions={
-            // As tall as Ask me again, so the rail starts level with the shelves.
+            // As tall as Ask me again, so the rail starts level with the cards.
             <span className="numeric flex h-8 items-center text-hint text-muted-foreground">
               {shown} of {total} shown
             </span>
