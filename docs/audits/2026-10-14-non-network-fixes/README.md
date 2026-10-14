@@ -2,8 +2,8 @@
 
 The audit inspected 94 routes and 924 feature entries on baseline `7690fb41` of `patch/0.7.5`.
 `/network` and its descendants are excluded. This change handles all 34 findings: 30 confirmed defects,
-three potential bugs and one exposed design limitation. Findings are implemented; combined validation
-is recorded below before the PR is filed. This matrix records behavior and meaningful regression
+three potential bugs and one exposed design limitation. All findings are implemented and passed the affected local checks
+recorded below. This matrix records behavior and meaningful regression
 coverage, rather than declaring every live host integration certified.
 
 | Finding | Existing feature | Change | Regression coverage |
@@ -39,7 +39,7 @@ coverage, rather than declaring every live host integration certified.
 | DDP-04 | Saved-query URL handoff is discarded at full tab capacity | Keep saved-query handoff pending at 24-tab capacity and accept it when a slot opens. | `database-query.spec.ts` |
 | DDP-05 | Backup job detail reopens a retained stale edit draft | Clear job editor drafts on explicit close and successful save. | `backups-ui.spec.ts` |
 | HT-04 | Canceling a Cut paste clears the clipboard | Clear only successfully moved Cut sources; preserve canceled, skipped or failed sources. | `files-ui.spec.ts` |
-| HT-08 | Cron schedule parser accepts malformed trailing syntax and can show invalid previews | Reject malformed field separators/bounds/steps, preserve environment whitespace and native leading-star day semantics. | `cron_test.go; cron.test.js` |
+| HT-08 | Cron schedule parser accepts malformed trailing syntax and can show invalid previews | Reject malformed field separators/bounds/steps, preserve environment whitespace and native leading-star day semantics; retain app-owned Go scheduler grammar/forecasts separately. | `cron_test.go; cron.test.js` |
 | HT-13 | Export crashes on a valid five-digit-year datetime input | Parse extended HTML years then show RFC3339 range/order errors; disable invalid exports/search and validate server download bounds. | `log-filter.test.js; logs-lens.spec.ts; handlers_logs_export_test.go` |
 | HT-15 | Administrator filter/count omits UID 0 accounts and other root routes | Include UID 0 and known sudo/wheel/admin/docker group routes; state direct sudoers rules are not inspected. | `access.test.js; system-ui.spec.ts` |
 
@@ -59,8 +59,26 @@ is part of this PR. No CI, dependency, release version or `/network` page change
 
 ## Verification
 
-Combined fresh-build validation pending. The contributor-required `scripts/test-changed.sh patch/0.7.5`
-selects only reachable checks and specs; the whole browser suite and `go test ./...` are not run.
+A fresh `bun run build` passed after integrating target `90d30d67`. Required changed-file
+verification covered the complete repair scope:
+
+- Prettier, ESLint and `tsc --noEmit` passed; `bun test src` passed 3,597 tests.
+- `go build ./...`, scoped `go vet` and selected tests in eight changed packages passed. Additional
+  guarded-write/FIFO and Docker decoder race checks passed with temporary fixtures.
+- `scripts/test-changed.sh origin/patch/0.7.5` selected 1,195 browser cases: 1,160 passed,
+  33 skipped and two test-timing failures (19.1m). Both failures blurred before delayed menu
+  focus restoration; this legitimately kept inspection active. The test correction waits for the
+  menu to close and focus to return before releasing the row, preserving every original assertion.
+- The final `scripts/test-changed.sh 5f978f6e` passed the affected process spec (37 browser cases,
+  zero failures, 45.6s) plus static/unit checks. Both corrected cases also passed three repetitions
+  each. All 1,162 non-skipped selected cases have passing verification after scoped rechecks.
+
+Skips are 32 optional screenshot captures and one legacy Redis-cursor case covered in the active
+Redis spec. The earlier combined run exposed an upload-directory normalization regression and four
+outdated selectors/fixture expectations; all five were corrected and passed on the integrated build.
+The whole browser suite and `go test ./...` were not run. Local build/gate evidence is saved under
+`/home/ubuntu/dashboard-audit-fixes/`; the HTML repair report is
+`/home/ubuntu/just-dashboard-audit-fixes.html`.
 
 ## Documentation review
 

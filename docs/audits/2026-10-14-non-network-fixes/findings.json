@@ -16,7 +16,7 @@
       "resolution": "Expose remote tools through a keyboard-accessible side panel below 1280px and restore trigger focus.",
       "regressions": "remote-desktop.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-05",
@@ -28,7 +28,7 @@
       "resolution": "Require acknowledged current board contents before duplication; keep editor after failed save.",
       "regressions": "stickyboard-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-06",
@@ -40,7 +40,7 @@
       "resolution": "Hold per-checkout/path Git editor drafts and their original revisions in memory; warn before unload and clear on sign-out.",
       "regressions": "git-features.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-14",
@@ -52,7 +52,7 @@
       "resolution": "Label and count password authentication locks accurately, preserving authorized-key sign-in routes and explaining SSH/PAM policy.",
       "regressions": "access.test.js; system-ui.spec.ts",
       "limits": "Authorized keys are a known route; actual SSH acceptance depends on host SSH/PAM/account policy. No live account changes were exercised.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-01",
@@ -64,7 +64,7 @@
       "resolution": "Reset one-time API key and creation fields on every close/reopen.",
       "regressions": "account-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-02",
@@ -77,7 +77,7 @@
       "resolution": "Record password/TOTP/recovery provenance separately from access elevation; additive legacy unknown migration.",
       "regressions": "session_method_test.go; session_method_migration_test.go; account-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-04",
@@ -89,7 +89,7 @@
       "resolution": "Show failed computer-overview load with retry in Add computer.",
       "regressions": "remote-desktop.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-06",
@@ -101,7 +101,7 @@
       "resolution": "Distinguish backend Ready from observed video playback; clear playback after document navigation or stalled media.",
       "regressions": "remote-desktop.spec.ts",
       "limits": "Canvas/WebCodecs-only or inaccessible player documents have no observed HTML video playback; their honest status remains Ready.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-08",
@@ -113,7 +113,7 @@
       "resolution": "Show remote-session inventory error and retry before connection workspace.",
       "regressions": "remote-desktop.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-09",
@@ -125,7 +125,7 @@
       "resolution": "Suppress rename commit on blur caused by Escape.",
       "regressions": "stickyboard-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-11",
@@ -138,7 +138,7 @@
       "resolution": "Drain board saves until the latest edited snapshot is acknowledged before navigating; retain dirty conflict unload warnings.",
       "regressions": "board-save.test.js; boards-ui.spec.ts; stickyboard-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-01",
@@ -152,7 +152,7 @@
       "resolution": "Allow a filesystem source or a native database dump; verify native-only archive, coverage and native restore.",
       "regressions": "database_dumps_test.go; backups-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-02",
@@ -166,7 +166,7 @@
       "resolution": "Consume database backup handoff only after resource data opens the suggested editor.",
       "regressions": "backups-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-03",
@@ -179,7 +179,7 @@
       "resolution": "Track picker-owned contributions and preserve manual or shared inputs when unselecting.",
       "regressions": "resource-picks.test.js; backups-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-06",
@@ -191,7 +191,7 @@
       "resolution": "Expose failed run-history reads with retry or stale-data warning.",
       "regressions": "backups-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-01",
@@ -204,7 +204,7 @@
       "resolution": "Normalize invalid/unavailable Docker detail views to the first available tab.",
       "regressions": "docker-ui.spec.ts; stack-detail.spec.ts; navigation.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-02",
@@ -216,7 +216,7 @@
       "resolution": "Poll container identity and route bindings every ten seconds and refresh after mutations while retaining child drafts.",
       "regressions": "docker-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-03",
@@ -228,7 +228,7 @@
       "resolution": "Include matching secondary tags/digests; distinguish unknown checks from verified current status.",
       "regressions": "images.test.js; docker-images.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-05",
@@ -240,7 +240,7 @@
       "resolution": "Plan folder-upload collisions in each actual directory, with explicit existing-folder merge and collision policy. Preserve canonical root destinations so completion refreshes the current directory.",
       "regressions": "upload-plan.test.js; files-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-07",
@@ -252,7 +252,7 @@
       "resolution": "Report measured host and positional CRON_TZ metadata, forecast in that zone and disclose browser date display/fallback.",
       "regressions": "cron_test.go; cron.test.js; schedule.test.js; processes-ui.spec.ts",
       "limits": "Native daemon CRON_TZ/DST behavior varies. POSIX or unavailable zones cannot be predicted; the page discloses forecast absence or estimates.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-09",
@@ -267,7 +267,7 @@
       "resolution": "Disclose native export limits, scans, missing sources and default journal window in downloaded coverage metadata; propagate read failures.",
       "regressions": "handlers_logs_export_test.go; handlers_logs_stack_test.go; logs-lens.spec.ts; containers_logs_test.go",
       "limits": "Native exports remain bounded to 20,000 selected lines/five-minute scans; journal with no start date reads 48 hours unless Current boot is selected. Omitted coverage is marked PARTIAL. Completeness is relative to available retained source output; source or decoder errors are recorded as missing coverage.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-10",
@@ -279,7 +279,7 @@
       "resolution": "Track accepted package jobs independently of console, allow failed/canceled retries and refresh catalogue flags and inventory/update readings at terminal outcomes.",
       "regressions": "install-jobs.test.js; packages-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-11",
@@ -291,7 +291,7 @@
       "resolution": "Describe actual manager-specific dependency/replacement scope and possible service restarts.",
       "regressions": "packages-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-12",
@@ -307,7 +307,7 @@
       "resolution": "Add guarded content revisions to Files/Git/Compose/crontab writes; retain conflicted drafts and serialize dashboard saves.",
       "regressions": "revision_test.go; revision_shared_test.go; handlers_files_revision_test.go; compose_revision_test.go; cron_test.go; files-ui.spec.ts; git-features.spec.ts; stack-detail.spec.ts; processes-ui.spec.ts",
       "limits": "Legacy API callers may omit revision. Uncoordinated native writers can race between final comparison and publication; dashboard writes are serialized.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-16",
@@ -319,7 +319,7 @@
       "resolution": "Open nonzero hourly minutes as Custom and retain the original schedule on command-only edits.",
       "regressions": "cron.test.js; processes-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "SH-01",
@@ -331,7 +331,7 @@
       "resolution": "Revalidate recognized feature authentication failures, redirect confirmed expiry to sign-in, retain identity on transient failures and fence login/logout response races. Keep a nonsensitive account owner ID through reload and clear a prior or unknown owner's working stores on sign-in.",
       "regressions": "api-auth-recovery.test.js; auth-recovery.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-07",
@@ -343,7 +343,7 @@
       "resolution": "Compute IPv4 CIDR membership for loopback instead of matching the host spelling.",
       "regressions": "allowlist.test.js",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "AW-10",
@@ -355,7 +355,7 @@
       "resolution": "Describe empty returned merged block view without claiming complete engine enforcement.",
       "regressions": "security-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-04",
@@ -367,7 +367,7 @@
       "resolution": "Keep saved-query handoff pending at 24-tab capacity and accept it when a slot opens.",
       "regressions": "database-query.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "DDP-05",
@@ -379,7 +379,7 @@
       "resolution": "Clear job editor drafts on explicit close and successful save.",
       "regressions": "backups-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-04",
@@ -391,7 +391,7 @@
       "resolution": "Clear only successfully moved Cut sources; preserve canceled, skipped or failed sources.",
       "regressions": "files-ui.spec.ts",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-08",
@@ -400,10 +400,10 @@
         "/processes/scheduled"
       ],
       "original_kind": "Defect",
-      "resolution": "Reject malformed field separators/bounds/steps, preserve environment whitespace and native leading-star day semantics.",
+      "resolution": "Reject malformed field separators/bounds/steps, preserve environment whitespace and native leading-star day semantics, and retain app-owned Go scheduler grammar and forecasts separately.",
       "regressions": "cron_test.go; cron.test.js",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-13",
@@ -415,7 +415,7 @@
       "resolution": "Parse extended HTML years then show RFC3339 range/order errors; disable invalid exports/search and validate server download bounds.",
       "regressions": "log-filter.test.js; logs-lens.spec.ts; handlers_logs_export_test.go",
       "limits": "",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     },
     {
       "id": "HT-15",
@@ -427,10 +427,48 @@
       "resolution": "Include UID 0 and known sudo/wheel/admin/docker group routes; state direct sudoers rules are not inspected.",
       "regressions": "access.test.js; system-ui.spec.ts",
       "limits": "Direct sudoers rules and other unknown privilege routes are not parsed.",
-      "status": "implemented; combined validation pending"
+      "status": "implemented; affected local checks passed after scoped rechecks"
     }
   ],
   "validation": {
-    "status": "pending"
-  }
+    "status": "passed",
+    "source_head": "5f978f6e7690ace1ad9d37f59f084d82258b2512",
+    "verification_head": "30349787298abea98a61c00e323001d35d232fe6",
+    "fresh_production_build": "bun run build passed after integration; own server at 127.0.0.1:43159; subsequent changes are tests and documentation only",
+    "required_gate": "scripts/test-changed.sh origin/patch/0.7.5 completed; two menu-release test races corrected; scripts/test-changed.sh 5f978f6e passed the affected process spec and static/unit checks with exit 0",
+    "frontend_static": "Prettier, ESLint and tsc --noEmit passed",
+    "frontend_unit_tests": 3597,
+    "frontend_unit_assertions": "16143",
+    "backend": "go build ./..., scoped go vet and selected tests in eight changed packages passed; additional guarded-write/FIFO and Docker decoder race checks passed",
+    "browser": {
+      "passed": 1162,
+      "skipped": 33,
+      "failed_after_correction": 0,
+      "scope": "1,195 reachable cases selected by the changed-file gate; whole browser suite not run",
+      "full_run": {
+        "passed": 1160,
+        "skipped": 33,
+        "failed": 2,
+        "duration": "19.1m"
+      },
+      "final_process_spec_recheck": {
+        "passed": 37,
+        "skipped": 0,
+        "failed": 0,
+        "duration": "45.6s"
+      },
+      "additional_focus_repetitions": "Both corrected desktop hover/menu cases passed three repetitions each (six total) at workers=3",
+      "skip_reason": "32 optional screenshot captures and one legacy Redis-cursor case superseded by an active database-redis.spec.ts regression",
+      "timing_correction": "Tests await Radix menu closure and trigger-focus restoration before blurring, preserving every row identity/order/inspection assertion; application code is unchanged"
+    },
+    "earlier_failures": "The pre-integration run had 1,117 passed, 33 skipped and five failures. One exposed a canonical upload-path/listing-refresh regression, fixed; four were outdated selectors/fixture expectations. All five passed on the fresh integrated build and in the broad recheck.",
+    "live_integration_limits": "No production restart, live SSH/account mutations, package upgrades, native database restore or real remote streams exercised. Native export bounds, daemon timezone/DST variability and external-write race limits remain documented.",
+    "local_evidence": [
+      "/home/ubuntu/dashboard-audit-fixes/build-postmerge.log",
+      "/home/ubuntu/dashboard-audit-fixes/changed-gate-postmerge.log",
+      "/home/ubuntu/dashboard-audit-fixes/changed-gate-delta.log",
+      "/home/ubuntu/dashboard-audit-fixes/postmerge-hover-traces"
+    ]
+  },
+  "integration_base": "90d30d6717c8d73a85fbbdabb61c041de293111e"
 }
