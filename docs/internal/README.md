@@ -110,6 +110,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-14-non-network-fixes/README.md`](../audits/2026-10-14-non-network-fixes/README.md)
+  — all 34 non-network audit findings, their fixes, focused regressions and operational limits.
+
 - [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
   — scored networking feature map, current implementation gaps, official competitor research and
   prioritized proposals from single-host recovery through an optional future network fabric.

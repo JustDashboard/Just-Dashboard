@@ -1429,12 +1429,15 @@ export type CronJob = {
   comment?: string
   raw: string
   disabled: boolean
+  timeZone?: string
 }
 
 export type Crontab = {
   user: string
   source: string
   raw: string
+  revision?: string
+  timeZone?: string
   jobs: CronJob[]
   env: string[]
   comments: string[]
@@ -1690,6 +1693,7 @@ export type FileListing = {
 }
 
 export type FileContent = {
+  revision?: string
   path: string
   content: string
   size: number
@@ -5118,6 +5122,7 @@ export type ApiToken = {
 }
 
 export type SessionInfo = {
+  authMethod?: "unknown" | "password" | "totp" | "recovery"
   id: string
   userId: number
   twoFactorPassed: boolean

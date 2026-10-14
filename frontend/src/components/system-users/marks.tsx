@@ -58,11 +58,15 @@ export function accountProduct(user: Pick<SystemUser, "username" | "system">) {
   return ACCOUNTS[name] ?? ACCOUNTS[name.split(/[-_]/)[0]]
 }
 
-/** The groups that may run anything as root; membership is what makes an account an administrator. */
+/** Known group-based root access; direct sudoers rules are not inspected. */
 const ADMIN_GROUPS = new Set(["sudo", "wheel", "admin"])
 
-export function isAdmin(user: Pick<SystemUser, "groups">) {
-  return user.groups.some((group) => ADMIN_GROUPS.has(group))
+export function isAdmin(user: Pick<SystemUser, "groups"> & Partial<Pick<SystemUser, "uid">>) {
+  return (
+    user.uid === 0 ||
+    user.groups.includes("docker") ||
+    user.groups.some((group) => ADMIN_GROUPS.has(group))
+  )
 }
 
 /** The account on the tile its list lines up on: a face for a person, a product or a glyph for the rest. */

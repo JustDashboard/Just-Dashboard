@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
 
@@ -378,6 +379,12 @@ const crontab = {
   comments: ["nightly backup"],
 }
 
+const guardedCrontab = {
+  ...crontab,
+  revision: createHash("sha256").update(crontab.raw).digest("hex"),
+  timeZone: "UTC",
+}
+
 async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -498,7 +505,7 @@ async function mockHost(page: Page): Promise<LogMocks> {
     if (path === "/systemd/nginx.service") return json(route, unitDetail)
     if (path === "/systemd/postgresql.service") return json(route, failedDetail)
     if (path === "/cron/users") return json(route, ["root", "deploy"])
-    if (path === "/cron/user/root") return json(route, crontab)
+    if (path === "/cron/user/root") return json(route, guardedCrontab)
     if (path === "/cron/system") {
       return json(route, [
         {
@@ -1605,6 +1612,9 @@ for (const [surface, width] of (["live", "pm2", "services", "timers"] as const).
     await expect.poll(() => reads).toBeGreaterThan(finalReads)
     await expect(rows.first()).toContainText(fixture.reading)
     await page.keyboard.press("Escape")
+    await expect(menu).toBeHidden()
+    // The menu restores trigger focus asynchronously before inspection can be released.
+    await expect(rows.first().getByRole("button", { name: "More actions" })).toBeFocused()
     await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
     await page.mouse.move(0, 0)
     await expect
@@ -1624,7 +1634,7 @@ test("cron disable updates its existing row and keeps keyboard focus on the togg
       return json(route, { exitCode: 0 })
     }
     return json(route, {
-      ...crontab,
+      ...guardedCrontab,
       jobs: crontab.jobs.map((job, index) =>
         index === 0 && disabled ? { ...job, disabled: true, raw: `# ${job.raw}` } : job,
       ),
@@ -1725,3 +1735,90 @@ for (const surface of ["pm2", "services"] as const) {
     expect(await table.evaluate((element) => element.isConnected)).toBe(true)
   })
 }
+
+test("cron edits preserve a nonzero hourly minute and keep a conflicted draft", async ({
+  page,
+}) => {
+  await mockHost(page)
+  const raw = "MAILTO=ops@example.com\n15 * * * * /usr/local/bin/hourly\n"
+  const revision = createHash("sha256").update(raw).digest("hex")
+  const writes: { content: string; expectedRevision: string }[] = []
+  await page.route("**/api/v1/cron/user/root", async (route) => {
+    if (route.request().method() === "PUT") {
+      writes.push(route.request().postDataJSON())
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "content_conflict",
+          message: "Crontab changed since it was opened",
+        }),
+      })
+    }
+    return json(route, {
+      ...guardedCrontab,
+      raw,
+      revision,
+      timeZone: "America/New_York",
+      jobs: [
+        {
+          line: 2,
+          schedule: "15 * * * *",
+          command: "/usr/local/bin/hourly",
+          raw: "15 * * * * /usr/local/bin/hourly",
+          disabled: false,
+          timeZone: "America/New_York",
+        },
+      ],
+    })
+  })
+  await page.goto("/processes/scheduled")
+  await page
+    .getByRole("row", { name: /hourly/ })
+    .getByRole("button", { name: "Edit", exact: true })
+    .click()
+  const form = page.getByRole("dialog", { name: "Edit cron job" })
+  await expect(form.getByLabel("Expression", { exact: true })).toHaveValue("15 * * * *")
+  await form.getByLabel("Command", { exact: true }).fill("/usr/local/bin/hourly-updated")
+  await form.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toEqual({
+    content: "MAILTO=ops@example.com\n15 * * * * /usr/local/bin/hourly-updated\n",
+    expectedRevision: revision,
+  })
+  await expect(form).toContainText("Crontab was not saved")
+  await expect(form.getByLabel("Command", { exact: true })).toHaveValue(
+    "/usr/local/bin/hourly-updated",
+  )
+  const storage = await page.evaluate(() => JSON.stringify({ ...sessionStorage, ...localStorage }))
+  expect(storage).not.toContain("MAILTO=ops@example.com")
+  expect(storage).not.toContain("/usr/local/bin/hourly-updated")
+})
+
+test("adding a cron job waits for the existing tab and sends its revision", async ({ page }) => {
+  await mockHost(page)
+  let release!: () => void
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const writes: { content: string; expectedRevision: string }[] = []
+  await page.route("**/api/v1/cron/user/root", async (route) => {
+    if (route.request().method() === "PUT") {
+      writes.push(route.request().postDataJSON())
+      return json(route, { ok: true })
+    }
+    await waiting
+    return json(route, guardedCrontab)
+  })
+  await page.goto("/processes/scheduled")
+  await expect(page.getByRole("button", { name: "Add job", exact: true })).toBeDisabled()
+  release()
+  await page.getByRole("button", { name: "Add job", exact: true }).click()
+  const form = page.getByRole("dialog", { name: "Add cron job" })
+  await form.getByLabel("Command", { exact: true }).fill("/usr/local/bin/new-job")
+  await form.getByRole("button", { name: "Add job", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].content).toContain(guardedCrontab.raw)
+  expect(writes[0].content).toContain("/usr/local/bin/new-job")
+  expect(writes[0].expectedRevision).toBe(guardedCrontab.revision)
+})

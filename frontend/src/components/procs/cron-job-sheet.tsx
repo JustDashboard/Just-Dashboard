@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import Link from "next/link"
 import { Clock, Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { describeCron, nextCronRun } from "@/lib/cron"
+import { describeCron, nextCronRun, supportsCronTimeZone } from "@/lib/cron"
 import { timestamp } from "@/lib/format"
 import { exactValue } from "@/lib/log-filter"
 import { countdown, cronProgram, cronRunsBetween, RUN_CAP } from "@/lib/schedule"
@@ -48,10 +48,12 @@ export function WeekStrip({
   schedule,
   color = KIND.cron.color,
   className,
+  timeZone,
 }: {
   schedule: string
   color?: string
   className?: string
+  timeZone?: string
 }) {
   const now = useNow(60_000)
   const today = startOfDay(now)
@@ -60,9 +62,9 @@ export function WeekStrip({
       Array.from({ length: 7 }, (_, i) => {
         const from = startOfDay(today + i * DAY + 12 * HOUR)
         const until = startOfDay(from + DAY + 12 * HOUR)
-        return { from, until, ...cronRunsBetween(schedule, from - 1, until - 1) }
+        return { from, until, ...cronRunsBetween(schedule, from - 1, until - 1, RUN_CAP, timeZone) }
       }),
-    [schedule, today],
+    [schedule, today, timeZone],
   )
   const place = (at: number, from: number, until: number) => ((at - from) / (until - from)) * 100
 
@@ -225,18 +227,24 @@ function CronJobDetail({
   const minute = Math.floor(now / 60_000) * 60_000
   const reboot = job.schedule.trim().toLowerCase() === "@reboot"
   const next = useMemo(
-    () => (job.disabled ? undefined : nextCronRun(job.schedule, new Date(minute))?.getTime()),
+    () =>
+      job.disabled
+        ? undefined
+        : nextCronRun(job.schedule, new Date(minute), job.timeZone)?.getTime(),
     [job, minute],
   )
   const day = useMemo(
-    () => (job.disabled ? undefined : cronRunsBetween(job.schedule, minute, minute + DAY)),
+    () =>
+      job.disabled
+        ? undefined
+        : cronRunsBetween(job.schedule, minute, minute + DAY, RUN_CAP, job.timeZone),
     [job, minute],
   )
   const week = useMemo(
     () =>
       job.disabled
         ? undefined
-        : cronRunsBetween(job.schedule, minute, minute + 7 * DAY, 7 * RUN_CAP),
+        : cronRunsBetween(job.schedule, minute, minute + 7 * DAY, 7 * RUN_CAP, job.timeZone),
     [job, minute],
   )
   const sources = useMemo(() => (cron ? [cron] : []), [cron])
@@ -291,7 +299,9 @@ function CronJobDetail({
                 ? "the line is commented out"
                 : reboot
                   ? "only when the server starts"
-                  : "never matches a date"
+                  : job.timeZone && !supportsCronTimeZone(job.timeZone)
+                    ? "forecast unavailable for this time zone"
+                    : "never matches a date"
           }
         />
         <StatTile
@@ -335,6 +345,7 @@ function CronJobDetail({
           <PanelBody className="pt-3">
             <WeekStrip
               schedule={job.schedule}
+              timeZone={job.timeZone}
               color={color}
               className={cn(job.disabled && "opacity-40")}
             />

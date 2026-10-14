@@ -498,6 +498,7 @@ function useInsights(props: InsightsProps) {
     setError(null)
     try {
       const window = resolveRange(p.range, p.since, p.until)
+      if (window.error) throw new Error(window.error)
       if (window.since && window.until && Date.parse(window.since) >= Date.parse(window.until)) {
         throw new Error("The start of the log window must be before its end.")
       }

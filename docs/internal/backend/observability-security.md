@@ -585,3 +585,20 @@ command is a file whose **parent** is a bin directory (`/usr/bin` is in every fi
 `/man/man` (translated pages live under `de/man1`); and the page to render is **ranked**, or coreutils
 shows TEST(1) and openssh-client shows scp. `stripOverstrike` undoes nroff bold in four lines rather than
 shelling to `col -b`, which lives in the same package whose absence already costs the login records.
+
+## Truthful empty blocks and package outcomes
+
+The merged intrusion block list's empty wording states that no blocks were returned in this view;
+it does not infer that every engine blocks nobody. Engine availability and community decisions remain
+separate evidence. The allowlist editor's IPv4 loopback helper performs prefix membership, so a CIDR
+such as `127.0.0.0/8` correctly covers `127.0.0.1` without accepting unrelated prefixes.
+
+Package installation outcomes are tracked by accepted package/job identity, independently of the
+currently viewed console and retained across tab changes. A failed or canceled attempt can be retried;
+a terminal job poll wins over stale running console status, and old attempts cannot overwrite the latest one.
+Completion re-reads catalogue installed flags, installed searches and inventory/update readings.
+Upgrade confirmations describe the native manager: ordinary APT holds back dependency additions and
+removals, security-only APT retains its simulated exact candidate contract, dnf/yum and zypper may add
+or replace dependencies, pacman may also remove replacements, and apk may add/replace dependencies.
+The UI does not promise that affected services cannot restart. No live package upgrade is needed for
+these regressions: unit outcome tests and browser fixtures cover retries, refreshes and six managers.

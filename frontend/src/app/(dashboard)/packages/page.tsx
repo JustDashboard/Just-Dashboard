@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { InstallPanel } from "@/components/packages/install-panel"
+import { upgradeDescription } from "@/components/packages/upgrade-description"
 import { PackageLogView } from "@/components/packages/log-view"
 import { OriginFact, PackageMark, VersionTo, managerProduct } from "@/components/packages/marks"
 import { HUE } from "@/components/overview/readings"
@@ -148,13 +149,12 @@ export default function PackagesPage() {
       description: (
         <>
           <p>
-            Runs the host&rsquo;s package manager
-            {securityOnly ? ", restricted to the security pocket" : ""}. Services whose packages
-            change are restarted.
+            {upgradeDescription(data?.manager ?? report?.manager, securityOnly)} Affected services
+            may restart.
           </p>
           <p className="text-muted-foreground">
-            New packages are never installed and nothing is removed. The output appears below as it
-            happens, and the upgrade keeps running if you close this page.
+            The output appears below as it happens, and the upgrade keeps running if you close this
+            page.
           </p>
         </>
       ),
@@ -648,7 +648,16 @@ export default function PackagesPage() {
             )}
 
             {view === "install" && (
-              <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
+              <InstallPanel
+                manager={data.manager}
+                onJob={console_.attach}
+                onInspect={setInspect}
+                observedJob={console_.job}
+                onSettled={() => {
+                  inventory.refresh()
+                  updates.refresh()
+                }}
+              />
             )}
 
             {view === "log" && (

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
@@ -152,6 +153,72 @@ func TestBackupFailsWhenADatabaseDumpFails(t *testing.T) {
 	}
 	if run.Manifest != nil && run.Manifest.Complete {
 		t.Fatal("a run without its dump claims completeness")
+	}
+}
+
+func TestNativeDumpOnlyJobRunsAndRestoresWithoutFilesystemSources(t *testing.T) {
+	db, err := storetest.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	root := t.TempDir()
+	dumper := &fakeDumper{
+		content:   map[int64]string{7: "PGDMP database-only canary"},
+		described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop", Driver: "postgres", Database: "shop"}},
+	}
+	s := NewStore(db, nil, files.New([]string{root})).WithDatabaseValidator(dumper.DescribeDatabase)
+	definition := &Job{Name: "database-only", DatabaseDumps: []int64{7},
+		TargetKind: TargetLocal, Target: TargetConfig{Path: filepath.Join(root, "archives")},
+		Enabled: true, Schedule: "0 3 * * *"}
+	job, err := s.Create(t.Context(), definition, nil)
+	if err != nil {
+		t.Fatalf("create a scheduled dump-only job: %v", err)
+	}
+	job.Name = "updated database-only"
+	if job, err = s.Update(t.Context(), job.ID, job, nil); err != nil {
+		t.Fatalf("edit a dump-only job: %v", err)
+	}
+	runner := NewRunner(s, filepath.Join(root, "staging"), slog.New(slog.NewTextHandler(io.Discard, nil))).WithDatabaseDumper(dumper)
+	run, err := runner.Execute(t.Context(), job.ID, "test")
+	if err != nil || run.Status != StatusSuccess {
+		t.Fatalf("dump-only run = %+v, %v", run, err)
+	}
+	if run.Manifest == nil || !run.Manifest.Complete || len(run.Manifest.Sources) != 0 || len(run.Manifest.DatabaseDumps) != 1 {
+		t.Fatalf("dump-only manifest = %+v", run.Manifest)
+	}
+	entries, err := runner.ListArchive(t.Context(), run.ID, 100)
+	if err != nil || len(entries) != 1 || entries[0].Name != "database-0001/app-7.dump" {
+		t.Fatalf("dump-only archive = %+v, %v", entries, err)
+	}
+	if err := runner.VerifyDatabaseCoverage(t.Context(), run.ID, []int64{7}); err != nil {
+		t.Fatalf("dump-only database coverage: %v", err)
+	}
+	destination := filepath.Join(root, "extracted")
+	if _, err := runner.Restore(t.Context(), run.ID, destination); err != nil {
+		t.Fatalf("extract dump-only archive: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "database-0001", "app-7.dump"))
+	if err != nil || string(data) != dumper.content[7] {
+		t.Fatalf("extracted dump = %q, %v", data, err)
+	}
+	if _, err := runner.RestoreDatabase(t.Context(), run.ID, 7, "shop_drill"); err != nil {
+		t.Fatalf("native dump-only restore: %v", err)
+	}
+	if len(dumper.restored) != 1 || dumper.restored[0] != (restoredDump{connectionID: 7, database: "shop_drill", content: dumper.content[7]}) {
+		t.Fatalf("native restore received %+v", dumper.restored)
+	}
+	if _, err := runner.Restore(t.Context(), run.ID, t.TempDir()); err == nil {
+		t.Fatal("dump-only restore bypassed configured file roots")
+	}
+	job.Target.Path = t.TempDir()
+	if _, err := s.Update(t.Context(), job.ID, job, nil); err == nil {
+		t.Fatal("dump-only target bypassed configured file roots")
+	}
+	job.Target.Path = filepath.Join(root, "archives")
+	job.DatabaseDumps = nil
+	if _, err := s.Update(t.Context(), job.ID, job, nil); err == nil {
+		t.Fatal("job with neither sources nor dumps was accepted")
 	}
 }
 

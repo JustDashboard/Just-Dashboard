@@ -305,7 +305,7 @@ test.describe("system users", () => {
     await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
     const line = page.locator("[data-slot='host-identity']")
     await expect(line).toContainText("4 people")
-    await expect(line).toContainText("3 can sign in")
+    await expect(line).toContainText("3 have sign-in routes")
     await expect(line).toContainText("3 SSH keys authorised")
     await expect(line).toContainText("ion")
     // Mira holds sudo and needs no password, so she is the verdict.
@@ -378,7 +378,7 @@ test.describe("system users", () => {
     await page.goto("/system-users")
     await page.waitForLoadState("networkidle")
 
-    await page.getByRole("button", { name: /^Locked/ }).click()
+    await page.getByRole("button", { name: /^Password locked/ }).click()
     await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
     await expect(page.locator("[data-slot='choice-row']")).toContainText("backup")
     await page.getByRole("button", { name: /^All/ }).click()
@@ -560,4 +560,25 @@ test("workspace: mobile audit navigation respects input and sidebar focus", asyn
   await expect(action).toHaveValue("?")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+})
+
+test("password-locked SSH accounts retain their route and uid-0 counts as administration", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.route("**/api/v1/system-users/**", (route) =>
+    json(route, [
+      account({ username: "keyonly", uid: 1100, groups: ["docker"], locked: true, sshKeyCount: 1 }),
+      account({ username: "superuser", uid: 0, groups: [], locked: false }),
+    ]),
+  )
+  await page.goto("/system-users")
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("2 have sign-in routes")
+  const reach = page.getByRole("region", { name: "Root access" })
+  await expect(reach.getByRole("listitem")).toHaveCount(2)
+  await expect(reach).toContainText("does not revoke SSH keys")
+  await expect(page.locator("[data-slot=choice-row]").filter({ hasText: "keyonly" })).toContainText(
+    "Password locked",
+  )
+  await expect(page.getByRole("button", { name: "Unlock password" })).toBeVisible()
 })

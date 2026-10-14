@@ -18,7 +18,7 @@ import { ArrowLeft, ArrowRight, Check, Globe } from "@/components/icons"
 import { Page } from "@/components/page"
 import { ProductGlyph, ProductLogos } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -126,7 +126,7 @@ function protocolFor(os: RdOS, edition: Edition): RdProtocol {
  */
 export function AddComputer({ peer: first }: { peer?: string }) {
   const router = useRouter()
-  const { data } = useRemoteDesktop(0)
+  const { data, error, refresh } = useRemoteDesktop(0)
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<ComputerDraft>(blankDraft)
   const [edition, setEdition] = useState<Edition>("pro")
@@ -201,7 +201,9 @@ export function AddComputer({ peer: first }: { peer?: string }) {
         question={questions[step]}
         steps={<FlowSteps steps={STEPS} current={step} />}
       />
-      {!data ? (
+      {error && !data ? (
+        <ErrorState error={error} onRetry={refresh} retryable />
+      ) : !data ? (
         <Skeleton className="h-72 rounded-xl" />
       ) : step === 0 ? (
         <ChooseComputer

@@ -95,6 +95,9 @@ export default function BackupsPage() {
     if (!incoming) return
     forgetMemoryState("backups.job.new")
     setForm({ prefill: { sources: [incoming] } })
+    const url = new URL(window.location.href)
+    url.searchParams.delete("source")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
   }, [incoming, setForm])
   const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
   const coverage = usePoll(
@@ -130,25 +133,24 @@ export default function BackupsPage() {
   // its native dump, the containers to freeze — so the form waits for it
   // rather than being filled from the id alone. Opened once: the report keeps
   // polling, and a second arrival must not reopen a form being typed into.
-  const openedForDatabase = useRef(false)
+  const openedForDatabase = useRef("")
   useEffect(() => {
-    if (!incomingDatabase || openedForDatabase.current) return
+    if (!incomingDatabase) {
+      openedForDatabase.current = ""
+      return
+    }
+    if (openedForDatabase.current === incomingDatabase) return
     const resource = coverage.data?.resources?.find(
       (item) => item.kind === "database" && String(item.connectionId) === incomingDatabase,
     )
     if (!resource) return
-    openedForDatabase.current = true
+    openedForDatabase.current = incomingDatabase
     forgetMemoryState("backups.job.new")
     setForm({ prefill: prefillFor(resource) })
-  }, [incomingDatabase, coverage.data, setForm])
-
-  useEffect(() => {
-    if (!incoming && !incomingDatabase) return
     const url = new URL(window.location.href)
-    url.searchParams.delete("source")
     url.searchParams.delete("database")
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
-  }, [incoming, incomingDatabase])
+  }, [incomingDatabase, coverage.data, setForm])
 
   const refresh = () => {
     jobs.refresh()
@@ -282,6 +284,7 @@ export default function BackupsPage() {
 
 function prefillFor(res: BackupResource): JobPrefill {
   return {
+    resourceKey: `${res.kind}:${res.id}`,
     name: res.suggest.name,
     sources: res.suggest.sources,
     excludes: res.suggest.excludes,

@@ -32,7 +32,7 @@ import { OperationProgress } from "@/components/operation-progress"
 import { OperationOverlay } from "@/components/operation-overlay"
 import { Detail, DetailList, Page, PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
@@ -379,7 +379,22 @@ export function JobPage() {
                 }
               />
               <PanelBody flush className="pt-3">
-                {runs.loading && !runs.data ? (
+                {runs.error && runs.data && (
+                  <Notice title="Run history could not refresh" tone="warning" className="mb-3">
+                    <p>Showing the last successful reading. {runs.error.message}</p>
+                    <Button size="xs" variant="outline" onClick={runs.refresh} className="mt-2">
+                      Retry run history
+                    </Button>
+                  </Notice>
+                )}
+                {runs.error && !runs.data ? (
+                  <div className="space-y-2">
+                    <ErrorState error={runs.error} />
+                    <Button size="xs" variant="outline" onClick={runs.refresh}>
+                      Retry run history
+                    </Button>
+                  </div>
+                ) : runs.loading && !runs.data ? (
                   <LoadingRows rows={3} />
                 ) : runList.length === 0 ? (
                   <EmptyNote>No runs yet. Run now takes the first one.</EmptyNote>

@@ -1,12 +1,18 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { Check, Download, MagnifyingGlass } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { Job, PackageSearchResult } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import {
+  reconcileInstall,
+  type InstallJob,
+  type InstallJobs,
+} from "@/components/packages/install-jobs"
 import { PackageMark } from "@/components/packages/marks"
 import { ProductLogo } from "@/components/product-logo"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
@@ -67,22 +73,42 @@ export function InstallPanel({
   onJob,
   onInspect,
   manager,
+  observedJob,
+  onSettled,
 }: {
   onJob: (job: Job) => void
   onInspect: (name: string) => void
   manager?: string
+  observedJob?: Job | null
+  onSettled?: () => void
 }) {
   const { can } = useAuth()
   const [query, setQuery] = useSessionState("packages.install.query", "")
   const [answer, setAnswer] = useState<{
     query: string
+    revision: number
     results: PackageSearchResult[]
     error?: string
-  }>({ query: "", results: [] })
+  }>({ query: "", revision: 0, results: [] })
   /** The row whose install is being started, so only that button spins. */
   const [starting, setStarting] = useState("")
-  /** Rows whose install has been handed to a job, so the button stops offering. */
-  const [started, setStarted] = useState<string[]>([])
+  const [installJobs, setInstallJobs] = useSessionState<InstallJobs>("packages.install.jobs", {})
+  const [revision, setRevision] = useState(0)
+  const settledRef = useRef(onSettled)
+  const handled = useRef(new Set<string>())
+  useEffect(() => {
+    settledRef.current = onSettled
+  })
+  const completed = useCallback(
+    (name: string, job: InstallJob) => {
+      if (handled.current.has(job.id)) return
+      handled.current.add(job.id)
+      setInstallJobs((current) => reconcileInstall(current, name, job))
+      setRevision((current) => current + 1)
+      settledRef.current?.()
+    },
+    [setInstallJobs],
+  )
 
   const needle = query.trim()
   // Nothing is *cleared* when the box empties, and nothing is set before the
@@ -96,23 +122,23 @@ export function InstallPanel({
     const timer = setTimeout(() => {
       get<PackageSearchResult[]>("/packages/search", { q: needle }, controller.signal)
         .then((found) => {
-          if (!controller.signal.aborted) setAnswer({ query: needle, results: found })
+          if (!controller.signal.aborted) setAnswer({ query: needle, revision, results: found })
         })
         .catch((err) => {
           if (controller.signal.aborted) return
-          setAnswer({ query: needle, results: [], error: errorMessage(err) })
+          setAnswer({ query: needle, revision, results: [], error: errorMessage(err) })
         })
     }, DEBOUNCE_MS)
     return () => {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [needle])
+  }, [needle, revision])
 
   // What the last request answered belongs to the query that asked for it, so
   // a half-typed box shows nothing rather than the results of two letters ago.
   const live = needle.length >= 2
-  const settled = answer.query === needle
+  const settled = answer.query === needle && answer.revision === revision
   const shown = live && settled ? answer.results : []
   const shownError = live && settled ? answer.error : ""
   const searching = live && !settled
@@ -121,7 +147,7 @@ export function InstallPanel({
     setStarting(name)
     try {
       const job = await post<Job>("/packages/install", { packages: [name] })
-      setStarted((prev) => [...prev, name])
+      setInstallJobs((prev) => ({ ...prev, [name]: { id: job.id, status: job.status } }))
       onJob(job)
       notify.success(`Installing ${name}`, {
         description: "The output is at the top of this page.",
@@ -209,56 +235,126 @@ export function InstallPanel({
 
         {shown.length > 0 && (
           <ChoiceList className="pt-3">
-            {shown.map((result) => {
-              const queued = started.includes(result.name)
-              return (
-                <ChoiceRow
-                  key={result.name}
-                  workspaceItem={{ id: result.name, name: result.name }}
-                  leading={<PackageMark name={result.name} />}
-                  title={<span className="font-mono">{result.name}</span>}
-                  verb={result.name}
-                  description={result.summary || "No description published"}
-                  onSelect={() => onInspect(result.name)}
-                  trailing={
-                    <span className="hidden min-w-0 items-center gap-3 sm:flex">
-                      {result.version && (
-                        <span
-                          className="max-w-40 truncate font-mono text-hint text-muted-foreground"
-                          title={result.version}
-                        >
-                          {result.version}
-                        </span>
-                      )}
-                      {result.repository && <Tag>{result.repository}</Tag>}
-                      {result.installed && <Status verdict="ok" icon={Check} label="Installed" />}
-                    </span>
-                  }
-                  actions={
-                    canInstall && !result.installed ? (
-                      queued ? (
-                        <Status verdict="ok" icon={Check} label="Started" className="px-2" />
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          pending={starting === result.name}
-                          disabled={Boolean(starting)}
-                          title={`${manager ?? "Package manager"} install ${result.name}`}
-                          onClick={() => void install(result.name)}
-                        >
-                          <Download className="size-4" />
-                          Install
-                        </Button>
-                      )
-                    ) : undefined
-                  }
-                />
-              )
-            })}
+            {shown.map((result) => (
+              <InstallResult
+                key={result.name}
+                result={result}
+                job={installJobs[result.name]}
+                observedJob={observedJob}
+                completed={completed}
+                canInstall={canInstall}
+                starting={starting}
+                manager={manager}
+                install={install}
+                onInspect={onInspect}
+              />
+            ))}
           </ChoiceList>
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+function InstallResult({
+  result,
+  job,
+  observedJob,
+  completed,
+  canInstall,
+  starting,
+  manager,
+  install,
+  onInspect,
+}: {
+  result: PackageSearchResult
+  job?: InstallJob
+  observedJob?: Job | null
+  completed: (name: string, job: InstallJob) => void
+  canInstall: boolean
+  starting: string
+  manager?: string
+  install: (name: string) => Promise<void>
+  onInspect: (name: string) => void
+}) {
+  const reading = usePoll(
+    (signal) => get<{ job: Job }>(`/jobs/${job?.id}`, undefined, signal),
+    2000,
+    [job?.id],
+    { enabled: job?.status === "running" },
+  )
+  const live =
+    observedJob?.id === job?.id && observedJob?.status !== "running"
+      ? observedJob
+      : (reading.data?.job ?? job)
+  const finished = useRef("")
+  useEffect(() => {
+    if (!live || live.status === "running" || finished.current === live.id) return
+    finished.current = live.id
+    completed(result.name, live)
+  }, [live, job?.status, completed, result.name])
+  const running = live?.status === "running"
+  const retry = live?.status === "failed" || live?.status === "cancelled"
+  return (
+    <ChoiceRow
+      workspaceItem={{ id: result.name, name: result.name }}
+      leading={<PackageMark name={result.name} />}
+      title={<span className="font-mono">{result.name}</span>}
+      verb={result.name}
+      description={result.summary || "No description published"}
+      onSelect={() => onInspect(result.name)}
+      trailing={
+        <span className="hidden min-w-0 items-center gap-3 sm:flex">
+          {result.version && (
+            <span
+              className="max-w-40 truncate font-mono text-hint text-muted-foreground"
+              title={result.version}
+            >
+              {result.version}
+            </span>
+          )}
+          {result.repository && <Tag>{result.repository}</Tag>}
+          {result.installed && <Status verdict="ok" icon={Check} label="Installed" />}
+        </span>
+      }
+      actions={
+        canInstall && !result.installed ? (
+          running ? (
+            reading.error ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={reading.refresh}
+                title={reading.error.message}
+              >
+                Recheck install status
+              </Button>
+            ) : (
+              <Status state="running" label="Installing…" className="px-2" />
+            )
+          ) : (
+            <div className="flex items-center gap-2">
+              {retry && (
+                <Status
+                  state={live?.status === "failed" ? "failed" : "stopped"}
+                  label={live?.status === "failed" ? "Failed" : "Cancelled"}
+                />
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                pending={starting === result.name}
+                disabled={Boolean(starting)}
+                title={`${manager ?? "Package manager"} install ${result.name}`}
+                onClick={() => void install(result.name)}
+              >
+                <Download className="size-4" />
+                {retry ? "Retry install" : "Install"}
+              </Button>
+            </div>
+          )
+        ) : undefined
+      }
+    />
   )
 }

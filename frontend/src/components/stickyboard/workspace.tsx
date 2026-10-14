@@ -593,7 +593,7 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
 
   const go = useCallback(
     async (href: string) => {
-      if ((await flush()) || !isDirty()) router.push(href)
+      if ((await flush()) && !isDirty()) router.push(href)
       else setLeaving(href)
     },
     [flush, isDirty, router],
@@ -620,16 +620,26 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
   }, [board.id, name])
 
   const duplicateBoard = useCallback(async () => {
-    await flush()
+    if (!(await flush()) || isDirty()) {
+      notify.error(
+        "Save the board before duplicating it",
+        new Error("Your latest changes have not been saved."),
+      )
+      return
+    }
     try {
       const copy = await post<StickyBoard>(`/stickyboards/${board.id}/duplicate`, {
         name: `${savedName.current} copy`.slice(0, 100),
       })
+      if (isDirty()) {
+        notify.info("Board copied; staying here with your newer unsaved changes")
+        return
+      }
       router.push(`/stickyboard/${copy.id}`)
     } catch (cause) {
       notify.error("Could not duplicate the board", cause)
     }
-  }, [board.id, flush, router])
+  }, [board.id, flush, isDirty, router])
 
   const deleteBoard = useCallback(async () => {
     await flush()
@@ -1090,10 +1100,17 @@ function LoadedBoard({ board }: { board: StickyBoard }) {
               maxLength={100}
               readOnly={!canWrite}
               onChange={(event) => setName(event.target.value)}
-              onBlur={() => void rename()}
+              onBlur={(event) => {
+                if (event.currentTarget.dataset.cancelRename === "true") {
+                  delete event.currentTarget.dataset.cancelRename
+                  return
+                }
+                void rename()
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") event.currentTarget.blur()
                 if (event.key === "Escape") {
+                  event.currentTarget.dataset.cancelRename = "true"
                   setName(savedName.current)
                   event.currentTarget.blur()
                 }

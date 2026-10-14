@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Check, ChevronDown, Clock } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { minuteSpan } from "@/lib/format"
+import { logTimeInput, parseLogTimeInput, resolveRange } from "@/lib/log-filter"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,8 +19,7 @@ export type WindowPreset = { id: string; label: string; short: string }
  * the minute its two ends were the same time.
  */
 function localTime(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 19)
+  return Number.isFinite(date.getTime()) ? logTimeInput(date.toISOString()).split(".")[0] : ""
 }
 
 /**
@@ -62,10 +62,10 @@ export function TimeWindow({
   const [to, setTo] = useState("")
   const preset = presets.find((p) => p.id === value)
   const custom = value === "custom"
-  const fromAt = from ? new Date(from) : undefined
-  const toAt = to ? new Date(to) : undefined
-  const backwards = fromAt && toAt && fromAt >= toAt
-  const ready = Boolean(fromAt && toAt && !backwards)
+  const fromAt = from ? parseLogTimeInput(from) : undefined
+  const toAt = to ? parseLogTimeInput(to) : undefined
+  const window = resolveRange("custom", from, to)
+  const ready = Boolean(fromAt && toAt && !window.error)
 
   const label = live
     ? "Live"
@@ -181,6 +181,7 @@ export function TimeWindow({
               type="datetime-local"
               step={1}
               value={from}
+              aria-invalid={Boolean(window.sinceError) || undefined}
               onChange={(e) => setFrom(e.target.value)}
               className="numeric h-8 text-body"
             />
@@ -193,15 +194,18 @@ export function TimeWindow({
               step={1}
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              aria-invalid={backwards || undefined}
+              aria-invalid={Boolean(window.untilError) || undefined}
               className="numeric h-8 text-body"
             />
           </div>
           <div className="flex items-center justify-between gap-3 pt-1">
             <span
-              className={cn("text-hint", backwards ? "text-destructive" : "text-muted-foreground")}
+              className={cn(
+                "text-hint",
+                window.error ? "text-destructive" : "text-muted-foreground",
+              )}
             >
-              {backwards ? "The start must be before the end." : "Your local time."}
+              {window.error ?? "Your local time."}
             </span>
             <Button type="submit" size="sm" disabled={!ready}>
               Apply

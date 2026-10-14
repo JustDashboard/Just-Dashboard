@@ -240,7 +240,8 @@ function RootBlock({ users, onOpen }: { users: SystemUser[]; onOpen: (username: 
       <PanelBody className="pt-1">
         {shown.length === 0 ? (
           <p className="py-3 text-body text-muted-foreground">
-            No account is in sudo, wheel, admin or docker.
+            No known uid-0, sudo, wheel, admin or docker route was found. Direct sudoers rules are
+            not inspected.
           </p>
         ) : (
           <ul>
@@ -270,7 +271,7 @@ function RootBlock({ users, onOpen }: { users: SystemUser[]; onOpen: (username: 
                     {isBare(user) ? (
                       <Status tone="warning" label="No password" />
                     ) : user.locked ? (
-                      <Status tone="stopped" label="Locked" />
+                      <Status tone="unknown" label="Password locked" />
                     ) : (
                       <span className="inline-flex items-center gap-1 text-muted-foreground">
                         <Key aria-hidden className="size-3.5" />
@@ -288,6 +289,10 @@ function RootBlock({ users, onOpen }: { users: SystemUser[]; onOpen: (username: 
             {reach.length - shown.length} more
           </p>
         )}
+        <p className="border-t border-hairline pt-3 text-hint text-muted-foreground">
+          Known uid-0 and group routes; direct sudoers rules are not inspected. A password lock does
+          not revoke SSH keys; host SSH and PAM policy determine whether key access is allowed.
+        </p>
       </PanelBody>
     </Panel>
   )

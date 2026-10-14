@@ -607,13 +607,14 @@ func (c *Client) Logs(ctx context.Context, id string, opts LogOptions) (<-chan L
 	if err != nil {
 		return nil, nil, err
 	}
+	reader := &logReadCloser{ReadCloser: rc}
 	ch := make(chan LogLine, 256)
 	hasTTY := insp.Config != nil && insp.Config.Tty
 	go func() {
 		defer close(ch)
 		defer rc.Close()
 		if hasTTY {
-			scanLines(ctx, rc, "stdout", ch)
+			reader.record(scanLines(ctx, rc, "stdout", ch))
 			return
 		}
 		// stdcopy splits Docker's framed stream; each side is scanned into
@@ -621,7 +622,8 @@ func (c *Client) Logs(ctx context.Context, id string, opts LogOptions) (<-chan L
 		outR, outW := io.Pipe()
 		errR, errW := io.Pipe()
 		go func() {
-			_, copyErr := stdcopy.StdCopy(outW, errW, rc)
+			_, copyErr := stdcopy.StdCopy(outW, errW, &completeLogFrames{Reader: rc})
+			reader.record(copyErr)
 			outW.CloseWithError(copyErr)
 			errW.CloseWithError(copyErr)
 		}()
@@ -631,12 +633,20 @@ func (c *Client) Logs(ctx context.Context, id string, opts LogOptions) (<-chan L
 		// goroutine, the channel and the connection open after the reader
 		// left.
 		done := make(chan struct{}, 2)
-		go func() { scanLines(ctx, outR, "stdout", ch); outR.Close(); done <- struct{}{} }()
-		go func() { scanLines(ctx, errR, "stderr", ch); errR.Close(); done <- struct{}{} }()
+		go func() {
+			reader.record(scanLines(ctx, outR, "stdout", ch))
+			outR.Close()
+			done <- struct{}{}
+		}()
+		go func() {
+			reader.record(scanLines(ctx, errR, "stderr", ch))
+			errR.Close()
+			done <- struct{}{}
+		}()
 		<-done
 		<-done
 	}()
-	return ch, rc, nil
+	return ch, reader, nil
 }
 
 func (c *Client) PruneContainers(ctx context.Context) (uint64, []string, error) {

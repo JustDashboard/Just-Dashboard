@@ -304,6 +304,51 @@ test("Logs lists the services that write into it and narrows to one", async ({ p
   )
 })
 
+test("compose conflict keeps the draft until the current file is reviewed", async ({ page }) => {
+  await mockStackDetail(page)
+  let revision = "opened"
+  let content = "name: shop\nservices:\n  web:\n    image: nginx:old\n"
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/docker/stacks/shop/config", (route) => {
+    if (route.request().method() === "GET")
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ path: "/srv/shop/compose.yaml", content, revision }),
+      })
+    const body = route.request().postDataJSON()
+    writes.push(body)
+    if (body.expectedRevision !== revision)
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "content_conflict", message: "Changed on disk" } }),
+      })
+    content = body.content
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ validation: { valid: true, services: ["web"] }, revision: "saved" }),
+    })
+  })
+  await page.goto("/docker/stacks/shop?tab=compose")
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("# MY DRAFT")
+  revision = "external"
+  content = "name: shop\nservices:\n  web:\n    image: nginx:native\n"
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
+  await expect(page.locator(".monaco-editor")).toContainText("MY DRAFT")
+  expect(writes[0].expectedRevision).toBe("opened")
+  await page.getByRole("button", { name: "Review current file", exact: true }).click()
+  await expect(page.getByText("nginx:native", { exact: false })).toBeVisible()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => writes.length).toBe(2)
+  expect(writes[1].expectedRevision).toBe("external")
+})
+
 test("progress: Compose output is visible inside the confirmation while the command runs", async ({
   page,
 }) => {

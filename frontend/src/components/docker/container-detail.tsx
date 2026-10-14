@@ -111,8 +111,17 @@ function ContainerDetailPanel({
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const [detail, setDetail] = useState<ContainerDetail>()
-  const [error, setError] = useState<Error>()
+  const detailPoll = usePoll(
+    (signal) =>
+      get<ContainerDetail>(
+        `/docker/containers/${encodeURIComponent(containerId)}`,
+        undefined,
+        signal,
+      ),
+    10_000,
+    [containerId],
+  )
+  const { data: detail, error, refresh: refreshDetail } = detailPoll
   // Which tab a container opens on. Somebody watching a deploy wants Logs
   // every time, and reopening on Overview is a click paid per container. A
   // link that asked for a specific tab overrides the remembered one — it is
@@ -121,7 +130,14 @@ function ContainerDetailPanel({
   // Seeded once, because this component is keyed on the container and the
   // requested tab: a link to the logs gets the logs, and the moment the reader
   // moves to another tab that choice becomes the remembered one again.
-  const [tab, setTabState] = useState(focusTab ?? remembered)
+  const [requestedTab, setTabState] = useState(focusTab ?? remembered)
+  const running = detail?.state === "running"
+  const shell = can("terminal") && running
+  const tab =
+    ["overview", "usage", "logs", "env", "mounts", "inspect", "configure"].includes(requestedTab) ||
+    (requestedTab === "shell" && shell)
+      ? requestedTab
+      : "overview"
   // The logs' view a press asked for — Events, from the Overview's Recent —
   // handed to the pane once, as a window is.
   const [logView, setLogView] = useState<string>()
@@ -133,7 +149,6 @@ function ContainerDetailPanel({
     },
     [remember],
   )
-  const [reloads, setReloads] = useState(0)
   const [navigation] = useSessionState<{ id: string; name: string }[]>(
     "docker.containers.navigation",
     [],
@@ -150,8 +165,8 @@ function ContainerDetailPanel({
   // Ports table both draw it.
   const routes = usePoll<PortRoute[]>(
     (signal) => get<PortRoute[]>(`/docker/containers/${containerId}/routes`, undefined, signal),
-    0,
-    [containerId, reloads],
+    10_000,
+    [containerId],
   )
 
   // Whether this page has ever had its container, so a 404 can be told apart
@@ -159,31 +174,12 @@ function ContainerDetailPanel({
   const loaded = useRef(false)
 
   useEffect(() => {
-    const controller = new AbortController()
-    get<ContainerDetail>(
-      `/docker/containers/${encodeURIComponent(containerId)}`,
-      undefined,
-      controller.signal,
-    )
-      .then((next) => {
-        loaded.current = true
-        setDetail(next)
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        // Removing a container is done from this page, and the thing the page
-        // is about then stops existing. An error state about a container the
-        // reader just deleted on purpose is not news — the list is.
-        if (err instanceof ApiError && err.status === 404 && loaded.current) {
-          router.replace("/docker/containers")
-          return
-        }
-        setError(err)
-      })
-    return () => controller.abort()
-  }, [containerId, reloads, router])
+    if (detail) loaded.current = true
+    if (error instanceof ApiError && error.status === 404 && loaded.current) {
+      router.replace("/docker/containers")
+    }
+  }, [detail, error, router])
 
-  const running = detail?.state === "running"
   const frames = useContainerFrames(containerId, tab === "overview" && running)
   const verdict = useMemo(() => (detail ? containerVerdict(detail) : undefined), [detail])
   const traffic = useMemo(() => {
@@ -195,10 +191,11 @@ function ContainerDetailPanel({
     return moved >= 0 ? moved / seconds : undefined
   }, [frames])
 
-  const shell = can("terminal") && running
+  const refreshRoutes = routes.refresh
   const changed = useCallback(() => {
-    setReloads((n) => n + 1)
-  }, [])
+    refreshDetail()
+    refreshRoutes()
+  }, [refreshDetail, refreshRoutes])
 
   const views = detail
     ? [
@@ -350,13 +347,7 @@ function ContainerDetailPanel({
             </TabsContent>
 
             <TabsContent value="usage" className="min-h-0 flex-1 overflow-y-auto pt-6">
-              <ContainerUsageTab
-                key={detail.id}
-                detail={detail}
-                onLimitsSaved={() => {
-                  setReloads((n) => n + 1)
-                }}
-              />
+              <ContainerUsageTab key={detail.id} detail={detail} onLimitsSaved={changed} />
             </TabsContent>
 
             {/* Scrolls on a phone, where the readings and a pane worth reading

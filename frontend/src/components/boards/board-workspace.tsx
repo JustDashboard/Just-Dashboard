@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { drainBoardSaves } from "@/lib/board-save"
 import { useRouter } from "next/navigation"
 import {
   CaptureUpdateAction,
@@ -149,56 +150,58 @@ function LoadedBoard({ board }: { board: Board }) {
 
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    // A second caller waits out the save in flight and any save queued behind
-    // it; returning early reported success while the latest change was unsent.
-    while (savingRef.current) await savingRef.current
-    if (stoppedRef.current || abandonedRef.current) return false
-    if (!isDirty()) return true
-    const title = nameRef.current.trim()
-    if (!title) {
-      setSaveState("unnamed")
-      return false
-    }
-    const snapshot = sceneRef.current
-    setSaveState("saving")
-    const task = put<BoardSummary>(`/boards/${board.id}`, {
-      name: title,
-      // "local" is Excalidraw's file format, and the one that keeps `files`:
-      // "database" drops them for a separate image store this server does not
-      // have, so every save was refused and images would have been lost.
-      scene: snapshot
-        ? (JSON.parse(
-            serializeAsJSON(snapshot.elements, snapshot.appState, snapshot.files, "local"),
-          ) as BoardScene)
-        : board.scene,
-      revision: revisionRef.current,
-    })
-      .then((saved) => {
-        revisionRef.current = saved.revision
-        savedNameRef.current = saved.name
-        if (snapshot) savedSignatureRef.current = snapshot.signature
-        clearSaveError()
-        setSaveState(!isDirty() ? "saved" : nameRef.current.trim() ? "pending" : "unnamed")
-        return true
-      })
-      .catch((cause) => {
-        if (cause instanceof ApiError && cause.code === "board_conflict") {
-          stoppedRef.current = "conflict"
-          setSaveState("conflict")
-        } else if (cause instanceof ApiError && cause.code === "board_not_found") {
-          stoppedRef.current = "missing"
-          setSaveState("missing")
-        } else {
-          setSaveState("error")
-          clearSaveError()
-          errorToastRef.current = notify.error("Drawing was not saved", cause)
-        }
+    if (savingRef.current) return savingRef.current
+    const task = drainBoardSaves(isDirty, async () => {
+      if (stoppedRef.current || abandonedRef.current) return false
+      const title = nameRef.current.trim()
+      if (!title) {
+        setSaveState("unnamed")
         return false
+      }
+      const snapshot = sceneRef.current
+      setSaveState("saving")
+      return put<BoardSummary>(`/boards/${board.id}`, {
+        name: title,
+        // "local" is Excalidraw's file format, and the one that keeps `files`:
+        // "database" drops them for a separate image store this server does not
+        // have, so every save was refused and images would have been lost.
+        scene: snapshot
+          ? (JSON.parse(
+              serializeAsJSON(snapshot.elements, snapshot.appState, snapshot.files, "local"),
+            ) as BoardScene)
+          : board.scene,
+        revision: revisionRef.current,
       })
+        .then((saved) => {
+          revisionRef.current = saved.revision
+          savedNameRef.current = saved.name
+          if (snapshot) savedSignatureRef.current = snapshot.signature
+          clearSaveError()
+          setSaveState(!isDirty() ? "saved" : nameRef.current.trim() ? "pending" : "unnamed")
+          return true
+        })
+        .catch((cause) => {
+          if (cause instanceof ApiError && cause.code === "board_conflict") {
+            stoppedRef.current = "conflict"
+            setSaveState("conflict")
+          } else if (cause instanceof ApiError && cause.code === "board_not_found") {
+            stoppedRef.current = "missing"
+            setSaveState("missing")
+          } else {
+            setSaveState("error")
+            clearSaveError()
+            errorToastRef.current = notify.error("Drawing was not saved", cause)
+          }
+          return false
+        })
+    })
     savingRef.current = task
-    const saved = await task
-    if (savingRef.current === task) savingRef.current = null
-    return saved
+    try {
+      return await task
+    } finally {
+      if (savingRef.current === task) savingRef.current = null
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
   }, [board.id, board.scene, clearSaveError, isDirty])
 
   const changed = useCallback(() => {
@@ -317,7 +320,7 @@ function LoadedBoard({ board }: { board: Board }) {
   // A save that cannot go through used to make Back and card links do
   // nothing at all; now leaving is a choice the operator makes.
   async function go(href: string) {
-    if (await flush()) router.push(href)
+    if ((await flush()) && !isDirty()) router.push(href)
     else setLeaving(href)
   }
 

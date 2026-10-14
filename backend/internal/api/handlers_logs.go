@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -637,6 +638,11 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 		line.No = n
 		c.Feed(&line)
 	}
+	if ctx.Err() != nil {
+		c.Incomplete()
+	} else if err := dockerx.LogReadError(closer); err != nil {
+		return nil, fmt.Errorf("container %s log read failed: %w", id, err)
+	}
 	return c.Result(), nil
 }
 
@@ -823,6 +829,8 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 	if err != nil {
 		return 0, err
 	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, err
@@ -830,11 +838,12 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
+	finished := false
 	defer func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
+		if !finished {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 		}
-		cmd.Wait()
 	}()
 	count := 0
 	sc := bufio.NewScanner(stdout)
@@ -850,7 +859,22 @@ func (s *Server) streamJournalInto(ctx context.Context, opts procs.JournalOption
 			}
 		}
 	}
-	return count, sc.Err()
+	if err := sc.Err(); err != nil {
+		return count, err
+	}
+	if ctx.Err() != nil {
+		return count, nil
+	}
+	err = cmd.Wait()
+	finished = true
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if len(detail) > 4096 {
+			detail = detail[:4096]
+		}
+		return count, fmt.Errorf("journalctl: %s: %w", detail, err)
+	}
+	return count, nil
 }
 
 // journalLine maps a journal record onto the viewer's one line shape, reading
@@ -965,8 +989,10 @@ func readDockerLine(line *logsx.Line, stamp *time.Time, text string, l dockerx.L
 	// is the page inventing a reading.
 }
 
-// handleLogDownload streams the requested window straight to the client rather
-// than buffering it, so exporting a day out of a large log costs no memory.
+// File-backed exports stream without a selected-line cap. Native sources use
+// the bounded search reader and retain its coverage evidence in the artifact.
+const nativeLogExportLimit = 20_000
+
 func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	raw := q.Get("source")
@@ -981,9 +1007,8 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	// An export is a file to keep, so it is ordered oldest-first and not
-	// capped: the cap exists to keep a browser responsive, which a download
-	// does not need.
+	// File-backed exports keep every selected line, oldest first. Native
+	// readers apply their bound below and record the resulting coverage.
 	opts.Head = true
 	opts.Limit = 0
 
@@ -993,6 +1018,9 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 				return httpx.BadRequest("%s must be an RFC3339 timestamp", spec.name)
 			}
 		}
+	}
+	if !opts.Since.IsZero() && !opts.Until.IsZero() && !opts.Since.Before(opts.Until) {
+		return httpx.BadRequest("the start of the log window must be before its end")
 	}
 
 	ctx, cancel := timeoutCtx(r, 5*time.Minute)
@@ -1009,9 +1037,11 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 	if name == "" {
 		name = "logs"
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
-		name+"-"+time.Now().UTC().Format("20060102-150405")+".log"))
+	setDownloadHeaders := func() {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
+			name+"-"+time.Now().UTC().Format("20060102-150405")+".log"))
+	}
 
 	targets := []logsx.SearchTarget{{Path: target.path}}
 	switch target.kind {
@@ -1024,7 +1054,7 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 	case logsx.KindDocker, logsx.KindStack, logsx.KindJournal, logsx.KindJournalID, logsx.KindKernel:
 		// None is a file, so the export is the search result written out
 		// rather than a byte range of something on disk.
-		opts.Limit = 20000
+		opts.Limit = nativeLogExportLimit
 		var res *logsx.SearchResult
 		var err error
 		switch target.kind {
@@ -1037,6 +1067,17 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 		}
 		if err != nil {
 			s.Log.Error("log export failed", "source", raw, "err", err)
+			switch target.kind {
+			case logsx.KindDocker:
+				return s.dockerErr(err)
+			case logsx.KindStack:
+				return err
+			default:
+				return mapProcsError(err)
+			}
+		}
+		setDownloadHeaders()
+		if err := writeNativeLogExportHeader(w, raw, target.kind, opts, q.Get("boot") == "true", res); err != nil {
 			return nil
 		}
 		for _, line := range res.Lines {
@@ -1051,12 +1092,63 @@ func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error
 		return nil
 	}
 
-	if _, err := s.modules.logs.RangeTargets(ctx, targets, opts, w); err != nil {
-		// Headers are already committed; the truncated body plus the audit
-		// record is the honest outcome here.
+	setDownloadHeaders()
+	if written, err := s.modules.logs.RangeTargets(ctx, targets, opts, w); err != nil {
 		s.Log.Error("log export failed", "path", target.path, "err", err)
+		if written == 0 {
+			w.Header().Del("Content-Disposition")
+			return httpx.Internal(err)
+		}
+		_, _ = fmt.Fprintf(w, "\n# WARNING: this export stopped before completing the requested window: %s\n", strings.ReplaceAll(err.Error(), "\n", " "))
 	}
 	return nil
+}
+
+func writeNativeLogExportHeader(w http.ResponseWriter, source string, kind logsx.SourceKind, opts logsx.SearchOptions, boot bool, res *logsx.SearchResult) error {
+	var header strings.Builder
+	clean := func(value string) string { return strings.NewReplacer("\r", " ", "\n", " ").Replace(value) }
+	fmt.Fprintf(&header, "# Just Dashboard native log export\n# Source: %s\n# Order: oldest first\n# Selected-line limit: %d\n# Returned lines: %d; matching records: %d; scanned lines: %d\n",
+		clean(source), nativeLogExportLimit, len(res.Lines), res.Matched, res.Scanned)
+	for _, bound := range []struct {
+		label string
+		at    time.Time
+	}{{"Requested start", opts.Since}, {"Requested end", opts.Until}} {
+		value := "unbounded"
+		if !bound.at.IsZero() {
+			value = bound.at.Format(time.RFC3339Nano)
+		}
+		fmt.Fprintf(&header, "# %s: %s\n", bound.label, value)
+	}
+	partial := false
+	if res.Truncated {
+		partial = true
+		fmt.Fprintf(&header, "# WARNING: output is capped at the first %d selected lines; later matching lines are omitted.\n", nativeLogExportLimit)
+	}
+	if !res.Complete {
+		partial = true
+		header.WriteString("# WARNING: the native scan did not finish; some requested lines may be missing (five-minute scan limit).\n")
+	}
+	if (kind == logsx.KindJournal || kind == logsx.KindJournalID || kind == logsx.KindKernel) && opts.Since.IsZero() && !boot {
+		partial = true
+		header.WriteString("# WARNING: without a start date the journal is limited to the last 48 hours; older history was not read.\n")
+	}
+	for _, file := range res.Files {
+		if file.Error != "" {
+			partial = true
+			name := file.Name
+			if name == "" {
+				name = file.Path
+			}
+			fmt.Fprintf(&header, "# WARNING: source %s could not be read: %s\n", clean(name), clean(file.Error))
+		}
+	}
+	coverage := "complete for the requested window available from this source"
+	if partial {
+		coverage = "PARTIAL; see warnings above"
+	}
+	fmt.Fprintf(&header, "# Export coverage: %s\n\n", coverage)
+	_, err := fmt.Fprint(w, header.String())
+	return err
 }
 
 // streamMeta is the frame the socket opens with. A viewer that starts with a

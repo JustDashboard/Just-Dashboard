@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { IMAGES, mockImages } from "./docker-images-fixture"
+import { IMAGES, UPDATES, mockImages } from "./docker-images-fixture"
 
 /**
  * /docker/images after its overhaul: the engine's identity line, a band of
@@ -224,3 +224,25 @@ for (const width of [390, 768, 1024, 1280, 1720]) {
     expect(clipped).toBeLessThanOrEqual(1)
   })
 }
+
+test("unknown registry checks never claim that every image is current", async ({ page }) => {
+  await mockImages(page)
+  await page.route("**/api/v1/docker/images/updates", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        Object.fromEntries(
+          Object.keys(UPDATES).map((ref) => [
+            ref,
+            { ref, state: "unknown", checkedAt: new Date().toISOString() },
+          ]),
+        ),
+      ),
+    }),
+  )
+  await page.goto("/docker/images")
+  const identity = page.locator("[data-slot=host-identity]")
+  await expect(identity).toContainText("unverified")
+  await expect(identity).not.toContainText("Tags in use are current")
+})

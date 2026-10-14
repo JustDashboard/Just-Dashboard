@@ -5,13 +5,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 )
 
 // Compose, as a thing you can watch happen.
@@ -613,10 +617,21 @@ func (c *Client) ComposeAvailable(ctx context.Context) bool {
 // the wrong thing, which is only discovered after the stack comes back up
 // wrong.
 func WriteComposeFile(path, content string) error {
-	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
-		if previous, err := os.ReadFile(path); err == nil {
-			_ = os.WriteFile(path+".bak", previous, info.Mode().Perm())
-		}
+	return WriteComposeFileChecked(path, content, nil)
+}
+
+func WriteComposeFileChecked(path, content string, expected *string) error {
+	unlock := contentguard.Lock(path)
+	defer unlock()
+	previous, err := readComposeForWrite(path)
+	if expected != nil && os.IsNotExist(err) {
+		return contentguard.ErrConflict
+	}
+	if err != nil && (expected != nil || !os.IsNotExist(err)) {
+		return err
+	}
+	if err := contentguard.Check(string(previous), expected); err != nil {
+		return err
 	}
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
@@ -634,13 +649,56 @@ func WriteComposeFile(path, content string) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return err
 	}
+	if expected != nil {
+		current, err := readComposeForWrite(path)
+		if os.IsNotExist(err) {
+			return contentguard.ErrConflict
+		}
+		if err != nil {
+			return err
+		}
+		if err := contentguard.Check(string(current), expected); err != nil {
+			return err
+		}
+		previous = current
+	}
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		if err := os.WriteFile(path+".bak", previous, info.Mode().Perm()); err != nil {
+			return err
+		}
+	}
 	return os.Rename(tmpName, path)
+}
+
+// A native writer can replace a config with a FIFO after the editor opens it.
+// Nonblocking open lets the type check refuse it instead of hanging a save.
+func readComposeForWrite(path string) ([]byte, error) {
+	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+		return nil, contentguard.ErrConflict
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, contentguard.ErrConflict
+	}
+	return io.ReadAll(file)
 }
 
 // NewStack creates a stack directory with a compose file in it.

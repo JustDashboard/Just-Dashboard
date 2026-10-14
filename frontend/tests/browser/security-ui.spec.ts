@@ -1475,3 +1475,28 @@ test("workspace: security filters are shareable and Back restores the previous q
   await expect(query).toHaveValue("")
   await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
 })
+
+test("empty merged blocks describe only listed evidence when an engine is unread", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  await page.route("**/api/v1/security/blocks", (route) =>
+    json(route, {
+      entries: [],
+      distinct: 0,
+      duplicated: 0,
+      covered: 0,
+      communityOnly: 4,
+      truncated: false,
+      engines: [
+        { engine: "fail2ban", read: true, count: 0 },
+        { engine: "crowdsec", read: false, count: 0, note: "not read" },
+      ],
+    }),
+  )
+  await page.goto("/security/intrusion")
+  await expect(page.getByText("No blocked addresses are listed in this reading.")).toBeVisible()
+  await expect(page.getByText(/Not read: CrowdSec/)).toBeVisible()
+  await expect(page.getByText(/4 community decisions/)).toBeVisible()
+  await expect(page.getByText("No engine is refusing an address right now.")).toHaveCount(0)
+})

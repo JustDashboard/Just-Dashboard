@@ -149,8 +149,8 @@ func (j *Job) Validate() error {
 	if strings.TrimSpace(j.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if len(j.Sources) == 0 {
-		return fmt.Errorf("at least one source path is required")
+	if len(j.Sources) == 0 && len(j.DatabaseDumps) == 0 {
+		return fmt.Errorf("at least one source path or database dump is required")
 	}
 	if !j.TargetKind.Valid() {
 		return fmt.Errorf("target must be one of local, s3, b2")

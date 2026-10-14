@@ -55,22 +55,31 @@ export function ExportDialog({
   const [archives, setArchives] = useState(false)
 
   const window = resolveRange(range, since, until)
+  const native = /^(?:docker|stack|journal|journal-id|kernel):/.test(sourceId)
+  const journal = /^(?:journal|journal-id|kernel):/.test(sourceId)
   const hasArchives = (source?.archives ?? 0) > 0
-  const href = downloadUrl("/logs/download", {
-    source: sourceId,
-    ...(withFilter ? filterQuery(filter) : {}),
-    // The same reading as the screen, so `f=event:slow` exports the lines
-    // that were slow there rather than whatever an undetected file calls slow.
-    lens: lens || undefined,
-    ...window,
-    archives: archives && hasArchives ? "true" : undefined,
-    boot: boot ? "true" : undefined,
-  })
+  const href = window.error
+    ? undefined
+    : downloadUrl("/logs/download", {
+        source: sourceId,
+        ...(withFilter ? filterQuery(filter) : {}),
+        // The same reading as the screen, so `f=event:slow` exports the lines
+        // that were slow there rather than whatever an undetected file calls slow.
+        lens: lens || undefined,
+        since: window.since,
+        until: window.until,
+        archives: archives && hasArchives ? "true" : undefined,
+        boot: boot ? "true" : undefined,
+      })
 
   const rangeLabel = TIME_RANGES.find((r) => r.id === range)?.label.toLowerCase() ?? "everything"
   const summary = [
-    withFilter && isFilterActive(filter) ? "the lines this filter keeps" : "every line",
-    range === "all" ? "on disk" : `from ${rangeLabel}`,
+    withFilter && isFilterActive(filter)
+      ? "the lines this filter keeps"
+      : native
+        ? "available lines"
+        : "every line",
+    range === "all" ? (native ? "in available native history" : "on disk") : `from ${rangeLabel}`,
     archives && hasArchives ? `including ${source?.archives} rotated archives` : null,
   ]
     .filter(Boolean)
@@ -97,12 +106,19 @@ export function ExportDialog({
         description="A plain text file, oldest line first. Lines with no parseable timestamp are kept —
             they continue the record above them."
         footer={
-          <Button asChild onClick={() => notify.success("Export started")}>
-            <a href={href} download>
+          href ? (
+            <Button asChild onClick={() => notify.success("Export started")}>
+              <a href={href} download>
+                <Download className="size-4" />
+                Download
+              </a>
+            </Button>
+          ) : (
+            <Button disabled>
               <Download className="size-4" />
               Download
-            </a>
-          </Button>
+            </Button>
+          )
         }
       >
         <div className="grid gap-4">
@@ -114,7 +130,7 @@ export function ExportDialog({
               <SelectContent>
                 {TIME_RANGES.map((r) => (
                   <SelectItem key={r.id} value={r.id}>
-                    {r.label}
+                    {native && r.id === "all" ? "Available history" : r.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -123,19 +139,21 @@ export function ExportDialog({
 
           {range === "custom" && (
             <FieldRow>
-              <Field label="From" htmlFor="export-since">
+              <Field label="From" htmlFor="export-since" error={window.sinceError}>
                 <Input
                   id="export-since"
                   type="datetime-local"
                   value={since}
+                  aria-invalid={Boolean(window.sinceError) || undefined}
                   onChange={(e) => setSince(e.target.value)}
                 />
               </Field>
-              <Field label="To" htmlFor="export-until">
+              <Field label="To" htmlFor="export-until" error={window.untilError}>
                 <Input
                   id="export-until"
                   type="datetime-local"
                   value={until}
+                  aria-invalid={Boolean(window.untilError) || undefined}
                   onChange={(e) => setUntil(e.target.value)}
                 />
               </Field>
@@ -163,6 +181,22 @@ export function ExportDialog({
             </OptionList>
           )}
 
+          {window.error && !window.sinceError && !window.untilError && (
+            <p role="alert" className="text-hint text-destructive">
+              {window.error}
+            </p>
+          )}
+          {native && (
+            <FormNote>
+              Native exports include at most the first 20,000 selected lines, with a five-minute
+              scan limit. The downloaded file records caps, unfinished scans and unavailable source
+              reads.
+              {journal &&
+                !boot &&
+                !window.since &&
+                " Without a start date, the journal is limited to the last 48 hours."}
+            </FormNote>
+          )}
           <FormNote>Downloads {summary}.</FormNote>
         </div>
       </Modal>

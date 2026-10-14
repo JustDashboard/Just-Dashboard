@@ -61,3 +61,13 @@ spec waits for each destination address before the next traversal, because retai
 can still describe the previous folder while native history is moving. Run
 `scripts/test-changed.sh <base>` against a production frontend built from the task worktree;
 `JD_BROWSER_BASE_URL` selects that worktree's loopback server.
+
+## Drafts and navigation failures
+
+Board navigation drains every dirty snapshot through acknowledgement; further edits during a save
+must also be acknowledged before leaving. Failed save/duplicate attempts retain the workspace and
+its leave warning. Escape cancels Stickyboard renaming without its blur handler committing the draft.
+Git file drafts stay in memory per checkout/path across SPA previews, with an unload guard across
+repositories; cron builder drafts keep their captured crontab revision in memory per account. Their
+explicit Close/discard and sign-out paths clear the retained content. File Cut clipboard entries are
+removed only for successfully moved sources, preserving canceled, skipped and failed items.

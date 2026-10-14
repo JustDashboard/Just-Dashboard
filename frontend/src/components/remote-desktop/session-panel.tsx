@@ -79,7 +79,7 @@ export function SessionPanel({
     <aside
       aria-label="Session"
       data-slot="session-panel"
-      className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-hairline xl:flex"
+      className="flex w-full shrink-0 flex-col overflow-y-auto border-hairline xl:w-80 xl:border-l"
     >
       <div className="flex items-center gap-3 border-b border-hairline px-4 py-3.5">
         <ComputerMark os={computer.os} size="sm" />

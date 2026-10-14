@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
@@ -564,7 +565,8 @@ func (s *Server) handleCronUserGet(w http.ResponseWriter, r *http.Request) error
 }
 
 type crontabRequest struct {
-	Content string `json:"content"`
+	Content          string  `json:"content"`
+	ExpectedRevision *string `json:"expectedRevision,omitempty"`
 }
 
 func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error {
@@ -579,7 +581,10 @@ func (s *Server) handleCronUserPut(w http.ResponseWriter, r *http.Request) error
 	// No typed phrase: this is the Save button of an editor whose contents are
 	// on screen, and a Save that asks you to type the account name is a Save
 	// nobody reads either.
-	if err := s.modules.cron.SetUserCrontab(r.Context(), user, req.Content); err != nil {
+	if err := s.modules.cron.SetUserCrontabGuarded(r.Context(), user, req.Content, req.ExpectedRevision); err != nil {
+		if errors.Is(err, contentguard.ErrConflict) {
+			return httpx.Err(http.StatusConflict, "content_conflict", err.Error())
+		}
 		return mapProcsError(err)
 	}
 	ct, err := s.modules.cron.UserCrontab(r.Context(), user)

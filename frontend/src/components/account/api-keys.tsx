@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useSyncExternalStore } from "react"
+import { useRef, useState, useSyncExternalStore } from "react"
 import { Check, Copy, Key, Plus, Trash } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { del, get, post } from "@/lib/api"
@@ -399,6 +399,7 @@ export function CreateApiKeyDialog({ onDone }: { onDone: () => void }) {
   const [role, setRole] = useState<Role>("readonly")
   const [ttl, setTtl] = useState("90")
   const [secret, setSecret] = useState<string | null>(null)
+  const generation = useRef(0)
   const [busy, setBusy] = useState(false)
 
   const allowed: Role[] =
@@ -409,6 +410,7 @@ export function CreateApiKeyDialog({ onDone }: { onDone: () => void }) {
         : ["readonly"]
 
   const create = async () => {
+    const request = generation.current
     setBusy(true)
     try {
       const res = await post<{ secret: string }>("/tokens/", {
@@ -416,39 +418,52 @@ export function CreateApiKeyDialog({ onDone }: { onDone: () => void }) {
         role,
         ttlDays: Number(ttl),
       })
-      setSecret(res.secret)
+      if (request === generation.current) setSecret(res.secret)
       onDone()
     } catch (err) {
       notify.error("Could not create the key", err)
     } finally {
-      setBusy(false)
+      if (request === generation.current) setBusy(false)
     }
   }
 
   const reset = () => {
+    generation.current += 1
+    setBusy(false)
     setSecret(null)
     setName("")
     setRole("readonly")
     setTtl("90")
   }
 
+  const close = () => {
+    setOpen(false)
+    reset()
+  }
+
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        onClick={() => {
+          reset()
+          setOpen(true)
+        }}
+      >
         <Plus className="size-4" />
         New key
       </Button>
       <Modal
         open={open}
         onOpenChange={(o) => {
-          setOpen(o)
-          if (!o) reset()
+          if (!o) close()
+          else setOpen(true)
         }}
         title={secret ? "Your new key" : "New API key"}
         description="A credential for scripts and other machines to call this dashboard's API."
         footer={
           secret ? (
-            <Button onClick={() => setOpen(false)}>Done</Button>
+            <Button onClick={close}>Done</Button>
           ) : (
             <Button onClick={create} disabled={!name.trim() || busy} pending={busy}>
               Create key

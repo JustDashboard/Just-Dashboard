@@ -388,14 +388,16 @@ export function SessionsSection({ sessions }: { sessions: ReturnType<typeof useS
   const clients = [
     ...new Set(list.map((s) => parseAgent(s.userAgent).product).filter((id) => id !== undefined)),
   ]
-  const bare = list.filter((s) => !s.twoFactorPassed).length
+  const bare = list.filter((s) => s.authMethod === "password" && s.twoFactorPassed).length
+  const pending = list.filter((s) => !s.twoFactorPassed).length
+  const unknown = list.filter((s) => !s.authMethod || s.authMethod === "unknown").length
   return (
     <FormSection
       aside
       title="Sessions"
       hint={
         sessions.data
-          ? `${plural(list.length, "session")} signed in${bare > 0 ? ` · ${bare} on a password alone` : ""}`
+          ? `${plural(list.length, "session")} signed in${bare > 0 ? ` · ${bare} on a password alone` : ""}${pending > 0 ? ` · ${pending} awaiting a second factor` : ""}${unknown > 0 ? ` · ${unknown} authentication method not recorded` : ""}`
           : "loading"
       }
     >

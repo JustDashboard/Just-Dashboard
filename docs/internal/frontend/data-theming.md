@@ -429,3 +429,23 @@ Saved connection investigations share the `netdiag` lifecycle and exact-source c
 `kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
 is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
 not a connected/live state. The shared naming dialog snapshots its discriminated request kind.
+
+## Recovering an ended session
+
+All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
+recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
+code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
+confirmed ended session to `/login?reason=session` with a visible notice that survives a reload.
+An unavailable recheck retains the current identity for retry. Request generations prevent a stale
+session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
+drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
+never starts expiry recovery. Reauthentication by a different account clears the prior account's
+working drafts; the same account retains values held in the shared session/memory stores. Local
+component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
+account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
+is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership
+clears shared working drafts conservatively. `api-auth-recovery.test.js` and `auth-recovery.spec.ts` cover this contract.
+
+API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
+not become the next key's form. Session views use actual `authMethod` provenance rather than treating
+an access-elevation bit as proof of a code; legacy provenance is unknown.

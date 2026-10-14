@@ -231,3 +231,14 @@ cancellation (bounded at five seconds), so a client that disconnects once its mu
 leaves the row. An `Entry` records who (user, role, `Actor` = session or token), from
 where, what (action, target, method, path), and how it went. Local root account commands use
 `Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.
+
+## Session authentication provenance
+
+`sessions.auth_method` is additive with default `unknown`; existing rows are never inferred to have
+entered a code. Fresh sessions record `password`, and successful factor completion records `totp` or
+`recovery`. This provenance is exposed as `authMethod` separately from `twoFactorPassed`, which is
+an access-policy/elevation flag. Optional two-factor policy can complete a password-only session;
+that does not make it a password-and-code session. Enrolment proves its code, while later policy-off
+elevation retains its recorded provenance, including unknown legacy provenance. Account session summaries use this distinction and display
+legacy/unknown authentication honestly. Migration and authentication tests cover existing rows and
+password/code/recovery completion; route authorization and per-account enforcement are unchanged.

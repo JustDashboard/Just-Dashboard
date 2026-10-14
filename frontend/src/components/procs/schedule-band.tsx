@@ -119,6 +119,10 @@ export function ScheduleBand({
         </ChipStrip>
       </PanelHeader>
       <PanelBody className="pt-1">
+        <p className="mb-3 text-hint text-muted-foreground">
+          Cron forecasts use the reported host or CRON_TZ time zone. When unavailable, they are
+          estimates in this browser&apos;s time zone. The axis displays this browser&apos;s time.
+        </p>
         {listed.length === 0 ? (
           <p className="py-6 text-body text-muted-foreground">
             Nothing {kind ? `in ${KIND[kind].label.toLowerCase()} ` : ""}runs in the next 24 hours.

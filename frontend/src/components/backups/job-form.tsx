@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { useMemoryState } from "@/lib/view-state"
+import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -29,6 +29,14 @@ import {
 import { SearchInput } from "@/components/page"
 import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
 import {
+  backupInputs,
+  editPickedInput,
+  pickedInputs,
+  startResourcePicks,
+  toggleResourcePick,
+  type BackupInputField,
+} from "@/components/backups/resource-picks"
+import {
   ScheduleBuilder,
   scheduleExpression,
   scheduleFields,
@@ -37,6 +45,7 @@ import {
 
 /** What a job starts out as when it is opened for something in particular. */
 export type JobPrefill = {
+  resourceKey?: string
   name?: string
   sources?: string[]
   excludes?: string[]
@@ -120,6 +129,19 @@ export function JobDialog({
     `${draft}.pauseContainers`,
     job?.pauseContainers ?? prefill?.pauseContainers ?? [],
   )
+  const [resourcePicks, setResourcePicks] = useMemoryState(
+    `${draft}.resourcePicks`,
+    startResourcePicks(
+      backupInputs({
+        sources: lines(sources),
+        excludes: lines(excludes),
+        sqlitePaths: lines(sqlitePaths),
+        databaseDumps,
+        pauseContainers,
+      }),
+      job ? undefined : prefill?.resourceKey,
+    ),
+  )
   const [recoveryEnabled, setRecoveryEnabled] = useMemoryState(
     `${draft}.recoveryEnabled`,
     Boolean(job?.recovery),
@@ -158,7 +180,13 @@ export function JobDialog({
   const valid = scheduleValid(expression)
 
   const sourceList = lines(sources)
-  const canSave = name.trim().length > 0 && sourceList.length > 0 && valid && !busy
+  const canSave =
+    name.trim().length > 0 && (sourceList.length > 0 || databaseDumps.length > 0) && valid && !busy
+
+  const changeOpen = (open: boolean) => {
+    if (!open) forgetMemoryState(draft)
+    onOpenChange(open)
+  }
 
   const submit = async () => {
     setBusy(true)
@@ -195,7 +223,7 @@ export function JobDialog({
       if (job) await put(`/backups/${job.id}`, body)
       else await post("/backups/", body)
       notify.success(job ? "Job updated" : "Job created")
-      onOpenChange(false)
+      changeOpen(false)
       onDone()
     } catch (err) {
       notify.error("Could not save", err)
@@ -204,40 +232,30 @@ export function JobDialog({
     }
   }
 
-  /**
-   * Adds or removes everything a resource suggests. Removal takes away only
-   * what the pick added, so a path typed by hand that happens to match a
-   * volume survives unpicking the volume.
-   */
-  const picked = (res: BackupResource) => {
-    if (res.suggest.databaseDumps?.length) {
-      return res.suggest.databaseDumps.every((id) => databaseDumps.includes(id))
-    }
-    return (
-      res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
-    )
-  }
+  const picked = (res: BackupResource) => Boolean(resourcePicks.picks[`${res.kind}:${res.id}`])
   const togglePick = (res: BackupResource, on: boolean) => {
-    const merge = (current: string[], extra: string[] | undefined) =>
-      on
-        ? [...current, ...(extra ?? []).filter((v) => !current.includes(v))]
-        : current.filter((v) => !(extra ?? []).includes(v))
-    setSources(merge(lines(sources), res.suggest.sources).join("\n"))
-    setExcludes(merge(lines(excludes), res.suggest.excludes).join("\n"))
-    setSQLitePaths(merge(lines(sqlitePaths), res.suggest.sqlitePaths).join("\n"))
-    setPauseContainers((current) => merge(current, res.suggest.pauseContainers))
-    setDatabaseDumps((current) =>
-      on
-        ? [...new Set([...current, ...(res.suggest.databaseDumps ?? [])])].sort((a, b) => a - b)
-        : current.filter((id) => !(res.suggest.databaseDumps ?? []).includes(id)),
+    const next = toggleResourcePick(
+      resourcePicks,
+      `${res.kind}:${res.id}`,
+      backupInputs(res.suggest),
+      on,
     )
+    setResourcePicks(next)
+    const inputs = pickedInputs(next)
+    setSources(inputs.sources.join("\n"))
+    setExcludes(inputs.excludes.join("\n"))
+    setSQLitePaths(inputs.sqlitePaths.join("\n"))
+    setPauseContainers(inputs.pauseContainers)
+    setDatabaseDumps(inputs.databaseDumps.map(Number).sort((a, b) => a - b))
     if (on && !name.trim() && !job) setName(res.suggest.name)
   }
+  const rememberManual = (field: BackupInputField, values: string[]) =>
+    setResourcePicks((current) => editPickedInput(current, field, values))
 
   return (
     <Modal
       open
-      onOpenChange={onOpenChange}
+      onOpenChange={changeOpen}
       size="lg"
       title={job ? `Edit ${job.name}` : "New backup"}
       description="Choose what to back up, where the archives go, when the job runs, and how the copy is kept consistent."
@@ -253,6 +271,11 @@ export function JobDialog({
             <Input id="job-name" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <ResourcePicker resources={resources} picked={picked} onToggle={togglePick} />
+          <FormNote>
+            Pick resources to add their suggested paths and consistency settings. Unpicking keeps
+            values entered manually or used by another pick. A job needs a source path or a database
+            dump.
+          </FormNote>
           <FieldRow>
             <Field
               label="Sources (one per line)"
@@ -262,7 +285,10 @@ export function JobDialog({
               <Textarea
                 id="job-sources"
                 value={sources}
-                onChange={(e) => setSources(e.target.value)}
+                onChange={(e) => {
+                  setSources(e.target.value)
+                  rememberManual("sources", lines(e.target.value))
+                }}
                 rows={4}
                 className="font-mono text-xs"
                 placeholder="/srv/app&#10;/etc/nginx"
@@ -276,7 +302,10 @@ export function JobDialog({
               <Textarea
                 id="job-excludes"
                 value={excludes}
-                onChange={(e) => setExcludes(e.target.value)}
+                onChange={(e) => {
+                  setExcludes(e.target.value)
+                  rememberManual("excludes", lines(e.target.value))
+                }}
                 rows={4}
                 className="font-mono text-xs"
                 placeholder="node_modules&#10;*.log"
@@ -436,7 +465,10 @@ export function JobDialog({
             <Textarea
               id="job-sqlite"
               value={sqlitePaths}
-              onChange={(e) => setSQLitePaths(e.target.value)}
+              onChange={(e) => {
+                setSQLitePaths(e.target.value)
+                rememberManual("sqlitePaths", lines(e.target.value))
+              }}
               rows={2}
               className="font-mono text-xs"
             />
@@ -470,13 +502,13 @@ export function JobDialog({
                     <Checkbox
                       checked={chosen}
                       disabled={Boolean(unusable) && !chosen}
-                      onCheckedChange={(checked) =>
-                        setDatabaseDumps((current) =>
-                          checked
-                            ? [...current, connection.id].sort((a, b) => a - b)
-                            : current.filter((id) => id !== connection.id),
-                        )
-                      }
+                      onCheckedChange={(checked) => {
+                        const next = checked
+                          ? [...new Set([...databaseDumps, connection.id])].sort((a, b) => a - b)
+                          : databaseDumps.filter((id) => id !== connection.id)
+                        setDatabaseDumps(next)
+                        rememberManual("databaseDumps", next.map(String))
+                      }}
                       aria-label={`Dump ${connection.name}`}
                     />
                     <span
@@ -525,13 +557,13 @@ export function JobDialog({
                 >
                   <Checkbox
                     checked={pauseContainers.includes(container.name)}
-                    onCheckedChange={(checked) =>
-                      setPauseContainers((current) =>
-                        checked
-                          ? [...current, container.name]
-                          : current.filter((name) => name !== container.name),
-                      )
-                    }
+                    onCheckedChange={(checked) => {
+                      const next = checked
+                        ? [...new Set([...pauseContainers, container.name])]
+                        : pauseContainers.filter((name) => name !== container.name)
+                      setPauseContainers(next)
+                      rememberManual("pauseContainers", next)
+                    }}
                     aria-label={`Pause ${container.name}`}
                   />
                   <span className="min-w-0 truncate">

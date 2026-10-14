@@ -33,7 +33,16 @@ function activeNow(session: SessionInfo) {
 }
 
 function factorLabel(session: SessionInfo) {
-  return session.twoFactorPassed ? "password and code" : "password only"
+  switch (session.authMethod) {
+    case "password":
+      return session.twoFactorPassed ? "password only" : "password · second factor pending"
+    case "totp":
+      return "password and authenticator code"
+    case "recovery":
+      return "password and recovery code"
+    default:
+      return "authentication method not recorded"
+  }
 }
 
 /**

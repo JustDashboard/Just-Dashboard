@@ -2052,3 +2052,47 @@ test("an administrator traces a published port's path from outside, layer by lay
   await expect(port).toHaveAttribute("title", /reaching it from outside is unproven/)
   await expect(page.getByRole("button", { name: /^Trace the path/ })).toHaveCount(0)
 })
+
+test("unavailable and invalid container tabs fall back to a working overview", async ({ page }) => {
+  await mockDocker(page)
+  await page.route(`**/api/v1/docker/containers/${detail.id}`, (route) =>
+    json(route, { ...detail, state: "exited" }),
+  )
+  await page.goto(`/docker/containers/${detail.id}?tab=shell`)
+  await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  await expect(page.getByRole("tab", { name: "Shell", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("tabpanel")).toBeVisible()
+  await page.goto(`/docker/containers/${detail.id}?tab=invalid`)
+  await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  await expect(page.getByRole("tabpanel")).toBeVisible()
+})
+
+test("container identity polls external changes and retains the selected view", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  let reads = 0
+  let latest = { ...detail }
+  await page.route(`**/api/v1/docker/containers/${detail.id}`, (route) => {
+    reads += 1
+    return json(route, latest)
+  })
+  await page.goto(`/docker/containers/${detail.id}?tab=inspect`)
+  await expect(page.getByRole("tab", { name: "Inspect", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  latest = { ...latest, name: "externally-renamed" }
+  await expect.poll(() => reads, { timeout: 15000 }).toBeGreaterThan(1)
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("externally-renamed")
+  await expect(page.getByRole("tab", { name: "Inspect", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
