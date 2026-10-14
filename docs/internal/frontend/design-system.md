@@ -176,9 +176,11 @@ taking a frame:
   much is covered — every thing on it is taken, opening the job that covers it or the form written
   for it — with a job's own page opening on an identity line and its own picture over its
   readings, and its runs one frame around a rail of the runs and an inspector of the picked one,
-  the run page's Details shape; the five account pages — the profile's identity line, readings and capability rows,
+  the run page's Details shape; the six account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
+  in a `ChoiceList`, Security as `FormSection aside`s, and Workspace as the first-run purposes'
+  lit cards on their Stable and Experimental shelves beside the rail itself, the one frame, in the
+  sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
   (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
@@ -505,7 +507,8 @@ of the latest copy. A refused form keeps its edits and says why under the field,
 with what is left; when everything went through it says *Saved* and when it applies, then leaves —
 so the forms no longer toast their own success. A clean page has nothing to save and no button:
 re-checking an untouched Source means saving an edit to it. The game server's settings take the
-same bar, and hold its Save while a value is outside its declared range. Each form keeps its draft keyed on
+same bar, and hold its Save while a value is outside its declared range; so does Account → Workspace,
+whose purposes and rail switches are one draft of the sidebar. Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
 

@@ -4,81 +4,94 @@ import { useState } from "react"
 import Link from "next/link"
 import { notify } from "@/lib/toast"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import {
-  SectionTiles,
-  SidebarPreview,
-  useSectionCount,
-} from "@/components/onboarding/section-tiles"
+import { Page, PageContext, Section } from "@/components/page"
+import { PurposePicker, SidebarEditor, useSectionCount } from "@/components/account/workspace"
+import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
 import { Button } from "@/components/ui/button"
 
 /**
- * The first-run answer, after the first run: which sections this account
- * keeps in its sidebar, as the same tiles beside the same preview, and a way
- * to be asked the question again.
+ * The first-run answer, after the first run: what this account uses the
+ * server for, on the question's two shelves, beside the rail itself with a
+ * switch on every row it may hide. The cards are the coarse answer and the
+ * switches the fine one; both edit one draft, so pressing a purpose throws
+ * its switches and throwing a switch can leave a purpose partly shown.
  *
  * A reading of the account's own setting that happens to be editable, so it
- * is drawn in the reading register — the welcome screen is the flow.
+ * is drawn in the reading register — the welcome screen is the flow. Nothing
+ * on it is framed but the rail, which is a picture of one. An edit raises
+ * the settings pages' one Save at the foot of the window rather than a
+ * disabled button sitting under the page for as long as nothing has changed.
  */
 export default function AccountWorkspacePage() {
+  return (
+    <SaveBarProvider>
+      <Workspace />
+    </SaveBarProvider>
+  )
+}
+
+function Workspace() {
   const { hidden, save } = useHiddenSections()
   const [draft, setDraft] = useState<Set<string> | null>(null)
-  const [saving, setSaving] = useState(false)
   const current = draft ?? hidden
-  const dirty =
-    draft !== null && (draft.size !== hidden.size || [...draft].some((key) => !hidden.has(key)))
+  const changes = draft
+    ? [...draft].filter((key) => !hidden.has(key)).length +
+      [...hidden].filter((key) => !draft.has(key)).length
+    : 0
   const { shown, total } = useSectionCount(current)
 
-  const commit = async () => {
-    setSaving(true)
-    try {
-      await save([...current])
-      setDraft(null)
-      notify.success("Sidebar saved")
-    } catch (err) {
-      notify.error("Could not save your sidebar", err)
-    } finally {
-      setSaving(false)
-    }
-  }
+  useSaveBarEntry(
+    true,
+    {
+      name: "Sidebar",
+      dirty: changes > 0,
+      changes,
+      saving: false,
+      invalid: false,
+      applies: "immediately",
+    },
+    {
+      save: async () => {
+        try {
+          await save([...current])
+          setDraft(null)
+          return true
+        } catch (err) {
+          notify.error("Could not save your sidebar", err)
+          return false
+        }
+      },
+      discard: () => setDraft(null),
+    },
+  )
 
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Account" title="Workspace" />
-      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <Panel>
-          <PanelHeader
-            title="Sidebar sections"
-            actions={
-              <>
-                <span className="numeric mr-2 text-hint text-muted-foreground">
-                  {shown} of {total} shown
-                </span>
-                {/* The question again, for somebody whose use of the server
-                    changed rather than one section of it. */}
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/welcome">Ask me again</Link>
-                </Button>
-              </>
-            }
-          />
-          <PanelBody>
-            <SectionTiles hidden={current} onChange={setDraft} />
-          </PanelBody>
-          <PanelFooter className="justify-end">
-            {dirty && (
-              <Button size="sm" variant="ghost" onClick={() => setDraft(null)} disabled={saving}>
-                Discard
-              </Button>
-            )}
-            <Button size="sm" onClick={commit} disabled={!dirty || saving} pending={saving}>
-              Save changes
+      <div className="grid min-w-0 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <Section
+          title="What you use this server for"
+          actions={
+            // The question again, on its own screen, for somebody whose use
+            // of the server changed rather than one section of it.
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/welcome">Ask me again</Link>
             </Button>
-          </PanelFooter>
-        </Panel>
-        {/* Unlabelled: drawn as the rail it is, it needs no name. */}
-        <SidebarPreview hidden={current} />
+          }
+        >
+          <PurposePicker hidden={current} onChange={setDraft} />
+        </Section>
+        <Section
+          title="Sidebar"
+          actions={
+            // As tall as Ask me again, so the rail starts level with the shelves.
+            <span className="numeric flex h-8 items-center text-hint text-muted-foreground">
+              {shown} of {total} shown
+            </span>
+          }
+        >
+          <SidebarEditor hidden={current} onChange={setDraft} />
+        </Section>
       </div>
     </Page>
   )

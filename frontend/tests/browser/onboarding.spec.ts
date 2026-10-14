@@ -36,24 +36,25 @@ test("a new account is asked what the server is for, and the answer shapes the s
   // The question is the cards and nothing beside them: the picture is the answer.
   await expect(page.getByRole("list", { name: "What this server is for" })).toHaveCount(0)
 
-  // The server already runs a project and four databases, so those two start
-  // chosen and their cards say why.
+  // The stable three start chosen and the experimental three are offered
+  // under their own name; the cards of what the server already runs say so.
   const purposes = page.getByRole("group", { name: "Purposes" })
+  await expect(purposes.getByText("Stable", { exact: true })).toBeVisible()
+  await expect(purposes.getByText("Experimental", { exact: true })).toBeVisible()
+  await expect(purposes.getByText("Working, still being tested")).toBeVisible()
+  const purpose = (name: string) => purposes.getByRole("button", { name })
+  for (const name of ["Ship apps", "Run databases", "Work on the server"]) {
+    await expect(purpose(name)).toHaveAttribute("aria-pressed", "true")
+  }
+  for (const name of ["Manage containers", "Route the network", "Secure the server"]) {
+    await expect(purpose(name)).toHaveAttribute("aria-pressed", "false")
+  }
   await expect(purposes.getByText("1 project here")).toBeVisible()
   await expect(purposes.getByText("4 databases here")).toBeVisible()
-  await expect(purposes.getByRole("button", { name: "Ship apps" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(purposes.getByRole("button", { name: "Run databases" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await purposes.getByRole("button", { name: "Run databases" }).click()
-  await expect(purposes.getByRole("button", { name: "Run databases" })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  )
+  for (const name of ["Run databases", "Work on the server"]) {
+    await purpose(name).click()
+    await expect(purpose(name)).toHaveAttribute("aria-pressed", "false")
+  }
   await page.getByRole("button", { name: "Continue" }).click()
 
   // Continue is the answer: saved, and drawn as the server wired to each
@@ -62,20 +63,17 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(
     page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
   ).toHaveText(["Ship apps"])
-  await expect(page.getByText(/^6 sections in your sidebar/)).toBeVisible()
+  await expect(page.getByText(/^9 sections in your sidebar/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
     [
-      "audit",
       "excalidraw",
       "files",
       "network",
-      "packages",
       "remote-desktop",
       "security",
       "stickyboard",
-      "system-users",
       "terminal",
     ].sort(),
   )
@@ -96,16 +94,15 @@ test("a new account is asked what the server is for, and the answer shapes the s
   for (const hidden of ["Network", "Security", "Terminal", "Excalidraw"]) {
     await expect(rail(page).getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
   }
-  // Server configuration held only hidden sections, so its row is gone, and a
-  // label with nothing left under it goes with its rows. Protection keeps
-  // Backups, which shipping apps uses, so it stays.
-  await expect(rail(page).getByText("Server configuration")).toHaveCount(0)
-  await expect(rail(page).getByText("Advanced", { exact: true })).toHaveCount(0)
+  // Protection keeps Backups, which shipping apps uses, and Server
+  // configuration is in every answer, so both stay.
   await expect(rail(page).getByText("Protection", { exact: true })).toBeVisible()
-  // The Overview drops the tiles of what was hidden, and keeps the rest.
+  await expect(rail(page).getByText("Server configuration")).toBeVisible()
+  // The Overview drops the tiles of what was hidden, and keeps the rest —
+  // Packages among them, because every answer keeps it.
   await expect(page.getByRole("link", { name: /^Docker/ }).first()).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: "Security" })).toHaveCount(0)
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: "Packages" })).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]", { hasText: /^Security/ })).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]", { hasText: /^Packages/ })).toBeVisible()
 
   // Answered once, never asked again.
   await page.reload()
@@ -142,7 +139,7 @@ test("on a phone the command stays in reach, and the answer fits the screen", as
   await command.click()
   await expect(
     page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
-  ).toHaveCount(5)
+  ).toHaveCount(6)
   await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
 })
 
@@ -195,23 +192,46 @@ test("hidden pages stay out of the palette's list and one word away", async ({ p
   await expect(dialog.getByRole("option", { name: /^Firewall/ }).first()).toBeVisible()
 })
 
-test("Workspace keeps the same tiles and saves them", async ({ page }) => {
+test("Workspace asks the question again as cards and switches, and saves them", async ({
+  page,
+}) => {
   const { saved } = await mockOnboarding(page, {
     needsOnboarding: false,
     hiddenSections: ["network"],
   })
   await page.goto("/account/workspace")
-  const tile = (name: string) => page.getByRole("button", { name, exact: true })
-  await expect(tile("Network")).toHaveAttribute("aria-pressed", "false")
-  const save = page.getByRole("button", { name: "Save changes" })
-  await expect(save).toBeDisabled()
-  await tile("Network").click()
-  await tile("Excalidraw").click()
-  await save.click()
-  await expect(save).toBeDisabled()
-  expect(saved).toEqual([["excalidraw"]])
-  const preview = page.getByRole("navigation", { name: "Sidebar preview" })
-  await expect(preview.getByText("Network", { exact: true }).last()).toBeVisible()
-  await expect(preview.getByText("Excalidraw", { exact: true })).toHaveCount(0)
+  const shelf = (name: string) => page.getByRole("group", { name, exact: true })
+  const toggle = (name: string) =>
+    page.getByRole("group", { name: "Sidebar sections" }).getByRole("switch", { name, exact: true })
+  const bar = page.getByRole("region", { name: "Save changes" })
+
+  await expect(shelf("Stable").getByRole("button")).toHaveCount(3)
+  await expect(shelf("Experimental").getByRole("button")).toHaveCount(3)
+  await expect(toggle("Network")).toHaveAttribute("aria-checked", "false")
+  // Network is out of the rail, so routing the network is only partly there.
+  const route = shelf("Experimental").getByRole("button", { name: "Route the network" })
+  await expect(route).toHaveAttribute("aria-pressed", "false")
+  await expect(shelf("Stable").getByRole("button", { name: "Ship apps" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  // Nothing to save, so nothing asks to be saved.
+  await expect(bar).toHaveCount(0)
+
+  // A purpose throws its switches, and a switch can leave a purpose partly shown.
+  await route.click()
+  await expect(route).toHaveAttribute("aria-pressed", "true")
+  await expect(toggle("Network")).toHaveAttribute("aria-checked", "true")
+  await toggle("Excalidraw").click()
+  await expect(shelf("Stable").getByRole("button", { name: "Work on the server" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
+  await expect(bar).toContainText("2 unsaved changes")
+
+  await bar.getByRole("button", { name: /^Save/ }).click()
+  await expect.poll(() => saved).toEqual([["excalidraw"]])
+  await expect(bar).toContainText("Saved")
+  await expect(toggle("Excalidraw")).toHaveAttribute("aria-checked", "false")
   await expect(page.getByRole("link", { name: "Ask me again" })).toHaveAttribute("href", "/welcome")
 })
