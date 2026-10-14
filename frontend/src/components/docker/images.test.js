@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   foldPull,
   freshness,
+  imageFreshness,
   layerInstruction,
   parseSize,
   pullShare,
@@ -61,6 +62,19 @@ test("every image gets one answer, and one nothing runs is not called unchecked"
   // Running and never pushed: there is no registry to ask.
   expect(freshness(image({ repoDigests: [] }), undefined)).toBe("local")
   expect(freshness(image({ repoTags: [], dangling: true }), undefined)).toBe("untagged")
+})
+
+test("secondary tags and digest references participate in image freshness", () => {
+  const tagged = image({ repoTags: ["nginx:alpine", "nginx:stable"] })
+  expect(imageFreshness(tagged, { "nginx:stable": { state: "outdated" } })).toBe("outdated")
+  expect(
+    imageFreshness(tagged, {
+      "nginx:alpine": { state: "current" },
+      "nginx:stable": { state: "unknown" },
+    }),
+  ).toBe("unknown")
+  expect(imageFreshness(tagged, { "nginx@sha256:bb": { state: "pinned" } })).toBe("pinned")
+  expect(imageFreshness(image({ containers: 0 }), {})).toBe("unused")
 })
 
 test("the table narrows by use, by answer and by text, largest first", () => {

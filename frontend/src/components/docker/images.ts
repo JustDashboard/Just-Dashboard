@@ -81,6 +81,22 @@ export function freshness(image: DockerImage, update: ImageUpdateStatus | undefi
   return image.repoDigests.length === 0 ? "local" : "unknown"
 }
 
+export function imageFreshness(
+  image: DockerImage,
+  updates: Record<string, ImageUpdateStatus> | undefined,
+): Freshness {
+  const readings = [...new Set([...image.repoTags, ...image.repoDigests])]
+    .map((ref) => updates?.[ref])
+    .filter((reading): reading is ImageUpdateStatus => Boolean(reading))
+  // One image can have several tags in use. A current alias cannot hide an
+  // outdated or unreadable alias of the same image.
+  for (const state of ["outdated", "unknown", "current", "pinned", "local"] as const) {
+    const reading = readings.find((item) => item.state === state)
+    if (reading) return freshness(image, reading)
+  }
+  return freshness(image, undefined)
+}
+
 /** The order the band lists them in: what wants doing first. */
 export const FRESHNESS_ORDER: Freshness[] = [
   "outdated",

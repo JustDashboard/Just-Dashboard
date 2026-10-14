@@ -53,6 +53,18 @@ describe("cronRunsBetween", () => {
     expect(dense).toBe(true)
     expect(times).toHaveLength(RUN_CAP)
   })
+
+  test("uses the job's zone when browser midnight differs", () => {
+    const start = Date.parse("2026-10-14T00:00:00Z")
+    const { times } = cronRunsBetween(
+      "0 3 * * *",
+      start,
+      start + 24 * H,
+      RUN_CAP,
+      "America/New_York",
+    )
+    expect(times).toEqual([Date.parse("2026-10-14T07:00:00Z")])
+  })
 })
 
 describe("scheduleLanes", () => {

@@ -192,3 +192,27 @@ test("repeated sign-out uses one pending request before a fresh login", async ({
     page.getByRole("button", { name: "Account menu for Ion", exact: true }),
   ).toBeVisible()
 })
+
+test("a different account after expiry clears the previous account's working drafts", async ({
+  page,
+}) => {
+  const key = `jd.session.state.entry.${encodeURIComponent("audit.owner.secret")}`
+  await page.addInitScript(
+    (storageKey) => sessionStorage.setItem(storageKey, JSON.stringify("old-owner-draft")),
+    key,
+  )
+  const fixture = await authFixture(page)
+  await page.route("**/api/v1/auth/login", (route) =>
+    json(route, { ...user, user: { ...user.user, id: 2, username: "second-owner" } }),
+  )
+  await rejectKeyCreation(page, () => {
+    fixture.account.signedIn = false
+  })
+  await expect(page.getByLabel("Username")).toBeVisible()
+  expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBe(
+    JSON.stringify("old-owner-draft"),
+  )
+  await signIn(page)
+  await expect(page).toHaveURL(/\/$/)
+  expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBeNull()
+})

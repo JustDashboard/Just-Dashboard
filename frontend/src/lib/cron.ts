@@ -9,10 +9,9 @@
  * what the builder writes is what the reader sees described.
  *
  * Only what Vixie cron accepts: five fields, `*`, lists, ranges, steps, the
- * month and weekday names, and the `@` nicknames. `nextCronRun` computes in
- * this browser's clock and time zone — cron runs on the server's — and the
- * page says so beside the figure; a schedule that names its own zone (a
- * deployment's) is read in that zone by `nextCronRunsIn`.
+ * month and weekday names, and the `@` nicknames. Forecasts use the job's
+ * measured host or CRON_TZ zone when available, with browser-zone estimates
+ * as a disclosed fallback. Displayed dates remain in the browser's zone.
  */
 
 export type CronFields = {
@@ -75,28 +74,32 @@ function parseField(field: string, spec: FieldSpec): Set<number> | null {
   const out = new Set<number>()
   for (const part of field.split(",")) {
     if (part === "") return null
-    const [rangePart, stepPart] = part.split("/")
+    const stepped = part.split("/")
+    if (stepped.length > 2) return null
+    const [rangePart, stepPart] = stepped
     if (stepPart !== undefined && !/^\d+$/.test(stepPart)) return null
     const step = stepPart === undefined ? 1 : Number(stepPart)
-    if (step < 1) return null
+    if (!Number.isSafeInteger(step) || step < 1 || step > 2147483647) return null
     let lo: number
     let hi: number
     if (rangePart === "*") {
       lo = spec.min
       hi = spec.max
     } else if (rangePart.includes("-")) {
-      const [a, b] = rangePart.split("-")
+      const range = rangePart.split("-")
+      if (range.length !== 2) return null
+      const [a, b] = range
       const from = parseValue(a, spec)
       const to = parseValue(b, spec)
       if (from === null || to === null || from > to) return null
       lo = from
       hi = to
     } else {
+      if (stepPart !== undefined) return null
       const value = parseValue(rangePart, spec)
       if (value === null) return null
       lo = value
-      // `*/5` is a range; `5/5` in Vixie cron means "from 5 to the end".
-      hi = stepPart === undefined ? value : spec.max
+      hi = value
     }
     if (lo < spec.min || hi > spec.max) return null
     for (let v = lo; v <= hi; v += step) out.add(v)
@@ -124,8 +127,8 @@ export function parseCron(expression: string): CronFields | null {
     dayOfMonth,
     month,
     dayOfWeek,
-    anyDayOfMonth: fields[2] === "*",
-    anyDayOfWeek: fields[4] === "*",
+    anyDayOfMonth: fields[2].startsWith("*"),
+    anyDayOfWeek: fields[4].startsWith("*"),
   }
 }
 
@@ -268,7 +271,12 @@ export function describeCron(expression: string): string {
  * hundred steps rather than half a million. Null for `@reboot` and for a
  * schedule that never matches (February 30th).
  */
-export function nextCronRun(expression: string, from: Date = new Date()): Date | null {
+export function nextCronRun(
+  expression: string,
+  from: Date = new Date(),
+  timeZone?: string,
+): Date | null {
+  if (timeZone) return nextCronRunsIn(expression, timeZone, 1, from)[0] ?? null
   const cron = parseCron(expression)
   if (!cron) return null
   const hours = [...cron.hour].sort((a, b) => a - b)
@@ -303,9 +311,7 @@ function onDay(cron: CronFields, month: number, date: number, weekday: number): 
   if (!cron.month.has(month)) return false
   const dom = cron.dayOfMonth.has(date)
   const dow = cron.dayOfWeek.has(weekday)
-  if (cron.anyDayOfMonth && cron.anyDayOfWeek) return true
-  if (cron.anyDayOfMonth) return dow
-  if (cron.anyDayOfWeek) return dom
+  if (cron.anyDayOfMonth || cron.anyDayOfWeek) return dom && dow
   return dom || dow
 }
 
@@ -314,6 +320,10 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 const zoneFormats = new Map<string, Intl.DateTimeFormat>()
+
+export function supportsCronTimeZone(timeZone: string): boolean {
+  return zoneFormat(timeZone) !== undefined
+}
 
 /** Reads an instant as a zone's wall clock; undefined for a zone this browser does not know. */
 function zoneFormat(timeZone: string): Intl.DateTimeFormat | undefined {
@@ -369,6 +379,7 @@ export function nextCronRunsIn(
   timeZone: string,
   count: number,
   from: Date = new Date(),
+  until?: Date,
 ): Date[] {
   const cron = parseCron(expression)
   const format = zoneFormat(timeZone)
@@ -377,12 +388,13 @@ export function nextCronRunsIn(
   const minutes = [...cron.minute].sort((a, b) => a - b)
 
   const start = Math.floor(from.getTime() / MINUTE) * MINUTE + MINUTE
+  const end = until?.getTime() ?? Infinity
   const first = new Date(wallAt(format, start))
   let day = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate())
   // Five years covers every real schedule; anything further is unmatchable.
   const limit = Date.UTC(first.getUTCFullYear() + 5, first.getUTCMonth(), first.getUTCDate())
   const out: number[] = []
-  for (; day < limit && out.length < count; day += DAY) {
+  for (; day < limit && day <= end + 14 * HOUR && out.length < count; day += DAY) {
     const date = new Date(day)
     if (!onDay(cron, date.getUTCMonth() + 1, date.getUTCDate(), date.getUTCDay())) continue
     // Offsets run from -12h to +14h, so every instant this day's wall times
@@ -396,7 +408,7 @@ export function nextCronRunsIn(
         const wall = day + h * HOUR + m * MINUTE
         for (const offset of offsets) {
           const instant = wall - offset
-          if (instant < start) continue
+          if (instant < start || instant > end) continue
           // Only on a day with a change can an offset be the wrong one: the
           // spring gap matches neither, the autumn overlap matches both.
           if (offsets.length === 1 || wallAt(format, instant) === wall) found.push(instant)
@@ -439,7 +451,7 @@ export function presetFor(expression: string): CronPreset {
   if (minute === "*" && hour === "*" && dom === "*" && dow === "*") return "minute"
   if (minute === "*/5" && hour === "*" && dom === "*" && dow === "*") return "5min"
   if (minute === "*/15" && hour === "*" && dom === "*" && dow === "*") return "15min"
-  if (plainMinute && hour === "*" && dom === "*" && dow === "*") return "hourly"
+  if (minute === "0" && hour === "*" && dom === "*" && dow === "*") return "hourly"
   if (plainMinute && plainHour && dom === "*" && dow === "*") return "daily"
   if (plainMinute && plainHour && dom === "*" && /^[0-7]$/.test(dow)) return "weekly"
   if (plainMinute && plainHour && /^\d{1,2}$/.test(dom) && dow === "*") return "monthly"

@@ -191,10 +191,11 @@ function ContainerDetailPanel({
     return moved >= 0 ? moved / seconds : undefined
   }, [frames])
 
+  const refreshRoutes = routes.refresh
   const changed = useCallback(() => {
     refreshDetail()
-    routes.refresh()
-  }, [refreshDetail, routes.refresh])
+    refreshRoutes()
+  }, [refreshDetail, refreshRoutes])
 
   const views = detail
     ? [
@@ -346,11 +347,7 @@ function ContainerDetailPanel({
             </TabsContent>
 
             <TabsContent value="usage" className="min-h-0 flex-1 overflow-y-auto pt-6">
-              <ContainerUsageTab
-                key={detail.id}
-                detail={detail}
-                onLimitsSaved={changed}
-              />
+              <ContainerUsageTab key={detail.id} detail={detail} onLimitsSaved={changed} />
             </TabsContent>
 
             {/* Scrolls on a phone, where the readings and a pane worth reading

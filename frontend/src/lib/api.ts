@@ -202,10 +202,10 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))
   }
 
-  return readResponse<T>(res)
+  return readResponse<T>(res, path)
 }
 
-async function readResponse<T>(res: Response): Promise<T> {
+async function readResponse<T>(res: Response, path: string): Promise<T> {
   if (res.status === 204) return undefined as T
 
   const text = await res.text()
@@ -222,6 +222,17 @@ async function readResponse<T>(res: Response): Promise<T> {
     const body = parsed as ApiErrorBody | undefined
     if (body?.error?.code === "password_change_required" && typeof window !== "undefined") {
       window.dispatchEvent(new Event("jd:password-change-required"))
+    }
+    if (
+      !path.startsWith("/auth/") &&
+      typeof window !== "undefined" &&
+      ((res.status === 401 &&
+        ["unauthorized", "totp_required", "totp_enrollment_required"].includes(
+          body?.error?.code ?? "",
+        )) ||
+        body?.error?.code === "account_disabled")
+    ) {
+      window.dispatchEvent(new Event("jd:authentication-lost"))
     }
     throw new ApiError(
       res.status,
@@ -255,7 +266,7 @@ export async function postForm<T>(
     signal: opts.signal,
     body,
   })
-  return readResponse<T>(res)
+  return readResponse<T>(res, path)
 }
 
 export const get = <T>(path: string, query?: RequestOptions["query"], signal?: AbortSignal) =>
@@ -306,7 +317,7 @@ export async function postFile(
     signal: opts.signal,
     body: JSON.stringify(body),
   })
-  if (!res.ok) return readResponse(res)
+  if (!res.ok) return readResponse(res, path)
   const disposition = res.headers.get("Content-Disposition") ?? ""
   const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "download"
   return { blob: await res.blob(), filename }
@@ -315,7 +326,7 @@ export async function postFile(
 /** A plain-text read — a transcript — through the same authenticated fetch and errors. */
 export async function getText(path: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(buildUrl(path), { credentials: "include", signal })
-  if (!res.ok) return readResponse<string>(res)
+  if (!res.ok) return readResponse<string>(res, path)
   return res.text()
 }
 

@@ -293,3 +293,21 @@ The current host-execution implementation and its relationship to the documented
 Backups displays schedules, next runs, recorded outcomes, coverage and recovery controls. The automatic
 attention list and overdue recommendation detector are removed, including the `overdue` response field.
 The scheduler, retained run history, retention and restore safeguards are unchanged.
+
+## Backup form inputs and host account access
+
+A backup job requires at least one filesystem source **or** one native database dump. Native-only
+jobs use the existing manifest, retention, coverage, extraction and database-restore paths without
+inventing a host file source. The `?database=` handoff is consumed only when the resource report can
+open its suggested job. The picker tracks explicitly owned contributions: unselecting a resource
+removes only its exclusive inputs, preserving manual and shared inputs. Closing or saving the job
+editor clears its held draft. Failed run-history reads show an error/retry or an older-data warning;
+they never become a successful empty history. `database_dumps_test.go`, `resource-picks.test.js` and
+`backups-ui.spec.ts` exercise these behaviors.
+
+Host `locked` describes a **password lock**, and the dashboard action is labelled Lock password.
+It does not remove authorized keys or claim complete SSH/account disablement. A login shell plus
+an unlocked password or authorized key is a known sign-in route; sshd/PAM and account policy still
+decide actual acceptance. Administrator counts include UID 0 and sudo/wheel/admin/docker group routes.
+Direct sudoers rules are not inspected, so this is an inventory of known routes, not complete effective
+privilege analysis. `access.test.js` and `system-ui.spec.ts` cover key-only accounts and UID 0.

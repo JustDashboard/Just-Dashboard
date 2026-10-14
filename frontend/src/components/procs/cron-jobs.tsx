@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { useEffect, useMemo, useState } from "react"
+import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-state"
 import { Clock, Copy, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
 import { put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -11,6 +11,7 @@ import {
   isValidCron,
   nextCronRun,
   presetFor,
+  supportsCronTimeZone,
   type CronPreset,
 } from "@/lib/cron"
 import { appendJob, removeJob, replaceJob, toggleJob, type JobEdit } from "@/lib/crontab"
@@ -28,7 +29,7 @@ import type { ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -105,17 +106,43 @@ export function CronJobsPanel({
   const { can } = useAuth()
   // The draft remembers whose crontab it is, so switching accounts cannot
   // save one account's text over another's.
-  const [draftFor, setDraftFor] = useState<{ user: string; text: string } | null>(null)
+  const [draftFor, setDraftFor] = useState<{
+    user: string
+    text: string
+    revision?: string
+  } | null>(null)
   const draft = draftFor?.user === user ? draftFor.text : null
-  const setDraft = (text: string | null) => setDraftFor(text === null ? null : { user, text })
-  const [editing, setEditing] = useSessionState<CronJob | null>("processes.cron.editing", null)
+  const setDraft = (text: string | null) =>
+    setDraftFor((previous) =>
+      text === null
+        ? null
+        : {
+            user,
+            text,
+            revision: previous?.user === user ? previous.revision : crontab.data?.revision,
+          },
+    )
+  const [editing, setEditing] = useMemoryState<CronJob | null>(
+    `processes.cron.editing.${user}`,
+    null,
+  )
   const [shown, setShown] = useSessionState<"" | "enabled" | "disabled">("processes.cron.shown", "")
   const [saving, setSaving] = useState(false)
 
-  const save = async (content: string, done: string, confirmText?: string) => {
+  const save = async (
+    content: string,
+    done: string,
+    confirmText?: string,
+    expectedRevision = crontab.data?.revision,
+  ) => {
     setSaving(true)
     try {
-      await put(`/cron/user/${encodeURIComponent(user)}`, { content }, { confirm: confirmText })
+      if (!expectedRevision) throw new Error("Reload the crontab before saving this draft.")
+      await put(
+        `/cron/user/${encodeURIComponent(user)}`,
+        { content, expectedRevision },
+        { confirm: confirmText },
+      )
       notify.success(done)
       crontab.refresh()
     } catch (err) {
@@ -181,7 +208,11 @@ export function CronJobsPanel({
                 </Button>
               )}
               {admin && (
-                <Button size="sm" onClick={() => onAddingChange(true)}>
+                <Button
+                  size="sm"
+                  disabled={!crontab.data?.revision}
+                  onClick={() => onAddingChange(true)}
+                >
                   <Plus className="size-3.5" />
                   Add job
                 </Button>
@@ -283,7 +314,7 @@ export function CronJobsPanel({
                         </p>
                       ),
                       action: async (phrase) => {
-                        await save(draft, `Crontab of ${user} saved`, phrase)
+                        await save(draft, `Crontab of ${user} saved`, phrase, draftFor?.revision)
                         setDraft(null)
                       },
                     })
@@ -309,12 +340,13 @@ export function CronJobsPanel({
                   </Tag>
                 ))}
               </>
-            ) : (
-              <span>
-                Next runs are computed in this browser&apos;s time zone; cron uses the
-                server&apos;s.
-              </span>
-            )}
+            ) : null}
+            <span>
+              {crontab.data.timeZone
+                ? `Schedules use ${crontab.data.timeZone} unless a job names another CRON_TZ.`
+                : "Host time zone unavailable; forecasts are estimates in this browser's time zone."}{" "}
+              Forecast dates are displayed in this browser&apos;s time zone.
+            </span>
           </PanelFooter>
         )}
       </Panel>
@@ -328,17 +360,26 @@ export function CronJobsPanel({
       />
 
       <CronJobEditor
-        open={adding || editing !== null}
+        open={(adding || editing !== null) && !!crontab.data?.revision}
         job={editing}
         user={user}
+        baseline={{ raw, revision: crontab.data?.revision }}
+        timeZone={editing?.timeZone ?? crontab.data?.timeZone}
         onClose={() => {
           onAddingChange(false)
           setEditing(null)
-          forgetSessionState("processes.cron.job.")
+          forgetMemoryState(`processes.cron.job.${user}.`)
         }}
-        onSave={async (edit) => {
-          const next = editing ? replaceJob(raw, editing, edit) : appendJob(raw, edit)
-          await save(next, editing ? "Cron job updated" : "Cron job added")
+        onSave={async (edit, baseline) => {
+          const next = editing
+            ? replaceJob(baseline.raw, editing, edit)
+            : appendJob(baseline.raw, edit)
+          await save(
+            next,
+            editing ? "Cron job updated" : "Cron job added",
+            undefined,
+            baseline.revision,
+          )
         }}
       />
     </>
@@ -422,7 +463,10 @@ function CronJobRow({
   onEdit: () => void
   onRemove: (phrase: string) => Promise<void>
 }) {
-  const next = useMemo(() => (job.disabled ? null : nextCronRun(job.schedule)), [job])
+  const next = useMemo(
+    () => (job.disabled ? null : nextCronRun(job.schedule, new Date(), job.timeZone)),
+    [job],
+  )
   const verbs = useMemo(
     () => cronJobVerbs({ job, admin, confirm, onToggle, onEdit, onRemove }),
     [job, admin, confirm, onToggle, onEdit, onRemove],
@@ -446,7 +490,13 @@ function CronJobRow({
           </>
         ) : (
           <span className="text-muted-foreground">
-            {job.disabled ? "—" : job.schedule.toLowerCase() === "@reboot" ? "at boot" : "never"}
+            {job.disabled
+              ? "—"
+              : job.schedule.toLowerCase() === "@reboot"
+                ? "at boot"
+                : job.timeZone && !supportsCronTimeZone(job.timeZone)
+                  ? "forecast unavailable"
+                  : "never"}
           </span>
         )}
       </TableCell>
@@ -549,12 +599,16 @@ function CronJobEditor({
   user,
   onClose,
   onSave,
+  baseline,
+  timeZone,
 }: {
   open: boolean
   job: CronJob | null
   user: string
   onClose: () => void
-  onSave: (edit: JobEdit) => Promise<void>
+  onSave: (edit: JobEdit, baseline: { raw: string; revision?: string }) => Promise<void>
+  baseline: { raw: string; revision?: string }
+  timeZone?: string
 }) {
   return (
     <SidePanel
@@ -567,11 +621,13 @@ function CronJobEditor({
     >
       {open && (
         <CronJobForm
-          key={job ? job.line : "new"}
+          key={`${user}:${job ? job.line : "new"}`}
           job={job}
           user={user}
           onClose={onClose}
           onSave={onSave}
+          baseline={baseline}
+          timeZone={timeZone}
         />
       )}
     </SidePanel>
@@ -583,25 +639,36 @@ function CronJobForm({
   user,
   onClose,
   onSave,
+  baseline: incomingBaseline,
+  timeZone,
 }: {
   job: CronJob | null
   user: string
   onClose: () => void
-  onSave: (edit: JobEdit) => Promise<void>
+  onSave: (edit: JobEdit, baseline: { raw: string; revision?: string }) => Promise<void>
+  baseline: { raw: string; revision?: string }
+  timeZone?: string
 }) {
   // Every field starts from the job being edited and is kept for the tab
   // until the editor is closed, so a walk to the Files page for the exact
   // path of a script comes back to the half-written job.
   const [initial] = useState(() => fieldsOf(job))
-  const draft = `processes.cron.job.${job ? job.line : "new"}`
-  const [preset, setPreset] = useSessionState<CronPreset>(`${draft}.preset`, initial.preset)
-  const [time, setTime] = useSessionState(`${draft}.time`, initial.time)
-  const [weekday, setWeekday] = useSessionState(`${draft}.weekday`, initial.weekday)
-  const [monthDay, setMonthDay] = useSessionState(`${draft}.monthDay`, initial.monthDay)
-  const [custom, setCustom] = useSessionState(`${draft}.custom`, job?.schedule ?? "")
-  const [command, setCommand] = useSessionState(`${draft}.command`, job?.command ?? "")
-  const [comment, setComment] = useSessionState(`${draft}.comment`, job?.comment ?? "")
-  const [enabled, setEnabled] = useSessionState(`${draft}.enabled`, job ? !job.disabled : true)
+  const draft = `processes.cron.job.${user}.${job ? job.line : "new"}`
+  const [baseline, setBaseline] = useMemoryState(`${draft}.baseline`, incomingBaseline)
+  useEffect(() => {
+    // Keep the revision paired with the draft across SPA navigation. A fresh
+    // poll must never silently rebase an old edit onto a changed crontab.
+    setBaseline((previous) => previous)
+  }, [setBaseline])
+  const [saveError, setSaveError] = useState<string>()
+  const [preset, setPreset] = useMemoryState<CronPreset>(`${draft}.preset`, initial.preset)
+  const [time, setTime] = useMemoryState(`${draft}.time`, initial.time)
+  const [weekday, setWeekday] = useMemoryState(`${draft}.weekday`, initial.weekday)
+  const [monthDay, setMonthDay] = useMemoryState(`${draft}.monthDay`, initial.monthDay)
+  const [custom, setCustom] = useMemoryState(`${draft}.custom`, job?.schedule ?? "")
+  const [command, setCommand] = useMemoryState(`${draft}.command`, job?.command ?? "")
+  const [comment, setComment] = useMemoryState(`${draft}.comment`, job?.comment ?? "")
+  const [enabled, setEnabled] = useMemoryState(`${draft}.enabled`, job ? !job.disabled : true)
   const [busy, setBusy] = useState(false)
 
   const [hh, mm] = time.split(":").map((v) => Number(v))
@@ -629,27 +696,31 @@ function CronJobForm({
     const out: Date[] = []
     let from = new Date()
     for (let i = 0; i < 3; i++) {
-      const next = nextCronRun(expression, from)
+      const next = nextCronRun(expression, from, timeZone)
       if (!next) break
       out.push(next)
       from = next
     }
     return out
-  }, [expression, validSchedule])
+  }, [expression, validSchedule, timeZone])
   const program = cronProgram(command)
 
   const submit = async () => {
     setBusy(true)
+    setSaveError(undefined)
     try {
-      await onSave({
-        schedule: expression,
-        command: command.trim(),
-        comment: comment.trim() || undefined,
-        disabled: !enabled,
-      })
+      await onSave(
+        {
+          schedule: expression,
+          command: command.trim(),
+          comment: comment.trim() || undefined,
+          disabled: !enabled,
+        },
+        baseline,
+      )
       onClose()
-    } catch {
-      // The panel already said what went wrong.
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -664,6 +735,11 @@ function CronJobForm({
         if (valid && !busy) void submit()
       }}
     >
+      {saveError && (
+        <Notice tone="danger" title="Crontab was not saved">
+          {saveError} Your draft is kept. Reload and review the current crontab before trying again.
+        </Notice>
+      )}
       <FormSection title="When">
         <ToggleGroup
           type="single"
@@ -682,7 +758,15 @@ function CronJobForm({
         </ToggleGroup>
         {(preset === "daily" || preset === "weekly" || preset === "monthly") && (
           <FieldRow>
-            <Field label="At" htmlFor="cron-time" hint="The server's clock.">
+            <Field
+              label="At"
+              htmlFor="cron-time"
+              hint={
+                timeZone
+                  ? `Schedule time zone: ${timeZone}.`
+                  : "Server time; preview uses this browser's time zone as an estimate."
+              }
+            >
               <Input
                 id="cron-time"
                 type="time"
@@ -748,7 +832,16 @@ function CronJobForm({
               {expression ? describeCron(expression) : "Choose how often it runs"}
             </span>
           </div>
-          {validSchedule && preset !== "reboot" && <WeekStrip schedule={expression} />}
+          {validSchedule && preset !== "reboot" && (
+            <>
+              <WeekStrip schedule={expression} timeZone={timeZone} />
+              <FormNote>
+                {timeZone
+                  ? `Forecast uses ${timeZone}; displayed in this browser's time zone.`
+                  : "Approximate forecast in this browser's time zone; host time zone unavailable."}
+              </FormNote>
+            </>
+          )}
           {previews.length > 0 && (
             <p className="text-hint text-muted-foreground">
               Next: {previews.map((d) => timestamp(d.toISOString())).join(" · ")}

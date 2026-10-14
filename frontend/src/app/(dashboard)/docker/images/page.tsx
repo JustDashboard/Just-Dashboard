@@ -28,9 +28,9 @@ import { ImageSheet } from "@/components/docker/image-sheet"
 import { ImageTable } from "@/components/docker/image-table"
 import {
   FRESHNESS_LABEL,
-  freshness,
   imagePhrase,
   primaryTag,
+  imageFreshness,
   shortId,
   visibleImages,
   type Freshness,
@@ -117,13 +117,7 @@ export default function DockerImagesPage() {
 
   const list = useMemo(() => images.data ?? [], [images.data])
   const states = useMemo(
-    () =>
-      new Map(
-        list.map((image) => {
-          const tag = primaryTag(image)
-          return [image.id, freshness(image, tag ? updates.data?.[tag] : undefined)] as const
-        }),
-      ),
+    () => new Map(list.map((image) => [image.id, imageFreshness(image, updates.data)] as const)),
     [list, updates.data],
   )
   const users = useMemo(() => {
@@ -141,6 +135,7 @@ export default function DockerImagesPage() {
     images.refresh()
     usage.refresh()
     containers.refresh()
+    updates.refresh()
   }
 
   const recheck = async () => {
@@ -264,6 +259,8 @@ export default function DockerImagesPage() {
   const untagged = list.filter((i) => i.dangling).length
   const unused = list.filter((i) => i.containers === 0 && !i.dangling).length
   const outdated = list.filter((i) => states.get(i.id) === "outdated").length
+  const unverified = list.filter((i) => i.containers > 0 && states.get(i.id) === "unknown").length
+  const verified = list.filter((i) => i.containers > 0 && states.get(i.id) === "current").length
   const checkedAt = Object.values(updates.data ?? {})
     .map((u) => u.checkedAt)
     .sort()
@@ -343,7 +340,11 @@ export default function DockerImagesPage() {
                   >
                     <Status verdict="warning" label={`${plural(outdated, "update")} available`} />
                   </button>
-                ) : updates.data && checkedAt ? (
+                ) : updates.error ? (
+                  <Status verdict="warning" label="Registry checks unavailable" />
+                ) : unverified > 0 ? (
+                  <Status verdict="warning" label={`${plural(unverified, "image")} unverified`} />
+                ) : verified > 0 && checkedAt ? (
                   <Status verdict="ok" label="Tags in use are current" />
                 ) : null}
               </span>

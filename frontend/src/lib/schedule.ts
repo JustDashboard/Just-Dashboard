@@ -1,4 +1,4 @@
-import { describeCron, nextCronRun } from "@/lib/cron"
+import { describeCron, nextCronRun, nextCronRunsIn } from "@/lib/cron"
 import type { CronJob, Crontab, SystemdTimer } from "@/lib/types"
 
 /**
@@ -64,11 +64,23 @@ export function cronProgram(command: string): { name: string; segment: string } 
 }
 
 /** A cron expression's runs from `from` up to `until`, capped at `cap`. */
-export function cronRunsBetween(expression: string, from: number, until: number, cap = RUN_CAP) {
+export function cronRunsBetween(
+  expression: string,
+  from: number,
+  until: number,
+  cap = RUN_CAP,
+  timeZone?: string,
+) {
   const times: number[] = []
+  if (timeZone) {
+    const times = nextCronRunsIn(expression, timeZone, cap + 1, new Date(from), new Date(until))
+      .map((date) => date.getTime())
+      .filter((instant) => instant <= until)
+    return { times: times.slice(0, cap), dense: times.length > cap }
+  }
   let at = new Date(from)
   while (times.length <= cap) {
-    const next = nextCronRun(expression, at)
+    const next = nextCronRun(expression, at, timeZone)
     if (!next || next.getTime() > until) break
     times.push(next.getTime())
     at = next
@@ -87,10 +99,10 @@ function cronLane(
   const program = cronProgram(job.command)
   const { times, dense } = job.disabled
     ? { times: [], dense: false }
-    : cronRunsBetween(job.schedule, from, until)
+    : cronRunsBetween(job.schedule, from, until, RUN_CAP, job.timeZone)
   const next = job.disabled
     ? undefined
-    : (times[0] ?? nextCronRun(job.schedule, new Date(from))?.getTime())
+    : (times[0] ?? nextCronRun(job.schedule, new Date(from), job.timeZone)?.getTime())
   return {
     key,
     kind,

@@ -38,6 +38,10 @@ describe("describing a schedule", () => {
     expect(isValidCron("0 3 * * mon")).toBe(true)
     expect(isValidCron("@reboot")).toBe(true)
     expect(isValidCron("@bogus")).toBe(false)
+    for (const schedule of ["*/5/2 * * * *", "1-2-3 * * * *", "1,,2 * * * *"]) {
+      expect(isValidCron(schedule)).toBe(false)
+      expect(nextCronRun(schedule)).toBeNull()
+    }
   })
 })
 
@@ -76,6 +80,8 @@ describe("recognising a preset", () => {
     expect(presetFor("* * * * *")).toBe("minute")
     expect(presetFor("*/5 * * * *")).toBe("5min")
     expect(presetFor("0 * * * *")).toBe("hourly")
+    expect(presetFor("15 * * * *")).toBe("custom")
+    expect(presetFor("45 * * * *")).toBe("custom")
     expect(presetFor("0 3 * * *")).toBe("daily")
     expect(presetFor("0 3 * * 1")).toBe("weekly")
     expect(presetFor("0 3 1 * *")).toBe("monthly")
@@ -171,4 +177,12 @@ describe("the next runs in a named zone", () => {
       expect(nextCronRunsIn(expression, zone, 1, from)).toEqual([nextCronRun(expression, from)])
     }
   })
+})
+
+test("star steps use native day intersection and reject unsupported step grammar", () => {
+  const from = new Date("2026-10-12T00:01:00Z")
+  expect(nextCronRunsIn("0 0 */2 * 1", "UTC", 1, from)).toEqual([new Date("2026-10-19T00:00:00Z")])
+  expect(isValidCron("5/5 * * * *")).toBe(false)
+  expect(isValidCron("*/999999999999999999999999 * * * *")).toBe(false)
+  expect(isValidCron("5-59/5 * * * *")).toBe(true)
 })

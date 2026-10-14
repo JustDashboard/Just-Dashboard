@@ -4396,3 +4396,10 @@ so it is built around the moment the page watching it loses its API.
   `GET /api/v1/dashboard/uninstall/log`, `DELETE /api/v1/dashboard/uninstall/run` and
   `POST /api/v1/dashboard/uninstall` (`{mode, deleteBackups}`, inside `s.destructive`), all
   `system.admin`. A wipe requires the host name as the typed phrase (invariant 3); a keep does not.
+
+## SQL handoff at tab capacity
+
+A saved-query URL stays pending when all 24 SQL tabs are occupied. Its intent is consumed only after
+an existing blank tab or a newly available slot accepts it. Closing a tab therefore opens the pending
+query once rather than silently dropping it. No extra query runs or connection mutations are caused
+by this handoff. `database-query.spec.ts` covers the full-capacity case.

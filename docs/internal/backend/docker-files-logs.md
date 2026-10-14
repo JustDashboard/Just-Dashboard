@@ -995,3 +995,28 @@ creates only its own temporary host bridge/routes through Docker; it does not ed
 
 This establishes the supported native bridge path. Third-party drivers/options still depend on
 installed Engine plugins and native support; a fixture does not establish provider connectivity.
+
+## Docker detail freshness and export coverage
+
+Container detail identity and associated route bindings poll every ten seconds and refresh after an
+in-page action. Child editors retain their drafts while these readings update. An unavailable or
+invalid detail tab falls back to the first available view; stopped containers do not leave an empty
+Shell panel. The Images verdict includes secondary tags/digests, and a matching outdated reference
+wins over an otherwise current alias. Unknown/failed registry checks are unverified; only an actual
+verified current answer contributes to the green current verdict.
+
+Native Docker/stack/journal log exports remain bounded to 20,000 selected lines and the native scan
+budget. Their downloaded text begins with coverage metadata: returned/matching/scanned counts,
+selected-line limit, unfinished scans, unread stack sources, and the journal's implicit last-48-hours
+scope when no start date is requested. Any such omission makes coverage PARTIAL. The pane states the
+native bound before download; file and PM2 exports remain uncapped. A native read error is returned
+before attachment headers, and journal process exit failures are checked. Streaming file failures
+before output return an error; a failure after output appends an explicit incomplete-artifact warning.
+Consumers of native text exports must account for the comment-prefixed coverage header.
+
+Custom time windows share validation between pane, time-window dialog and export. Native HTML
+extended-year values are parsed, then years outside RFC3339's four-digit range, missing endpoints and
+reversed windows receive field errors. Invalid ranges do not trigger search or enable Download;
+server downloads also reject malformed bounds. Export fixture tests exceed 20,000 records, exercise
+native failures and partial coverage, and verify uncapped file output. Datetime unit and browser tests
+cover year 10000 and invalid/order recovery.

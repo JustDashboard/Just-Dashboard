@@ -382,7 +382,8 @@ a concept on every single-package install while protecting against an interrupti
 The command each install button runs is its `title`. The empty search offers eight software choices
 with product marks; results are `ChoiceRow`s with their install action, so opening a result and starting
 an install remain separate gestures. A pending query hides the previous query's results and says it is
-searching; failed reads say so. A started install is a `Status`, not a disabled button.
+searching; failed reads say so. An active install has a job-backed `Status`; failed or canceled
+attempts offer retry, and completed attempts refresh native package readings.
 The page is drawn per design-system §15 in the reading register, without summary tiles. Installed and
 by-hand/dependency counts live in the identity, view strip and scope chips. `software-band.tsx` draws the
 five largest software groups as shares of the installed size, in the disk measurement's colour, with

@@ -181,3 +181,10 @@ endpoints. PM2 details no longer add a heuristic attention panel. Editable setti
 certificate operations and requested diagnostics remain. Network read failures remain visible as
 errors; Gateway retains manual admission-rule repair under Policy evidence. See the owning backend guides for retired
 routes and retained operation checks; the 2026-10-12 actionable-findings audit is historical.
+
+## Non-network audit repairs
+
+The [2026-10-14 repair matrix](../../audits/2026-10-14-non-network-fixes/README.md) records the 34 findings
+from the 94-route audit, their owning features, regression coverage and remaining integration limits.
+Route inventory and capability ownership remain unchanged; the fixes correct existing save, handoff,
+status, loading, error-recovery and authentication behaviors. `/network` pages are excluded.

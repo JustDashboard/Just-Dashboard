@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { isBare, keyShares, placeOnAxis, rootReach, rootRoutes, signIns, verdict } from "./access"
+import {
+  hasSignInRoute,
+  isBare,
+  keyShares,
+  placeOnAxis,
+  rootReach,
+  rootRoutes,
+  signIns,
+  verdict,
+} from "./access"
+import { isAdmin } from "./marks"
 
 const user = (username, over = {}) => ({
   username,
@@ -19,6 +29,15 @@ const user = (username, over = {}) => ({
 
 const NOW = Date.parse("2026-10-10T12:00:00Z")
 const ago = (ms) => new Date(NOW - ms).toISOString()
+
+test("password locks do not erase an authorised-key route or uid-0 administration", () => {
+  expect(hasSignInRoute(user("key-only", { locked: true, sshKeyCount: 1 }))).toBe(true)
+  expect(hasSignInRoute(user("locked", { locked: true }))).toBe(false)
+  expect(hasSignInRoute(user("daemon", { canLogin: false, sshKeyCount: 1 }))).toBe(false)
+  expect(isAdmin(user("root", { uid: 0, groups: ["root"] }))).toBe(true)
+  expect(isAdmin(user("docker-user", { groups: ["docker"] }))).toBe(true)
+  expect(verdict([user("root", { uid: 0, groups: ["root"], noPassword: true })]).admins).toBe(1)
+})
 
 describe("verdict", () => {
   test("counts the accounts that need no password and which of them are administrators", () => {

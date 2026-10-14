@@ -18,7 +18,7 @@ import { NetworkChangeConfirmation } from "@/components/network/change-confirmat
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { status, loading } = useAuth()
+  const { status, loading, sessionEnded } = useAuth()
   const router = useRouter()
 
   // Redirecting here is a convenience, not a security control: every API call
@@ -27,9 +27,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // wherever it was headed; answering or skipping ends that for good.
   const onboarding = Boolean(status?.user?.needsOnboarding)
   useEffect(() => {
-    if (!loading && !status?.authenticated) router.replace("/login")
+    if (!loading && !status?.authenticated)
+      router.replace(sessionEnded ? "/login?reason=session" : "/login")
     else if (onboarding) router.replace("/welcome")
-  }, [loading, status, onboarding, router])
+  }, [loading, status, sessionEnded, onboarding, router])
 
   if (loading || !status?.authenticated || onboarding) return <ShellSplash />
 

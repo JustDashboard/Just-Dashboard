@@ -159,8 +159,9 @@ socket-activated service's port.
   Per-job enable, disable, edit, add and remove are edits to the crontab's text made in the browser
   (`lib/crontab.ts`: only the job's own line and the comment the parser attached to it change) and
   written back through the same wholesale `PUT`, so the row controls and the text editor are two
-  views of one file. Schedules are described and their next runs computed in `lib/cron.ts`, in the
-  browser's clock; the page says so. There is no "run now" for a cron line: a crontab command is a
+  views of one file. Schedules are described and their next runs computed in `lib/cron.ts`, using
+  the host zone or each preceding `CRON_TZ` assignment. Dates and axes use the browser zone; unavailable
+  host metadata is explicitly an estimate, and unsupported named zones have no forecast. There is no "run now" for a cron line: a crontab command is a
   shell string, and running it would mean a request-built `sh -c`, which invariant 4 forbids. Writes use
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
   What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
@@ -500,3 +501,31 @@ Resident and swapped bytes come from the process memory read (`statm`, and `VmSw
 since gopsutil's Linux memory read leaves swap at zero). Nice is reported on the −20…19 scale the
 priority route takes: gopsutil returns `getpriority(2)`'s raw value, which is 20 minus the nice
 value, and read as-is every ordinary process was "nice 20" and could not be lowered.
+
+## Cron edit and forecast contract
+
+Crontab reads carry a SHA-256 `revision`, a host `timeZone` where `/etc/localtime` or `/etc/timezone`
+identifies it, and each job's effective zone. `CRON_TZ` applies to subsequent jobs, including disabled
+lines; quoted values and whitespace around `=` are accepted, and an empty value restores the host
+zone. Native implementations that do not support `CRON_TZ`, POSIX zone expressions that the browser
+cannot interpret, and copied localtime files without a discoverable zone remain operational limits.
+An unsupported reported zone is labelled forecast unavailable rather than never. Forecasts describe
+schedule matches; the native daemon's missed/repeated-time behavior can differ around DST.
+
+The common five-field grammar rejects extra slash/range separators, empty list members, field bounds,
+signed or oversized steps and steps after single numbers. Leading-star day fields intersect their
+sets, while two non-star day fields use cron's either-day rule. Zoned window forecasts are generated
+in a bounded batch. Command-only editing of `15 * * * *` retains `15`; a nonzero hourly minute opens
+as Custom rather than a preset that would move it to `:00`.
+
+`PUT /cron/user/{user}` accepts optional `expectedRevision` for older clients. Dashboard edits always
+send the captured revision; the per-account content guard reads the host crontab again and refuses a
+changed revision with `409 content_conflict`. Add stays disabled until the existing tab is loaded.
+Builder fields and their original raw/revision stay together in memory per account across SPA visits,
+are cleared on Close/sign-out, and never write full commands/environment into Web Storage. A refused
+save keeps the draft and displays the reason. Text edits capture their revision when opened. External
+native writers do not share the dashboard's lock and can race after the final comparison; this is an
+optimistic edit guard, not atomic coordination with every host process.
+
+`cron_test.go`, `cron.test.js`, `schedule.test.js` and `processes-ui.spec.ts` cover syntax, time-zone
+positions, stale and simultaneous saves, forecast semantics and preservation of the hourly minute.

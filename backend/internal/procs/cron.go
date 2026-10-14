@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
@@ -27,18 +29,23 @@ type CronJob struct {
 	Comment  string `json:"comment,omitempty"`
 	Raw      string `json:"raw"`
 	Disabled bool   `json:"disabled"`
+	TimeZone string `json:"timeZone,omitempty"`
 }
 
 type Crontab struct {
-	User    string    `json:"user"`
-	Source  string    `json:"source"`
-	Raw     string    `json:"raw"`
-	Jobs    []CronJob `json:"jobs"`
-	Env     []string  `json:"env"`
-	Comment []string  `json:"comments"`
+	User     string    `json:"user"`
+	Source   string    `json:"source"`
+	Raw      string    `json:"raw"`
+	Jobs     []CronJob `json:"jobs"`
+	Env      []string  `json:"env"`
+	Comment  []string  `json:"comments"`
+	Revision string    `json:"revision"`
+	TimeZone string    `json:"timeZone,omitempty"`
 }
 
-type Cron struct{}
+type Cron struct {
+	run func(context.Context, string, string, bool) (*CommandResult, error)
+}
 
 func NewCron() *Cron { return &Cron{} }
 
@@ -50,12 +57,14 @@ func (c *Cron) UserCrontab(ctx context.Context, user string) (*Crontab, error) {
 	if err := ValidateName(user); err != nil {
 		return nil, err
 	}
-	res, err := runCron(ctx, user, "", false)
+	res, err := c.command(ctx, user, "", false)
 	if err != nil {
 		// An empty crontab exits non-zero with this message; that is not an
 		// error condition for a viewer.
 		if strings.Contains(res.Stderr, "no crontab for") {
-			return &Crontab{User: user, Source: "crontab -u " + user, Jobs: []CronJob{}, Env: []string{}, Comment: []string{}}, nil
+			ct := parseCrontab("", false)
+			ct.User, ct.Source = user, "crontab -u "+user
+			return ct, nil
 		}
 		return nil, err
 	}
@@ -66,17 +75,39 @@ func (c *Cron) UserCrontab(ctx context.Context, user string) (*Crontab, error) {
 }
 
 func (c *Cron) SetUserCrontab(ctx context.Context, user, content string) error {
+	return c.SetUserCrontabGuarded(ctx, user, content, nil)
+}
+
+func (c *Cron) SetUserCrontabGuarded(ctx context.Context, user, content string, expected *string) error {
 	if err := ValidateName(user); err != nil {
 		return err
 	}
 	if err := ValidateCrontab(content); err != nil {
 		return err
 	}
+	unlock := contentguard.Lock("crontab:" + user)
+	defer unlock()
+	if expected != nil {
+		current, err := c.UserCrontab(ctx, user)
+		if err != nil {
+			return err
+		}
+		if err := contentguard.Check(current.Raw, expected); err != nil {
+			return err
+		}
+	}
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	_, err := runCron(ctx, user, content, true)
+	_, err := c.command(ctx, user, content, true)
 	return err
+}
+
+func (c *Cron) command(ctx context.Context, user, content string, write bool) (*CommandResult, error) {
+	if c.run != nil {
+		return c.run(ctx, user, content, write)
+	}
+	return runCron(ctx, user, content, write)
 }
 
 // ValidateCrontab catches malformed schedules before they are installed.
@@ -88,10 +119,8 @@ func ValidateCrontab(content string) error {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if strings.Contains(trimmed, "=") && !strings.HasPrefix(trimmed, "@") {
-			if idx := strings.Index(trimmed, "="); idx > 0 && !strings.ContainsAny(trimmed[:idx], " \t") {
-				continue // environment assignment
-			}
+		if cronEnvironment.FindStringSubmatch(trimmed) != nil {
+			continue
 		}
 		if strings.HasPrefix(trimmed, "@") {
 			// cronNicknames exists precisely to say which of these are real;
@@ -119,8 +148,15 @@ func ValidateCrontab(content string) error {
 	return nil
 }
 
+var cronEnvironment = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
+
 func parseCrontab(content string, withUser bool) *Crontab {
-	ct := &Crontab{Raw: content, Jobs: []CronJob{}, Env: []string{}, Comment: []string{}}
+	return parseCrontabIn(content, withUser, hostTimeZone())
+}
+
+func parseCrontabIn(content string, withUser bool, zone string) *Crontab {
+	baseZone := zone
+	ct := &Crontab{Raw: content, Revision: contentguard.Revision(content), TimeZone: zone, Jobs: []CronJob{}, Env: []string{}, Comment: []string{}}
 	sc := bufio.NewScanner(strings.NewReader(content))
 	lineNo := 0
 	var pendingComment string
@@ -139,6 +175,7 @@ func parseCrontab(content string, withUser bool) *Crontab {
 				job.Raw = raw
 				job.Disabled = true
 				job.Comment = pendingComment
+				job.TimeZone = zone
 				pendingComment = ""
 				ct.Jobs = append(ct.Jobs, job)
 				continue
@@ -147,14 +184,23 @@ func parseCrontab(content string, withUser bool) *Crontab {
 			ct.Comment = append(ct.Comment, body)
 			continue
 		}
-		if idx := strings.Index(trimmed, "="); idx > 0 && !strings.ContainsAny(trimmed[:idx], " \t") {
+		if env := cronEnvironment.FindStringSubmatch(trimmed); env != nil {
 			ct.Env = append(ct.Env, trimmed)
+			if env[1] == "CRON_TZ" {
+				zone = strings.Trim(strings.TrimSpace(env[2]), "\"'")
+				zone = strings.TrimPrefix(zone, ":")
+				if zone == "" {
+					zone = baseZone
+				}
+				ct.TimeZone = zone
+			}
 			continue
 		}
 		if job, ok := splitCronLine(trimmed, withUser); ok {
 			job.Line = lineNo
 			job.Raw = raw
 			job.Comment = pendingComment
+			job.TimeZone = zone
 			pendingComment = ""
 			ct.Jobs = append(ct.Jobs, job)
 		}
@@ -162,13 +208,19 @@ func parseCrontab(content string, withUser bool) *Crontab {
 	return ct
 }
 
-// cronNames are the symbolic month and weekday names cron accepts in place of
-// a number.
-var cronNames = map[string]bool{
-	"jan": true, "feb": true, "mar": true, "apr": true, "may": true, "jun": true,
-	"jul": true, "aug": true, "sep": true, "oct": true, "nov": true, "dec": true,
-	"sun": true, "mon": true, "tue": true, "wed": true, "thu": true, "fri": true,
-	"sat": true,
+func hostTimeZone() string {
+	if path, err := os.Readlink(hostexec.HostPath("/etc/localtime")); err == nil {
+		if _, zone, ok := strings.Cut(path, "/zoneinfo/"); ok {
+			return zone
+		}
+	}
+	if raw, err := os.ReadFile(hostexec.HostPath("/etc/timezone")); err == nil {
+		zone := strings.TrimSpace(string(raw))
+		if _, err := time.LoadLocation(zone); err == nil {
+			return zone
+		}
+	}
+	return ""
 }
 
 // cronNicknames are the @-prefixed shorthands cron understands. Anything else
@@ -187,29 +239,80 @@ var cronNicknames = map[string]bool{
 // five-field schedule plus a command — which rendered documentation as if it
 // were a job.
 func isCronField(field string) bool {
-	if field == "" {
+	return validCronField(field, 0, 59, "jan feb mar apr may jun jul aug sep oct nov dec sun mon tue wed thu fri sat")
+}
+
+func isCronSchedule(fields []string) bool {
+	if len(fields) != 5 {
 		return false
 	}
-	for _, part := range strings.FieldsFunc(field, func(r rune) bool {
-		return r == ',' || r == '-' || r == '/'
-	}) {
-		if part == "*" {
-			continue
+	for i, f := range fields {
+		min := []int{0, 0, 1, 1, 0}[i]
+		max := []int{59, 23, 31, 12, 7}[i]
+		names := ""
+		if i == 3 {
+			names = "jan feb mar apr may jun jul aug sep oct nov dec"
 		}
-		if _, err := strconv.Atoi(part); err == nil {
-			continue
+		if i == 4 {
+			names = "sun mon tue wed thu fri sat"
 		}
-		if cronNames[strings.ToLower(part)] {
-			continue
+		if !validCronField(f, min, max, names) {
+			return false
 		}
-		return false
 	}
 	return true
 }
 
-func isCronSchedule(fields []string) bool {
-	for _, f := range fields {
-		if !isCronField(f) {
+func validCronField(field string, min, max int, names string) bool {
+	value := func(token string) (int, bool) {
+		if n, err := strconv.Atoi(token); cronDigits(token) && err == nil && n >= min && n <= max {
+			return n, true
+		}
+		for i, name := range strings.Fields(names) {
+			if strings.EqualFold(token, name) {
+				return min + i, true
+			}
+		}
+		return 0, false
+	}
+	for _, part := range strings.Split(field, ",") {
+		step := strings.Split(part, "/")
+		if len(step) > 2 {
+			return false
+		}
+		if len(step) == 2 {
+			n, err := strconv.Atoi(step[1])
+			if !cronDigits(step[1]) || err != nil || n <= 0 || n > 2147483647 {
+				return false
+			}
+		}
+		if step[0] == "*" {
+			continue
+		}
+		span := strings.Split(step[0], "-")
+		if len(span) > 2 || (len(step) == 2 && len(span) != 2) {
+			return false
+		}
+		lo, ok := value(span[0])
+		if !ok {
+			return false
+		}
+		if len(span) == 2 {
+			hi, ok := value(span[1])
+			if !ok || hi < lo {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func cronDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
 			return false
 		}
 	}

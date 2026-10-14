@@ -1,6 +1,13 @@
 package procs
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
+)
 
 // The prose in a packaged /etc/cron.d file is what broke the old parser: any
 // comment six words or longer parsed as a five-field schedule plus a command,
@@ -81,5 +88,85 @@ func TestValidateCrontabRejectsProse(t *testing.T) {
 	}
 	if err := ValidateCrontab("*/5 * * * * /usr/bin/backup.sh\n"); err != nil {
 		t.Errorf("valid entry rejected: %v", err)
+	}
+}
+
+func TestValidateCrontabRejectsMalformedFields(t *testing.T) {
+	for _, schedule := range []string{"*/5/2 * * * *", "5/5 * * * *", "*/999999999999999999999999 * * * *", "1-2-3 * * * *", "1,,2 * * * *", "*/+5 * * * *", "+1 * * * *", "60 * * * *", "0 24 * * *", "0 0 0 * *", "0 0 * 13 *", "0 0 * * 8"} {
+		if err := ValidateCrontab(schedule + " echo blocked\n"); err == nil {
+			t.Errorf("malformed schedule %q accepted", schedule)
+		}
+	}
+	for _, schedule := range []string{"5-59/5 * * * *", "0 0 * jan,dec sun-sat", "0 0 * * 7"} {
+		if err := ValidateCrontab(schedule + " echo valid\n"); err != nil {
+			t.Errorf("valid schedule %q rejected: %v", schedule, err)
+		}
+	}
+}
+
+func TestCrontabTimeZonesFollowEnvironmentPosition(t *testing.T) {
+	const raw = "0 3 * * * first\nCRON_TZ=America/New_York\n0 3 * * * second\nCRON_TZ='Asia/Tokyo'\n# 0 3 * * * disabled\n"
+	ct := parseCrontabIn(raw, false, "UTC")
+	if ct.Raw != raw || ct.Revision != contentguard.Revision(raw) || ct.TimeZone != "Asia/Tokyo" {
+		t.Fatalf("metadata: %+v", ct)
+	}
+	for i, zone := range []string{"UTC", "America/New_York", "Asia/Tokyo"} {
+		if ct.Jobs[i].TimeZone != zone {
+			t.Errorf("job %d zone = %q, want %q", i, ct.Jobs[i].TimeZone, zone)
+		}
+	}
+}
+
+func TestGuardedCrontabRefusesNativeEditsAndSerializesDashboardSaves(t *testing.T) {
+	ctx := context.Background()
+	const original = "15 * * * * echo original\n"
+	var mu sync.Mutex
+	content, writes := original, 0
+	c := &Cron{run: func(_ context.Context, _ string, next string, write bool) (*CommandResult, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if write {
+			content = next
+			writes++
+		}
+		return &CommandResult{Stdout: content}, nil
+	}}
+	opened, err := c.UserCrontab(ctx, "audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = "30 * * * * echo native\n"
+	if err := c.SetUserCrontabGuarded(ctx, "audit", original, &opened.Revision); !errors.Is(err, contentguard.ErrConflict) {
+		t.Fatalf("native edit accepted: %v", err)
+	}
+	if writes != 0 || content != "30 * * * * echo native\n" {
+		t.Fatal("native edit overwritten")
+	}
+	content = original
+	results := make(chan error, 2)
+	for _, next := range []string{"20 * * * * echo first\n", "40 * * * * echo second\n"} {
+		go func() { results <- c.SetUserCrontabGuarded(ctx, "audit", next, &opened.Revision) }()
+	}
+	conflicts := 0
+	for range 2 {
+		if err := <-results; errors.Is(err, contentguard.ErrConflict) {
+			conflicts++
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if writes != 1 || conflicts != 1 {
+		t.Fatalf("writes=%d conflicts=%d", writes, conflicts)
+	}
+}
+
+func TestCrontabEnvironmentWhitespaceAndEmptyZone(t *testing.T) {
+	const raw = "CRON_TZ = \"America/New_York\"\n0 3 * * * first\nCRON_TZ = \"\"\n0 3 * * * second\n"
+	if err := ValidateCrontab(raw); err != nil {
+		t.Fatal(err)
+	}
+	ct := parseCrontabIn(raw, false, "UTC")
+	if len(ct.Jobs) != 2 || ct.Jobs[0].TimeZone != "America/New_York" || ct.Jobs[1].TimeZone != "UTC" {
+		t.Fatalf("zones: %+v", ct)
 	}
 }
