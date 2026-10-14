@@ -361,11 +361,9 @@ export function PruneDialog({
       size="sm"
       title="Remove unused networks"
       description="The networks a prune would remove, and the ones it keeps because something still names them."
+      progress={busy && <OperationProgress label="Removing unused networks…" />}
       footer={
         <>
-          {busy && (
-            <OperationProgress label="Removing unused networks…" className="basis-full pb-2" />
-          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>

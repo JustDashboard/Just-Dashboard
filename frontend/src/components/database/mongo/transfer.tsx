@@ -438,27 +438,28 @@ export function ImportDialog({
       size="lg"
       title={`Import into ${target.collection}`}
       description={`Add the documents of a file to ${target.collection}`}
+      progress={
+        busy === "importing" && (
+          <OperationProgress
+            label={
+              sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…"
+            }
+            detail={
+              sendTotal > 0 && sent < sendTotal
+                ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
+                : "Waiting for the database to finish the import"
+            }
+            completed={sendTotal > 0 && sent < sendTotal ? sent : undefined}
+            total={sendTotal > 0 && sent < sendTotal ? sendTotal : undefined}
+            showCount={false}
+          />
+        )
+      }
       footer={
         report ? (
           <Button onClick={() => close(false)}>Done</Button>
         ) : (
           <>
-            {busy === "importing" && (
-              <OperationProgress
-                label={
-                  sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…"
-                }
-                detail={
-                  sendTotal > 0 && sent < sendTotal
-                    ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
-                    : "Waiting for the database to finish the import"
-                }
-                completed={sendTotal > 0 && sent < sendTotal ? sent : undefined}
-                total={sendTotal > 0 && sent < sendTotal ? sendTotal : undefined}
-                showCount={false}
-                className="basis-full pb-2"
-              />
-            )}
             <Button variant="outline" disabled={busy !== null} onClick={() => close(false)}>
               Cancel
             </Button>

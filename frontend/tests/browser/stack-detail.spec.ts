@@ -330,6 +330,27 @@ test("progress: Compose output is visible inside the confirmation while the comm
     async () => {
       await dialog.getByRole("button", { name: "Restart", exact: true }).click()
       await expect(dialog.getByText("Restarting api container", { exact: true })).toBeVisible()
+      socket!.send(
+        JSON.stringify({
+          type: "output",
+          data: [
+            {
+              stream: "stdout",
+              text: "Waiting for the container to finish restarting. ".repeat(20),
+            },
+          ],
+        }),
+      )
+      const overlay = dialog.locator("[data-slot=operation-overlay]")
+      await expect(overlay).toContainText("Waiting for the container")
+      const title = await dialog.getByRole("heading").boundingBox()
+      const cancel = await dialog.getByRole("button", { name: "Cancel", exact: true }).boundingBox()
+      const box = await overlay.boundingBox()
+      expect(box!.y).toBeGreaterThanOrEqual(title!.y + title!.height)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(cancel!.y)
+      expect(await overlay.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+        true,
+      )
     },
     dialog.locator("[data-slot=operation-progress]"),
     async () => {

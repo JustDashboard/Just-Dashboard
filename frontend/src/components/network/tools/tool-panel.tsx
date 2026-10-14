@@ -1,5 +1,6 @@
 "use client"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useEffect, useRef } from "react"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -183,8 +184,12 @@ export function ToolPanel({
           <ErrorState error={t.error} onRetry={t.canRun && !t.busy ? t.run : undefined} />
         )}
 
-        {t.busy && <OperationProgress label={`Running ${def.label}…`} className="mt-4" />}
-        {!t.result && !t.busy && (
+        {t.busy && (
+          <OperationOverlay>
+            <OperationProgress label={`Running ${def.label}…`} />
+          </OperationOverlay>
+        )}
+        {!t.result && (
           <EmptyNote className="mt-6 border-t border-hairline py-10">
             {t.busy ? "Running diagnostic…" : "Ready to run. Results will appear here."}
           </EmptyNote>

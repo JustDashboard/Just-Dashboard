@@ -50,6 +50,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 import { useOperations } from "@/hooks/use-operations"
 import { Page } from "@/components/page"
 import { PaneFooter, PaneHeader } from "@/components/panel"
@@ -1627,13 +1628,13 @@ export default function FilesPage() {
                   sticky header sticks to its nearest scrolling ancestor. The
                   right-click menu is scoped to the body too, so the path field
                   in the strip above keeps the browser's own. */}
-              {operations.operations.map((operation) => (
-                <OperationProgress
-                  key={operation.id}
-                  {...operation}
-                  className="shrink-0 border-b border-hairline bg-surface-header px-3 py-3"
-                />
-              ))}
+              {operations.operations.length > 0 && (
+                <OperationOverlay>
+                  {operations.operations.map((operation) => (
+                    <OperationProgress key={operation.id} {...operation} />
+                  ))}
+                </OperationOverlay>
+              )}
               <ListingContextMenu
                 caps={caps}
                 resolve={(p) => byPath.get(p)}

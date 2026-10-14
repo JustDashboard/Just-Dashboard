@@ -1827,3 +1827,38 @@ for (const action of ["copy", "move", "duplicate", "extract", "delete"]) {
     expect(held.calls()).toBe(action === "delete" ? 2 : 1)
   })
 }
+
+for (const width of [1280, 390]) {
+  test(`overlay: file copy keeps the listing in place at ${width}px`, async ({ page }) => {
+    await mockFiles(page)
+    await page.setViewportSize({ width, height: 900 })
+    const held = await heldResponse(page, "/files/copy", { ok: true })
+    await openFiles(page)
+    await page.locator(`[data-entry-path='${home}/notes.md']`).click()
+    await page.keyboard.press("ControlOrMeta+c")
+    await page.locator(`[data-entry-path='${home}/site']`).dblclick()
+    const listing = page.locator("[data-file-listing]")
+    const before = await listing.boundingBox()
+    const overlay = page.locator("[data-slot=operation-overlay]")
+    await recordProgress(
+      page,
+      "files-overlay",
+      async () => {
+        await page.getByRole("button", { name: "Paste here", exact: true }).click()
+        await expect(overlay).toHaveCSS("position", "fixed")
+        await expect.poll(() => listing.boundingBox()).toEqual(before)
+        await expect(overlay).toBeInViewport()
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        )
+      },
+      page.locator("[data-slot=operation-progress]"),
+      async () => {
+        held.release()
+        await expect(overlay).toHaveCount(0)
+        await expect.poll(() => listing.boundingBox()).toEqual(before)
+      },
+    )
+    expect(held.calls()).toBe(1)
+  })
+}

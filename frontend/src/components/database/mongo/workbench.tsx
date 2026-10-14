@@ -1,5 +1,6 @@
 "use client"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useState } from "react"
 import { Copy, Download, Pencil, SettingsSliders, SidebarLeftOpen, Trash } from "@/components/icons"
@@ -255,12 +256,12 @@ export function MongoWorkbench({
   return (
     <SectionFrame section={section}>
       {exporter.progress && (
-        <div className="flex shrink-0 items-center gap-3 px-3 py-3">
-          <OperationProgress {...exporter.progress} className="flex-1" />
+        <OperationOverlay>
+          <OperationProgress {...exporter.progress} />
           <Button size="sm" variant="outline" onClick={exporter.cancel}>
             Cancel export
           </Button>
-        </div>
+        </OperationOverlay>
       )}
       {dialog}
       {/* One frame around the workbench: the rail and the work are two

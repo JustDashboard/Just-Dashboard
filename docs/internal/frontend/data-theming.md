@@ -2,26 +2,31 @@
 
 Actions in flight use `components/operation-progress.tsx` for a named working bar and elapsed time.
 The bar is indeterminate unless a caller reports a measured count. It does not estimate remaining
-time, invent a server stage or imply a durable background operation. `ConfirmDialog` shows it in
-its footer while awaiting the existing action; `workingLabel` names that action and the action's
-optional second argument reports detail or processed-item counts. Failure clears the working state
+time, invent a server stage or imply a durable background operation. `OperationOverlay` places page
+readings in a floating viewport panel without consuming workspace height. `ConfirmDialog` shows
+the reading in `Modal`'s overlay above its footer while awaiting the existing action; `workingLabel`
+names that action and the action's optional second argument reports detail or processed-item counts.
+Failure clears the working state
 and leaves the confirmation available for a deliberate retry. Its existing dismissal and typed
 confirmation rules still apply.
 
-The Files workspace uses `hooks/use-operations.ts` to retain a strip per simultaneous copy, move,
+The Files workspace uses `hooks/use-operations.ts` to retain a reading per simultaneous copy, move,
 duplicate or extraction until that operation settles. Batch copy/move and deletion count processed
 top-level items, including refused or skipped items; these counts are not byte progress inside a
 directory. Git's runner exposes its working reading for the workspace, including submodule and LFS
-actions; clone has a reading in its own dialog. These requests remain owned by their existing paths.
+actions; clone has a reading in its own dialog. These readings float without adding rows to the
+workspace or resizing the dialog. These requests remain owned by their existing paths.
 
 SQL table/query and MongoDB exports expose received bytes in the workbench and retain their real
-abort control there. The query export now reads response chunks, preserving the same completion,
-truncation and interrupted-stream checks before saving a file. SQL and MongoDB imports use browser
+abort control in the floating panel. The query export now reads response chunks, preserving the same
+completion, truncation and interrupted-stream checks before saving a file. SQL and MongoDB imports use browser
 upload readings followed by an indeterminate database-processing reading; 100% uploaded does not
 claim the import has finished. MongoDB imports share the multipart upload helper and its mutation
 headers and error handling. Job consoles add the working reading even while their transcript is
-quiet. Backup runs report only the running state; their stage/output recording still happens when
-the existing runner finishes, while restore and recovery-check requests keep their working state
+quiet, over a stable transcript region instead of adding a header row. Import progress overlays its
+dialog body while the existing footer controls stay in place. Backup runs report only the running
+state in the page overlay; their stage/output recording still happens when the existing runner
+finishes, while restore and recovery-check requests keep their working state
 visible until they answer.
 
 The [operation progress audit](../../audits/2026-10-14-operation-progress/README.md) contains the

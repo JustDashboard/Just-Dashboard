@@ -1,5 +1,6 @@
 "use client"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useState } from "react"
 import { del, post, put } from "@/lib/api"
@@ -147,10 +148,11 @@ export function BlocklistList({
   return (
     <>
       {refreshing !== undefined && (
-        <OperationProgress
-          label={`Refreshing ${lists.find((list) => list.id === refreshing)?.name ?? "blocklist"}…`}
-          className="mb-4"
-        />
+        <OperationOverlay>
+          <OperationProgress
+            label={`Refreshing ${lists.find((list) => list.id === refreshing)?.name ?? "blocklist"}…`}
+          />
+        </OperationOverlay>
       )}
       <ChoiceList>
         {lists.map((list, index) => (

@@ -1,6 +1,6 @@
 # Operation progress feedback
 
-Long waits now keep an action name, elapsed time and a visible working track beside the command.
+Long waits now keep an action name, elapsed time and a visible working track above the content.
 Docker prunes and cleanup, Compose confirmations, file operations, Git, backup runs/restores,
 database transfers, network tools and shared job consoles use the same reading. A measured byte or
 item count can fill the track; unknown completion sweeps. Upload completion switches to database
@@ -18,9 +18,49 @@ durable jobs were added. Scheduled backup output is still recorded at completion
 The shared console is recorded separately in Packages, certificate renewal, Suricata rule updates,
 SSH apply, network tool installation and both Remote Desktop engine/Stream installation flows.
 
+## Overlay revision
+
+Progress now floats above its owner instead of inserting and removing rows. Page feedback uses
+one compact panel at the upper right; simultaneous file operations stack inside it. Dialog feedback
+stays inside the dialog above its existing footer, with long output scrolling inside the overlay
+rather than covering its title or controls. Job feedback overlays a consistently sized transcript
+area. Forms, listings and workbench columns retain their bounds while the reading appears
+and disappears. Network tools and the proxy tester retain their empty results area during a request.
+Cancellation, dismissal, byte/count semantics and request ownership are unchanged.
+
+Only one new recording was taken for this revision: [files-overlay.gif](files-overlay.gif). It shows
+copying a file with the listing stationary before, during and after the floating feedback. The 42
+recordings below are retained from the original implementation and show its earlier placement.
+
+Every `OperationProgress` consumer uses an overlay. Placement inventory:
+
+| Placement | Applies to |
+| --- | --- |
+| Floating page panel | Files copy, move, duplicate and extraction; Git workspace operations, including fetch, pull, push, submodules and LFS; backup runs and recovery verification; SQL table exports; SQL query exports; MongoDB exports; blocklist refresh; Network Tools diagnostics; proxy request testing. |
+| Inside the existing dialog | Every shared `ConfirmDialog` action, including Docker reclaim/cleanup/prunes and Compose actions, file deletion, backup restores and DNS actions; unused Docker networks; Git clone/initialisation; SQL imports; MongoDB imports. |
+| Over the transcript | Every shared `JobConsole`: Packages; SSH apply; Suricata setup/rule updates; Remote Desktop engine setup/repair and Stream installation; saved network diagnostic runs; network tool installation; proxy engine jobs; proxy stream setup; certificate overview/fleet, site issuance and TLS repair; database backup/restore jobs. |
+
+Owners for the transcript placement are `packages/page.tsx`, `security/ssh-panel.tsx`,
+`security/suricata-setup.tsx`, `remote-desktop/engine.tsx`, `remote-desktop/stream.tsx`,
+`network/run-inspector.tsx`, `network/install.tsx`, `proxy/engine.tsx`, `proxy/stream-setup.tsx`,
+`proxy/certs-panel.tsx`, `proxy/tls-fleet.tsx`, `proxy/site-certificate.tsx`, `proxy/tls-fix-sheet.tsx`
+and `database/ops/backups-job.tsx` (component paths relative to `frontend/src/components`, except
+the Packages route).
+
+To reproduce just the new GIF, with a production frontend already running:
+
+```bash
+cd frontend
+JD_BROWSER_BASE_URL=http://127.0.0.1:43127 JD_PROGRESS_RECORD=1 \
+  JD_PROGRESS_FRAMES=/tmp/jd-overlay-frames \
+  bunx playwright test tests/browser/files-ui.spec.ts --grep 'overlay:.*1280' --workers=1
+cd ..
+python3 docs/audits/2026-10-14-operation-progress/make-gifs.py /tmp/jd-overlay-frames
+```
+
 ## Recordings
 
-Each GIF shows the command before starting, the actual working UI, then settlement or refusal.
+These original GIFs show the command before starting, the earlier working UI, then settlement or refusal.
 
 ### Docker reclaim and cleanup
 
@@ -124,7 +164,7 @@ capture for repeated frames. The network installer recording leaves unrelated th
 without samples so they do not consume the recording's screenshot budget. Normal browser
 verification does not take screenshots on each progress frame.
 
-## Validation
+## Original implementation validation
 
 - `bun run build`: passed on the final application source. The query export observes a native
   stream and lets the browser assemble its Blob, avoiding an additional retained chunk array.
@@ -144,3 +184,24 @@ No whole browser suite, whole Go test suite, CI or release changes are part of t
 frontend design, data-flow and feature guides were updated. `AGENTS.md`, the root `README.md`,
 `CONTRIBUTING.md`, backend/deployment guides and configuration need no changes: installation,
 capabilities, typed phrases, backend operation ownership and the required commands are unchanged.
+
+## Overlay validation
+
+- The final production build, changed-file Prettier/ESLint, TypeScript and all **3,564** fast tests
+  passed. The revision uses the required selector against the preceding validated commit,
+  `scripts/test-changed.sh 5b47039a`. See
+  [PR #225](https://github.com/JustDashboard/Just-Dashboard/pull/225) for the selector's result and
+  the GitHub checks.
+- **17** focused cases passed on the final production build, covering confirmation geometry,
+  console geometry at completion, measured exports and cancellation, import processing, reduced
+  motion, phone layout and long Compose output staying clear of the dialog's title and buttons.
+- Files copy bounds stayed identical before, during and after the operation at **1280px** and
+  **390px**. The one new GIF is animated at **1280 × 900**, with **22** frames. All **42** original
+  GIFs remain byte-for-byte unchanged.
+- An initial geometry assertion sampled the end of the dialog's opening animation. It now waits
+  for that animation before measuring; all five Docker confirmation cases passed on retry and
+  again on the final build.
+
+The frontend design, data-flow and feature guides document overlay placement and sizing. The root
+operator/contributor guides, backend/deployment guides, configuration and `AGENTS.md` need no
+updates: commands, ownership, capabilities, typed phrases and installation are unchanged.

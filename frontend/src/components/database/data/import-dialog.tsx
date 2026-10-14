@@ -378,6 +378,16 @@ export function ImportDialog({
             ? "A file's rows written into this table, previewed first"
             : "A table made from a file's columns and filled with its rows, previewed first"
         }
+        progress={
+          run.pending && (
+            <OperationProgress
+              label={progress.words}
+              completed={progress.sending ? run.sent : undefined}
+              total={progress.sending ? run.total : undefined}
+              showCount={false}
+            />
+          )
+        }
         footer={
           done ? (
             <Button onClick={() => close(false)}>Done</Button>
@@ -393,15 +403,6 @@ export function ImportDialog({
                 >
                   {run.error.message}
                 </p>
-              ) : run.pending ? (
-                <div className="mr-auto min-w-0 basis-full space-y-1.5 sm:flex-1 sm:basis-0">
-                  <OperationProgress
-                    label={progress.words}
-                    completed={progress.sending ? run.sent : undefined}
-                    total={progress.sending ? run.total : undefined}
-                    showCount={false}
-                  />
-                </div>
               ) : (
                 <p className="mr-auto min-w-0 text-hint text-muted-foreground">
                   {report

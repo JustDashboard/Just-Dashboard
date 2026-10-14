@@ -57,6 +57,7 @@ import { GitHubPanel } from "@/components/git/github-panel"
 import { RepoMark } from "@/components/git/languages"
 import { useCheckoutRemoval } from "@/components/git/remove-checkout"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import { PreviewPanel, type GitPreview, type PreviewContext } from "@/components/git/preview-panel"
 import { RemotesDialog } from "@/components/git/remotes-dialog"
@@ -756,10 +757,9 @@ export function RepoWorkspace({
           </PaneHeader>
 
           {progress && (
-            <OperationProgress
-              {...progress}
-              className="shrink-0 border-b border-hairline bg-surface-header px-3 py-3"
-            />
+            <OperationOverlay>
+              <OperationProgress {...progress} />
+            </OperationOverlay>
           )}
 
           {/* The three columns. Side by side they share the frame's height and

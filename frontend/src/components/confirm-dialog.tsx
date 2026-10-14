@@ -119,11 +119,9 @@ function ConfirmBody({
       open
       onOpenChange={(open) => !busy && onOpenChange(open)}
       title={request.title}
+      progress={busy && <OperationProgress {...progress} startedAt={startedAt} />}
       footer={
         <>
-          {busy && (
-            <OperationProgress {...progress} startedAt={startedAt} className="basis-full pb-2" />
-          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>

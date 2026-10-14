@@ -885,8 +885,16 @@ thin track. With no measured total it spends `animate-sweep`; a reported item or
 the track instead. An upload reaching its total switches to an indeterminate processing reading
 until the server answers. Elapsed time is not a completion estimate or a server heartbeat. The
 timer is excluded from the live region, the track has a named `progressbar` role, and reduced motion
-leaves a static visible track. Confirmations keep this reading in their fixed footer so a long
-description cannot scroll it away.
+leaves a static visible track. `OperationOverlay` keeps this reading out of document flow: page
+operations float at the upper right on a popover ground, with the border and shadow of something
+that actually floats (§2). Files stacks simultaneous operations inside one panel. On a phone the
+panel stays below the shell header, fits the viewport and scrolls if the stack is long. `Modal`
+anchors its `progress` overlay above the existing footer, inside the dialog's focus and accessibility
+scope; its frame and buttons do not resize when work starts. The body has a stable minimum for the
+compact reading, and longer output scrolls inside the overlay without covering the title or controls.
+Job consoles place the same overlay
+over a consistently sized transcript area. Overlay arrival spends `rise`; neither insertion nor
+removal shifts the table, editor, form or transcript underneath.
 
 **`rise` is expected wherever a fetch settles**, not reserved for special occasions. The Overview is
 the reference: the page rises once when its first snapshot lands; each sparkline when its hour of

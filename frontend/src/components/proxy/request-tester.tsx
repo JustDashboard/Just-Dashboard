@@ -1,5 +1,6 @@
 "use client"
 import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useState } from "react"
 import Link from "next/link"
@@ -319,9 +320,13 @@ export function RequestTester() {
         </div>
       </form>
 
-      {busy && <OperationProgress label="Testing the request…" />}
+      {busy && (
+        <OperationOverlay>
+          <OperationProgress label="Testing the request…" />
+        </OperationOverlay>
+      )}
       {error && !busy && <ErrorState error={error} />}
-      {admin && !result && !error && !busy && (
+      {admin && !result && !error && (
         <EmptyState
           icon={PaperAirplane}
           title="Nothing sent yet"

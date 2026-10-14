@@ -88,12 +88,21 @@ for (const entry of [
     if (entry.open === "untagged")
       await page.getByRole("button", { name: "Prune untagged", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: entry.title })
+    await dialog.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    )
+    const before = await dialog.boundingBox()
     await recordProgress(
       page,
       entry.name,
       async () => {
         await dialog.getByRole("button", { name: entry.action, exact: true }).click()
         await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
+        await expect.poll(() => dialog.boundingBox()).toEqual(before)
+        await expect(dialog.locator("[data-slot=operation-overlay]")).toHaveCSS(
+          "position",
+          "absolute",
+        )
         await expect(progress(page).getByRole("progressbar")).not.toHaveAttribute("aria-valuenow")
         await page.keyboard.press("Escape")
         await expect(dialog).toBeVisible()
@@ -256,10 +265,16 @@ test("progress: package jobs remain visible when their output is quiet", async (
   await page.route("**/api/v1/jobs/", (route) => route.fulfill({ json: [job] }))
   // RecentJobs polls on mount; reload after supplying the running operation.
   await page.reload()
+  let consoleBox: Awaited<ReturnType<ReturnType<typeof page.locator>["boundingBox"]>>
   await recordProgress(
     page,
     "packages-job",
-    () => page.getByRole("button", { name: /Install htop/ }).click(),
+    async () => {
+      await page.getByRole("button", { name: /Install htop/ }).click()
+      const pane = page.locator("[data-slot=pane]").filter({ has: progress(page) })
+      await expect(pane).toBeVisible()
+      consoleBox = await pane.boundingBox()
+    },
     progress(page),
     async () => {
       await expect.poll(() => Boolean(socket)).toBe(true)
@@ -269,6 +284,11 @@ test("progress: package jobs remain visible when their output is quiet", async (
           data: { ...job, status: "succeeded", endedAt: new Date().toISOString() },
         }),
       )
+      await expect(progress(page)).toHaveCount(0)
+      const pane = page.locator("[data-slot=pane]").filter({
+        has: page.getByText("No output.", { exact: true }),
+      })
+      await expect.poll(() => pane.boundingBox()).toEqual(consoleBox)
     },
   )
 })

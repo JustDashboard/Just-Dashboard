@@ -1887,10 +1887,16 @@ test("progress: a table export reports received bytes and can be cancelled", asy
   await page.goto(ITEMS)
   await expect(cell(page, 0, 1)).toHaveText("Item 1")
   await page.getByRole("button", { name: "Export", exact: true }).click()
+  const workbench = page.locator("[data-slot=table-editor]")
+  const before = await workbench.boundingBox()
   await recordProgress(
     page,
     "database-table-export",
-    () => page.getByRole("menuitem", { name: /^CSV/ }).click(),
+    async () => {
+      await page.getByRole("menuitem", { name: /^CSV/ }).click()
+      await expect(page.locator("[data-slot=operation-overlay]")).toHaveCSS("position", "fixed")
+      await expect.poll(() => workbench.boundingBox()).toEqual(before)
+    },
     page.locator("[data-slot=operation-progress]"),
     async () => {
       await expect(page.locator("[data-slot=operation-progress]")).toContainText(/received/)
@@ -1898,6 +1904,7 @@ test("progress: a table export reports received bytes and can be cancelled", asy
     },
   )
   await expect(page.getByText("The export of items was cancelled")).toBeVisible()
+  await expect.poll(() => workbench.boundingBox()).toEqual(before)
 })
 
 test("progress: a SQL import separates upload from database processing", async ({ page }) => {
@@ -1923,10 +1930,14 @@ test("progress: a SQL import separates upload from database processing", async (
     atomic: true,
     columns: [],
   })
+  const before = await dialog.boundingBox()
   await recordProgress(
     page,
     "database-sql-import",
-    () => dialog.getByRole("button", { name: "Import", exact: true }).click(),
+    async () => {
+      await dialog.getByRole("button", { name: "Import", exact: true }).click()
+      await expect.poll(() => dialog.boundingBox()).toEqual(before)
+    },
     dialog.locator("[data-slot=operation-progress]"),
     async () => {
       held.release()
