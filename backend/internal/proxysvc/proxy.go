@@ -258,8 +258,16 @@ func (s *Service) streamDir() string { return filepath.Join(s.nginxDir, "stream.
 // route is held by every signed-in account, and a list of bcrypt hashes is
 // not configuration.
 func (s *Service) isPasswordFile(full string) bool {
-	if strings.HasPrefix(full, s.authDir()+string(os.PathSeparator)) {
-		return true
+	authDirectory, err := filepath.Abs(s.authDir())
+	if err == nil {
+		if strings.HasPrefix(full, authDirectory+string(os.PathSeparator)) {
+			return true
+		}
+		// Resolve the protected directory too: files.Resolve already resolved the
+		// requested file, including a relative root or an internal jd-auth alias.
+		if resolved, err := filepath.EvalSymlinks(authDirectory); err == nil && strings.HasPrefix(full, resolved+string(os.PathSeparator)) {
+			return true
+		}
 	}
 	base := strings.ToLower(filepath.Base(full))
 	return strings.HasPrefix(base, ".ht") || strings.Contains(base, "htpasswd")

@@ -166,3 +166,60 @@ func TestAtomicConfigWritePreservesExistingParentSymlink(t *testing.T) {
 		t.Fatalf("contents=%q", got)
 	}
 }
+
+func TestConfigReadProtectsRelativeAndAliasedAuthDirectories(t *testing.T) {
+	for _, setup := range []string{"relative configuration root", "internal auth directory alias"} {
+		t.Run(setup, func(t *testing.T) {
+			root := t.TempDir()
+			authDirectory := filepath.Join(root, "jd-auth")
+			if setup == "internal auth directory alias" {
+				authDirectory = filepath.Join(root, "private-auth")
+			}
+			if err := os.Mkdir(authDirectory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(authDirectory, "team"), []byte("fixture-user:fixture-private-password-hash"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if setup == "internal auth directory alias" {
+				if err := os.Symlink(authDirectory, filepath.Join(root, "jd-auth")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configuredRoot := root
+			if setup == "relative configuration root" {
+				working, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				configuredRoot, err = filepath.Rel(working, root)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			svc := New(configuredRoot, filepath.Join(configuredRoot, "Caddyfile"))
+			path := filepath.Join(root, "jd-auth", "team")
+			for _, reader := range []string{"plain read", "editor snapshot"} {
+				t.Run(reader, func(t *testing.T) {
+					var content string
+					var err error
+					if reader == "plain read" {
+						content, err = svc.ReadConfig(path)
+					} else {
+						snapshot, readErr := svc.ReadConfigSnapshot(path)
+						err = readErr
+						if snapshot != nil {
+							content = snapshot.Content
+						}
+					}
+					if err == nil && content == "fixture-user:fixture-private-password-hash" {
+						t.Fatal("the config reader returned private password hashes")
+					}
+					if !errors.Is(err, ErrProtectedFile) {
+						t.Fatalf("protected-file rejection=%v", err)
+					}
+				})
+			}
+		})
+	}
+}
