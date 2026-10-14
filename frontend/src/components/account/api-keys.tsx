@@ -16,16 +16,29 @@ import { Field, FormNote } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ProductGlyphs, ProductLogo } from "@/components/product-logo"
+import { Section } from "@/components/page"
+import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ShellWords } from "@/components/deploy/run-evidence"
+import { useNow } from "@/components/deploy/vocabulary"
+import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
+import { ROLE_HUE } from "@/components/account/capabilities"
+import {
+  expired,
+  expiringSoon,
+  inKeyScope,
+  usableKeys,
+  type KeyScope,
+} from "@/components/account/access"
+import { KeyMap } from "@/components/account/key-map"
 import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
 
 export function useApiKeys() {
@@ -51,30 +64,6 @@ function subscribeNever() {
   return () => {}
 }
 
-const DAY = 86_400_000
-
-/** How close an expiry has to be before a key's state says so in amber. */
-const EXPIRING_MS = 14 * DAY
-
-function expired(token: ApiToken) {
-  return Boolean(token.expiresAt && new Date(token.expiresAt).getTime() < Date.now())
-}
-
-/** Called within the last week — the keys something is actually using. */
-function usedThisWeek(token: ApiToken) {
-  return Boolean(token.lastUsedAt && Date.now() - new Date(token.lastUsedAt).getTime() < 7 * DAY)
-}
-
-function expiringSoon(token: ApiToken) {
-  if (!token.expiresAt || token.revoked || expired(token)) return false
-  return new Date(token.expiresAt).getTime() - Date.now() < EXPIRING_MS
-}
-
-/** The keys that would still open a door right now. */
-export function usableKeys(tokens: ApiToken[]) {
-  return tokens.filter((k) => !k.revoked && !expired(k))
-}
-
 /** What the keys are for, as products, each once — for a reading that counts them. */
 export function keyProducts(tokens: ApiToken[]) {
   return [...new Set(tokens.map((k) => keyProduct(k.name)).filter((id) => id !== undefined))]
@@ -85,83 +74,16 @@ export function curlExample(origin: string, key = "vpsd_…") {
 }
 
 /** The one line a key's state comes down to. */
-function keyStatus(token: ApiToken) {
+function keyStatus(token: ApiToken, now: number) {
   if (token.revoked) return <Status tone="stopped" label="revoked" />
-  if (expired(token)) return <Status tone="stopped" label="expired" />
-  if (expiringSoon(token)) {
+  if (expired(token, now)) return <Status tone="stopped" label="expired" />
+  if (expiringSoon(token, now)) {
     return <Status tone="warning" label={`expires ${relativeTime(token.expiresAt)}`} />
   }
   if (token.expiresAt) {
     return <Status tone="running" label={`until ${calendarDate(token.expiresAt)}`} />
   }
   return <Status tone="running" label="no expiry" />
-}
-
-/**
- * Four readings over the keys, each a question an operator asks of a list of
- * credentials: how many still open a door, which of them anything is actually
- * using, which were made and never used — a key nobody uses is a key nobody
- * would notice being used — and which are about to stop working under a job
- * that still needs them.
- */
-function KeyReadings({ tokens }: { tokens: ApiToken[] }) {
-  const usable = usableKeys(tokens)
-  const week = usable.filter(usedThisWeek)
-  const lastUse = usable
-    .map((k) => k.lastUsedAt)
-    .filter(Boolean)
-    .sort()
-    .at(-1)
-  const unused = usable
-    .filter((k) => !k.lastUsedAt)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const expiring = usable
-    .filter(expiringSoon)
-    .sort((a, b) => (a.expiresAt ?? "").localeCompare(b.expiresAt ?? ""))
-
-  return (
-    <StatGrid columns={4}>
-      <StatTile
-        label="In use"
-        value={usable.length}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            <span className="truncate">
-              {tokens.length - usable.length > 0
-                ? `${tokens.length - usable.length} revoked or expired`
-                : "none revoked"}
-            </span>
-            <ProductGlyphs ids={keyProducts(usable)} />
-          </span>
-        }
-      />
-      <StatTile
-        label="Used this week"
-        value={week.length}
-        hint={lastUse ? `last call ${relativeTime(lastUse)}` : "no calls yet"}
-      />
-      <StatTile
-        label="Never used"
-        value={unused.length}
-        tone={unused.length > 0 ? "warning" : "default"}
-        hint={
-          unused.length > 0
-            ? `oldest made ${calendarDate(unused[0].createdAt)}`
-            : "every key has been used"
-        }
-      />
-      <StatTile
-        label="Expiring soon"
-        value={expiring.length}
-        tone={expiring.length > 0 ? "warning" : "default"}
-        hint={
-          expiring.length > 0
-            ? `${expiring[0].name} ${relativeTime(expiring[0].expiresAt)}`
-            : "none within two weeks"
-        }
-      />
-    </StatGrid>
-  )
 }
 
 /**
@@ -173,10 +95,12 @@ function KeyReadings({ tokens }: { tokens: ApiToken[] }) {
  */
 function KeyRow({
   token,
+  now,
   owner,
   onRevoke,
 }: {
   token: ApiToken
+  now: number
   /** The account that made it, when that is not the reader. */
   owner?: DashboardUser
   onRevoke?: () => void
@@ -189,7 +113,7 @@ function KeyRow({
           id={keyProduct(token.name)}
           size="sm"
           fallback={Key}
-          className={token.revoked || expired(token) ? "opacity-50 grayscale" : undefined}
+          className={token.revoked || expired(token, now) ? "opacity-50 grayscale" : undefined}
         />
       }
       title={token.name}
@@ -210,8 +134,10 @@ function KeyRow({
           <span className="hidden text-xs text-muted-foreground md:inline">
             {token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"}
           </span>
-          <Tag className="hidden sm:inline-flex">{token.role}</Tag>
-          {keyStatus(token)}
+          <Tag className="hidden sm:inline-flex" style={{ color: ROLE_HUE[token.role] }}>
+            {token.role}
+          </Tag>
+          {keyStatus(token, now)}
         </>
       }
     >
@@ -250,7 +176,9 @@ function CallExample() {
         }
       />
       <PanelBody className="space-y-2">
-        <Well className="break-all">{curlExample(origin)}</Well>
+        <Well className="break-all">
+          <ShellWords command={curlExample(origin)} />
+        </Well>
         <p className="text-hint text-muted-foreground">
           Send the key as a bearer token on any request; this one answers what the Overview shows.
         </p>
@@ -259,6 +187,19 @@ function CallExample() {
   )
 }
 
+/** The chips over the list: each narrowing, and the tone its count takes while it is not zero. */
+const SCOPES: { key: KeyScope; label: string; warn?: boolean }[] = [
+  { key: "all", label: "All" },
+  { key: "week", label: "Used this week" },
+  { key: "unused", label: "Never used", warn: true },
+  { key: "expiring", label: "Expiring soon", warn: true },
+]
+
+/**
+ * The keys page's body: where the keys reach, drawn (`KeyMap`), then the
+ * keys that still open a door under chips that count and narrow them, the
+ * spent ones, and the command a key is for.
+ */
 export function ApiKeysView({
   keys,
   users,
@@ -269,6 +210,9 @@ export function ApiKeysView({
 }) {
   const { status } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const origin = useApiOrigin()
+  const now = useNow(30_000)
+  const [scope, setScope] = useState<KeyScope>("all")
   const { data, error, loading, refresh } = keys
   if (loading && !data) return <LoadingRows rows={3} />
   if (error && !data) return <ErrorState error={error} onRetry={refresh} />
@@ -306,14 +250,19 @@ export function ApiKeysView({
 
   // Newest first within each: the key just made is the one being looked for.
   const byNewest = (a: ApiToken, b: ApiToken) => b.createdAt.localeCompare(a.createdAt)
-  const usable = usableKeys(data).sort(byNewest)
+  const usable = usableKeys(data, now).sort(byNewest)
   const spent = data.filter((k) => !usable.includes(k)).sort(byNewest)
+  const shown = usable.filter((k) => inKeyScope(k, scope, now))
 
   return (
     <>
-      <KeyReadings tokens={data} />
+      {usable.length > 0 && (
+        <Section title="Where the keys reach">
+          <KeyMap tokens={usable} origin={origin} />
+        </Section>
+      )}
 
-      <Panel plain>
+      <Panel plain id="keys" className="scroll-mt-6">
         <PanelHeader
           title="In use"
           actions={
@@ -326,18 +275,41 @@ export function ApiKeysView({
           }
         />
         <PanelBody flush>
+          {usable.length > 0 && (
+            <ChipStrip role="group" aria-label="Show" className="pt-3 pb-1">
+              {SCOPES.map(({ key, label, warn }) => {
+                const count = usable.filter((k) => inKeyScope(k, key, now)).length
+                if (key !== "all" && count === 0) return null
+                return (
+                  <FilterChip
+                    key={key}
+                    selected={scope === key}
+                    onClick={() => setScope(scope === key && key !== "all" ? "all" : key)}
+                  >
+                    {label}
+                    <ChipCount className={cn(warn && "text-warning opacity-100")}>
+                      {count}
+                    </ChipCount>
+                  </FilterChip>
+                )
+              })}
+            </ChipStrip>
+          )}
           {usable.length === 0 ? (
             <EmptyState
               icon={Key}
               title="No key opens anything"
               description="Every key here was revoked or has expired."
             />
+          ) : shown.length === 0 ? (
+            <EmptyNote className="py-4">No key matches.</EmptyNote>
           ) : (
             <RowList className="animate-rise">
-              {usable.map((token) => (
+              {shown.map((token) => (
                 <KeyRow
                   key={token.id}
                   token={token}
+                  now={now}
                   owner={ownerOf(token)}
                   onRevoke={() => revoke(token)}
                 />
@@ -360,7 +332,7 @@ export function ApiKeysView({
           <PanelBody flush>
             <RowList className="text-muted-foreground">
               {spent.map((token) => (
-                <KeyRow key={token.id} token={token} owner={ownerOf(token)} />
+                <KeyRow key={token.id} token={token} now={now} owner={ownerOf(token)} />
               ))}
             </RowList>
           </PanelBody>

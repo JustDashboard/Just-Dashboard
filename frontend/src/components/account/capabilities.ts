@@ -21,36 +21,53 @@ import {
  * itself — so the reader matches a granted power to the entry it put in their
  * rail without reading either (§14's wayfinding).
  */
-export const CAPABILITIES: { key: Capability; title: string; description: string; icon: Icon }[] = [
+export const CAPABILITIES: {
+  key: Capability
+  title: string
+  description: string
+  icon: Icon
+  /** The lowest role that holds it — `auth.rolePermissions`, mirrored for the ladder. */
+  from: Role
+  /** What on this server it reaches, as products, where the sentence names them. */
+  products?: string[]
+}[] = [
   {
     key: "read",
     title: "Read everything",
     description: "Metrics, logs, containers, files, databases and configuration, as they are.",
     icon: Eye,
+    from: "readonly",
   },
   {
     key: "service.control",
     title: "Start and stop",
     description: "Restart containers, services and processes, and run deployments.",
     icon: Play,
+    from: "limited",
+    products: ["docker", "systemd", "pm2"],
   },
   {
     key: "file.write",
     title: "Change files",
     description: "Edit and upload files, and change what a deployment is built from.",
     icon: FolderOpen,
+    from: "limited",
+    products: ["git"],
   },
   {
     key: "terminal",
     title: "Open a shell",
     description: "A root terminal on this server, with everything that implies.",
     icon: Terminal,
+    from: "admin",
+    products: ["terminal"],
   },
   {
     key: "destructive",
     title: "Delete for good",
     description: "Volumes, images, backups, host accounts — things that cannot be got back.",
     icon: Trash,
+    from: "admin",
   },
   {
     key: "system.admin",
@@ -58,6 +75,7 @@ export const CAPABILITIES: { key: Capability; title: string; description: string
     description:
       "Dashboard users, everyone's API keys, the audit log and this panel's own settings.",
     icon: SettingsGear,
+    from: "admin",
   },
 ]
 
@@ -66,6 +84,26 @@ export const ROLE_SUMMARY: Record<Role, string> = {
   admin: "Everything, including other accounts and this dashboard's settings",
   limited: "Start, stop and deploy, and edit files — no deleting, no accounts",
   readonly: "Look at everything, change nothing",
+}
+
+/** The roles from the one that only looks up, each adding to the one before it. */
+export const ROLE_LADDER: Role[] = ["readonly", "limited", "admin"]
+
+/** What a role is called on the ladder; the badges and pickers keep the key. */
+export const ROLE_NAME: Record<Role, string> = {
+  readonly: "Read-only",
+  limited: "Limited",
+  admin: "Administrator",
+}
+
+/**
+ * A role's hue on the ladder and on the users page's share of roles: none of
+ * them red or amber, so no rung reads as a warning.
+ */
+export const ROLE_HUE: Record<Role, string> = {
+  readonly: "var(--tag-cyan)",
+  limited: "var(--tag-green)",
+  admin: "var(--tag-violet)",
 }
 
 /**

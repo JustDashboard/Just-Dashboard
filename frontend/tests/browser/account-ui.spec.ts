@@ -1,10 +1,11 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
 /**
- * The account pages after their 0.7.0 pass, against a mocked API: the
- * profile opens on the account's identity line, sessions are drawn as the
- * browsers, systems and networks they came from, keys as what holds them,
- * users by their faces, and Security is a form whose heads sit in a rail.
+ * The account pages after their 0.7.5 pass, against a mocked API: no page
+ * opens on tiles; the profile wires everything signed in as the account into
+ * its face, sessions are drawn as the path each takes to the server, keys as
+ * what holds them wired through their role, users by their faces in a band
+ * over cards that chips narrow, and Security opens on what a sign-in passes.
  */
 
 const now = Date.now()
@@ -182,33 +183,51 @@ async function mockAccount(page: Page, auth = session(false)) {
   })
 }
 
-test("the profile opens on the account's identity line and its readings", async ({ page }) => {
+test("the profile opens on the account's identity line and what is signed in as it", async ({
+  page,
+}) => {
   await mockAccount(page)
   await page.goto("/account")
   await expect(page.getByRole("heading", { name: "Ion Moisei" })).toBeVisible()
-  await expect(page.getByText("@ion", { exact: true })).toBeVisible()
-  // The figure strip in the header is gone; its facts are the identity line.
+  await expect(
+    page.locator("[data-slot=host-identity]").getByText("@ion", { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText(/^member since/)).toBeVisible()
-  await expect(page.getByText("Chrome on macOS")).toBeVisible()
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("Chrome on macOS")
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("4 accounts")
   await expect(page.locator('img[src="/logos/tailscale.svg"]').first()).toBeVisible()
   await expect(page.getByText("two-factor on").first()).toBeVisible()
 
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  // Each reading names what it counts with the things themselves.
-  const readings = page.locator("[data-slot=stat-grid]")
-  const sessionsTile = readings.getByRole("link", { name: "Sessions" })
-  await expect(sessionsTile).toContainText("2 elsewhere")
+  // The four tiles went; what they counted is the picture's two sides.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const signedIn = page.getByRole("group", { name: "Signed in" })
   for (const logo of ["chrome", "safari", "curl"]) {
-    await expect(sessionsTile.locator(`img[src="/logos/${logo}.svg"]`)).toBeVisible()
+    await expect(signedIn.locator(`img[src="/logos/${logo}.svg"]`)).toBeVisible()
   }
-  await expect(
-    readings.getByRole("link", { name: "API keys" }).locator('img[src="/logos/github.svg"]'),
-  ).toBeVisible()
-  await expect(readings.getByRole("link", { name: "Users" })).toContainText("2 admins can sign in")
+  await expect(page.getByRole("link", { name: /3 sessions/ })).toHaveAttribute(
+    "href",
+    "/account/sessions",
+  )
+  const keyring = page.getByRole("group", { name: "API keys" })
+  await expect(keyring.locator('img[src="/logos/github.svg"]')).toBeVisible()
+  // Maria's grafana key is hers, not something signed in as this account.
+  await expect(keyring.locator('img[src="/logos/grafana.svg"]')).toHaveCount(0)
+  await expect(keyring).toContainText("never used")
 
-  await expect(page.getByText("Open a shell")).toBeVisible()
-  await expect(page.getByText("granted")).toHaveCount(6)
+  // The ladder lights up to this account's role and says what each adds.
+  const ladder = page.getByRole("list", { name: "Roles" })
+  await expect(ladder).toContainText("your role")
+  await expect(ladder.getByText("Open a shell")).toBeVisible()
+  await expect(ladder.locator('img[src="/logos/docker.svg"]')).toBeVisible()
+  await expect(page.getByText("Granted.")).toHaveCount(6)
+
+  // A rename raises the floating Save rather than a button under the fields.
+  await page.getByLabel("Name", { exact: true }).fill("Ion M.")
+  await expect(page.getByText("Edited", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("img", { name: /The rail draws this account as Ion M\./ }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Save/ })).toBeVisible()
 })
 
 test("sessions are the browser, the system and the network each came from", async ({ page }) => {
@@ -216,7 +235,7 @@ test("sessions are the browser, the system and the network each came from", asyn
   await page.goto("/account/sessions")
   // This device is the identity line, drawn as Chrome, with macOS and the
   // tailnet among its facts.
-  await expect(page.getByText("this device")).toBeVisible()
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("this device")
   await expect(page.getByText("password and authenticator code").first()).toBeVisible()
 
   const rows = page.locator("[data-slot=row]")
@@ -236,15 +255,37 @@ test("sessions are the browser, the system and the network each came from", asyn
       .locator("[data-slot=panel]", { hasText: "Other sessions" })
       .getByRole("button", { name: "Sign out other sessions" }),
   ).toBeEnabled()
+
+  // Every session is the path it takes: the networks between them and the server.
+  const networks = page.getByRole("group", { name: "Networks" })
+  await expect(networks).toContainText("Tailscale")
+  // Written lower case and set with a capital, as a sentence would start.
+  await expect(networks).toContainText("local network")
+  await expect(networks).toContainText("internet")
+  await expect(page.getByRole("group", { name: "Sessions" })).toContainText("owes a code")
+  // Each other session's life on the shared axis.
+  await expect(phone.getByRole("img", { name: /^Signed in .* expires/ })).toBeVisible()
 })
 
-test("keys are read as credentials and drawn as what holds them", async ({ page }) => {
+test("keys are drawn as what holds them, wired through their role", async ({ page }) => {
   await mockAccount(page)
   await page.goto("/account/keys")
-  const tile = (label: string) => page.locator("[data-slot=stat-tile]", { hasText: label })
-  await expect(tile("In use")).toContainText("3")
-  await expect(tile("Never used")).toContainText("1")
-  await expect(tile("Expiring soon")).toContainText("github-actions")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+
+  const map = page.getByRole("group", { name: "Keys" })
+  await expect(map.locator('img[src="/logos/github.svg"]')).toBeVisible()
+  await expect(page.getByRole("group", { name: "Roles" })).toContainText("Limited")
+  await expect(page.getByRole("group", { name: "Roles" })).toContainText("no key")
+
+  // The tiles' counts are chips now, and a chip narrows the list.
+  const chips = page.getByRole("group", { name: "Show" })
+  await expect(chips.getByRole("button", { name: /Never used\s*1/ })).toBeVisible()
+  await chips.getByRole("button", { name: /Expiring soon\s*1/ }).click()
+  const rows = page.locator("[data-slot=panel]", { hasText: "In use" }).locator("[data-slot=row]")
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText("github-actions")
+  await chips.getByRole("button", { name: /^All/ }).click()
+  await expect(rows).toHaveCount(3)
 
   const github = page.locator("[data-slot=row]", { hasText: "github-actions" })
   await expect(github.locator('img[src="/logos/github.svg"]')).toBeVisible()
@@ -267,13 +308,19 @@ test("keys are read as credentials and drawn as what holds them", async ({ page 
   ).toBeVisible()
 })
 
-test("users are cards drawn by their faces, opening their editor", async ({ page }) => {
+test("users are cards drawn by their faces, under a band of who they are", async ({ page }) => {
   await mockAccount(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/account/users")
-  const tile = (label: string) => page.locator("[data-slot=stat-tile]", { hasText: label })
-  await expect(tile("Two-factor")).toContainText("1 of 3")
-  await expect(tile("Two-factor")).toContainText("1 administrator on a password alone")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toContainText("4 accounts")
+  await expect(line).toContainText("2 administrators")
+
+  const band = page.locator("[data-slot=people-band]")
+  await expect(band.getByRole("list", { name: "Sign-ins" })).toContainText("Ion Moisei")
+  await expect(band).toContainText(/1\s*of 3 ask for a code/)
+  await expect(band).toContainText("Administrator")
 
   const cards = page.locator("[data-slot=choice-row]")
   await expect(cards).toHaveCount(4)
@@ -281,11 +328,14 @@ test("users are cards drawn by their faces, opening their editor", async ({ page
   await expect(cards.first()).toContainText("Ion Moisei")
   await expect(cards.nth(1)).toContainText("Maria Rusu")
   await expect(cards.filter({ hasText: "Deploy bot" })).toContainText("never signed in")
-  await expect(
-    page.locator("[data-slot=panel]", { hasText: "Accounts" }).getByRole("button", {
-      name: "New user",
-    }),
-  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "New user" })).toBeVisible()
+
+  // The verdict narrows the cards to exactly the accounts it counts.
+  await page.getByRole("button", { name: "Only the accounts a password alone opens" }).click()
+  await expect(cards).toHaveCount(2)
+  await expect(cards.filter({ hasText: "Guest" })).toHaveCount(0)
+  await page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^All/ }).click()
+  await expect(cards).toHaveCount(4)
 
   // Changing the role from its picker does not open the editor behind it.
   await page.getByRole("button", { name: "Edit Maria Rusu" }).click()
@@ -295,6 +345,10 @@ test("users are cards drawn by their faces, opening their editor", async ({ page
 test("security is a form with its state under each head", async ({ page }) => {
   await mockAccount(page, session(false, false))
   await page.goto("/account/security")
+  // The picture says it first: the second factor is a ring nobody stands in.
+  const path = page.getByRole("list", { name: "What a sign-in passes" })
+  await expect(path).toContainText("Not enrolled")
+  await expect(path).toContainText("a password alone gets in")
   await expect(page.getByRole("heading", { name: "Two-factor" })).toBeVisible()
   await expect(page.getByText("Your password is the only factor")).toBeVisible()
   await expect(page.getByRole("button", { name: "Enable two-factor" })).toBeVisible()
