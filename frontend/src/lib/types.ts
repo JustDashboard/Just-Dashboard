@@ -1429,12 +1429,15 @@ export type CronJob = {
   comment?: string
   raw: string
   disabled: boolean
+  timeZone?: string
 }
 
 export type Crontab = {
   user: string
   source: string
   raw: string
+  revision?: string
+  timeZone?: string
   jobs: CronJob[]
   env: string[]
   comments: string[]
