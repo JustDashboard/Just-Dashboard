@@ -8,7 +8,7 @@ import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { DbConnection, DeploymentFleet } from "@/lib/types"
-import { PURPOSES, hiddenFor, type PurposeKey } from "@/lib/sidebar-sections"
+import { PURPOSES, STABLE_PURPOSES, hiddenFor, type PurposeKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
 import { usePoll } from "@/hooks/use-poll"
@@ -17,9 +17,9 @@ import { ChoiceCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { displayNameOf } from "@/components/account/user-avatar"
+import { ExperimentalMark, useSectionCount } from "@/components/account/workspace"
 import { Logo } from "@/components/logo"
 import { ServerPicture } from "@/components/onboarding/server-picture"
-import { useSectionCount } from "@/components/onboarding/section-tiles"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -28,7 +28,9 @@ import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
  * The first thing a new account sees after signing in: one question and its
  * answer, on two screens.
  *
- * The question is the purposes as big cards and nothing beside them. Continue
+ * The question is the purposes as big cards and nothing beside them: the five
+ * stable ones first and chosen to begin with, and Route the network last,
+ * marked as working but still being tested. Continue
  * saves the sidebar those purposes keep and opens the answer: this server
  * wired to each purpose, filling the screen, with one command under it. The
  * sections themselves are not asked about here — they were a second screen of
@@ -44,15 +46,15 @@ export function WelcomeFlow() {
   const { status, logout } = useAuth()
   const { save } = useHiddenSections()
   const [answered, setAnswered] = useState(false)
-  // Null until the reader presses a purpose: until then the choice is what
-  // the server already runs.
+  // Null until the reader presses a purpose: until then the choice is the
+  // stable five, which is what most servers are for.
   const [picked, setPicked] = useState<PurposeKey[] | null>(null)
   const [saving, setSaving] = useState<"continue" | "skip" | null>(null)
   const confetti = useRef<ConfettiRef>(null)
   const page = useRef<HTMLDivElement>(null)
   const name = status?.user ? displayNameOf(status.user) : ""
-  const found = useFound()
-  const purposes = picked ?? found.purposes
+  const readings = useReadings()
+  const purposes = picked ?? STABLE_PURPOSES
   const { shown } = useSectionCount(new Set(hiddenFor(purposes)))
 
   // The answer is a new screen. On a phone Continue is pressed at the foot of
@@ -120,7 +122,7 @@ export function WelcomeFlow() {
           </>
         ) : (
           <>
-            <Purposes chosen={purposes} readings={found.readings} onPick={setPicked} />
+            <Purposes chosen={purposes} readings={readings} onPick={setPicked} />
             {/* Under the cards on every screen. A phone held them in a dark
                 bar stuck to the foot of the window, which the wide screen
                 does not have and which read as a second surface; six cards as
@@ -155,11 +157,11 @@ export function WelcomeFlow() {
 
 /**
  * What the server already runs, read once: its deployment projects and saved
- * databases. An account made for a second person on a working machine starts
- * with those purposes chosen and the count on their cards; a fresh install
- * has neither and starts with nothing chosen.
+ * databases, as a count on the card each belongs to. An account made for a
+ * second person on a working machine sees why those cards matter; a fresh
+ * install has neither and its cards say nothing.
  */
-function useFound() {
+function useReadings() {
   const fleet = usePoll((signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal), 0)
   const databases = usePoll((signal) => get<DbConnection[]>("/databases/", undefined, signal), 0)
   const projects = fleet.data?.deployments.length ?? 0
@@ -168,7 +170,7 @@ function useFound() {
     ...(projects > 0 && { ship: `${plural(projects, "project")} here` }),
     ...(connections > 0 && { databases: `${plural(connections, "database")} here` }),
   }
-  return { purposes: Object.keys(readings) as PurposeKey[], readings }
+  return readings
 }
 
 /**
@@ -217,6 +219,7 @@ function Purposes({
                   {purpose.title}
                 </span>
                 {reading && <Status tone="running" label={reading} className="text-hint" />}
+                {purpose.stage === "experimental" && <ExperimentalMark />}
               </span>
               <Tick on={on} className="sm:hidden" />
             </ChoiceCard>

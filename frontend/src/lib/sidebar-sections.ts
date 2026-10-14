@@ -48,62 +48,133 @@ export function sectionOf(pathname: string): SectionKey | null {
 
 /**
  * The answers to "what will you use this server for?", each the sections it
- * needs. They overlap on purpose: Backups belongs to shipping apps and to
- * running databases alike, and choosing both shows it once.
+ * brings into the rail. No two share a section, and none takes one of the
+ * base's: Manage containers used to be Docker, Files and Terminal, which the
+ * other purposes already brought, so pressing it changed nothing, and Route
+ * the network and Secure the server brought the same two rows. Now every card
+ * turns on something no other card does.
+ *
+ * The stable five come first and a new account starts with them chosen.
+ * Route the network works but is still being tested, so it comes last, says
+ * so on its card, and is taken only by somebody who presses it.
  */
 export const PURPOSES = [
   {
     key: "ship",
     title: "Ship apps",
-    products: ["github", "docker", "lets-encrypt"],
-    sections: ["deploy", "docker", "proxy", "databases", "git", "backups"],
+    stage: "stable",
+    products: ["github", "nginx", "lets-encrypt"],
+    sections: ["deploy", "proxy"],
   },
   {
     key: "databases",
     title: "Run databases",
+    stage: "stable",
     products: ["postgres", "mongodb", "redis"],
-    sections: ["databases", "backups", "docker"],
-  },
-  {
-    key: "containers",
-    title: "Manage containers",
-    products: ["docker", "docker-compose", "terminal"],
-    sections: ["docker", "files", "terminal"],
-  },
-  {
-    key: "network",
-    title: "Route the network",
-    products: ["wireguard", "tailscale", "nginx"],
-    sections: ["network", "proxy", "security"],
-  },
-  {
-    key: "secure",
-    title: "Secure the server",
-    products: ["crowdsec", "fail2ban", "netfilter"],
-    sections: ["security", "network", "packages", "audit", "backups", "system-users"],
+    sections: ["databases", "backups"],
   },
   {
     key: "workspace",
     title: "Work on the server",
+    stage: "stable",
     products: ["terminal", "git", "excalidraw"],
     sections: ["terminal", "files", "git", "excalidraw", "stickyboard", "remote-desktop"],
+  },
+  {
+    key: "containers",
+    title: "Manage containers",
+    stage: "stable",
+    products: ["docker", "docker-compose", "terminal"],
+    sections: ["docker"],
+  },
+  {
+    key: "secure",
+    title: "Secure the server",
+    stage: "stable",
+    products: ["crowdsec", "fail2ban", "netfilter"],
+    sections: ["security"],
+  },
+  {
+    key: "network",
+    title: "Route the network",
+    stage: "experimental",
+    products: ["wireguard", "tailscale", "adguard"],
+    sections: ["network"],
   },
 ] as const satisfies readonly {
   key: string
   title: string
+  stage: PurposeStage
   /** Drawn as themselves on the purpose's card and in the picture of the server. */
   products: readonly string[]
   sections: readonly SectionKey[]
 }[]
 
+export type PurposeStage = "stable" | "experimental"
+
 export type PurposeKey = (typeof PURPOSES)[number]["key"]
+
+/** What the question starts with chosen: every purpose that is finished. */
+export const STABLE_PURPOSES: PurposeKey[] = PURPOSES.filter(
+  (purpose) => purpose.stage === "stable",
+).map((purpose) => purpose.key)
+
+/**
+ * The sections every answer keeps, whatever the server is for: the packages,
+ * the system accounts and the audit trail are how the machine itself is
+ * changed and checked. They stay the account's to switch off afterwards.
+ */
+export const BASE_SECTIONS = [
+  "packages",
+  "system-users",
+  "audit",
+] as const satisfies readonly SectionKey[]
 
 /** Every section the chosen purposes do not use, in the rail's order. */
 export function hiddenFor(purposes: readonly PurposeKey[]): SectionKey[] {
-  const used = new Set<SectionKey>(
-    PURPOSES.filter((purpose) => purposes.includes(purpose.key)).flatMap(
+  const used = new Set<SectionKey>([
+    ...BASE_SECTIONS,
+    ...PURPOSES.filter((purpose) => purposes.includes(purpose.key)).flatMap(
       (purpose) => purpose.sections,
     ),
-  )
+  ])
   return SECTION_KEYS.filter((key) => !used.has(key))
+}
+
+/**
+ * Whether every section of a purpose that the account is offered is in its
+ * rail — which is what a purpose being chosen means once the question is
+ * over, since only the sections are stored.
+ */
+export function purposeShown(
+  key: PurposeKey,
+  hidden: ReadonlySet<string>,
+  offered: ReadonlySet<string>,
+): boolean {
+  return offeredSections(key, offered).every((section) => !hidden.has(section))
+}
+
+/**
+ * The hidden sections after a purpose is pressed: one that is wholly shown
+ * leaves the rail, and any other comes back whole. Purposes share no section,
+ * so a press never touches another card. Sections the account is not offered
+ * are left alone — a switch for them would decide nothing.
+ */
+export function pressPurpose(
+  key: PurposeKey,
+  hidden: ReadonlySet<string>,
+  offered: ReadonlySet<string>,
+): Set<string> {
+  const next = new Set(hidden)
+  const shown = purposeShown(key, hidden, offered)
+  for (const section of offeredSections(key, offered)) {
+    if (shown) next.add(section)
+    else next.delete(section)
+  }
+  return next
+}
+
+function offeredSections(key: PurposeKey, offered: ReadonlySet<string>): SectionKey[] {
+  const purpose = PURPOSES.find((p) => p.key === key)
+  return (purpose?.sections ?? []).filter((section) => offered.has(section))
 }
