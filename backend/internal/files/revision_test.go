@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 )
@@ -96,5 +98,32 @@ func TestWriteCheckedSaveAsRequiresAnUnusedName(t *testing.T) {
 	}
 	if err := s.WriteChecked(filepath.Join(root, "..", "outside"), "draft", &absent); !errors.Is(err, ErrOutsideRoot) {
 		t.Fatalf("root guard: %v", err)
+	}
+}
+
+func TestWriteCheckedRefusesAFIFOWithoutWaitingForAWriter(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expected := contentguard.Revision("opened regular file")
+	done := make(chan error, 1)
+	go func() { done <- New([]string{root}).WriteChecked(path, "draft", &expected) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, contentguard.ErrConflict) {
+			t.Fatalf("special-file save: %v", err)
+		}
+	case <-time.After(time.Second):
+		// Unblock the old blocking-open implementation before failing the test.
+		if writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			writer.Close()
+		}
+		t.Fatal("save waited for a FIFO writer")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("FIFO was replaced: info=%v err=%v", info, err)
 	}
 }

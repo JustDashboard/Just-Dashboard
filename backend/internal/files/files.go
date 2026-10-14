@@ -515,7 +515,10 @@ func checkFileRevision(path string, expected *string) error {
 	if expected == nil {
 		return nil
 	}
-	file, err := os.Open(path)
+	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+		return contentguard.ErrConflict
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if os.IsNotExist(err) {
 		if *expected == "" {
 			return nil

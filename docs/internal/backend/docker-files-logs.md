@@ -348,7 +348,9 @@ Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they r
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
 returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
 with Compose saves to the same resolved path, checks the bytes before staging and immediately
-before publish, and reports a stale, removed or oversized backing file as `409 content_conflict`.
+before publish, and reports a stale, removed, nonregular or oversized backing file as
+`409 content_conflict`. Guarded disk reads use nonblocking open and an opened-file type check, so a
+FIFO introduced by a native writer cannot leave Save waiting for a pipe producer.
 The editor retains the draft after refusal and offers a fresh comparison or confirmed discard and
 reload. **Save as** sends an empty expected revision, requiring a name that remains unoccupied when
 it is published. API clients that omit the precondition keep their previous unconditional behavior.
@@ -356,7 +358,8 @@ These are optimistic guards: an independent native writer can still change a pat
 comparison and rename. They do not make outside processes participate in a filesystem transaction.
 `revision_test.go`, `revision_shared_test.go`, `compose_revision_test.go` and
 `handlers_files_revision_test.go` cover stale/native edits, removal, concurrent Files/Compose
-saves, Save as occupancy and the HTTP conflict contract on temporary files.
+saves, Save as occupancy, refusal of FIFOs without waiting for a producer, and the HTTP conflict
+contract on temporary files.
 
 `ResolveArchive` checks an archive download before a header goes out — the base directory, and each
 member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a

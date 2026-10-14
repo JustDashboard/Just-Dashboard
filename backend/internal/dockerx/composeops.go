@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
@@ -621,7 +623,7 @@ func WriteComposeFile(path, content string) error {
 func WriteComposeFileChecked(path, content string, expected *string) error {
 	unlock := contentguard.Lock(path)
 	defer unlock()
-	previous, err := os.ReadFile(path)
+	previous, err := readComposeForWrite(path)
 	if expected != nil && os.IsNotExist(err) {
 		return contentguard.ErrConflict
 	}
@@ -658,7 +660,7 @@ func WriteComposeFileChecked(path, content string, expected *string) error {
 		return err
 	}
 	if expected != nil {
-		current, err := os.ReadFile(path)
+		current, err := readComposeForWrite(path)
 		if os.IsNotExist(err) {
 			return contentguard.ErrConflict
 		}
@@ -676,6 +678,27 @@ func WriteComposeFileChecked(path, content string, expected *string) error {
 		}
 	}
 	return os.Rename(tmpName, path)
+}
+
+// A native writer can replace a config with a FIFO after the editor opens it.
+// Nonblocking open lets the type check refuse it instead of hanging a save.
+func readComposeForWrite(path string) ([]byte, error) {
+	if info, err := os.Stat(path); err == nil && !info.Mode().IsRegular() {
+		return nil, contentguard.ErrConflict
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, contentguard.ErrConflict
+	}
+	return io.ReadAll(file)
 }
 
 // NewStack creates a stack directory with a compose file in it.

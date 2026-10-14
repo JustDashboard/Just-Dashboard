@@ -4,7 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 )
@@ -40,5 +42,33 @@ func TestWriteComposeFileCheckedPreservesNewContentAndBackupOnConflict(t *testin
 	}
 	if err := WriteComposeFileChecked(path, "other old draft", &expected); !errors.Is(err, contentguard.ErrConflict) {
 		t.Fatalf("reused compose revision: %v", err)
+	}
+}
+
+func TestWriteComposeFileCheckedRefusesAFIFOWithoutWaitingForAWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compose.yaml")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	expected := contentguard.Revision("opened regular file")
+	done := make(chan error, 1)
+	go func() { done <- WriteComposeFileChecked(path, "draft", &expected) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, contentguard.ErrConflict) {
+			t.Fatalf("special-file save: %v", err)
+		}
+	case <-time.After(time.Second):
+		if writer, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			writer.Close()
+		}
+		t.Fatal("save waited for a FIFO writer")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("FIFO was replaced: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("refused save created a backup: %v", err)
 	}
 }
