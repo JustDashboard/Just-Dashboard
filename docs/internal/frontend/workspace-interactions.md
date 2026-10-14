@@ -64,8 +64,8 @@ can still describe the previous folder while native history is moving. Run
 
 ## Drafts and navigation failures
 
-Board navigation drains every dirty snapshot through acknowledgement; further edits during a save
-must also be acknowledged before leaving. Failed save/duplicate attempts retain the workspace and
+Editor-owned board Back and resource-link navigation drains every dirty snapshot through
+acknowledgement; further edits during a save must also be acknowledged before those controls leave. Failed save/duplicate attempts retain the workspace and
 its leave warning. Drawing and Stickyboard documents also retain dirty snapshots and their original
 revision in RAM across every SPA exit, including sidebar, palette and native history navigation.
 Returning waits for the previous editor's outstanding save to settle before restoring the retained

@@ -118,16 +118,16 @@ end of a link.
 ## Saving
 
 `components/stickyboard/use-board.ts` saves 700 ms after the last change, at once on Ctrl/⌘+S and
-before leaving, and compares the document with the object last saved, so undoing back to it leaves
-nothing to save and opening, panning, zooming or selecting never writes a revision. The status says
+before editor-owned Back and resource-link navigation, and compares the document with the object last
+saved, so undoing back to it leaves nothing to save and opening, panning, zooming or selecting never writes a revision. The status says
 saved, unsaved, saving, failed, conflict or deleted. A conflict or a deleted board stops saving and
 editing and says so, with Reload on a conflict, rather than overwriting another tab; Back with changes
 the server does not have asks before leaving without them. A reader without `service.control` sees the
 board read-only: no tools, no format bar, no editing, and nothing that would save.
 
 Each flush drains every snapshot changed during the requests already in flight (`lib/board-save.ts`,
-also used by Excalidraw). Navigation checks that the latest document is clean before routing, and a
-failed later request retains the editor and its leave choice. The browser's reload/close warning
+also used by Excalidraw). Editor-owned Back and resource-link navigation checks that the latest
+document is clean before routing, and a failed later request retains the editor and its leave choice. The browser's reload/close warning
 remains active for a dirty document after a conflict or missing-board response.
 
 Dirty documents, their saved document/revision, conflict state and undo/redo history are retained in

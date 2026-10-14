@@ -38,8 +38,8 @@ saving, saved, failed, unnamed, conflict and deleted states. When changes cannot
 in-board links ask before leaving without saving instead of doing nothing.
 
 A flush waits for every edit, including changes made while an earlier request was in flight.
-`lib/board-save.ts` drains successive snapshots against their acknowledged revisions, and navigation
-checks that the drawing is still clean before routing. A failed later save keeps the editor open with
+`lib/board-save.ts` drains successive snapshots against their acknowledged revisions, and editor-owned
+Back and resource-link navigation checks that the drawing is still clean before routing. A failed later save keeps the editor open with
 the leave choice. Reloading or closing the browser tab also warns while changes remain unsaved,
 including after a conflict or missing-drawing response; an explicit choice to leave without saving or
 delete the drawing suppresses that warning.

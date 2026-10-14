@@ -457,7 +457,9 @@ mounted dashboard workspace is keyed by authenticated account ID. A recovery pro
 another usable account remounts its providers and pages at the current route, removing the prior
 account's local editors, canvases and active work as well as its shared drafts. Raw proxy validation
 and save callbacks also check their retained-draft generation before sending, fencing the synchronous
-cleanup interval before React remounts; a cleared owner cannot stage or publish its old buffer.
+cleanup interval before React remounts; a cleared owner cannot start another validation or save
+from its old buffer. Cleanup does not retract an already-sent authorized request or prove its
+publication outcome.
 A same-account recovery
 keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
 PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.

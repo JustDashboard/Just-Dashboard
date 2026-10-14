@@ -2895,8 +2895,8 @@ containers/volumes/networks.
   against the current file and requires an explicit review against that version before retrying.
   Discard rereads a changed file; a removed/unreadable file retains the draft with a retry action.
   Raw Test config uses the same conflict display if a native writer changes the candidate during
-  validation. Every nginx dry run restores only its own candidate's bytes, including prior absence,
-  and refuses to erase a newer native edit. Raw reads, writes and restoration pin the approved parent
+  validation. The config editor's nginx dry runs restore only their own candidate's bytes, including
+  prior absence, and refuse to erase a newer native edit. Raw reads, writes and restoration pin the approved parent
   directory through `os.Root`; temporary contents, FD-based permissions, publication and cleanup stay
   on that captured directory. A renamed, replaced or outwardly retargeted parent causes a conflict;
   a candidate still held by the original directory is restored there while replacement directories

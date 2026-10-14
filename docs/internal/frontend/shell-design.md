@@ -15,6 +15,9 @@ each navigation, so a folder coloured in Files is that colour in every tree and 
 `HeldSessionsProvider` with `HeldSessionsHost` after the page, which draw Remote Desktop's sessions
 so they stay connected across pages (the session page only names which one is shown). Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
+The authenticated workspace is keyed by account ID. Session recovery for a different account remounts
+its providers and pages after account working-state cleanup, removing mounted editor buffers and held
+sessions. Recovery for the same account keeps those mounts and their drafts.
 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
 the remaining height (`<Page fill>`) instead of growing past the viewport.

@@ -357,8 +357,8 @@ map keyed by uploaded name. Image saves over the original always send the opened
 copies and Save as retain the no-overwrite publication rule. `UploadChecked` compares binary content
 before staging and under the Files/Compose path lock immediately before publishing, re-resolves the
 client path and preserves the target's owner and mode. Staging runs outside the lock so a slow browser
-transfer cannot block other saves. A changed or removed image, a changed symlink destination, or a
-competing dashboard save returns `409 content_conflict`; its transformed canvas remains available for
+transfer cannot block other saves. A changed or removed image, a changed allowed symlink destination,
+or a competing dashboard save returns `409 content_conflict`; its transformed canvas remains available for
 Save as or review, and reloading the server image requires confirmed discard. Subsequent successful
 original saves use the returned saved revision. Legacy uploads without a revision keep their previous
 overwrite behavior. The same narrow native comparison/rename window described below still applies.

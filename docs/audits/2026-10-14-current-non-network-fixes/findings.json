@@ -1,0 +1,686 @@
+{
+  "audit_baseline": "a3a8e49e6e578bb92e26ae38d6e568f5d6956ac9",
+  "routes_in_scope": 94,
+  "excluded_network_routes": 19,
+  "findings": [
+    {
+      "id": "N-01",
+      "title": "Drawing and Stickyboard edits can be lost through sidebar navigation",
+      "severity": "high",
+      "kind": "Defect",
+      "confidence": "Browser reproduced with failed-save fixtures",
+      "routes": [
+        "/excalidraw/[id]",
+        "/stickyboard/[id]"
+      ],
+      "feature_names": [
+        "Autosave and status",
+        "Autosave and manual save",
+        "Conflict/deletion handling"
+      ],
+      "trigger": "Make a drawing or sticky note dirty, have its PUT fail or remain unacknowledged, and use the shell sidebar to open Files. Return with browser Back.",
+      "expected": "Wait for the latest snapshot to save, retain the draft, or ask explicitly before leaving. Apply the same rule to sidebar, command-palette and history navigation as the editor\u2019s own Back button.",
+      "actual": "The editor-owned Back/card links drain saves, but shell navigation bypasses those handlers. Unmount cleanup sends a best-effort asynchronous PUT and discards the component state. The reproduced drawing reverted from \u201cUnsaved drawing name\u201d to \u201cUntitled board\u201d; the sticky note reverted from Violet to its saved Yellow. No leave dialog appeared.",
+      "impact": "Recent unsaved work disappears after an ordinary navigation when storage, connectivity or a revision conflict prevents saving. The repaired editor-local navigation does not cover every exit.",
+      "recommendation": "Use a route-wide navigation guard or retain each board\u2019s unsaved snapshot outside the mounted editor until it is acknowledged. Cover sidebar, search and history traversal, plus conflict/failure outcomes.",
+      "verification": "Both reproductions used the fresh production frontend and isolated mocked APIs. Each recorded a failed PUT, successful navigation, no warning and a restored older snapshot. No real board was changed.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/boards/board-workspace.tsx",
+          "line": 322,
+          "note": "Only editor-owned navigation calls this save gate",
+          "excerpt": " 320   // A save that cannot go through used to make Back and card links do\n 321   // nothing at all; now leaving is a choice the operator makes.\n 322   async function go(href: string) {\n 323     if ((await flush()) && !isDirty()) router.push(href)\n 324     else setLeaving(href)\n 325   }\n 326 \n 327   const onLinkOpen: NonNullable<ExcalidrawProps[\"onLinkOpen\"]> = (element, event) => {\n 328     const link = element.link\n 329     const click = event.detail.nativeEvent"
+        },
+        {
+          "path": "frontend/src/components/boards/board-workspace.tsx",
+          "line": 245,
+          "note": "Unmount cleanup cannot keep the route mounted after a failed save",
+          "excerpt": " 243       window.removeEventListener(\"beforeunload\", warn)\n 244       if (timerRef.current) clearTimeout(timerRef.current)\n 245       if (isDirty()) void flush()\n 246     }\n 247   }, [flush, isDirty])\n 248 \n 249   useEffect(() => {\n 250     // Excalidraw's own Ctrl+S writes a .excalidraw file to disk (it is turned\n 251     // off below); on a board the operator means this server. The physical key\n 252     // stands in on a non-Latin layout, where Russian's S key reports \"\u044b\"."
+        },
+        {
+          "path": "frontend/src/components/stickyboard/use-board.ts",
+          "line": 184,
+          "note": "Stickyboard likewise relies on best-effort cleanup outside its own navigation handler",
+          "excerpt": " 182       window.removeEventListener(\"beforeunload\", warn)\n 183       if (timerRef.current) clearTimeout(timerRef.current)\n 184       if (isDirty()) void flush()\n 185     }\n 186   }, [flush, isDirty])\n 187 \n 188   return {\n 189     doc,\n 190     docRef,\n 191     saveState,"
+        }
+      ],
+      "artifacts": [
+        "drawing-sidebar-save-failure.png",
+        "sticky-sidebar-save-failure.png"
+      ]
+    },
+    {
+      "id": "N-02",
+      "title": "Raw proxy configuration saves silently replace newer edits",
+      "severity": "high",
+      "kind": "Defect",
+      "confidence": "Native service reproduction in a temporary directory",
+      "routes": [
+        "/proxy/config",
+        "/proxy/sites",
+        "/proxy/sites/[name]",
+        "/proxy/streams"
+      ],
+      "feature_names": [
+        "Editor and test",
+        "Edit/raw/open/TLS",
+        "File actions",
+        "Toggle/delete/raw"
+      ],
+      "trigger": "Two operators read the same host nginx/Caddy file. A saves first; B later saves a valid edit made from the older buffer. The raw ConfigEditor is shared by the listed pages.",
+      "expected": "Refuse the stale save with a conflict and preserve B\u2019s draft for review against A\u2019s version.",
+      "actual": "GET /proxy/config returns content without an editor revision; PUT carries only kind/path/content/reload. WriteConfig serializes writes and validates syntax, but never compares the editor\u2019s original bytes. In the temporary native probe both writes succeeded and B removed A\u2019s change.",
+      "impact": "Valid syntax can still restore old upstreams, access policy or TLS settings. Serialization protects the staging procedure but does not prevent lost updates. The structured site builder has a separate digest guard; this finding concerns raw editing.",
+      "recommendation": "Return a content revision and require it on raw saves. Check under the existing writer lock before staging, return an explicit conflict and show the fresh file beside the retained draft.",
+      "verification": "The real proxysvc.ReadConfig/WriteConfig functions were exercised against private files. A private always-successful nginx stub replaced native validation; no host proxy, listener or reload was touched. The contract omission is also visible in the handler and frontend.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/proxy/config-editor.tsx",
+          "line": 152,
+          "note": "Raw save payload has no original-content precondition",
+          "excerpt": " 150     setBusy(\"save\")\n 151     try {\n 152       const res = await put<{ validation?: ProxyValidation }>(\"/proxy/config\", {\n 153         kind,\n 154         path,\n 155         content,\n 156         reload,\n 157       })\n 158       setOriginal(content)\n 159       setReview(null)"
+        },
+        {
+          "path": "backend/internal/api/handlers_proxy_engine.go",
+          "line": 97,
+          "note": "Raw config request has no revision field",
+          "excerpt": "  95 }\n  96 \n  97 type proxyConfigRequest struct {\n  98 \tKind    proxysvc.Kind `json:\"kind\"`\n  99 \tPath    string        `json:\"path\"`\n 100 \tContent string        `json:\"content\"`\n 101 \tReload  bool          `json:\"reload\"`\n 102 }\n 103 \n 104 // decode reads a file the config editor validates or saves. The service"
+        },
+        {
+          "path": "backend/internal/proxysvc/proxy.go",
+          "line": 483,
+          "note": "Writer validates and stages without checking the editor snapshot",
+          "excerpt": " 481 // WriteConfig saves a configuration only after it validates. The order here is\n 482 // the whole point of the endpoint: validate, then write, then reload.\n 483 func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content string) (*ValidationResult, error) {\n 484 \ts.mu.Lock()\n 485 \tdefer s.mu.Unlock()\n 486 \tfull, err := s.allowedPath(path)\n 487 \tif err != nil {\n 488 \t\treturn nil, err\n 489 \t}\n 490 \tif kind == KindCaddy {"
+        }
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "N-03",
+      "title": "Image editing can overwrite a picture changed after it was opened",
+      "severity": "medium",
+      "kind": "Defect",
+      "confidence": "Source trace plus native upload-mechanism reproduction",
+      "routes": [
+        "/files",
+        "/files/editor"
+      ],
+      "feature_names": [
+        "Image editor",
+        "Image editing"
+      ],
+      "trigger": "Open an image for editing, replace that file from another tab or host program, then Save over the original path.",
+      "expected": "Detect that the original image changed and offer review, Save as, or an explicit replacement choice.",
+      "actual": "The image editor posts to /files/upload with overwrite=true for the original path. Its modified timestamp is only an image-cache key. Upload atomically publishes the replacement, but receives no expected content revision. A temporary upload probe replaced a newer external file with an older editor snapshot.",
+      "impact": "The text-editor conflict protection does not extend to image saves. Another operator\u2019s latest image can be lost while Save reports success.",
+      "recommendation": "Carry an original-image revision through image loading and upload. Require that revision for overwrite, return a conflict and retain the transformed canvas.",
+      "verification": "The actual files.Upload overwrite path was exercised against a private temporary file after an external replacement. The probe verifies the publication mechanism, not the browser image codec or a complete two-tab image workflow.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/files/image-editor.tsx",
+          "line": 356,
+          "note": "Saving to the original image unconditionally requests overwrite",
+          "excerpt": " 354       form.append(\"file\", blob, finalName)\n 355       const res = await fetch(\n 356         `${API_BASE}/files/upload?path=${encodeURIComponent(dir)}&overwrite=${target === path}`,\n 357         { method: \"POST\", credentials: \"include\", headers: mutationHeaders(), body: form },\n 358       )\n 359       if (!res.ok) throw new Error((await res.json()).error?.message ?? res.statusText)\n 360       notify.success(`Saved ${finalName}`, {\n 361         description: `${bytes(blob.size)} \u00b7 ${current.width}\u00d7${current.height}`,\n 362       })\n 363       if (target === path) {"
+        },
+        {
+          "path": "backend/internal/api/handlers_files.go",
+          "line": 203,
+          "note": "Upload accepts overwrite rather than an original-content revision",
+          "excerpt": " 201 \t\treturn httpx.BadRequest(\"path query parameter is required\")\n 202 \t}\n 203 \toverwrite := r.URL.Query().Get(\"overwrite\") == \"true\"\n 204 \n 205 \tr.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)\n 206 \treader, err := r.MultipartReader()\n 207 \tif err != nil {\n 208 \t\treturn httpx.BadRequest(\"expected a multipart upload: %v\", err)\n 209 \t}\n 210 \twritten := []string{}"
+        },
+        {
+          "path": "backend/internal/files/files.go",
+          "line": 837,
+          "note": "Atomic upload publication does not compare the editor\u2019s original bytes",
+          "excerpt": " 835 // An existing file keeps its owner and mode across the replacement, which is\n 836 // what lets the image editor save over a picture the web server owns.\n 837 func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error) {\n 838 \tfull, err := s.Resolve(path)\n 839 \tif err != nil {\n 840 \t\treturn 0, err\n 841 \t}\n 842 \tperm := os.FileMode(0o644)\n 843 \tuid, gid := -1, -1\n 844 \tif st, err := os.Lstat(full); err == nil {"
+        }
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "N-04",
+      "title": "Streamed database exports bypass session-expiry recovery",
+      "severity": "medium",
+      "kind": "Defect",
+      "confidence": "Query-export browser reproduction; sibling paths source traced",
+      "routes": [
+        "/databases/[id]/query",
+        "/databases/[id]/data"
+      ],
+      "feature_names": [
+        "SQL file export",
+        "SQL import and export",
+        "Mongo documents"
+      ],
+      "trigger": "Let the browser session end after Query/Data has loaded, then export. The server returns 401 unauthorized.",
+      "expected": "Recognize the authentication failure, revalidate once and return to sign-in with the expiry explanation, just as ordinary feature requests do.",
+      "actual": "SQL result export, SQL table export and Mongo export call fetch directly and build their own ApiError without dispatching jd:authentication-lost. The query reproduction showed \u201cSession expired\u201d, remained at /databases/1/query and emitted zero auth-loss events and zero session rechecks.",
+      "impact": "The user remains inside a signed-in-looking workspace retrying a refused operation until a later ordinary API request or reload triggers recovery. Backend authentication still rejects the export; this is not an access bypass.",
+      "recommendation": "Share one authentication-response observer with streamed/binary response readers. Preserve streaming while centralizing recognized 401/account-disabled/password-change handling.",
+      "verification": "Confirmed against the fresh production frontend with an expired export response and expired session endpoint. Table/Mongo sibling readers were traced in source, not independently expired in the browser. Background polling can eventually recover the shell.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/database/query/use-result-export.ts",
+          "line": 20,
+          "note": "Custom error reader omits the shared recovery event",
+          "excerpt": "  18 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))\n  19 \n  20 async function refused(response: Response): Promise<ApiError> {\n  21   const text = await response.text()\n  22   try {\n  23     const body = (JSON.parse(text) as ApiErrorBody).error\n  24     return new ApiError(response.status, body.code, body.message)\n  25   } catch {\n  26     return new ApiError(response.status, \"unknown\", text.slice(0, 300) || response.statusText)\n  27   }"
+        },
+        {
+          "path": "frontend/src/components/database/data/use-export.ts",
+          "line": 33,
+          "note": "SQL table export has the same bypass",
+          "excerpt": "  31 \n  32 /** A refused request as the error every other read throws. */\n  33 async function refused(response: Response): Promise<ApiError> {\n  34   const text = await response.text()\n  35   try {\n  36     const body = (JSON.parse(text) as ApiErrorBody).error\n  37     return new ApiError(response.status, body.code, body.message, undefined, {\n  38       reason: body.reason,\n  39       raw: body.raw,\n  40     })"
+        },
+        {
+          "path": "frontend/src/components/database/mongo/transfer.tsx",
+          "line": 38,
+          "note": "Mongo export has the same bypass",
+          "excerpt": "  36 \n  37 /** A refused request as the error every other read throws. */\n  38 async function refused(response: Response): Promise<ApiError> {\n  39   const text = await response.text()\n  40   try {\n  41     const body = (JSON.parse(text) as ApiErrorBody).error\n  42     return new ApiError(response.status, body.code, body.message)\n  43   } catch {\n  44     return new ApiError(response.status, \"unknown\", text.slice(0, 300) || response.statusText)\n  45   }"
+        },
+        {
+          "path": "frontend/src/lib/api.ts",
+          "line": 235,
+          "note": "Ordinary API errors notify the auth provider",
+          "excerpt": " 233         body?.error?.code === \"account_disabled\")\n 234     ) {\n 235       window.dispatchEvent(new Event(\"jd:authentication-lost\"))\n 236     }\n 237     throw new ApiError(\n 238       res.status,\n 239       body?.error?.code ?? \"unknown\",\n 240       body?.error?.message ?? res.statusText,\n 241       body?.error?.phrase,\n 242       {"
+        }
+      ],
+      "artifacts": [
+        "query-export-expired-session.png"
+      ]
+    },
+    {
+      "id": "N-05",
+      "title": "Security overview claims no repeated-failure protection from fail2ban alone",
+      "severity": "medium",
+      "kind": "Defect",
+      "confidence": "Browser-rendered wording and source-confirmed missing evidence",
+      "routes": [
+        "/security"
+      ],
+      "feature_names": [
+        "Intrusion reading/handoff"
+      ],
+      "trigger": "Open Security on a host without running fail2ban, including a host where CrowdSec and a bouncer provide protection.",
+      "expected": "Describe fail2ban specifically, or read all configured enforcement engines before stating that none provides protection.",
+      "actual": "The broad \u201cIntrusion\u201d tile reads fail2ban and, when it is absent/stopped, says \u201cnothing is blocking repeated failures\u201d. It does not read CrowdSec enforcement to support that statement. Intrusion\u2019s dedicated page has the richer engine evidence.",
+      "impact": "The overview can misstate the protection of a CrowdSec-managed host and lead the operator to install or change an unnecessary second blocker.",
+      "recommendation": "Change the statement to \u201cfail2ban is not running\u201d, or derive an explicitly bounded combined verdict from available enforcement evidence.",
+      "verification": "A fresh-browser fixture with fail2ban unavailable rendered the exact blanket statement. The absence of a CrowdSec read was checked in the page source; no actual CrowdSec/bouncer enforcement was exercised.",
+      "evidence": [
+        {
+          "path": "frontend/src/app/(dashboard)/security/page.tsx",
+          "line": 29,
+          "note": "Overview\u2019s intrusion input is fail2ban",
+          "excerpt": "  27   const { firewall, exposure } = useSecurity()\n  28 \n  29   const fail2ban = usePoll<Fail2banReply>((signal) => get(\"/fail2ban/\", undefined, signal), 20_000)\n  30   const bans = usePoll<BanSummary>(\n  31     (signal) => get(\"/fail2ban/offenders\", { top: 1 }, signal),\n  32     120_000,\n  33   )\n  34   const connections = usePoll<Connections>(\n  35     (signal) => get(\"/connections\", undefined, signal),\n  36     10_000,"
+        },
+        {
+          "path": "frontend/src/app/(dashboard)/security/page.tsx",
+          "line": 139,
+          "note": "Claim is broader than the evidence",
+          "excerpt": " 137             fail2ban.data?.running\n 138               ? `${fail2ban.data.jails.length} jail${fail2ban.data.jails.length === 1 ? \"\" : \"s\"} watching`\n 139               : \"nothing is blocking repeated failures\"\n 140           }\n 141         />\n 142         <AreaTile\n 143           icon={NetworkDevice}\n 144           title=\"Connections\"\n 145           href=\"/network/connections\"\n 146           loading={connections.loading && !connections.data}"
+        }
+      ],
+      "artifacts": [
+        "security-crowdsec-protection-wording.png"
+      ]
+    },
+    {
+      "id": "N-06",
+      "title": "Users page describes unenrolled accounts as password-only when 2FA is required",
+      "severity": "low",
+      "kind": "Defect",
+      "confidence": "Browser reproduced; backend policy source reviewed",
+      "routes": [
+        "/account/users"
+      ],
+      "feature_names": [
+        "Account readings",
+        "Reset two-factor"
+      ],
+      "trigger": "Set JD_REQUIRE_2FA=true and view an enabled account without an authenticator, or review Reset two-factor.",
+      "expected": "Say that the account must enroll before completing sign-in. Reset guidance must reflect the install\u2019s policy.",
+      "actual": "The readings say \u201c1 administrator on a password alone\u201d under a required-2FA session. Reset confirmation likewise says the person signs in on a password alone until enrolling again. UserReadings has no policy input. The backend grants such accounts only an enrollment session.",
+      "impact": "Administrators get an incorrect account-access description and recovery expectation. The required-factor enforcement itself remains intact.",
+      "recommendation": "Use require2fa when deriving user readings and reset guidance. Distinguish optional password-only access from required enrollment.",
+      "verification": "The production frontend was rendered with require2fa=true and an unenrolled enabled administrator. The wrong reading was captured. The reset wording is source confirmed; no account or authenticator was reset.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/account/dashboard-users.tsx",
+          "line": 134,
+          "note": "Readings do not account for the required-2FA policy",
+          "excerpt": " 132         hint={\n 133           bareAdmins.length > 0\n 134             ? `${plural(bareAdmins.length, \"administrator\")} on a password alone`\n 135             : enrolled.length === active.length\n 136               ? \"every account asks for a code\"\n 137               : `${active.length - enrolled.length} on a password alone`\n 138         }\n 139       />\n 140       <StatTile\n 141         label=\"Signed in this week\""
+        },
+        {
+          "path": "frontend/src/components/account/dashboard-users.tsx",
+          "line": 303,
+          "note": "Reset wording assumes the optional policy",
+          "excerpt": " 301                   description: (\n 302                     <p>\n 303                       <b>{name}</b> signs in with a password alone until they enrol an authenticator\n 304                       again. Do this when they have lost theirs and their recovery codes.\n 305                     </p>\n 306                   ),\n 307                   action: async () => {\n 308                     await post(`/dashboard-users/${user.id}/reset-totp`)\n 309                     notify.success(`Two-factor reset for ${name}`)\n 310                     refresh()"
+        },
+        {
+          "path": "docs/internal/security/invariants.md",
+          "line": 136,
+          "note": "Backend policy requires enrollment before feature access",
+          "excerpt": " 134 - A session that owes a second factor is never elevated. `httpx.Authenticator.resolve` refuses it\n 135   everywhere but the 2FA routes, exactly as before.\n 136 - Where `JD_REQUIRE_2FA` is true, an account with no authenticator gets a password-only session that\n 137   reaches nothing but enrolment \u2014 the old behaviour, unchanged.\n 138 - Turning an authenticator off is the account holder's own action, requires their password, and is\n 139   refused outright by `Service.DisableTOTP` where the policy demands one.\n 140 - Setup, enrollment confirmation and code verification share one account-scoped attempt budget.\n 141   Enrollment cannot be used again after TOTP is enabled. An accepted TOTP counter or recovery code is\n 142   consumed atomically with session elevation; another session cannot reuse it.\n 143 - A temporary password does not grant feature access. After required factors, only authentication"
+        }
+      ],
+      "artifacts": [
+        "required-two-factor-users-wording.png"
+      ]
+    },
+    {
+      "id": "N-07",
+      "title": "Browser Back closes a dirty proxy editor without a discard warning",
+      "severity": "medium",
+      "kind": "Defect",
+      "confidence": "Browser reproduced on the production frontend",
+      "routes": [
+        "/proxy/config"
+      ],
+      "feature_names": [
+        "Editor and test"
+      ],
+      "trigger": "Open nginx.conf from Configuration, edit its buffer, then press browser Back. Forward reopens the same file.",
+      "expected": "Preserve the buffer or ask to discard before the history traversal closes the editor.",
+      "actual": "The X/Escape path asks through requestClose, and beforeunload covers a full reload. History traversal changes the file query selection directly, remounts ConfigEditorBody under its open/path key and drops the dirty buffer. The reproduced traversal had zero warnings and Forward restored only server content.",
+      "impact": "Ordinary browser navigation can discard configuration work despite the editor\u2019s explicit close warning. No file is written in this scenario.",
+      "recommendation": "Integrate history traversal into the dirty-state guard or keep file-scoped drafts until explicit discard/save. Verify native Back/Forward as well as the panel\u2019s own close affordances.",
+      "verification": "A mocked raw config was edited in Monaco on a fresh build. Back removed the editor; Forward reopened it without the appended draft. No PUT or host config edit was performed.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/proxy/config-editor.tsx",
+          "line": 60,
+          "note": "History-driven open/path changes replace the component owning the buffer",
+          "excerpt": "  58  */\n  59 export function ConfigEditor(props: ConfigEditorProps) {\n  60   return <ConfigEditorBody key={props.open ? props.path : \"\"} {...props} />\n  61 }\n  62 \n  63 /** A test's result as the editor shows it: Test config's, or the one that refused a save. */\n  64 type Shown = { from: \"test\" | \"save\"; validation: ProxyValidation }\n  65 \n  66 /**\n  67  * Saving is two steps. Save only and Save and reload show what the save"
+        },
+        {
+          "path": "frontend/src/components/proxy/config-editor.tsx",
+          "line": 126,
+          "note": "Unload protection does not guard same-document history",
+          "excerpt": " 124     if (!open || !dirty) return\n 125     const warn = (event: BeforeUnloadEvent) => event.preventDefault()\n 126     window.addEventListener(\"beforeunload\", warn)\n 127     return () => window.removeEventListener(\"beforeunload\", warn)\n 128   }, [open, dirty])\n 129 \n 130   const readAgain = () => {\n 131     setRead(undefined)\n 132     setAttempt((n) => n + 1)\n 133   }"
+        },
+        {
+          "path": "frontend/src/components/proxy/config-editor.tsx",
+          "line": 217,
+          "note": "Discard guard is attached to panel-controlled closing",
+          "excerpt": " 215   })\n 216 \n 217   const requestClose = (next: boolean) => {\n 218     if (busy) return\n 219     if (next || !dirty) onOpenChange(next)\n 220     else setLeaving(\"close\")\n 221   }\n 222 \n 223   const editable = !readOnly && open && !failed\n 224   const unread = siteDisabled && !shown?.validation.note && !failed"
+        }
+      ],
+      "artifacts": [
+        "proxy-config-history-draft-loss.png"
+      ]
+    },
+    {
+      "id": "N-08",
+      "title": "A failed backup-job save can still replace its destination credentials",
+      "severity": "medium",
+      "kind": "Defect",
+      "confidence": "Fault-injected native SQLite reproduction",
+      "routes": [
+        "/backups",
+        "/backups/[job]"
+      ],
+      "feature_names": [
+        "Create/edit job",
+        "Identity and capacity"
+      ],
+      "trigger": "Save a job with new storage credentials and changed metadata. The credential update succeeds, but the following metadata update fails or its request context is canceled.",
+      "expected": "Commit the credentials and definition together, or leave both old values when Save fails.",
+      "actual": "backups.Store.Update uses two independent UPDATE statements: first secrets_enc, then the job definition. There is no encompassing transaction. A private SQLite trigger that rejected the metadata write produced an error while the new credentials remained committed and the old job name remained.",
+      "impact": "A Save reported as failed can leave old bucket/endpoint settings paired with new keys. Scheduled backups may subsequently fail or use an unintended credential set.",
+      "recommendation": "Validate and seal first, then update credentials and metadata in one transaction or one statement. Add a meaningful regression that fails the metadata publication and verifies the credentials remain unchanged.",
+      "verification": "The actual backup Store.Update and Sealer ran against a newly created private SQLite database. A synthetic BEFORE UPDATE OF name failure modeled interruption of the second write. All key values were invented; no real destination was contacted.",
+      "evidence": [
+        {
+          "path": "backend/internal/backups/store.go",
+          "line": 261,
+          "note": "Credential replacement commits before the definition write",
+          "excerpt": " 259 \t\t\treturn nil, err\n 260 \t\t}\n 261 \t\tif _, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET secrets_enc = ? WHERE id = ?`, sealed, id); err != nil {\n 262 \t\t\treturn nil, err\n 263 \t\t}\n 264 \t}\n 265 \t_, err := s.st.DB.ExecContext(ctx,\n 266 \t\t`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,\n 267 \t\t schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ? WHERE id = ?`,\n 268 \t\tj.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),"
+        },
+        {
+          "path": "backend/internal/backups/store.go",
+          "line": 266,
+          "note": "Definition publication is a separate nontransactional statement",
+          "excerpt": " 264 \t}\n 265 \t_, err := s.st.DB.ExecContext(ctx,\n 266 \t\t`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,\n 267 \t\t schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ? WHERE id = ?`,\n 268 \t\tj.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),\n 269 \t\tencodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), id)\n 270 \tif err != nil {\n 271 \t\treturn nil, err\n 272 \t}\n 273 \treturn s.Get(ctx, id)"
+        },
+        {
+          "path": "backend/internal/api/handlers_backups.go",
+          "line": 247,
+          "note": "The API returns an error when the later statement fails",
+          "excerpt": " 245 }\n 246 \n 247 func (s *Server) handleBackupJobUpdate(w http.ResponseWriter, r *http.Request) error {\n 248 \tid, err := parseID(r)\n 249 \tif err != nil {\n 250 \t\treturn err\n 251 \t}\n 252 \tvar req jobRequest\n 253 \tif err := httpx.DecodeJSON(r, &req); err != nil {\n 254 \t\treturn err"
+        }
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "P-01",
+      "title": "Concurrent backup-job edits can quietly undo another editor\u2019s choices",
+      "severity": "medium",
+      "kind": "Potential issue",
+      "confidence": "Native lost-update mechanism reproduced; UI concurrency not separately exercised",
+      "routes": [
+        "/backups",
+        "/backups/[job]",
+        "/deploy/[id]/settings/databases"
+      ],
+      "feature_names": [
+        "Create/edit job",
+        "Identity and capacity",
+        "Add missing native dump"
+      ],
+      "trigger": "Two tabs read one backup job. A changes retention or included native dumps and saves; B saves another field from its older full-job draft.",
+      "expected": "Keep unrelated saved choices or surface a concurrent-edit conflict. A helper that adds a database dump should not replace a newer retention/schedule/source choice.",
+      "actual": "The form PUTs a full definition without an expected version. Store.Update rewrites every field with WHERE id only. In a temporary store, A\u2019s retention of 10 was replaced with B\u2019s stale value of 2 while both updates succeeded.",
+      "impact": "A job can silently lose retention, schedule, source, native-dump or recovery settings during overlapping edits. This is mapped as a behavior risk because the current job API does not promise versioned conflict handling.",
+      "recommendation": "Add a job revision and compare it on save, or use explicit field-level updates for narrow helpers with appropriate conflict handling.",
+      "verification": "Confirmed in the native store with two independent snapshots; no real backup ran. Source identifies the browser\u2019s full-object PUT. Two concurrent browser dialogs were not independently exercised.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/backups/job-form.tsx",
+          "line": 223,
+          "note": "Job editor sends the complete definition",
+          "excerpt": " 221     }\n 222     try {\n 223       if (job) await put(`/backups/${job.id}`, body)\n 224       else await post(\"/backups/\", body)\n 225       notify.success(job ? \"Job updated\" : \"Job created\")\n 226       changeOpen(false)\n 227       onDone()\n 228     } catch (err) {\n 229       notify.error(\"Could not save\", err)\n 230     } finally {"
+        },
+        {
+          "path": "backend/internal/backups/store.go",
+          "line": 266,
+          "note": "Metadata update compares only the record ID",
+          "excerpt": " 264 \t}\n 265 \t_, err := s.st.DB.ExecContext(ctx,\n 266 \t\t`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,\n 267 \t\t schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ? WHERE id = ?`,\n 268 \t\tj.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),\n 269 \t\tencodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), id)\n 270 \tif err != nil {\n 271 \t\treturn nil, err\n 272 \t}\n 273 \treturn s.Get(ctx, id)"
+        }
+      ],
+      "artifacts": []
+    }
+  ],
+  "test_findings": [
+    {
+      "id": "T-01",
+      "title": "Auth-recovery reload assertion can run before its session probe completes",
+      "severity": "low",
+      "actual": "The initial targeted run failed at expected 3 session reads, received 2. The sign-in notice can be visible before the reload\u2019s asynchronous auth request settles. The same untouched test passed all three focused repetitions.",
+      "impact": "A timing-dependent test failure can obscure otherwise working shared session recovery. It is not evidence that the backend accepts expired sessions.",
+      "recommendation": "Wait for the session probe before asserting its exact count. A test-only follow-up already exists in commit da1186fd; it is not part of the audited a3a8e49e baseline.",
+      "evidence": [
+        {
+          "path": "frontend/tests/browser/auth-recovery.spec.ts",
+          "line": 65,
+          "note": "Immediate read-count assertion after reload",
+          "excerpt": "  63   await page.reload()\n  64   await expect(page.getByText(\"Your session ended. Sign in again to continue.\")).toBeVisible()\n  65   expect(fixture.reads()).toBe(3)\n  66   await signIn(page)\n  67   await expect(page).toHaveURL(/\\/$/)\n  68   await expect(page.getByText(\"Your session ended. Sign in again to continue.\")).toHaveCount(0)\n  69 })\n  70 \n  71 test(\"a temporarily unavailable session recheck preserves the current account\", async ({\n  72   page,"
+        }
+      ]
+    }
+  ],
+  "known_limits": [
+    {
+      "id": "L-01",
+      "title": "The full journal remains broader than the auth-log permission boundary",
+      "routes": [
+        "/logs",
+        "/processes/services"
+      ],
+      "text": "Specific sshd/sudo sources require system.admin, but journal: remains readable by authenticated read accounts and can include those same records. The repository explicitly documents this authorization gap; the audit did not introduce it.",
+      "action": "Decide and document a policy for the broad journal before treating the auth-log gate as a complete boundary.",
+      "evidence": [
+        {
+          "path": "backend/internal/api/handlers_logs.go",
+          "line": 246,
+          "note": "Explicitly acknowledged broader source",
+          "excerpt": " 244 // is sometimes a password typed into the username prompt, and a sudo line\n 245 // carries the command that was run. Reading those is closer to reading\n 246 // somebody's keystrokes than to operational history. The whole journal stays\n 247 // readable, as it was before this gate existed; narrowing it to sshd is what\n 248 // is gated.\n 249 func (s *Server) logTargetFor(r *http.Request, raw string) (logTarget, error) {\n 250 \ttarget, err := parseLogTarget(raw)\n 251 \tif err != nil {\n 252 \t\treturn logTarget{}, err\n 253 \t}"
+        },
+        {
+          "path": "docs/internal/security/invariants.md",
+          "line": 56,
+          "note": "Invariant documentation records the exception",
+          "excerpt": "  54      `system.admin` on every `/logs` route that reads a source \u2014 except the whole journal\n  55      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a\n  56      known gap rather than the boundary\n  57      ([observability-security](../backend/observability-security.md))).\n  58 \n  59    A database connection marked read-only adds one rule in front of all of these, and it fails closed\n  60    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that\n  61    is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until\n  62    somebody decides it belongs there. The routes on the list that are a read or a write by what they\n  63    carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is"
+        }
+      ]
+    },
+    {
+      "id": "L-02",
+      "title": "Archive coverage and checksums do not establish application recovery",
+      "routes": [
+        "/backups",
+        "/backups/[job]",
+        "/deploy/[id]/settings/storage",
+        "/deploy/[id]/settings/databases"
+      ],
+      "text": "Coverage proves captured sources and verified artifact identity. A live database filesystem archive is not automatically transaction-consistent. Native database dumps and configured SQLite snapshots address their supported cases; the application checker proves only the supplied schema/canary check and is currently a single-container check.",
+      "action": "Use native dumps and an application-specific recovery drill; require evidence for the exact artifact where recovery matters.",
+      "evidence": [
+        {
+          "path": "docs/internal/deployments/backup-coverage.md",
+          "line": 28,
+          "note": "Coverage and restore success are separate",
+          "excerpt": "  26 the run fail; partial archives cannot be reported as complete coverage.\n  27 \n  28 Coverage is not application consistency. Filesystem archives of running databases do not prove a\n  29 recoverable transaction boundary. Jobs capture explicitly selected SQLite files through the Databases\n  30 owner's native snapshot, and they capture **native dumps of saved database connections**\n  31 (`backup_jobs.database_dumps`, additive): every run asks the Databases owner (`backupDatabaseDumper`,\n  32 which opens the sealed DSN like every Databases route and calls `dbx.Dump`) for `pg_dump`,\n  33 `mysqldump`, `mongodump`, a Redis snapshot or the built-in driver dump of each connection, stores the\n  34 file under `database-NNNN/<file>` beside the `source-NNNN` trees, and records\n  35 `manifest.databaseDumps` (connection, engine, database, method, file, archive path, SHA-256, bytes)."
+        },
+        {
+          "path": "docs/internal/deployments/restore-verification.md",
+          "line": 82,
+          "note": "Multi-container/PITR work remains outside the current checker",
+          "excerpt": "  80 Native dumps of saved PostgreSQL/MySQL/MongoDB/Redis connections are supported through the Databases\n  81 owner and recorded manifests, including jobs with no filesystem source; see\n  82 [deployment backup coverage](backup-coverage.md). Multi-container restore orchestration,\n  83 external-service recovery and PITR remain outside this implementation. Copying live database data\n  84 directories is not promoted to an application-consistent backup by this feature. Application checker\n  85 coverage and actual production RPO/RTO must be established for each supported workload.\n  86 \n  87 ## Verification\n  88 \n  89 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSQLiteApplicationRecoveryVerification -count=1 -v`"
+        }
+      ]
+    },
+    {
+      "id": "L-03",
+      "title": "Archive browsing searches a bounded fetched subset",
+      "routes": [
+        "/backups/[job]"
+      ],
+      "text": "The archive browser requests at most 5,000 entries and renders at most 1,000 matching rows. Its browser text filter cannot find entries never fetched. The restore artifact may contain more than the preview.",
+      "action": "Do not infer missing backup contents from a search over the fetched subset; disclose the inspected entry count and expand or page larger inventories.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/backups/job-detail.tsx",
+          "line": 605,
+          "note": "Bounded archive fetch",
+          "excerpt": " 603   const entries = usePoll(\n 604     (signal) =>\n 605       get<BackupArchiveEntry[]>(`/backups/runs/${run.id}/contents`, { limit: 5000 }, signal),\n 606     0,\n 607     [run.id],\n 608   )\n 609   const visible = useMemo(() => {\n 610     const needle = filter.trim().toLowerCase()\n 611     const all = entries.data ?? []\n 612     return needle ? all.filter((e) => e.name.toLowerCase().includes(needle)) : all"
+        }
+      ]
+    },
+    {
+      "id": "L-04",
+      "title": "Native log exports remain capped and windowed",
+      "routes": [
+        "/logs",
+        "/security/ssh",
+        "/processes/services"
+      ],
+      "text": "Native sources export up to 20,000 selected lines with a five-minute scan bound. An undated journal export defaults to the last 48 hours unless Current boot is selected. The merged repair now writes coverage warnings and PARTIAL metadata; this is a disclosed limit, not the earlier silent-truncation defect.",
+      "action": "Read the downloaded coverage metadata and choose explicit time windows for larger exports.",
+      "evidence": [
+        {
+          "path": "backend/internal/api/handlers_logs.go",
+          "line": 994,
+          "note": "Native export line ceiling",
+          "excerpt": " 992 // File-backed exports stream without a selected-line cap. Native sources use\n 993 // the bounded search reader and retain its coverage evidence in the artifact.\n 994 const nativeLogExportLimit = 20_000\n 995 \n 996 func (s *Server) handleLogDownload(w http.ResponseWriter, r *http.Request) error {\n 997 \tq := r.URL.Query()\n 998 \traw := q.Get(\"source\")\n 999 \tif raw == \"\" {\n1000 \t\traw = q.Get(\"path\")\n1001 \t}"
+        },
+        {
+          "path": "backend/internal/api/handlers_logs.go",
+          "line": 1147,
+          "note": "Incomplete/default-window coverage is disclosed",
+          "excerpt": "1145 \tcoverage := \"complete for the requested window available from this source\"\n1146 \tif partial {\n1147 \t\tcoverage = \"PARTIAL; see warnings above\"\n1148 \t}\n1149 \tfmt.Fprintf(&header, \"# Export coverage: %s\\n\\n\", coverage)\n1150 \t_, err := fmt.Fprint(w, header.String())\n1151 \treturn err\n1152 }\n1153 \n1154 // streamMeta is the frame the socket opens with. A viewer that starts with a"
+        }
+      ]
+    },
+    {
+      "id": "L-05",
+      "title": "Query exports rerun the statement rather than freezing the displayed result",
+      "routes": [
+        "/databases/[id]/query"
+      ],
+      "text": "Server-side result export reruns the SQL as a read to export beyond the grid\u2019s row limit. Volatile expressions and concurrently changing rows can differ from the earlier on-screen result. This is the implemented export model, not a preserved query snapshot.",
+      "action": "Make rerun semantics clear at Export; use a database snapshot or deterministic statement when an exact result is required.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/database/query/use-result-export.ts",
+          "line": 49,
+          "note": "Export reruns the statement",
+          "excerpt": "  47  * The rows on the page are the first few hundred; an export of *those* is a\n  48  * file that looks complete and is not. So the statement is handed back to\n  49  * the server, which runs it again as a read and streams every row \u2014 and the\n  50  * file is only saved once the server has said how the export ended: whole,\n  51  * cut at its row limit, or failed. The table editor's export reads its ending\n  52  * the same way; the words and the arithmetic are its.\n  53  */\n  54 export function useResultExport(id: number) {\n  55   const [running, setRunning] = useState(false)\n  56   const [progress, setProgress] = useState<OperationReading & { startedAt: number }>()"
+        }
+      ]
+    },
+    {
+      "id": "L-06",
+      "title": "Drivers and flavors do not offer identical tools or provisioning",
+      "routes": [
+        "/databases",
+        "/databases/new",
+        "/databases/[id]/schema",
+        "/databases/[id]/backups",
+        "/databases/[id]/generate",
+        "/deploy/new"
+      ],
+      "text": "Eight connection drivers and their product flavors share a capability catalogue. Not every driver can be provisioned, dumped/restored, diagrammed, maintained or generated from every page. Engine-specific sections must be read through the server catalogue and connection summary; an unavailable section is intentionally blocked.",
+      "action": "Check the engine\u2019s returned capabilities and provision options; test every claimed engine separately before calling an engine-dependent operation stable.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/database/shell/section-page.tsx",
+          "line": 31,
+          "note": "Unsupported pages are deliberately blocked",
+          "excerpt": "  29 } & Partial<Record<EngineKind, Area>>) {\n  30   const { engine, href } = useDatabase()\n  31   const Component = engine.has(section) ? (byKind[engine.kind] ?? any) : undefined\n  32   if (Component) return <Component />\n  33 \n  34   const { thing, reason } = engine.missing(section)\n  35   const data = engine.section(\"data\")\n  36   return (\n  37     <SectionFrame section={section}>\n  38       <BlockedState"
+        },
+        {
+          "path": "backend/internal/api/testdata/database-drivers.json",
+          "line": 421,
+          "note": "Checked-in server capability catalogue",
+          "excerpt": " 419           \"views\": true\n 420         },\n 421         \"id\": \"postgres\",\n 422         \"label\": \"PostgreSQL\"\n 423       },\n 424       {\n 425         \"capabilities\": {\n 426           \"aclRules\": false,\n 427           \"aggregation\": false,\n 428           \"aofRewrite\": false,"
+        }
+      ]
+    },
+    {
+      "id": "L-07",
+      "title": "Cron forecasts are not an exact promise of native daemon execution",
+      "routes": [
+        "/processes/scheduled"
+      ],
+      "text": "The repaired UI retains nonzero hourly minutes, rejects malformed grammar and uses measured host/CRON_TZ information. Native daemon support for CRON_TZ, DST and POSIX timezone strings differs; unavailable forecasts and browser date rendering still need their disclosed fallback.",
+      "action": "Treat next-run previews as estimates where native timezone behavior cannot be verified; use the raw crontab and daemon logs for confirmation.",
+      "evidence": [
+        {
+          "path": "docs/internal/backend/processes-terminal-github.md",
+          "line": 163,
+          "note": "Native and dashboard scheduler timezone limitations",
+          "excerpt": " 161   written back through the same wholesale `PUT`, so the row controls and the text editor are two\n 162   views of one file. Schedules are described and their next runs computed in `lib/cron.ts`, using\n 163   the host zone or each preceding `CRON_TZ` assignment. Dates and axes use the browser zone; unavailable\n 164   host metadata is explicitly an estimate, and unsupported named zones have no forecast. There is no \"run now\" for a cron line: a crontab command is a\n 165   shell string, and running it would mean a request-built `sh -c`, which invariant 4 forbids. Writes use\n 166   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.\n 167   What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's\n 168   unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines\n 169   (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a job's sheet\n 170   reads the same log narrowed to its command (`command:` is a field of the cron lens). A timer's"
+        }
+      ]
+    },
+    {
+      "id": "L-08",
+      "title": "Account privilege and SSH acceptance cannot be inferred from one lock/group reading",
+      "routes": [
+        "/system-users"
+      ],
+      "text": "Password lock now means password authentication is locked, rather than all SSH is disabled. Authorized keys, PAM/sshd policy and direct sudoers/other privilege routes can change actual access. UID 0 and known group routes are counted, but direct sudoers rules are not exhaustively parsed.",
+      "action": "Use the page as an inventory of known routes; verify native SSH/PAM/sudo policy for actual login and privilege acceptance.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/system-users/access.ts",
+          "line": 57,
+          "note": "Privilege calculation enumerates known UID/group routes",
+          "excerpt": "  55  * host's root filesystem into a container, which is root by another name.\n  56  */\n  57 export function rootRoutes(user: Pick<SystemUser, \"groups\" | \"uid\">): RootRoute[] {\n  58   const routes: RootRoute[] = []\n  59   if (user.uid === 0) routes.push({ label: \"uid 0\", kind: \"root\" })\n  60   for (const group of user.groups) {\n  61     if (group === \"sudo\" || group === \"wheel\" || group === \"admin\") {\n  62       routes.push({ label: group, kind: \"sudo\" })\n  63     }\n  64   }"
+        },
+        {
+          "path": "docs/internal/backend/git-backups-users.md",
+          "line": 308,
+          "note": "Host access semantics are broader than password state",
+          "excerpt": " 306 `backups-ui.spec.ts` exercise these behaviors.\n 307 \n 308 Host `locked` describes a **password lock**, and the dashboard action is labelled Lock password.\n 309 It does not remove authorized keys or claim complete SSH/account disablement. A login shell plus\n 310 an unlocked password or authorized key is a known sign-in route; sshd/PAM and account policy still\n 311 decide actual acceptance. Administrator counts include UID 0 and sudo/wheel/admin/docker group routes.\n 312 Direct sudoers rules are not inspected, so this is an inventory of known routes, not complete effective\n 313 privilege analysis. `access.test.js` and `system-ui.spec.ts` cover key-only accounts and UID 0."
+        }
+      ]
+    },
+    {
+      "id": "L-09",
+      "title": "Remote desktop readiness is not proof of a usable desktop or full browser support",
+      "routes": [
+        "/remote-desktop",
+        "/remote-desktop/new",
+        "/remote-desktop/[id]"
+      ],
+      "text": "A TCP port response does not validate credentials. RDP/VNC require host setup; Stream requires Sunshine pairing, a supported application and real media playback. Canvas/WebCodecs-only or inaccessible iframe playback remains Ready unless observed. File-drive transfer is RDP-specific; keyboard lock depends on browser support.",
+      "action": "Complete a real control/stream session on each supported OS/browser; verify clipboard, audio, drive transfer, fullscreen and stalled-media states.",
+      "evidence": [
+        {
+          "path": "docs/internal/backend/remote-desktop.md",
+          "line": 157,
+          "note": "Playback visibility limitation",
+          "excerpt": " 155 Playing video makes the header and held-session dock live; pause, waiting, stall, error, end and a\n 156 new player document clear that evidence. A final `timeupdate` after a stall does not count as playback\n 157 resuming. A canvas-only WebCodecs renderer supplies no HTML video playback evidence and remains at the\n 158 readiness verdict. A paired Sunshine with no offered application displays its setup instruction and\n 159 does not claim a live session. Initial computer-inventory and stream-read failures display their\n 160 reason, with retry when the response permits it, instead of an indefinite skeleton or connecting\n 161 screen.\n 162 \n 163 **Session tools fit narrow screens.** Below 1280 px the visible tools button opens a `SidePanel`\n 164 containing the same mode switch, clipboard, file transfer, quality, pointer and pairing controls as"
+        },
+        {
+          "path": "frontend/src/components/remote-desktop/stream.tsx",
+          "line": 37,
+          "note": "Stream status depends on observed media",
+          "excerpt": "  35   const [pinOut, setPinOut] = useState(false)\n  36   // Keep the last usable bridge connection through a transient Sunshine probe miss.\n  37   // Readiness permits mounting the player; playback is observed separately.\n  38   const [readyStream, setReadyStream] = useState<RdStream>()\n  39   const poll = usePoll(\n  40     async (signal) => {\n  41       const stream = await get<RdStream>(\n  42         `/remote-desktop/computers/${id}/stream`,\n  43         undefined,\n  44         signal,"
+        }
+      ]
+    },
+    {
+      "id": "L-10",
+      "title": "Native configuration syntax outside supported forms is intentionally read-only",
+      "routes": [
+        "/proxy/sites",
+        "/proxy/streams",
+        "/security/ssh"
+      ],
+      "text": "Arbitrary unmanaged nginx constructs cannot all be round-tripped by the site/stream forms. Conditional SSH Match blocks and CLI-owned inline Suricata interfaces are deliberately restricted. Raw file inspection and guarded supported actions remain available where documented.",
+      "action": "Preserve unsupported constructs; use the native owner\u2019s supported editing path rather than expecting every directive to appear as a form control.",
+      "evidence": [
+        {
+          "path": "frontend/src/components/proxy/streams-panel.tsx",
+          "line": 1377,
+          "note": "Unsupported stream syntax is read-only",
+          "excerpt": "1375                 {stream.error\n1376                   ? `The file could not be read: ${stream.error}.`\n1377                   : `This file uses ${stream.unsupported.join(\", \")}, which this form cannot keep, so it is shown read-only.`}\n1378                 {stream.link && !stream.error && ` It links to ${stream.link}.`}\n1379               </p>\n1380               {!stream.error && (\n1381                 <Button size=\"sm\" variant=\"outline\" onClick={() => onRaw(stream)}>\n1382                   <Code className=\"size-4\" />\n1383                   Edit the file\n1384                 </Button>"
+        },
+        {
+          "path": "docs/internal/backend/observability-security.md",
+          "line": 150,
+          "note": "Conditional SSH policy has deliberate limits",
+          "excerpt": " 148 `PasswordAuthentication` twice does not behave the way it reads. Two sshd semantics are load-bearing and\n 149 get read backwards by anyone treating the file as an ini: the **first** value wins, and everything after\n 150 a `Match` is conditional. So the parser never overwrites an earlier value, a `Match` ends the file for\n 151 it, and its existence is reported rather than dropped.\n 152 \n 153 `sshd_apply.go` writes in the proxy editor's order: refuse certain lockouts \u2192 write \u2192 `sshd -t` \u2192\n 154 restore on failure \u2192 reload only then.\n 155 \n 156 - The write target is a drop-in under `sshd_config.d` **only if the main file includes that directory\n 157   before setting anything itself**. First-value-wins means a drop-in included at the bottom is a file we"
+        }
+      ]
+    },
+    {
+      "id": "L-11",
+      "title": "Required-factor recovery needs host access and account-scoped state",
+      "routes": [
+        "/login",
+        "/account/security",
+        "/account/users"
+      ],
+      "text": "Forgot-password guidance uses the host reset command; there is no email reset. Recovery codes are one-time display/consumption data. Hiding an enrollment panel does not erase the pending server seed. Tokens do not replace a browser session for personal factor management.",
+      "action": "Keep host access and safely retain recovery codes; judge enrollment/reset wording separately from backend enforcement.",
+      "evidence": [
+        {
+          "path": "docs/internal/frontend/shell-design.md",
+          "line": 168,
+          "note": "Sign-in recovery is host-owned",
+          "excerpt": " 166 the server's answer (`needsTotp`, `needsEnrollment`, `user.totpEnabled`, `user.mustChangePassword`), and\n 167 is not drawn before that answer: it used to promise *Verify* to every account. *Forgot it?* shows\n 168 `scripts/reset-password.sh` with the typed name filled in, since recovery happens on the host. A forced\n 169 password change does not ask again for the current password the page already holds, reads the server's\n 170 rule as the reader types (`lib/password.ts`), and signs straight back in with the new password once the\n 171 change has ended the session.\n 172 \n 173 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls\n 174 `useNavScope(...)` and the rail draws what it publishes: one database's layout\n 175 (`app/(dashboard)/databases/[id]/layout.tsx`, through `database/shell/nav-scope.tsx`), because the"
+        },
+        {
+          "path": "frontend/src/components/account/security-panels.tsx",
+          "line": 210,
+          "note": "Browser cancel/reset hides local enrollment state",
+          "excerpt": " 208       const res = await post<{ recoveryCodes: string[] }>(\"/auth/2fa/enable\", { code })\n 209       setCodes(res.recoveryCodes)\n 210       setEnrollment(null)\n 211       setCode(\"\")\n 212       await refresh().catch(() => undefined)\n 213       notify.success(\"Two-factor enabled\", {\n 214         description: \"You will be asked for a code the next time you sign in.\",\n 215       })\n 216     } catch (err) {\n 217       notify.error(\"Code rejected\", err)"
+        }
+      ]
+    },
+    {
+      "id": "L-12",
+      "title": "Stable labels exceed the evidence available for native integrations",
+      "routes": [
+        "/deploy/new",
+        "/packages",
+        "/dashboard/configuration",
+        "/remote-desktop/[id]",
+        "/databases/[id]/backups"
+      ],
+      "text": "This audit built and tested the current code, but did not perform real package upgrades, native database restores, production deployment/certificate changes, host-account/SSH changes, dashboard reinstall/uninstall or real remote streams. Browser fixtures verify UI behavior and requests, not these operations\u2019 success on the operator\u2019s server.",
+      "action": "Before using a blanket stable claim, maintain a disposable native acceptance matrix for these integrations and their supported failure/recovery paths.",
+      "evidence": [
+        {
+          "path": "docs/audits/2026-10-14-non-network-fixes/README.md",
+          "line": 56,
+          "note": "Prior repair verification also distinguishes native coverage limits",
+          "excerpt": "  54 \n  55 Host mutations in the regressions use temporary directories, mocked host commands and isolated API\n  56 fixtures. Live SSH/account changes, package upgrades, real native database restore and real remote\n  57 streams were not exercised against the operator's server. No production stack restart or deployment\n  58 is part of this PR. No CI, dependency, release version or `/network` page change is introduced.\n  59 \n  60 ## Verification\n  61 \n  62 A fresh `bun run build` passed after integrating target `90d30d67`. Required changed-file\n  63 verification covered the complete repair scope:"
+        }
+      ]
+    }
+  ]
+}
