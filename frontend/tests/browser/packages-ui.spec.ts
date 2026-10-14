@@ -348,10 +348,131 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await expect(btop).toContainText("Installed")
 
   await htop.getByRole("button", { name: "Install" }).click()
-  await expect(htop).toContainText("Started")
+  await expect(htop).toContainText("Installing…")
   // The job's output opens at the top of the page.
   await expect(page.getByText("Install htop")).toBeVisible()
 })
+
+for (const outcome of ["failed", "cancelled"] as const) {
+  test(`an install that is ${outcome} offers retry from its result row`, async ({ page }) => {
+    await mockHost(page)
+    let status: "running" | "failed" | "cancelled" = "running"
+    let attempts = 0
+    const job = (id: string) => ({
+      id,
+      kind: "packages.install",
+      title: "Install htop",
+      target: "htop",
+      status,
+      exitCode: status === "failed" ? 1 : 0,
+      startedAt: new Date().toISOString(),
+      lines: 0,
+    })
+    await page.route("**/api/v1/packages/install", (route) => {
+      attempts++
+      status = "running"
+      return route.fulfill({ json: job(`job-${attempts}`) })
+    })
+    await page.route(/\/api\/v1\/jobs\/job-\d+$/, (route) =>
+      route.fulfill({
+        json: { job: job(new URL(route.request().url()).pathname.split("/").at(-1)!), lines: [] },
+      }),
+    )
+    // No stream completion: result rows also read their own jobs, including
+    // an earlier install after the output console has switched to another.
+    await page.routeWebSocket("**/api/v1/jobs/*/stream**", () => {})
+    await page.goto("/packages")
+    await page
+      .getByRole("navigation", { name: "Package views" })
+      .getByRole("button", { name: "Add software" })
+      .click()
+    await page.getByPlaceholder(/What do you need/).fill("htop")
+    const htop = page.getByRole("listitem").filter({ hasText: "htop" }).first()
+    await htop.getByRole("button", { name: "Install", exact: true }).click()
+    await expect(htop).toContainText("Installing…")
+    status = outcome
+    await expect(htop.getByRole("button", { name: "Retry install" })).toBeVisible()
+    await expect(htop).toContainText(outcome === "failed" ? "Failed" : "Cancelled")
+    await htop.getByRole("button", { name: "Retry install" }).click()
+    await expect(htop).toContainText("Installing…")
+    await expect(htop.getByRole("button", { name: "Retry install" })).toHaveCount(0)
+    expect(attempts).toBe(2)
+  })
+}
+
+test("a successful install refreshes the search result's installed metadata", async ({ page }) => {
+  await mockHost(page)
+  let installed = false
+  let searchReads = 0
+  const job = {
+    id: "job-1",
+    kind: "packages.install",
+    title: "Install htop",
+    target: "htop",
+    status: "running",
+    exitCode: 0,
+    startedAt: new Date().toISOString(),
+    lines: 0,
+  }
+  await page.route("**/api/v1/packages/search**", (route) => {
+    searchReads++
+    return route.fulfill({
+      json: [{ name: "htop", version: "3.3.0", summary: "Process viewer", installed }],
+    })
+  })
+  await page.route("**/api/v1/packages/install", (route) => route.fulfill({ json: job }))
+  await page.route("**/api/v1/jobs/job-1", (route) =>
+    route.fulfill({
+      json: {
+        job: { ...job, status: installed ? "succeeded" : "running" },
+        lines: [],
+      },
+    }),
+  )
+  await page.routeWebSocket("**/api/v1/jobs/*/stream**", () => {})
+  await page.goto("/packages")
+  await page
+    .getByRole("navigation", { name: "Package views" })
+    .getByRole("button", { name: "Add software" })
+    .click()
+  await page.getByPlaceholder(/What do you need/).fill("htop")
+  const htop = page.getByRole("listitem").filter({ hasText: "htop" }).first()
+  await htop.getByRole("button", { name: "Install", exact: true }).click()
+  await expect(htop).toContainText("Installing…")
+  installed = true
+  await expect(htop).toContainText("Installed")
+  await expect(htop.getByRole("button", { name: "Install", exact: true })).toHaveCount(0)
+  expect(searchReads).toBeGreaterThan(1)
+})
+
+for (const [manager, text] of [
+  ["apt", "holds back updates that require new packages or removals"],
+  ["dnf", "may install new dependencies and replace obsolete packages"],
+  ["yum", "may install new dependencies and replace obsolete packages"],
+  ["zypper", "may add or replace packages"],
+  ["pacman", "upgrades the full system"],
+  ["apk", "fresh repository index"],
+]) {
+  test(`the ${manager} upgrade confirmation states that manager's transaction scope`, async ({
+    page,
+  }) => {
+    await mockHost(page)
+    await page.route("**/api/v1/packages/", (route) =>
+      route.fulfill({ json: { ...inventory, manager } }),
+    )
+    await page.goto("/packages")
+    await page
+      .getByRole("button", { name: /^Upgrade all/ })
+      .first()
+      .click()
+    const dialog = page.getByRole("dialog", { name: "Upgrade all packages", exact: true })
+    await expect(dialog).toContainText(text)
+    await expect(dialog).not.toContainText(
+      "New packages are never installed and nothing is removed",
+    )
+    await expect(dialog).toContainText("Affected services may restart")
+  })
+}
 
 test("the Log view reads the package manager's own log in place", async ({ page }) => {
   await mockHost(page)
