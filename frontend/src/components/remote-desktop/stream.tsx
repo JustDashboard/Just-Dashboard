@@ -634,7 +634,7 @@ function StreamFrame({
             ["pause", "ended", "waiting", "stalled", "error", "emptied"].includes(event.type)
           )
             interrupted = true
-          else if (event && ["playing", "timeupdate"].includes(event.type)) interrupted = false
+          else if (event?.type === "playing") interrupted = false
           onPlayback(
             !interrupted &&
               [...doc.querySelectorAll("video")].some(

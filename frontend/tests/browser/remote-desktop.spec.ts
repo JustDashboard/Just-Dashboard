@@ -591,6 +591,8 @@ test("streaming status requires playback and returns to ready when video stalls"
   await expect(page.getByText("streaming", { exact: true })).toBeVisible()
   await frame.locator("video").evaluate((video) => video.dispatchEvent(new Event("waiting")))
   await expect(page.getByText("ready to stream", { exact: true })).toBeVisible()
+  await frame.locator("video").evaluate((video) => video.dispatchEvent(new Event("timeupdate")))
+  await expect(page.getByText("ready to stream", { exact: true })).toBeVisible()
   await frame.locator("video").evaluate((video) => video.dispatchEvent(new Event("playing")))
   await expect(page.getByText("streaming", { exact: true })).toBeVisible()
   // A new inaccessible document supplies no playback proof from the former player.
