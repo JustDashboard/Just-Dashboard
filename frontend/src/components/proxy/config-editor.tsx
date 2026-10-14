@@ -171,6 +171,17 @@ function ConfigEditorBody({
     setAttempt((n) => n + 1)
   }
 
+  const showConflict = async () => {
+    setReview(null)
+    setShown(null)
+    setStale("unread")
+    try {
+      setStale(await get<ConfigRead>("/proxy/config", { path }))
+    } catch (readError) {
+      setStale(readError instanceof ApiError && readError.status === 404 ? "gone" : "unread")
+    }
+  }
+
   const validate = async () => {
     setBusy("test")
     try {
@@ -179,7 +190,8 @@ function ConfigEditorBody({
         validation: await post<ProxyValidation>("/proxy/validate", { kind, path, content }),
       })
     } catch (err) {
-      notify.error("The config test did not run", err)
+      if (err instanceof ApiError && err.code === "config_conflict") await showConflict()
+      else notify.error("The config test did not run", err)
     } finally {
       setBusy(undefined)
     }
@@ -220,13 +232,7 @@ function ConfigEditorBody({
     } catch (err) {
       const refusal = refusalOf(err)
       if (err instanceof ApiError && err.code === "config_conflict") {
-        setReview(null)
-        setStale("unread")
-        try {
-          setStale(await get<ConfigRead>("/proxy/config", { path }))
-        } catch (readError) {
-          setStale(readError instanceof ApiError && readError.status === 404 ? "gone" : "unread")
-        }
+        await showConflict()
       } else if (refusal) {
         // Nothing was written. The refusal is drawn under the editor with
         // each of nginx's lines, which a toast would cut short.
