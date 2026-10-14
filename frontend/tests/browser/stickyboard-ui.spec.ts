@@ -340,6 +340,13 @@ test("the format bar colours the selection, and a stale tab stops saving and say
   await page.keyboard.press("Digit2")
   await page.waitForTimeout(1200)
   expect(board.puts).toHaveLength(attempts)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
 })
 
 test("a reader sees the board and cannot change it", async ({ page }) => {

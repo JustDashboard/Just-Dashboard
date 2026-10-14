@@ -174,7 +174,7 @@ export function useBoardDocument(board: StickyBoard, canWrite: boolean) {
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (stoppedRef.current || (!isDirty() && !savingRef.current)) return
+      if (!isDirty() && !savingRef.current) return
       event.preventDefault()
     }
     window.addEventListener("beforeunload", warn)

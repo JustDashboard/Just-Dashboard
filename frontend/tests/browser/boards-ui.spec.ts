@@ -261,6 +261,13 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(status).toContainText("Saved on this server")
   await expect(failure).toBeHidden()
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(false)
 
   board.refuse = { status: 404, code: "board_not_found", message: "board not found" }
   await name.fill("Rack layout 2")
@@ -269,6 +276,13 @@ test("a failed save lets the operator leave on purpose, and a board deleted else
   await name.fill("Rack layout 3")
   await page.waitForTimeout(1500)
   expect(board.puts).toHaveLength(attempts)
+  expect(
+    await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }),
+  ).toBe(true)
 
   await page.getByRole("button", { name: "Back to Excalidraw" }).click()
   await page.getByRole("dialog").getByRole("button", { name: "Leave without saving" }).click()

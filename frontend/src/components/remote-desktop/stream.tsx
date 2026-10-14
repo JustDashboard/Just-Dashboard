@@ -623,6 +623,7 @@ function StreamFrame({
       // it is a screen, so the margins round the picture go black.
       onLoad={(event) => {
         stopObserving.current()
+        onPlayback(false)
         const doc = event.currentTarget.contentDocument
         if (!doc?.head) return
         let interrupted = false
