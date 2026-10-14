@@ -243,6 +243,136 @@ test("closing the detail edit discards its draft and reopening uses the saved de
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(jobs[0].name)
 })
 
+test("two editors keep the stale draft and keys until an explicit review resolves the conflict", async ({
+  page,
+  context,
+}) => {
+  const other = await context.newPage()
+  await mockWorkbench(other)
+  let current = { ...jobs[1] }
+  const saves: Record<string, unknown>[] = []
+  for (const tab of [page, other]) {
+    await tab.route("**/api/v1/backups/2", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as Record<string, unknown>
+        saves.push(body)
+        if (body.expectedRevision !== current.revision) {
+          return route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: { code: "backup_job_conflict", message: "This job changed in another tab" },
+            }),
+          })
+        }
+        current = {
+          ...current,
+          name: String(body.name),
+          retention: Number(body.retention),
+          revision: current.revision + 1,
+        }
+      }
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(current) })
+    })
+    await tab.goto("/backups/2")
+    await tab.getByRole("button", { name: "Edit", exact: true }).click()
+  }
+  const first = page.getByRole("dialog")
+  const stale = other.getByRole("dialog")
+  await first.getByRole("spinbutton", { name: "Keep the last", exact: true }).fill("10")
+  await stale.getByRole("textbox", { name: "Name", exact: true }).fill("Second editor draft")
+  await stale.getByRole("textbox", { name: "Access key ID", exact: true }).fill("fixture-new-key")
+  await stale.getByLabel("Secret access key", { exact: true }).fill("fixture-new-secret")
+  await first.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(first).toHaveCount(0)
+  await stale.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(stale.getByText("This job changed while you were editing")).toBeVisible()
+  await expect(stale.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+  await expect(stale.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+    "Second editor draft",
+  )
+  await expect(stale.getByLabel("Secret access key", { exact: true })).toHaveValue(
+    "fixture-new-secret",
+  )
+  expect(saves.map((body) => body.expectedRevision)).toEqual([1, 1])
+  expect(current.retention).toBe(10)
+  const storage = await other.evaluate(() =>
+    JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+  )
+  expect(storage).not.toContain("fixture-new-key")
+  expect(storage).not.toContain("fixture-new-secret")
+  await stale.getByRole("button", { name: "Review current job", exact: true }).click()
+  const differences = stale.getByRole("table")
+  await expect(differences.getByRole("row", { name: "Archives to keep 10 14" })).toBeVisible()
+  // A second save after the review is still protected by the reviewed revision.
+  current = { ...current, revision: current.revision + 1 }
+  await stale.getByRole("button", { name: "Save draft over reviewed job" }).click()
+  await expect(stale.getByRole("button", { name: "Save draft over reviewed job" })).toHaveCount(0)
+  expect(saves.at(-1)?.expectedRevision).toBe(2)
+  await expect(stale.getByLabel("Secret access key", { exact: true })).toHaveValue(
+    "fixture-new-secret",
+  )
+  await stale.getByRole("button", { name: "Review current job", exact: true }).click()
+  // The operator keeps the other editor's retention after reviewing it.
+  await stale.getByRole("spinbutton", { name: "Keep the last", exact: true }).fill("10")
+  await stale.getByRole("button", { name: "Save draft over reviewed job" }).click()
+  await expect(stale).toHaveCount(0)
+  expect(saves.at(-1)).toMatchObject({
+    expectedRevision: 3,
+    name: "Second editor draft",
+    retention: 10,
+    secrets: { accessKeyId: "fixture-new-key", secretAccessKey: "fixture-new-secret" },
+  })
+  await other.getByRole("button", { name: "Edit", exact: true }).click()
+  await expect(stale.getByLabel("Secret access key", { exact: true })).toHaveValue("")
+  await other.close()
+})
+
+test("a held backup draft keeps its original revision after dashboard navigation", async ({
+  page,
+}) => {
+  let current = { ...jobs[1] }
+  const saves: Record<string, unknown>[] = []
+  await page.route("**/api/v1/backups/2", async (route) => {
+    if (route.request().method() === "PUT") {
+      saves.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "backup_job_conflict", message: "This job changed" },
+        }),
+      })
+    }
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(current) })
+  })
+  await page.goto("/backups/2")
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Held draft")
+  await dialog.getByLabel("Secret access key", { exact: true }).fill("fixture-held-secret")
+  // Invoke the actual SPA link while an editor is open, as a page-owned
+  // navigation command can do; a reload would discard RAM by design.
+  await page
+    .locator('a[href="/files"]')
+    .first()
+    .evaluate((link) => (link as HTMLElement).click())
+  await expect(page).toHaveURL(/\/files$/)
+  current = { ...current, revision: 2, retention: 10 }
+  await page.locator('a[href="/backups"]').first().click()
+  await page.getByRole("link", { name: "Databases nightly", exact: true }).click()
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Held draft")
+  await dialog.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(dialog.getByText("This job changed while you were editing")).toBeVisible()
+  expect(saves[0].expectedRevision).toBe(1)
+  await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await expect(dialog.getByLabel("Secret access key", { exact: true })).toHaveValue("")
+  await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(current.name)
+})
+
 test("failed run history shows its read error and retries without claiming there are no runs", async ({
   page,
 }) => {

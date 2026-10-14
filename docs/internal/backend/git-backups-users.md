@@ -176,10 +176,9 @@ days (`retention_days`, additive), and the containers to pause for the archive s
 additive; names are trimmed and refused when option-shaped). `POST /backups/{id}/enabled` pauses or
 resumes the schedule alone — audited as `backup.job.pause`/`backup.job.resume`, and never re-sending the
 definition or touching sealed keys. The list and single-job reads carry the figures the page draws:
-`stored` (retained successful artifacts and their bytes), `lastSuccessAt`, and `overdue`, which
-`Job.IsOverdue` sets when an enabled, scheduled job has gone two schedule intervals
-(`ScheduleInterval`) without a successful run — one missed firing is a transient, two is a job nobody
-would notice had stopped. Displayable target configuration is separate from access keys; credentials are sealed by
+`stored` (retained successful artifacts and their bytes) and `lastSuccessAt`. The automatic overdue
+detector and its response field were removed in 0.7.5. Displayable target configuration is separate
+from access keys; credentials are sealed by
 `auth.Sealer` and never returned by the API. The target-test route checks local writability or object-store
 bucket access before the operator depends on a schedule.
 
@@ -295,6 +294,33 @@ attention list and overdue recommendation detector are removed, including the `o
 The scheduler, retained run history, retention and restore safeguards are unchanged.
 
 ## Backup form inputs and host account access
+
+Backup jobs expose a `revision`, migrated additively with default 1 on existing jobs.
+`PUT /backups/{id}` accepts `expectedRevision`: a positive value must match the stored revision,
+otherwise it returns `409 backup_job_conflict` without changing the definition or credentials.
+Validation and sealing happen before one SQL statement publishes both halves and advances the
+revision. Omitting `secrets` keeps the sealed keys. Legacy callers omitting `expectedRevision` (or
+sending zero) retain their unconditional-save contract, and their saves still advance the revision.
+Dashboard editors always send the revision captured with their held draft; polling and navigation
+never silently adopt a newer one. A conflict keeps fields and entered keys in memory and offers
+**Review current job**, a comparison of saved settings and draft, and an explicit
+**Save draft over reviewed job** or **Discard draft and close**. A second edit after review conflicts
+again. New keys and expected recovery output are called out before an explicit replacement. Successful
+save, explicit close/discard and working-state clearing remove the held draft and keys; nothing is
+persisted in browser storage. Pausing/resuming changes only `enabled` and advances the revision, so
+an older full-definition save cannot silently undo the pause.
+
+`POST /backups/{id}/database-dumps` accepts only `connectionId` and requires `system.admin`.
+It refuses malformed stored dump-list JSON, validates saved connections, idempotently adds the
+requested dump, and publishes only that list with a revision precondition. A concurrent publication
+retries against the latest list up to five attempts, then returns the same conflict; other definition
+fields and sealed keys are untouched.
+It audits as `backup.job.database_dump.add` and reloads the schedule like other job edits.
+The deployment Databases settings helper uses this route instead of a stale full-job save.
+`store_update_test.go`, `recovery_migration_test.go`, `backup_job_updates_test.go`,
+`backups-ui.spec.ts` and `deploy-settings-b.spec.ts` cover fault-injected publication, canceled saves,
+competing editors, pause conflicts, simultaneous dump additions, legacy migration, authorization,
+auditing, retained drafts, reviewed revisions and secret cleanup.
 
 A backup job requires at least one filesystem source **or** one native database dump. Native-only
 jobs use the existing manifest, retention, coverage, extraction and database-restore paths without

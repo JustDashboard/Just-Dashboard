@@ -47,6 +47,7 @@ type TargetSecrets struct {
 
 type Job struct {
 	ID         int64        `json:"id"`
+	Revision   int64        `json:"revision"`
 	Name       string       `json:"name"`
 	Sources    []string     `json:"sources"`
 	Excludes   []string     `json:"excludes"`

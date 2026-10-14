@@ -22,7 +22,7 @@ func TestRecoveryMigrationPreservesExistingJobsAndDoesNotInventEvidence(t *testi
  id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES backup_jobs(id), started_at INTEGER NOT NULL,
  ended_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, artifact TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0,
  log TEXT NOT NULL DEFAULT '', trigger TEXT NOT NULL DEFAULT 'manual');
- INSERT INTO backup_jobs(id,name,sources,target_kind,target_cfg,schedule,created_at) VALUES(42,'existing-job','["/srv/important"]','local','{"path":"/var/backups"}','0 3 * * *',100);
+ INSERT INTO backup_jobs(id,name,sources,target_kind,target_cfg,secrets_enc,schedule,created_at) VALUES(42,'existing-job','["/srv/important"]','local','{"path":"/var/backups"}','fixture-sealed-marker','0 3 * * *',100);
  INSERT INTO backup_runs(id,job_id,started_at,ended_at,status,artifact) VALUES(43,42,101,102,'success','/var/backups/existing.tar.gz');`)
 	db.Close()
 	if err != nil {
@@ -35,11 +35,33 @@ func TestRecoveryMigrationPreservesExistingJobsAndDoesNotInventEvidence(t *testi
 	defer upgraded.Close()
 	s := NewStore(upgraded, nil)
 	job, err := s.Get(t.Context(), 42)
-	if err != nil || job.Name != "existing-job" || job.Schedule != "0 3 * * *" || job.Sources[0] != "/srv/important" || job.Recovery != nil || len(job.SQLitePaths) != 0 {
+	if err != nil || job.Name != "existing-job" || job.Schedule != "0 3 * * *" || job.Sources[0] != "/srv/important" || job.Recovery != nil || len(job.SQLitePaths) != 0 || job.Revision != 1 {
 		t.Fatalf("existing job changed: %+v %v", job, err)
+	}
+	if !job.Enabled || !job.HasCredentials || job.Retention != 7 || job.RetentionDays != 0 || len(job.DatabaseDumps) != 0 || len(job.PauseContainers) != 0 || job.Target.Path != "/var/backups" {
+		t.Fatalf("migration changed existing fields or additive defaults: %+v", job)
+	}
+	var sealed string
+	if err := upgraded.DB.QueryRow(`SELECT secrets_enc FROM backup_jobs WHERE id = 42`).Scan(&sealed); err != nil || sealed != "fixture-sealed-marker" {
+		t.Fatal("migration changed the stored credential bytes", err)
 	}
 	run, err := s.Run(t.Context(), 43)
 	if err != nil || run.Status != StatusSuccess || run.Artifact != "/var/backups/existing.tar.gz" || run.Manifest != nil || run.RestoreVerification != nil {
 		t.Fatalf("invented legacy recovery evidence: %+v %v", run, err)
+	}
+	if job, err = s.SetEnabled(t.Context(), 42, false); err != nil || job.Revision != 2 {
+		t.Fatalf("migrated revision did not advance: %+v %v", job, err)
+	}
+	if err := upgraded.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := basestore.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	job, err = NewStore(reopened, nil).Get(t.Context(), 42)
+	if err != nil || job.Revision != 2 || job.Enabled || job.Name != "existing-job" {
+		t.Fatalf("reopening reset migrated settings: %+v %v", job, err)
 	}
 }

@@ -51,9 +51,16 @@ configuration, isolation and limits.
 A project's Databases settings reads the same `databaseDumps` the gate reads and says before a
 deployment what the gate would otherwise say during one: a declared job that takes no native dump of a
 linked database is named there, with the fallback to that database's files spelled out and one press
-to add the dump. The press writes the whole job back without `secrets`, which is what preserves the
-destination's stored keys. This is a reading of the job, not a second gate: the refusal remains the
-activation step's.
+to add the dump. The press uses `POST /backups/{id}/database-dumps` with only `connectionId`.
+The Backups owner validates the connection and adds it to the latest list with a revision precondition
+and bounded retry, preserving concurrent retention, schedule, source, recovery and destination edits.
+Already-present connections are idempotent, and deleted/unavailable connections or a malformed stored
+dump-list JSON value are refused. The helper never sends destination credentials or a full job
+definition. Full dashboard job edits use `expectedRevision` and retain their draft on
+`409 backup_job_conflict`; schedule pauses also advance
+the job revision. See [backup editing](../backend/git-backups-users.md#backup-form-inputs-and-host-account-access)
+for the conflict review and legacy-client contract. This is a reading of the job, not a second gate:
+the refusal remains the activation step's.
 
 Tests cover omitted binds/named volumes, changed job definitions, colliding basenames, corrupt artifacts,
 filters and original destinations. The opt-in `TestLiveDeploymentComposeStorageUsesMergedMountsAndFrozenVariables`

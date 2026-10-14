@@ -15,6 +15,7 @@ import (
 )
 
 var ErrNotFound = errors.New("backup job not found")
+var ErrConflict = errors.New("this backup job changed since it was opened; review the current job before saving")
 
 type Store struct {
 	st     *store.Store
@@ -62,7 +63,7 @@ func (s *Store) ValidatePaths(j *Job) error {
 	return s.validateDatabaseDumps(context.Background(), j)
 }
 
-const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers`
+const jobCols = `id, name, sources, excludes, target_kind, target_cfg, secrets_enc, schedule, retention, enabled, created_at, recovery_json, sqlite_paths, database_dumps, retention_days, pause_containers, revision`
 
 func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	var (
@@ -75,7 +76,7 @@ func (s *Store) scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 		databaseDumps, pauseContainers string
 	)
 	if err := row.Scan(&j.ID, &j.Name, &sources, &excludes, &targetKind,
-		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps, &j.RetentionDays, &pauseContainers); err != nil {
+		&targetCfg, &secrets, &schedule, &j.Retention, &enabled, &created, &recovery, &sqlitePaths, &databaseDumps, &j.RetentionDays, &pauseContainers, &j.Revision); err != nil {
 		return nil, err
 	}
 	j.Sources = decodeStrings(sources)
@@ -177,7 +178,7 @@ func (s *Store) SetEnabled(ctx context.Context, id int64, enabled bool) (*Job, e
 	if enabled {
 		value = 1
 	}
-	res, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET enabled = ? WHERE id = ?`, value, id)
+	res, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET enabled = ?, revision = revision + 1 WHERE id = ?`, value, id)
 	if err != nil {
 		return nil, err
 	}
@@ -240,37 +241,90 @@ func (s *Store) Create(ctx context.Context, j *Job, secrets *TargetSecrets) (*Jo
 	return s.Get(ctx, id)
 }
 
-// Update rewrites a job. Credentials are only replaced when new ones are
-// supplied, so editing a schedule does not silently wipe stored keys.
+// Update publishes the definition and credentials in one statement. A positive
+// Revision is a precondition; zero preserves compatibility with older callers.
+// Credentials are replaced only when supplied, so a schedule edit keeps keys.
 func (s *Store) Update(ctx context.Context, id int64, j *Job, secrets *TargetSecrets) (*Job, error) {
 	if err := s.ValidatePaths(j); err != nil {
-		return nil, err
-	}
-	if _, err := s.Get(ctx, id); err != nil {
 		return nil, err
 	}
 	enabled := 0
 	if j.Enabled {
 		enabled = 1
 	}
-	if secrets != nil && (secrets.AccessKeyID != "" || secrets.SecretAccessKey != "") {
-		sealed, err := s.sealer.Seal(encodeJSON(secrets))
+	sealed := ""
+	replaceSecrets := secrets != nil && (secrets.AccessKeyID != "" || secrets.SecretAccessKey != "")
+	if replaceSecrets {
+		var err error
+		sealed, err = s.sealer.Seal(encodeJSON(secrets))
 		if err != nil {
 			return nil, err
 		}
-		if _, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET secrets_enc = ? WHERE id = ?`, sealed, id); err != nil {
-			return nil, err
-		}
 	}
-	_, err := s.st.DB.ExecContext(ctx,
+	result, err := s.st.DB.ExecContext(ctx,
 		`UPDATE backup_jobs SET name = ?, sources = ?, excludes = ?, target_kind = ?, target_cfg = ?,
-		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ? WHERE id = ?`,
+		 schedule = ?, retention = ?, enabled = ?, recovery_json = ?, sqlite_paths = ?, database_dumps = ?, retention_days = ?, pause_containers = ?,
+		 secrets_enc = CASE WHEN ? THEN ? ELSE secrets_enc END, revision = revision + 1
+		 WHERE id = ? AND (? = 0 OR revision = ?)`,
 		j.Name, encodeJSON(j.Sources), encodeJSON(j.Excludes), string(j.TargetKind),
-		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), id)
+		encodeJSON(j.Target), j.Schedule, j.Retention, enabled, encodeJSON(j.Recovery), encodeJSON(j.SQLitePaths), encodeJSON(j.DatabaseDumps), j.RetentionDays, encodeJSON(j.PauseContainers), replaceSecrets, sealed, id, j.Revision, j.Revision)
 	if err != nil {
 		return nil, err
 	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return nil, err
+	} else if affected == 0 {
+		if _, err := s.Get(ctx, id); err != nil {
+			return nil, err
+		}
+		return nil, ErrConflict
+	}
 	return s.Get(ctx, id)
+}
+
+// AddDatabaseDump changes only the dump list. Retry a concurrent publication
+// against its new revision instead of replaying stale retention or destination.
+func (s *Store) AddDatabaseDump(ctx context.Context, id, connectionID int64) (*Job, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		job, err := s.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		// General job reads tolerate historical malformed lists. A narrow add
+		// must not turn an unreadable stored list into a successful replacement.
+		var raw string
+		if err := s.st.DB.QueryRowContext(ctx, `SELECT database_dumps FROM backup_jobs WHERE id = ? AND revision = ?`, id, job.Revision).Scan(&raw); err == sql.ErrNoRows {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(raw), &job.DatabaseDumps); err != nil {
+			return nil, errors.New("the stored database dump list is malformed; repair the job before adding a dump")
+		}
+		found := false
+		for _, existing := range job.DatabaseDumps {
+			found = found || existing == connectionID
+		}
+		if !found {
+			job.DatabaseDumps = append(job.DatabaseDumps, connectionID)
+		}
+		if err := s.validateDatabaseDumps(ctx, job); err != nil {
+			return nil, err
+		}
+		if found {
+			return job, nil
+		}
+		result, err := s.st.DB.ExecContext(ctx, `UPDATE backup_jobs SET database_dumps = ?, revision = revision + 1 WHERE id = ? AND revision = ?`, encodeJSON(job.DatabaseDumps), id, job.Revision)
+		if err != nil {
+			return nil, err
+		}
+		if affected, err := result.RowsAffected(); err != nil {
+			return nil, err
+		} else if affected != 0 {
+			return s.Get(ctx, id)
+		}
+	}
+	return nil, ErrConflict
 }
 
 func (s *Store) Delete(ctx context.Context, id int64) error {
