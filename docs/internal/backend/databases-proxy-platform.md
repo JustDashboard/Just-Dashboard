@@ -2894,6 +2894,17 @@ containers/volumes/networks.
   SPA navigation and Back/Forward. Conflict UI pauses saving, preserves the draft, shows a diff
   against the current file and requires an explicit review against that version before retrying.
   Discard rereads a changed file; a removed/unreadable file retains the draft with a retry action.
+  Raw Test config uses the same conflict display if a native writer changes the candidate during
+  validation. Every nginx dry run restores only its own candidate's bytes, including prior absence,
+  and refuses to erase a newer native edit. Raw reads, writes and restoration pin the approved parent
+  directory through `os.Root`; temporary contents, FD-based permissions, publication and cleanup stay
+  on that captured directory. A renamed, replaced or outwardly retargeted parent causes a conflict;
+  a candidate still held by the original directory is restored there while replacement directories
+  and their files stay untouched. `files.Resolve` rejects outward symlink ancestors even when the
+  requested suffix does not exist. Raw file reads are nonblocking and require a regular file, so a
+  native FIFO replacement cannot hold the writer lock forever. The native check-to-publish interval
+  cannot atomically compare bytes against independent host writers; descriptor confinement prevents
+  that remaining interval from redirecting metadata, writes or cleanup into a replacement ancestor.
   Its unload warning remains active even while the editor is closed. Explicit discard and account
   working-state cleanup clear the buffer; no config text is written to Web Storage. Service/API
   regressions cover both nginx and Caddy, simultaneous stale writers, native edits during validation,

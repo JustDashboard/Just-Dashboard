@@ -130,6 +130,9 @@ func (s *Server) handleProxyValidate(w http.ResponseWriter, r *http.Request) err
 	}
 	res, err := s.modules.proxy.Validate(r.Context(), req.Kind, req.Path, req.Content)
 	if err != nil {
+		if errors.Is(err, proxysvc.ErrConfigChanged) {
+			httpx.SetAudit(r, "proxy.config.validate", req.Path, map[string]any{"result": "conflict"})
+		}
 		return mapProxyError(err)
 	}
 	httpx.SetAudit(r, "proxy.config.validate", req.Path,

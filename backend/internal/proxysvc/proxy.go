@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
@@ -225,21 +226,11 @@ func firstLine(s string) string {
 // Without it this endpoint would be an arbitrary-file-write primitive dressed
 // up as a config editor.
 func (s *Service) allowedPath(path string) (string, error) {
-	abs, err := filepath.Abs(filepath.Clean(path))
+	resolved, err := files.New([]string{s.nginxDir, filepath.Dir(s.caddyFile)}).Resolve(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %s", ErrUnsafePath, path)
 	}
-	resolved := abs
-	if r, err := filepath.EvalSymlinks(abs); err == nil {
-		resolved = r
-	}
-	roots := []string{s.nginxDir, filepath.Dir(s.caddyFile)}
-	for _, root := range roots {
-		if resolved == root || strings.HasPrefix(resolved, root+string(os.PathSeparator)) {
-			return resolved, nil
-		}
-	}
-	return "", fmt.Errorf("%w: %s", ErrUnsafePath, path)
+	return resolved, nil
 }
 
 // confdPath is where a site lives on a host with no sites-available. nginx
@@ -367,14 +358,16 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	if err != nil {
 		return nil, err
 	}
-	restore, err := s.stageNginx(full, content)
+	restore, release, err := s.stageNginx(full, content)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	res, err := runTest(ctx, "nginx", "-t")
-	// Unconditional: the caller asked whether this content would be accepted,
-	// not for it to be installed.
-	restore()
+	// Restore only our candidate; a native edit belongs to its writer.
+	if restoreErr := restore(); restoreErr != nil {
+		return nil, restoreErr
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -385,28 +378,35 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 // stageNginx puts content at full and returns the undo. The transient window is
 // unavoidable for nginx and is why validation requires system.admin — the same
 // capability as writing the file outright.
-func (s *Service) stageNginx(full, content string) (func(), error) {
+func (s *Service) stageNginx(full, content string) (func() error, func(), error) {
+	target, err := s.openConfigTarget(full)
+	if err != nil {
+		return nil, nil, err
+	}
+	original, existed, err := target.read()
+	if err != nil {
+		target.parent.Close()
+		return nil, nil, err
+	}
+	expected := ""
+	if existed {
+		expected = ContentDigest(original)
+	}
+	mode := target.mode()
 	s.keepLoaded(full)
-	original, readErr := os.ReadFile(full)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return nil, readErr
+	if err := target.write(content, mode, &expected, true); err != nil {
+		target.parent.Close()
+		return nil, nil, err
 	}
-	var mode os.FileMode = 0o644
-	if st, err := os.Stat(full); err == nil {
-		mode = st.Mode().Perm()
-	}
-	if err := writeAtomic(full, content); err != nil {
-		return nil, err
-	}
-	return func() {
-		// Leaving a broken or absent file behind means the next unrelated
-		// reload takes the sites down, so the undo ignores nothing.
-		if readErr == nil {
-			os.WriteFile(full, original, mode)
-		} else {
-			os.Remove(full)
+	candidate := ContentDigest(content)
+	restore := func() error {
+		locationErr := target.location()
+		if err := target.restore(original, existed, mode, candidate); err != nil {
+			return err
 		}
-	}, nil
+		return locationErr
+	}
+	return restore, func() { target.parent.Close() }, nil
 }
 
 // caddyScratchRoot is where a Caddyfile candidate is copied for `caddy
@@ -503,7 +503,7 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 			Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 		return res, nil
 	}
-	// Validation now restores the original unconditionally, so the write has
+	// Validation restores its own candidate, so the write has
 	// to be made explicitly afterwards. Testing again with the content in
 	// place is not redundant: the first test only proves nginx tolerates the
 	// candidate at the moment it ran, and the file may not be in nginx's
@@ -516,18 +516,23 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		return res, ErrInvalidConf
 	}
 	original, existed := readIfPresent(full)
-	restore, err := s.stageNginx(full, content)
+	restore, release, err := s.stageNginx(full, content)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	started := time.Now()
 	after, err := runTest(ctx, "nginx", "-t")
 	if err != nil {
-		restore()
+		if restoreErr := restore(); restoreErr != nil {
+			return nil, restoreErr
+		}
 		return nil, err
 	}
 	if !after.Valid {
-		restore()
+		if restoreErr := restore(); restoreErr != nil {
+			return nil, restoreErr
+		}
 		return after, ErrInvalidConf
 	}
 	// The file stays, so this is a test of the configuration as it now is.
@@ -546,40 +551,21 @@ func writeAtomic(path, content string) error {
 }
 
 func writeAtomicMode(path, content string, mode os.FileMode) error {
-	return writeAtomicModeChecked(path, content, mode, "")
-}
-
-func writeAtomicChecked(path, content, expected string) error {
-	var mode os.FileMode = 0o644
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	return writeAtomicModeChecked(path, content, mode, expected)
-}
-
-func writeAtomicModeChecked(path, content string, mode os.FileMode, expected string) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".vpsd-*")
+	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+	parent, err := os.OpenRoot(resolvedParent)
+	if err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	target, err := newConfigTarget(parent, filepath.Join(resolvedParent, filepath.Base(path)), nil)
+	if err != nil {
 		return err
 	}
-	if err := os.Chmod(tmp.Name(), mode); err != nil {
-		return err
-	}
-	if expected != "" {
-		if _, err := checkConfigRevision(path, expected); err != nil {
-			return err
-		}
-	}
-	return os.Rename(tmp.Name(), path)
+	defer parent.Close()
+	target.alias = path
+	return target.write(content, mode, nil, true)
 }
 
 // Test runs the server's own config test against what is on disk right now.

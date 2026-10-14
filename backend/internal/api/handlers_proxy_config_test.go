@@ -271,3 +271,26 @@ func TestRawConfigRequiresRevisionAndRetainsNewerContent(t *testing.T) {
 		})
 	}
 }
+
+func TestRawConfigDryRunConflictRetainsNativeEditAndAudit(t *testing.T) {
+	s, bin := engineHost(t, map[string]string{"nginx": "exit 0\n"})
+	dir := configHost(t, s)
+	file := filepath.Join(dir, "nginx.conf")
+	script := "#!/bin/sh\nprintf '%s' 'native edit during test' > '" + file + "'\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "nginx"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	body, _ := json.Marshal(map[string]any{"kind": "nginx", "path": file, "content": "dry-run candidate"})
+	w := admin.do(http.MethodPost, "/api/v1/proxy/validate", string(body), nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "config_conflict") {
+		t.Fatalf("dry-run conflict: %d %s", w.Code, w.Body.String())
+	}
+	if got, _ := os.ReadFile(file); string(got) != "native edit during test" {
+		t.Fatalf("native edit erased: %q", got)
+	}
+	var audited int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='proxy.config.validate' AND detail LIKE '%conflict%'`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("conflict audit: %d %v", audited, err)
+	}
+}
