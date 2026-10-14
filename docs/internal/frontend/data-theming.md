@@ -452,7 +452,13 @@ An unavailable recheck retains the current identity for retry. Request generatio
 session probe or recheck from replacing a newer sign-in. Sign-out requests are coalesced, clear working
 drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
 never starts expiry recovery. Reauthentication by a different account clears the prior account's
-working drafts; the same account retains values held in the shared session/memory stores. Local
+working drafts; the same account retains values held in the shared session/memory stores. The
+mounted dashboard workspace is keyed by authenticated account ID. A recovery probe that discovers
+another usable account remounts its providers and pages at the current route, removing the prior
+account's local editors, canvases and active work as well as its shared drafts. A same-account recovery
+keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
+PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.
+Local
 component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
 account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
 is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership

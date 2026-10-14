@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { mockOnboarding } from "./onboarding-fixture"
 import { user } from "./host-fixture"
+import { mockProxy, user as proxyUser } from "./proxy-fixtures"
 
 const signedOut = {
   authenticated: false,
@@ -244,3 +245,81 @@ test("draft ownership survives a reload before a different account signs in", as
   await expect(page).toHaveURL(/\/$/)
   expect(await page.evaluate((storageKey) => sessionStorage.getItem(storageKey), key)).toBeNull()
 })
+
+for (const changedAccount of [false, true]) {
+  test(`a recovered ${changedAccount ? "different" : "same"} account ${changedAccount ? "replaces" : "retains"} the mounted raw editor`, async ({
+    page,
+  }) => {
+    await mockProxy(page, { included: true })
+    let refused = false
+    let reads = 0
+    let fileReads = 0
+    const writes: { content: string }[] = []
+    const nextName = changedAccount ? "New operator" : "Same operator"
+    await page.route("**/api/v1/auth/session", (route) => {
+      reads += 1
+      return json(route, {
+        ...proxyUser,
+        user: {
+          ...proxyUser.user,
+          id: changedAccount && refused ? 2 : 1,
+          displayName: refused ? nextName : "Original operator",
+        },
+      })
+    })
+    const content = "server { server_name saved.example.com; }\n"
+    await page.route("**/api/v1/proxy/config?**", (route) => {
+      fileReads += 1
+      return json(route, { content, revision: "a".repeat(64) })
+    })
+    await page.route("**/api/v1/proxy/config", (route) => {
+      if (route.request().method() !== "PUT") return route.fallback()
+      writes.push(route.request().postDataJSON())
+      refused = true
+      return json(route, { error: { code: "unauthorized", message: "Prior session expired" } }, 401)
+    })
+    const route = `/proxy/config?file=${encodeURIComponent("/etc/nginx/nginx.conf")}`
+    await page.goto(route)
+    const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+    const lines = editor.locator(".monaco-editor .view-lines")
+    await expect(lines).toContainText("saved.example.com", { timeout: 20_000 })
+    await editor.locator(".monaco-editor").evaluate((element: HTMLElement) => {
+      element.dataset.accountReview = "original-instance"
+    })
+    await lines.click()
+    await page.keyboard.press("Control+End")
+    await page.keyboard.insertText("\n# PRIVATE PREVIOUS ACCOUNT BUFFER")
+    await editor.getByRole("button", { name: "Save only", exact: true }).click()
+    await editor.getByRole("button", { name: "Save only", exact: true }).click()
+    // A modal hides the sidebar from accessibility queries, but its real
+    // account label proves AuthProvider adopted the usable session answer.
+    await expect(page.locator(`[aria-label="Account menu for ${nextName}"]`)).toHaveCount(1)
+    expect(reads).toBe(2)
+    await expect(page).toHaveURL(route)
+    expect(writes).toHaveLength(1)
+    expect(writes[0].content).toContain("PRIVATE PREVIOUS ACCOUNT BUFFER")
+    if (changedAccount) {
+      await expect.poll(() => fileReads).toBe(2)
+      await expect(lines).toContainText("saved.example.com")
+      await expect(lines).not.toContainText("PRIVATE PREVIOUS ACCOUNT BUFFER")
+      await expect(editor.locator(".monaco-editor")).not.toHaveAttribute(
+        "data-account-review",
+        "original-instance",
+      )
+      await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
+      await expect(editor.getByRole("button", { name: "Save only", exact: true })).toBeDisabled()
+      await lines.click()
+      await page.keyboard.press("Control+s")
+      await expect(editor.getByRole("button", { name: "Back to editing" })).toHaveCount(0)
+      expect(writes).toHaveLength(1)
+    } else {
+      await expect(editor.locator("pre")).toContainText("PRIVATE PREVIOUS ACCOUNT BUFFER")
+      await expect(editor.locator(".monaco-editor")).toHaveAttribute(
+        "data-account-review",
+        "original-instance",
+      )
+      await expect(editor.getByRole("button", { name: "Save only", exact: true })).toBeEnabled()
+      expect(fileReads).toBe(1)
+    }
+  })
+}
