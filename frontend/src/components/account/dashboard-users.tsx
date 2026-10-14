@@ -257,7 +257,11 @@ function PeopleIdentity({
               />
             </button>
           ) : (
-            <Status className="text-body" verdict="ok" label="every account asks for a code" />
+            <Status
+              className="text-body"
+              verdict="ok"
+              label="every enabled account asks for a code"
+            />
           )}
           {action}
         </span>
