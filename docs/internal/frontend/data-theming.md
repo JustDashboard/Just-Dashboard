@@ -472,3 +472,11 @@ clears shared working drafts conservatively. `api-auth-recovery.test.js` and `au
 API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
 not become the next key's form. Session views use actual `authMethod` provenance rather than treating
 an access-elevation bit as proof of a code; legacy provenance is unknown.
+
+The redesigned account identity, authenticator coverage band, user cards and account filters use the
+current `require2fa` policy. An enabled account without an authenticator is password-only under the
+optional policy and requires enrollment under the required policy; disabled accounts are excluded
+from both coverage counts and those filters. Reset-two-factor guidance follows the same distinction.
+The Profile picture labels required enrollment, and the Security sign-in picture draws a direct
+password-to-server path only when two-factor is optional. Session pictures continue to describe each
+session's recorded authentication method, independently of the current policy.

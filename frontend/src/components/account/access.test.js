@@ -184,3 +184,14 @@ test("last sign-ins split by the window and count who never signed in", () => {
   expect(older).toBe(1)
   expect(never).toBe(1)
 })
+
+test("required two-factor warns for every enabled unenrolled account and excludes disabled accounts", () => {
+  const people = [
+    user(),
+    user({ role: "limited", totpEnabled: false }),
+    user({ role: "admin", totpEnabled: false, disabled: true }),
+  ]
+  expect(peopleVerdict(people, true)).toEqual({ tone: "warning", bare: 1, admins: 0 })
+  expect(peopleVerdict(people, false)).toEqual({ tone: "notice", bare: 1, admins: 0 })
+  expect(peopleVerdict([user()], true)).toEqual({ tone: "running", bare: 0, admins: 0 })
+})
