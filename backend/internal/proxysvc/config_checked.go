@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
+	"os"
+	"syscall"
 	"time"
 )
 
@@ -37,7 +38,7 @@ func (s *Service) ReadConfigSnapshot(path string) (*ConfigSnapshot, error) {
 		return nil, err
 	}
 	if !existed {
-		return nil, fs.ErrNotExist
+		return nil, &os.PathError{Op: "open", Path: full, Err: syscall.ENOENT}
 	}
 	if err := target.location(); err != nil {
 		return nil, err
