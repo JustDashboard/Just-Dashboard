@@ -62,7 +62,7 @@ test("an expired mutation rechecks once and the sign-in explanation survives rel
   expect(fixture.reads()).toBe(2)
   await page.reload()
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
-  expect(fixture.reads()).toBe(3)
+  await expect.poll(() => fixture.reads()).toBe(3)
   await signIn(page)
   await expect(page).toHaveURL(/\/$/)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toHaveCount(0)
