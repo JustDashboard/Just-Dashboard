@@ -638,6 +638,11 @@ func (s *Server) searchContainer(ctx context.Context, id string, opts logsx.Sear
 		line.No = n
 		c.Feed(&line)
 	}
+	if ctx.Err() != nil {
+		c.Incomplete()
+	} else if err := dockerx.LogReadError(closer); err != nil {
+		return nil, fmt.Errorf("container %s log read failed: %w", id, err)
+	}
 	return c.Result(), nil
 }
 

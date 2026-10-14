@@ -26,6 +26,7 @@ type fakeLogContainer struct {
 	// image is what the list reports; configImage what inspect's Config has.
 	image, imageID, configImage string
 	lines, followLines          []string
+	logError, rawLogs           string
 }
 
 type fakeLogEngine struct {
@@ -107,6 +108,16 @@ func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer)
 				"State": map[string]any{"Status": c.state, "Running": c.state == "running"},
 			})
 		case "logs":
+			if c.logError != "" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": c.logError})
+				return
+			}
+			if c.rawLogs != "" {
+				_, _ = fmt.Fprint(w, c.rawLogs)
+				return
+			}
 			q := r.URL.Query()
 			lines := c.lines
 			if q.Get("follow") == "1" || q.Get("follow") == "true" {
@@ -157,6 +168,63 @@ func serveFakeLogEngine(t *testing.T, s *Server, containers ...fakeLogContainer)
 
 func stamped(at time.Time, text string) string {
 	return at.UTC().Format(time.RFC3339Nano) + " " + text
+}
+
+func TestStackExportRecordsUnreadMembersAndRefusesAnEntirelyUnreadStack(t *testing.T) {
+	s := testServer(t)
+	fake := serveFakeLogEngine(t, s,
+		fakeLogContainer{id: "aaaaaaaaaaaa1111", name: "app-web", project: "app", service: "web", state: "running", lines: []string{stamped(time.Now(), "retained web output")}},
+		fakeLogContainer{id: "bbbbbbbbbbbb2222", name: "app-worker", project: "app", service: "worker", state: "running", logError: "worker log driver refused reading"},
+	)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	export := c.do(http.MethodGet, "/api/v1/logs/download?source=stack:app", "", nil)
+	if export.Code != http.StatusOK {
+		t.Fatalf("partial stack export: %d %s", export.Code, export.Body.String())
+	}
+	for _, evidence := range []string{"retained web output", "Export coverage: PARTIAL", "source app-worker could not be read", "worker log driver refused reading"} {
+		if !strings.Contains(export.Body.String(), evidence) {
+			t.Errorf("partial export lacks %q: %s", evidence, export.Body.String())
+		}
+	}
+	search := decode[logsx.SearchResult](t, c.do(http.MethodGet, "/api/v1/logs/search?source=stack:app", "", nil))
+	if search.Complete || len(search.Lines) != 1 || len(search.Files) != 2 || search.Files[1].Name != "app-worker" || search.Files[1].Error == "" {
+		t.Fatalf("partial source read was not retained: %+v", search)
+	}
+	fake.change(func(containers []fakeLogContainer) []fakeLogContainer {
+		containers[0].logError = "web log driver refused reading"
+		return containers
+	})
+	for _, route := range []string{"/api/v1/logs/download", "/api/v1/logs/search"} {
+		response := c.do(http.MethodGet, route+"?source=stack:app", "", nil)
+		if response.Code != http.StatusServiceUnavailable || response.Body.Len() == 0 || response.Header().Get("Content-Disposition") != "" {
+			t.Errorf("entirely unread stack became success: %d %v %s", response.Code, response.Header(), response.Body.String())
+		}
+	}
+}
+
+func TestDockerExportRefusesScannerFailuresAndStackKeepsPartialSourceEvidence(t *testing.T) {
+	s := testServer(t)
+	fake := serveFakeLogEngine(t, s,
+		fakeLogContainer{id: "aaaaaaaaaaaa1111", name: "app-web", project: "app", service: "web", state: "running", lines: []string{stamped(time.Now(), "retained web output")}},
+		fakeLogContainer{id: "bbbbbbbbbbbb2222", name: "app-worker", project: "app", service: "worker", state: "running", rawLogs: strings.Repeat("x", 300*1024)},
+	)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	export := c.do(http.MethodGet, "/api/v1/logs/download?source=docker:app-worker", "", nil)
+	if export.Code == http.StatusOK || export.Body.Len() == 0 || export.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("scanner failure became an empty download: %d %s", export.Code, export.Body.String())
+	}
+	export = c.do(http.MethodGet, "/api/v1/logs/download?source=stack:app", "", nil)
+	if export.Code != http.StatusOK || !strings.Contains(export.Body.String(), "Export coverage: PARTIAL") || !strings.Contains(export.Body.String(), "source app-worker could not be read") || !strings.Contains(export.Body.String(), "token too long") || !strings.Contains(export.Body.String(), "retained web output") {
+		t.Fatalf("stack scanner failure was hidden: %d %s", export.Code, export.Body.String())
+	}
+	fake.change(func(containers []fakeLogContainer) []fakeLogContainer {
+		containers[0].rawLogs = strings.Repeat("x", 300*1024)
+		return containers
+	})
+	export = c.do(http.MethodGet, "/api/v1/logs/download?source=stack:app", "", nil)
+	if export.Code != http.StatusServiceUnavailable || export.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("all decoder failures became an export: %d %s", export.Code, export.Body.String())
+	}
 }
 
 // shopStack is a compose project of three containers: a database whose list
