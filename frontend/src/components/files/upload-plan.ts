@@ -1,4 +1,4 @@
-import { joinPath, numberedName } from "./media"
+import { cleanPath, joinPath, numberedName } from "./media"
 import type { Incoming, UploadJob } from "./uploads"
 import type { ConflictPolicy } from "./conflict-dialog"
 
@@ -87,7 +87,12 @@ export async function inspectUpload(
         }
         taken.add(name)
         assigned.add(item.rel)
-        jobs.push({ file: item.file, dir: joinPath(destination, parent), name, overwrite })
+        jobs.push({
+          file: item.file,
+          dir: parent ? joinPath(destination, parent) : cleanPath(destination),
+          name,
+          overwrite,
+        })
       }
       return jobs
     },

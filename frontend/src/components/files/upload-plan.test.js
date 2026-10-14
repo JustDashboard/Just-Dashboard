@@ -51,8 +51,14 @@ test("duplicate incoming names and existing directory targets stay safe", async 
   const plan = await inspectUpload([incoming("a.txt"), incoming("a.txt")], "/root", async () => [])
   expect(plan.clashes).toEqual(["a.txt"])
   expect(plan.jobs("keep").map((job) => job.name)).toEqual(["a.txt", "a (2).txt"])
+  expect(plan.jobs("keep").map((job) => job.dir)).toEqual(["/root", "/root"])
   const occupied = await inspectUpload([incoming("photos")], "/root", async () => [
     directory("photos"),
   ])
   expect(() => occupied.jobs("replace")).toThrow("Choose Keep both or Skip")
+})
+
+test("root-level uploads keep the canonical folder used by listing refreshes", async () => {
+  const plan = await inspectUpload([incoming("desktop.txt")], "/root/photos/", async () => [])
+  expect(plan.jobs("keep")[0].dir).toBe("/root/photos")
 })

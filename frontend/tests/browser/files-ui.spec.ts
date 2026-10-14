@@ -1912,7 +1912,10 @@ test("a partially failed cut paste retries only files that have not moved", asyn
   const listing = page.locator("[data-file-listing]")
   await listing.locator(`[data-entry-path="${home}/notes.md"]`).getByRole("checkbox").click()
   await listing.locator(`[data-entry-path="${home}/logo.png"]`).click()
-  await page.getByRole("button", { name: "Cut selection", exact: true }).click()
+  await page
+    .getByRole("toolbar", { name: "Selection actions" })
+    .getByRole("button", { name: "Cut", exact: true })
+    .click()
   await listing.locator(`[data-entry-path="${home}/photos"]`).dblclick()
   await page.getByRole("button", { name: "Paste here", exact: true }).click()
   await expect(page.getByText("1 item ready to move", { exact: true })).toBeVisible()
