@@ -245,7 +245,8 @@ func TestStackSearchMergesContainersByTime(t *testing.T) {
 	}
 
 	export := c.do("GET", "/api/v1/logs/download?source=stack:shop&q=orders", "", nil)
-	if strings.Count(export.Body.String(), "\n") != 2 {
+	header, lines, hasCoverage := strings.Cut(export.Body.String(), "\n\n")
+	if export.Code != http.StatusOK || !hasCoverage || !strings.Contains(header, "# Export coverage: complete") || strings.Count(lines, "\n") != 2 || !strings.Contains(lines, "GET /orders 200") || !strings.Contains(lines, "GET /orders 500") {
 		t.Errorf("stack export:\n%s", export.Body.String())
 	}
 	if rec := c.do("GET", "/api/v1/logs/search?source=stack:nothing", "", nil); rec.Code != 404 {
