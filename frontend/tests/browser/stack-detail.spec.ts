@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { recordProgress } from "./progress-recording"
 import { DETAIL, mockStackDetail } from "./stack-detail-fixture"
 
 /**
@@ -300,5 +301,61 @@ test("Logs lists the services that write into it and narrows to one", async ({ p
   await expect(strip.getByRole("button", { name: "Only worker" })).toHaveAttribute(
     "aria-pressed",
     "true",
+  )
+})
+
+test("progress: Compose output is visible inside the confirmation while the command runs", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  let socket: { send: (message: string) => void } | undefined
+  await page.routeWebSocket(/\/docker\/stacks\/shop\/run/, (ws) => {
+    socket = ws
+    ws.send(
+      JSON.stringify({
+        type: "output",
+        data: [{ stream: "stdout", text: "Restarting api container" }],
+      }),
+    )
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/docker/stacks/shop")
+  const api = page.locator("tr[data-workspace-item='api']")
+  await api.hover()
+  await api.getByRole("button", { name: "Restart", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await recordProgress(
+    page,
+    "docker-compose",
+    async () => {
+      await dialog.getByRole("button", { name: "Restart", exact: true }).click()
+      await expect(dialog.getByText("Restarting api container", { exact: true })).toBeVisible()
+      socket!.send(
+        JSON.stringify({
+          type: "output",
+          data: [
+            {
+              stream: "stdout",
+              text: "Waiting for the container to finish restarting. ".repeat(20),
+            },
+          ],
+        }),
+      )
+      const overlay = dialog.locator("[data-slot=operation-overlay]")
+      await expect(overlay).toContainText("Waiting for the container")
+      const title = await dialog.getByRole("heading").boundingBox()
+      const cancel = await dialog.getByRole("button", { name: "Cancel", exact: true }).boundingBox()
+      const box = await overlay.boundingBox()
+      expect(box!.y).toBeGreaterThanOrEqual(title!.y + title!.height)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(cancel!.y)
+      expect(await overlay.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+        true,
+      )
+    },
+    dialog.locator("[data-slot=operation-progress]"),
+    async () => {
+      socket!.send(JSON.stringify({ type: "done", data: { exitCode: 0 } }))
+      await expect(dialog).toHaveCount(0)
+    },
   )
 })

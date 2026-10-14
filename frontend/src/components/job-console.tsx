@@ -12,6 +12,8 @@ import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/state"
 import { Pane, PaneHeader } from "@/components/panel"
+import { OperationProgress } from "@/components/operation-progress"
+import { OperationOverlay } from "@/components/operation-overlay"
 
 /**
  * Watching an operation that outlives the page.
@@ -180,44 +182,51 @@ export function JobConsole({
           {job.error}
         </p>
       )}
-      {running && (
-        <p className="border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
-          This keeps running if you close the page — reopen it from the recent list.
-        </p>
-      )}
-
-      <div
-        ref={scrollRef}
-        onScroll={() => {
-          const el = scrollRef.current
-          if (!el) return
-          setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-        }}
-        className="max-h-80 min-h-24 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
-      >
-        {dropped > 0 && (
-          <div className="mb-1.5 text-muted-foreground">
-            … {dropped} earlier {dropped === 1 ? "line" : "lines"} dropped …
-          </div>
+      <div className="relative flex min-h-40 flex-1 flex-col">
+        {running && (
+          <OperationOverlay
+            local
+            className="top-3 bottom-auto mb-0 max-h-[calc(100%-1.5rem)] overflow-y-auto"
+          >
+            <OperationProgress label={`${job.title}…`} startedAt={job.startedAt} />
+            <p className="text-hint text-muted-foreground">
+              This keeps running if you close the page — reopen it from the recent list.
+            </p>
+          </OperationOverlay>
         )}
-        {lines.length === 0 ? (
-          <p className="text-muted-foreground">{running ? "Starting…" : "No output."}</p>
-        ) : (
-          lines.map((line) => (
-            <div
-              key={line.seq}
-              className={cn(
-                "break-all whitespace-pre-wrap",
-                // A status line is the runner's own voice rather than the
-                // command's, so it reads as a heading in the stream.
-                line.stream === "status" && "mt-1.5 font-medium text-primary",
-                line.stream === "stderr" && "text-warning",
-              )}
-            >
-              {line.text}
+        <div
+          ref={scrollRef}
+          onScroll={() => {
+            const el = scrollRef.current
+            if (!el) return
+            setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
+          }}
+          className="max-h-80 min-h-0 flex-1 overflow-auto p-2.5 font-mono text-hint leading-relaxed"
+        >
+          {dropped > 0 && (
+            <div className="mb-1.5 text-muted-foreground">
+              … {dropped} earlier {dropped === 1 ? "line" : "lines"} dropped …
             </div>
-          ))
-        )}
+          )}
+          {lines.length === 0 ? (
+            <p className="text-muted-foreground">{running ? "Starting…" : "No output."}</p>
+          ) : (
+            lines.map((line) => (
+              <div
+                key={line.seq}
+                className={cn(
+                  "break-all whitespace-pre-wrap",
+                  // A status line is the runner's own voice rather than the
+                  // command's, so it reads as a heading in the stream.
+                  line.stream === "status" && "mt-1.5 font-medium text-primary",
+                  line.stream === "stderr" && "text-warning",
+                )}
+              >
+                {line.text}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </Pane>
   )

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { heldResponse, recordProgress } from "./progress-recording"
 
 test.use({
   video:
@@ -1775,3 +1776,89 @@ test("a failed native move keeps its source preview available", async ({ page })
   await expect(page.getByRole("heading", { name: "notes.md", exact: true })).toBeVisible()
   await expect(page.locator('[data-dragging="true"]')).toHaveCount(0)
 })
+
+for (const action of ["copy", "move", "duplicate", "extract", "delete"]) {
+  test(`progress: file ${action} reports work in the workspace`, async ({ page }) => {
+    await mockFiles(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    if (action === "extract")
+      await page.route("**/api/v1/files/list**", (route) =>
+        json(route, {
+          path: home,
+          parent: "/home",
+          roots: ["/"],
+          entries: [...entries, entry("backup.zip", { size: 1200000 })],
+        }),
+      )
+    const held = await heldResponse(
+      page,
+      `/files/${action === "duplicate" ? "copy" : action}`,
+      action === "extract" ? { extracted: 3 } : { ok: true },
+    )
+    await openFiles(page)
+    const item = (name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+    let start: () => Promise<unknown>
+    if (action === "copy" || action === "move") {
+      await item("notes.md").click()
+      await page.keyboard.press(action === "copy" ? "ControlOrMeta+c" : "ControlOrMeta+x")
+      await item("site").dblclick()
+      start = () => page.getByRole("button", { name: "Paste here", exact: true }).click()
+    } else if (action === "delete") {
+      await item("notes.md").getByRole("checkbox").click()
+      await item("logo.png").getByRole("checkbox").click()
+      await page.keyboard.press("Delete")
+      start = () =>
+        page.getByRole("dialog").getByRole("button", { name: "Delete all", exact: true }).click()
+    } else {
+      await item(action === "extract" ? "backup.zip" : "notes.md").click({ button: "right" })
+      start = () =>
+        page
+          .getByRole("menuitem", {
+            name: action === "extract" ? /Extract/ : "Duplicate",
+            exact: action !== "extract",
+          })
+          .click()
+    }
+    const progress = page.locator("[data-slot=operation-progress]")
+    await recordProgress(page, `files-${action}`, start, progress, async () => {
+      held.release()
+      await expect(progress).toHaveCount(0)
+    })
+    expect(held.calls()).toBe(action === "delete" ? 2 : 1)
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`overlay: file copy keeps the listing in place at ${width}px`, async ({ page }) => {
+    await mockFiles(page)
+    await page.setViewportSize({ width, height: 900 })
+    const held = await heldResponse(page, "/files/copy", { ok: true })
+    await openFiles(page)
+    await page.locator(`[data-entry-path='${home}/notes.md']`).click()
+    await page.keyboard.press("ControlOrMeta+c")
+    await page.locator(`[data-entry-path='${home}/site']`).dblclick()
+    const listing = page.locator("[data-file-listing]")
+    const before = await listing.boundingBox()
+    const overlay = page.locator("[data-slot=operation-overlay]")
+    await recordProgress(
+      page,
+      "files-overlay",
+      async () => {
+        await page.getByRole("button", { name: "Paste here", exact: true }).click()
+        await expect(overlay).toHaveCSS("position", "fixed")
+        await expect.poll(() => listing.boundingBox()).toEqual(before)
+        await expect(overlay).toBeInViewport()
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        )
+      },
+      page.locator("[data-slot=operation-progress]"),
+      async () => {
+        held.release()
+        await expect(overlay).toHaveCount(0)
+        await expect.poll(() => listing.boundingBox()).toEqual(before)
+      },
+    )
+    expect(held.calls()).toBe(1)
+  })
+}

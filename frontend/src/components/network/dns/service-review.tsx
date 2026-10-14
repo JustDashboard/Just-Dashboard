@@ -94,6 +94,8 @@ export function DNSServiceReview({
           ? "Create only the reviewed loopback service and its two persistent data volumes with the saved limits and native credentials."
           : "Apply this exact native policy once, then inspect native readback. A lost response remains a retained result to review.",
       confirmLabel: kind === "provision" ? "Create owned service" : "Apply native change",
+      workingLabel:
+        kind === "provision" ? "Creating DNS service…" : "Applying reviewed DNS change…",
       action: async (): Promise<"reported"> => {
         const current = live.current
         const latestProblem =
@@ -169,6 +171,7 @@ export function DNSServiceReview({
         </div>
       ),
       confirmLabel: setup.state === "planned" ? "Discard review" : "Remove service and data",
+      workingLabel: "Removing owned DNS service…",
       action: async (): Promise<"reported"> => {
         const current = live.current
         if (

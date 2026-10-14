@@ -77,6 +77,7 @@ export function CleanupPanel({
     confirm({
       title: destroys ? "Remove volumes and reclaim disk" : `Reclaim ${bytes(total)}`,
       confirmLabel: "Remove",
+      workingLabel: "Reclaiming Docker space…",
       description: (
         <>
           <ul className="space-y-1.5 text-body">
@@ -107,6 +108,10 @@ export function CleanupPanel({
           const failed = res.reports.filter((r) => r.error)
           if (failed.length && res.reclaimed === 0) {
             notify.error(`Nothing was removed — ${failed.map((f) => f.error).join("; ")}`)
+          } else if (failed.length) {
+            notify.warning(`Reclaimed ${bytes(res.reclaimed)}; some parts did not run`, {
+              description: failed.map((report) => `${report.kind}: ${report.error}`).join("; "),
+            })
           } else {
             notify.success(
               res.reclaimed > 0
@@ -116,6 +121,7 @@ export function CleanupPanel({
           }
           refresh()
           onDone?.()
+          return "reported" as const
         } finally {
           setBusy(false)
         }
