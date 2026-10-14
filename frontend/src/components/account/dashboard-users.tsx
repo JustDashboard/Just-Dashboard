@@ -83,11 +83,11 @@ function RolePicker({
 
 /**
  * The accounts in four readings: how many there are and how many of them can
- * get in, who holds everything, how many of them a stolen password alone
- * would open — amber while an administrator is one of those — and who has
- * been here this week.
+ * get in, who holds everything and who has been here this week. An account
+ * without a factor may owe enrollment, so the coverage reading uses the
+ * install policy before describing it as password-only.
  */
-function UserReadings({ users }: { users: DashboardUser[] }) {
+function UserReadings({ users, require2fa }: { users: DashboardUser[]; require2fa: boolean }) {
   const active = users.filter((u) => !u.disabled)
   const admins = active.filter((u) => u.role === "admin")
   const enrolled = active.filter((u) => u.totpEnabled)
@@ -103,8 +103,8 @@ function UserReadings({ users }: { users: DashboardUser[] }) {
         value={users.length}
         hint={
           users.length === active.length
-            ? "every one can sign in"
-            : `${active.length} can sign in · ${users.length - active.length} disabled`
+            ? "every account enabled"
+            : `${active.length} enabled · ${users.length - active.length} disabled`
         }
       />
       <StatTile
@@ -123,7 +123,7 @@ function UserReadings({ users }: { users: DashboardUser[] }) {
         label="Two-factor"
         value={`${enrolled.length} of ${active.length}`}
         tone={
-          bareAdmins.length > 0
+          bareAdmins.length > 0 || (require2fa && enrolled.length < active.length)
             ? "warning"
             : enrolled.length === active.length
               ? "success"
@@ -131,10 +131,10 @@ function UserReadings({ users }: { users: DashboardUser[] }) {
         }
         hint={
           bareAdmins.length > 0
-            ? `${plural(bareAdmins.length, "administrator")} on a password alone`
+            ? `${plural(bareAdmins.length, "administrator")} ${require2fa ? "must enrol before signing in" : "on a password alone"}`
             : enrolled.length === active.length
               ? "every account asks for a code"
-              : `${active.length - enrolled.length} on a password alone`
+              : `${plural(active.length - enrolled.length, "account")} ${require2fa ? "must enrol before signing in" : "on a password alone"}`
         }
       />
       <StatTile
@@ -183,12 +183,14 @@ export function AvatarRun({ users, max = 4 }: { users: DashboardUser[]; max?: nu
 function UserCard({
   user,
   me,
+  require2fa,
   onEdit,
   onUpdate,
   verbs,
 }: {
   user: DashboardUser
   me: boolean
+  require2fa: boolean
   onEdit: () => void
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
@@ -206,10 +208,12 @@ function UserCard({
           onChange={(role) => onUpdate({ role })}
         />
       </span>
-      <span className="flex w-28">
+      <span className="flex w-36">
         <Status
           tone={user.totpEnabled ? "running" : user.role === "admin" ? "warning" : "notice"}
-          label={user.totpEnabled ? "two-factor on" : "password only"}
+          label={
+            user.totpEnabled ? "two-factor on" : require2fa ? "enrolment required" : "password only"
+          }
         />
       </span>
       <span className="w-36 truncate text-xs text-muted-foreground">
@@ -263,6 +267,7 @@ function UserCard({
  */
 export function DashboardUsersView({ users }: { users: ReturnType<typeof useDashboardUsers> }) {
   const { status, refresh: refreshAuth } = useAuth()
+  const require2fa = Boolean(status?.require2fa)
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<DashboardUser | null>(null)
   const { data, error, loading, refresh } = users
@@ -300,8 +305,11 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
                   confirmLabel: "Reset",
                   description: (
                     <p>
-                      <b>{name}</b> signs in with a password alone until they enrol an authenticator
-                      again. Do this when they have lost theirs and their recovery codes.
+                      <b>{name}</b>{" "}
+                      {require2fa
+                        ? "must enrol an authenticator again before completing sign-in."
+                        : "signs in with a password alone until they enrol an authenticator again."}{" "}
+                      Do this when they have lost theirs and their recovery codes.
                     </p>
                   ),
                   action: async () => {
@@ -364,7 +372,7 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
 
   return (
     <>
-      <UserReadings users={data} />
+      <UserReadings users={data} require2fa={require2fa} />
       <Panel plain>
         <PanelHeader
           title="Accounts"
@@ -384,6 +392,7 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
                 key={user.id}
                 user={user}
                 me={user.id === status?.user?.id}
+                require2fa={require2fa}
                 onEdit={() => setEditing(user)}
                 onUpdate={(body) => update(user, body)}
                 verbs={verbsFor(user)}

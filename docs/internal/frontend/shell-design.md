@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 111 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 113 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login` and `/welcome`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -157,6 +157,12 @@ design system §7) rather than a disabled button sitting under the page. Account
 question default to answered with nothing hidden, so an upgrade changes nobody's rail.
 
 ### Signing in
+
+The dashboard Users page derives missing-factor descriptions from the same `require2fa` policy.
+On an optional install, an enabled unenrolled account is password-only. On a required install,
+its card and the coverage reading say enrollment is required before completing sign-in, and a
+two-factor reset explains that requirement. Enabled/disabled account counts describe account state;
+they do not promise that an unenrolled account can bypass the sign-in enrollment step.
 
 `app/login/page.tsx` is one `FlowPanel` card: the form, and from `lg` a picture half drawing
 `ProductOrbit` (`components/onboarding/product-orbit.tsx`) — the same server rack, ringed by the

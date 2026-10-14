@@ -105,7 +105,9 @@ export default function SecurityOverviewPage() {
           loading={fail2ban.loading && !fail2ban.data}
           products={fail2ban.data?.running ? ["fail2ban"] : []}
           value={
-            !fail2ban.data ? undefined : !fail2ban.data.available ? (
+            fail2ban.error ? (
+              "Unreadable"
+            ) : !fail2ban.data ? undefined : !fail2ban.data.available ? (
               "No fail2ban"
             ) : !fail2ban.data.running ? (
               "Not running"
@@ -114,13 +116,15 @@ export default function SecurityOverviewPage() {
             )
           }
           tone={
-            !fail2ban.data
-              ? "default"
-              : !fail2ban.data.available || !fail2ban.data.running
-                ? "warning"
-                : bannedNow > 0
+            fail2ban.error
+              ? "warning"
+              : !fail2ban.data
+                ? "default"
+                : !fail2ban.data.available || !fail2ban.data.running
                   ? "warning"
-                  : "default"
+                  : bannedNow > 0
+                    ? "warning"
+                    : "default"
           }
           // What the jails did over the days fail2ban.log covers: a reading
           // that moves, where the figure is only this moment of it.
@@ -134,9 +138,15 @@ export default function SecurityOverviewPage() {
             ) : undefined
           }
           hint={
-            fail2ban.data?.running
-              ? `${fail2ban.data.jails.length} jail${fail2ban.data.jails.length === 1 ? "" : "s"} watching`
-              : "nothing is blocking repeated failures"
+            fail2ban.error
+              ? "fail2ban status could not be read"
+              : !fail2ban.data
+                ? undefined
+                : fail2ban.data.running
+                  ? `${fail2ban.data.jails.length} fail2ban jail${fail2ban.data.jails.length === 1 ? "" : "s"} watching`
+                  : fail2ban.data.available
+                    ? "fail2ban is not running"
+                    : "fail2ban is not installed"
           }
         />
         <AreaTile
