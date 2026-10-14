@@ -183,6 +183,7 @@ function ConfigEditorBody({
   }
 
   const validate = async () => {
+    if (owner !== configDrafts.generation()) return
     setBusy("test")
     try {
       setShown({
@@ -204,6 +205,8 @@ function ConfigEditorBody({
   }
 
   const saveDraft = async (reload: boolean) => {
+    // Account cleanup happens before React replaces the mounted workspace.
+    if (owner !== configDrafts.generation()) return
     const savedContent = contentRef.current
     const expectedRevision = revisionRef.current
     setBusy("save")

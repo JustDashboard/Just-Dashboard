@@ -2135,3 +2135,33 @@ test("raw config test conflicts retain the draft and expose the native newer fil
     editor.getByText("server { server_name native.example.com; }", { exact: true }).last(),
   ).toBeVisible()
 })
+
+test("a raw editor cannot test or publish its buffer after working-state cleanup", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  let tests = 0
+  let writes = 0
+  await page.route("**/api/v1/proxy/validate", (route) => {
+    tests += 1
+    return json(route, passingTest)
+  })
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes += 1
+    return json(route, { revision: "b".repeat(64), validation: passingTest })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent("/etc/nginx/nginx.conf")}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# prior account buffer")
+  // Keep the old mount to exercise the interval before an account-keyed
+  // workspace remount. Its controls must refuse the cleared owner's buffer.
+  await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
+  await editor.getByRole("button", { name: "Test config", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await editor.getByRole("button", { name: "Save only", exact: true }).click()
+  await page.keyboard.press("Control+s")
+  expect(tests).toBe(0)
+  expect(writes).toBe(0)
+})

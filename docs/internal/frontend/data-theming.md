@@ -455,7 +455,10 @@ never starts expiry recovery. Reauthentication by a different account clears the
 working drafts; the same account retains values held in the shared session/memory stores. The
 mounted dashboard workspace is keyed by authenticated account ID. A recovery probe that discovers
 another usable account remounts its providers and pages at the current route, removing the prior
-account's local editors, canvases and active work as well as its shared drafts. A same-account recovery
+account's local editors, canvases and active work as well as its shared drafts. Raw proxy validation
+and save callbacks also check their retained-draft generation before sending, fencing the synchronous
+cleanup interval before React remounts; a cleared owner cannot stage or publish its old buffer.
+A same-account recovery
 keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
 PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.
 Local
