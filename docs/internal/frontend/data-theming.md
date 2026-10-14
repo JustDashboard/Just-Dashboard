@@ -441,7 +441,8 @@ response headers and export completion/truncation checks remain with each reader
 also fence asynchronous canvas encoding and upload completion to their mounted editor and working-state
 generation. Unmounting or clearing account-owned state aborts an in-flight upload; a late encoder never
 starts an old-canvas upload, and late responses cannot announce success or call a departed editor's
-callbacks. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
+callbacks. Image revision conflicts use the inline warning without a second error toast, keeping
+Save as and reload controls reachable. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
 
 All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
 recognized authentication failure. Authentication endpoints are excluded: an incorrect password or

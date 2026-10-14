@@ -454,7 +454,7 @@ export function ImageEditor({
     } catch (err) {
       if (!active()) return
       if (err instanceof ApiError && err.code === "content_conflict") setConflict(true)
-      notify.error("Could not save the image", err)
+      else notify.error("Could not save the image", err)
     } finally {
       if (saveFlight.current === controller) saveFlight.current = null
       if (active()) setSaving(false)
