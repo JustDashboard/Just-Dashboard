@@ -134,6 +134,148 @@ test("a thing nothing covers opens the form filled in for it", async ({ page }) 
   )
 })
 
+test("a delayed database handoff opens a saveable native-dump-only job and consumes the URL", async ({
+  page,
+}) => {
+  let release!: () => void
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/backups/resources", async (route) => {
+    await waiting
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        resources: [
+          {
+            kind: "database",
+            id: "remote",
+            name: "Remote database",
+            connectionId: 3,
+            suggest: { name: "Remote database", sources: [], databaseDumps: [3] },
+            coveredBy: [],
+            protected: false,
+          },
+        ],
+        unavailable: {},
+      }),
+    })
+  })
+  await page.route("**/api/v1/databases/", (route) =>
+    route.fulfill({ contentType: "application/json", body: "[]" }),
+  )
+  await page.goto("/backups?database=3&keep=1")
+  await expect(page.getByRole("heading", { name: "Backups" })).toBeAttached()
+  expect(new URL(page.url()).searchParams.get("database")).toBe("3")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  release()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+    "Remote database",
+  )
+  await expect(dialog.getByRole("textbox", { name: "Sources (one per line)" })).toHaveValue("")
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+  await expect.poll(() => new URL(page.url()).searchParams.get("database")).toBeNull()
+  expect(new URL(page.url()).searchParams.get("keep")).toBe("1")
+  const request = page.waitForRequest(
+    (request) => request.url().endsWith("/api/v1/backups/") && request.method() === "POST",
+  )
+  await dialog.getByRole("button", { name: "Create", exact: true }).click()
+  expect((await request).postDataJSON()).toMatchObject({ sources: [], databaseDumps: [3] })
+  await expect(dialog).toHaveCount(0)
+})
+
+test("resource unpicks preserve manual paths and the settings another pick shares", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/backups/resources", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        resources: ["App", "Shared"].map((name) => ({
+          kind: "deployment",
+          id: name,
+          name,
+          paths: ["/srv/app"],
+          suggest: { name, sources: ["/srv/app"], excludes: ["*.log"], pauseContainers: ["app"] },
+          coveredBy: [],
+          protected: false,
+        })),
+        unavailable: {},
+      }),
+    }),
+  )
+  await page.goto("/backups?source=%2Fsrv%2Fapp")
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("button", { name: "Pick from what this server has" }).click()
+  const app = dialog.getByRole("checkbox", { name: "Back up App", exact: true })
+  const shared = dialog.getByRole("checkbox", { name: "Back up Shared", exact: true })
+  await expect(app).not.toBeChecked()
+  await app.check()
+  await shared.check()
+  await app.uncheck()
+  await expect(dialog.getByRole("textbox", { name: "Sources (one per line)" })).toHaveValue(
+    "/srv/app",
+  )
+  await expect(dialog.getByRole("textbox", { name: "Excludes (glob, one per line)" })).toHaveValue(
+    "*.log",
+  )
+  await expect(dialog.getByRole("checkbox", { name: "Pause app", exact: true })).toBeChecked()
+  await shared.uncheck()
+  await expect(dialog.getByRole("textbox", { name: "Sources (one per line)" })).toHaveValue(
+    "/srv/app",
+  )
+  await expect(dialog.getByRole("textbox", { name: "Excludes (glob, one per line)" })).toHaveValue(
+    "",
+  )
+})
+
+test("closing the detail edit discards its draft and reopening uses the saved definition", async ({
+  page,
+}) => {
+  await page.goto("/backups/1")
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Discard this edit")
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(jobs[0].name)
+})
+
+test("failed run history shows its read error and retries without claiming there are no runs", async ({
+  page,
+}) => {
+  let failed = true
+  await page.route("**/api/v1/backups/1/runs", (route) =>
+    failed
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "Run history unavailable" },
+          }),
+        })
+      : route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ runs: [run(400, 1, 20_000, "success", 1000)], running: false }),
+        }),
+  )
+  await page.goto("/backups/1")
+  await expect(page.getByRole("alert")).toContainText("Run history unavailable")
+  await expect(page.getByText("No runs yet. Run now takes the first one.")).toHaveCount(0)
+  failed = false
+  await page.getByRole("button", { name: "Retry run history" }).click()
+  await expect(page.getByRole("button", { name: /^Run 400,/ })).toBeVisible()
+  await expect(page.getByRole("alert")).toHaveCount(0)
+  failed = true
+  await expect(page.getByText("Run history could not refresh")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole("button", { name: /^Run 400,/ })).toBeVisible()
+  await expect(
+    page.getByText("Showing the last successful reading.", { exact: false }),
+  ).toBeVisible()
+})
+
 test("a job's page opens on its identity, its picture and the run it last took", async ({
   page,
 }) => {

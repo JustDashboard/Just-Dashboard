@@ -167,20 +167,33 @@ export function SqlQuery() {
   // has been read, and is taken out of the address the same way.
   const linked = search.get("saved") ?? ""
   const followed = useRef("")
+  const waitingForSaved = useRef("")
   useEffect(() => {
     if (!linked) {
       followed.current = ""
+      waitingForSaved.current = ""
       return
     }
     if (followed.current === linked || !saved.data) return
-    followed.current = linked
     const query = saved.data.find((entry) => String(entry.id) === linked)
     if (query) {
       const opening = { sql: query.sql, title: query.name, saved: query.id }
-      place(opening, (state) => openTab(state, opening))
+      if (!hasRoom(tabs, opening)) {
+        if (waitingForSaved.current !== linked) {
+          waitingForSaved.current = linked
+          notify.warning(`${MAX_TABS} tabs are open`, {
+            description: "Close one, and the saved query opens in its place.",
+            duration: 12_000,
+          })
+        }
+        return
+      }
+      setTabs((state) => openTab(state, opening))
     } else notify.info("That saved query is not here any more")
+    followed.current = linked
+    waitingForSaved.current = ""
     select({ saved: null })
-  }, [linked, saved.data, place, select])
+  }, [linked, saved.data, tabs, setTabs, select])
 
   /* -------------------------------------------------------------- layout */
 

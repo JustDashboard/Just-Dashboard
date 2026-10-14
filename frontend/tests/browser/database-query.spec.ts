@@ -1776,6 +1776,33 @@ test("at the limit of tabs an opening says so, and a hand-over waits in the addr
   await expect.poll(() => new URL(page.url()).search).toBe("")
 })
 
+test("a saved-query handoff waits at the tab limit and opens after a tab closes", async ({
+  page,
+}) => {
+  const sql = "select 'saved query at the limit'"
+  await mockWork(page, { saved: [{ id: 3, name: "Capacity handoff", sql }] })
+  await page.addInitScript(() => {
+    const tabs = Array.from({ length: 24 }, (_, n) => ({
+      id: `q${n + 1}`,
+      title: `Query ${n + 1}`,
+      sql: `select ${n + 1}`,
+    }))
+    sessionStorage.setItem(
+      "jd.session.state.entry.databases.1.query.tabs",
+      JSON.stringify({ tabs, active: "q24", next: 25 }),
+    )
+  })
+  await openEditor(page, "/databases/1/query?saved=3")
+  await expect(openTabs(page)).toHaveCount(24)
+  await expect(page.getByText("Close one, and the saved query opens in its place.")).toBeVisible()
+  expect(new URL(page.url()).searchParams.get("saved")).toBe("3")
+  await page.getByRole("button", { name: "Close Query 24" }).click()
+  await expect.poll(() => editorText(page)).toBe(sql)
+  await expect(openTabs(page)).toHaveCount(24)
+  await expect.poll(() => new URL(page.url()).searchParams.get("saved")).toBeNull()
+  await expect(openTabs(page).filter({ hasText: "Capacity handoff" })).toHaveCount(1)
+})
+
 test("a table made from the editor is known to the tree and the completion without asking", async ({
   page,
 }) => {
