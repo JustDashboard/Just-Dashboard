@@ -432,6 +432,21 @@ test("a stream keeps playing while another page is up, with only the computer's 
   await expect.poll(hidden).toBe(true)
   await page.getByRole("switch", { name: "Show this computer's pointer too" }).click()
   await expect.poll(hidden).toBe(false)
+  await page
+    .frameLocator('iframe[data-slot="remote-stream"]')
+    .locator("body")
+    .evaluate((body) => {
+      const video = body.ownerDocument.createElement("video")
+      Object.defineProperties(video, {
+        paused: { value: false },
+        ended: { value: false },
+        readyState: { value: 3 },
+        videoWidth: { value: 1920 },
+      })
+      body.append(video)
+      video.dispatchEvent(new Event("playing"))
+    })
+  await expect(page.getByText("streaming", { exact: true })).toBeVisible()
 
   await page
     .getByRole("navigation", { name: "Computers" })
