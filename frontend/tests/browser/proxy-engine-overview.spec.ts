@@ -1996,10 +1996,10 @@ test("raw config drafts survive Back and Forward with an unload guard while clos
   await mockProxy(page, { included: true })
   await watchConfigFiles(page)
   const file = "/etc/nginx/nginx.conf"
-  const revisions: string[] = []
+  const saves: { expectedRevision: string; content: string }[] = []
   await page.route("**/api/v1/proxy/config", (route) => {
     if (route.request().method() !== "PUT") return route.fallback()
-    revisions.push(route.request().postDataJSON().expectedRevision)
+    saves.push(route.request().postDataJSON())
     return route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -2028,8 +2028,13 @@ test("raw config drafts survive Back and Forward with an unload guard while clos
   )
   await editor.getByRole("button", { name: "Save only", exact: true }).click()
   await editor.getByRole("button", { name: "Save only", exact: true }).click()
-  await expect.poll(() => revisions.length).toBe(1)
-  expect(revisions[0]).toBe(configRevision(configContents(file)))
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0].expectedRevision).toBe(configRevision(configContents(file)))
+  expect(saves[0].content).toContain("# retained through history")
+  await editor.getByRole("button", { name: "Back to editing", exact: true }).click()
+  await editor.locator(".monaco-editor .view-lines").click()
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("Control+End")
   await expect(editor.locator(".monaco-editor .view-lines")).toContainText(
     "# retained through history",
   )
@@ -2098,4 +2103,35 @@ test("raw config stale saves retain drafts and require review against the newer 
   await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
   expect(saves[1].expectedRevision).toBe(newerRevision)
   expect(content).toContain("# my retained draft")
+})
+
+test("raw config test conflicts retain the draft and expose the native newer file", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const file = "/etc/nginx/nginx.conf"
+  let content = "server { server_name original.example.com; }\n"
+  await page.route("**/api/v1/proxy/config?**", (route) => json(route, configRead(content)))
+  await page.route("**/api/v1/proxy/validate", (route) => {
+    content = "server { server_name native.example.com; }\n"
+    return route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "config_conflict", message: "Native file changed during test" },
+      }),
+    })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
+  const editor = page.getByRole("dialog", { name: /nginx\.conf/ })
+  await typeInEditor(page, editor, "# retain my test draft")
+  await editor.getByRole("button", { name: "Test config", exact: true }).click()
+  await expect(editor.getByText("File changed — draft retained", { exact: true })).toBeVisible()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("# retain my test draft")
+  await expect(editor.getByRole("button", { name: "Save only", exact: true })).toBeDisabled()
+  await editor.getByText("Compare current file with your draft", { exact: true }).click()
+  await editor.getByText("Current file on disk", { exact: true }).click()
+  await expect(
+    editor.getByText("server { server_name native.example.com; }", { exact: true }).last(),
+  ).toBeVisible()
 })
