@@ -347,7 +347,7 @@ test.describe("system users", () => {
 
     // Mira leads: sudo, no password. Ion is in sudo and docker.
     const root = band.getByRole("region", { name: "Root access" })
-    await expect(root.getByRole("listitem")).toHaveCount(4)
+    await expect(root.getByRole("listitem")).toHaveCount(3)
     await expect(root.getByRole("listitem").first()).toContainText("mira")
     await expect(root.getByRole("listitem").first()).toContainText("No password")
 

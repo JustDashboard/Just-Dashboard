@@ -237,7 +237,7 @@
         "/files"
       ],
       "original_kind": "Defect",
-      "resolution": "Plan folder-upload collisions in each actual directory, with explicit existing-folder merge and collision policy.",
+      "resolution": "Plan folder-upload collisions in each actual directory, with explicit existing-folder merge and collision policy. Preserve canonical root destinations so completion refreshes the current directory.",
       "regressions": "upload-plan.test.js; files-ui.spec.ts",
       "limits": "",
       "status": "implemented; combined validation pending"

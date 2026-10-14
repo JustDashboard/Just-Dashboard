@@ -7,9 +7,9 @@ import { put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import {
   CRON_PRESETS,
-  describeCron,
-  isValidCron,
-  nextCronRun,
+  describeNativeCron as describeCron,
+  isValidNativeCron as isValidCron,
+  nextNativeCronRun as nextCronRun,
   presetFor,
   supportsCronTimeZone,
   type CronPreset,

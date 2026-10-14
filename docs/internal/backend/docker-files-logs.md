@@ -1026,3 +1026,7 @@ reversed windows receive field errors. Invalid ranges do not trigger search or e
 server downloads also reject malformed bounds. Export fixture tests exceed 20,000 records, exercise
 native failures and partial coverage, and verify uncapped file output. Datetime unit and browser tests
 cover year 10000 and invalid/order recovery.
+
+Root-level upload jobs keep the destination's canonical path rather than adding a trailing slash.
+Their completion therefore refreshes the currently browsed directory just as nested uploads do;
+`upload-plan.test.js` and the desktop-drop browser case cover this identity and refresh contract.

@@ -512,9 +512,11 @@ cannot interpret, and copied localtime files without a discoverable zone remain 
 An unsupported reported zone is labelled forecast unavailable rather than never. Forecasts describe
 schedule matches; the native daemon's missed/repeated-time behavior can differ around DST.
 
-The common five-field grammar rejects extra slash/range separators, empty list members, field bounds,
+The native five-field grammar rejects extra slash/range separators, empty list members, field bounds,
 signed or oversized steps and steps after single numbers. Leading-star day fields intersect their
-sets, while two non-star day fields use cron's either-day rule. Zoned window forecasts are generated
+sets, while two non-star day fields use cron's either-day rule. App-owned deployment/backup
+schedules retain the Go scheduler's number-step expansion and star-step day rules through separate
+parser semantics; the stricter native rules apply only to the host crontab editor. Zoned window forecasts are generated
 in a bounded batch. Command-only editing of `15 * * * *` retains `15`; a nonzero hourly minute opens
 as Custom rather than a preset that would move it to `:00`.
 

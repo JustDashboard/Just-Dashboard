@@ -1225,7 +1225,9 @@ test("inline file drafts survive another preview and retain their opened revisio
   content = "native edit\n"
   await page.getByRole("button", { name: "a.txt", exact: true }).first().click()
   await expect(page.locator(".monaco-editor")).toContainText("UNSAVED DRAFT")
-  await expect(page.getByRole("alert")).toContainText("Your draft is kept")
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect.poll(() => writes.length).toBe(1)
   expect(writes[0].expectedRevision).toBe("opened")

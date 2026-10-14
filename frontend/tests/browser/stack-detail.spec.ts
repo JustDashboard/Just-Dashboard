@@ -336,7 +336,9 @@ test("compose conflict keeps the draft until the current file is reviewed", asyn
   revision = "external"
   content = "name: shop\nservices:\n  web:\n    image: nginx:native\n"
   await page.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(page.getByRole("alert")).toContainText("Your draft is kept")
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is kept" })).toContainText(
+    "Your draft is kept",
+  )
   await expect(page.locator(".monaco-editor")).toContainText("MY DRAFT")
   expect(writes[0].expectedRevision).toBe("opened")
   await page.getByRole("button", { name: "Review current file", exact: true }).click()

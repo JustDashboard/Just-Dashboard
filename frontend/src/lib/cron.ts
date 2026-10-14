@@ -8,8 +8,8 @@
  * puzzles. The same parser drives the schedule builder in the job dialog, so
  * what the builder writes is what the reader sees described.
  *
- * Only what Vixie cron accepts: five fields, `*`, lists, ranges, steps, the
- * month and weekday names, and the `@` nicknames. Forecasts use the job's
+ * Five fields, `*`, lists, ranges, steps, names and `@` nicknames. App-owned
+ * schedules follow the Go scheduler; native wrappers follow the host crontab. Forecasts use the job's
  * measured host or CRON_TZ zone when available, with browser-zone estimates
  * as a disclosed fallback. Displayed dates remain in the browser's zone.
  */
@@ -70,7 +70,9 @@ function parseValue(token: string, spec: FieldSpec): number | null {
   return spec.min + index
 }
 
-function parseField(field: string, spec: FieldSpec): Set<number> | null {
+type CronDialect = "app" | "native"
+
+function parseField(field: string, spec: FieldSpec, dialect: CronDialect): Set<number> | null {
   const out = new Set<number>()
   for (const part of field.split(",")) {
     if (part === "") return null
@@ -95,11 +97,11 @@ function parseField(field: string, spec: FieldSpec): Set<number> | null {
       lo = from
       hi = to
     } else {
-      if (stepPart !== undefined) return null
+      if (dialect === "native" && stepPart !== undefined) return null
       const value = parseValue(rangePart, spec)
       if (value === null) return null
       lo = value
-      hi = value
+      hi = stepPart === undefined ? value : spec.max
     }
     if (lo < spec.min || hi > spec.max) return null
     for (let v = lo; v <= hi; v += step) out.add(v)
@@ -108,12 +110,12 @@ function parseField(field: string, spec: FieldSpec): Set<number> | null {
 }
 
 /** Reads one schedule. `@reboot` has no fields and returns null. */
-export function parseCron(expression: string): CronFields | null {
+export function parseCron(expression: string, dialect: CronDialect = "app"): CronFields | null {
   const trimmed = expression.trim()
   const expanded = NICKNAMES[trimmed.toLowerCase()] ?? trimmed
   const fields = expanded.split(/\s+/)
   if (fields.length !== 5) return null
-  const parsed = fields.map((f, i) => parseField(f, SPECS[i]))
+  const parsed = fields.map((f, i) => parseField(f, SPECS[i], dialect))
   if (parsed.some((p) => p === null)) return null
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parsed as Set<number>[]
   // Sunday is both 0 and 7.
@@ -121,14 +123,21 @@ export function parseCron(expression: string): CronFields | null {
     dayOfWeek.delete(7)
     dayOfWeek.add(0)
   }
+  const hasStar = (field: string) =>
+    dialect === "native"
+      ? field.startsWith("*")
+      : field.split(",").some((part) => {
+          const [range, step] = part.split("/")
+          return range === "*" && (step === undefined || Number(step) === 1)
+        })
   return {
     minute,
     hour,
     dayOfMonth,
     month,
     dayOfWeek,
-    anyDayOfMonth: fields[2].startsWith("*"),
-    anyDayOfWeek: fields[4].startsWith("*"),
+    anyDayOfMonth: hasStar(fields[2]),
+    anyDayOfWeek: hasStar(fields[4]),
   }
 }
 
@@ -188,10 +197,10 @@ function offsetStepOf(values: Set<number>, spec: FieldSpec): { step: number; fro
  * The schedule as a sentence: "Every day at 03:00", "Every 5 minutes",
  * "At 07:30 on Monday and Friday", "At 00:00 on the 1st of every month".
  */
-export function describeCron(expression: string): string {
+export function describeCron(expression: string, dialect: CronDialect = "app"): string {
   const trimmed = expression.trim().toLowerCase()
   if (trimmed === "@reboot") return "Once, when the server boots"
-  const cron = parseCron(expression)
+  const cron = parseCron(expression, dialect)
   if (!cron) return "Not a schedule cron understands"
 
   const full = (values: Set<number>, spec: FieldSpec) => values.size === spec.max - spec.min + 1
@@ -275,9 +284,10 @@ export function nextCronRun(
   expression: string,
   from: Date = new Date(),
   timeZone?: string,
+  dialect: CronDialect = "app",
 ): Date | null {
-  if (timeZone) return nextCronRunsIn(expression, timeZone, 1, from)[0] ?? null
-  const cron = parseCron(expression)
+  if (timeZone) return nextCronRunsIn(expression, timeZone, 1, from, undefined, dialect)[0] ?? null
+  const cron = parseCron(expression, dialect)
   if (!cron) return null
   const hours = [...cron.hour].sort((a, b) => a - b)
   const minutes = [...cron.minute].sort((a, b) => a - b)
@@ -380,8 +390,9 @@ export function nextCronRunsIn(
   count: number,
   from: Date = new Date(),
   until?: Date,
+  dialect: CronDialect = "app",
 ): Date[] {
-  const cron = parseCron(expression)
+  const cron = parseCron(expression, dialect)
   const format = zoneFormat(timeZone)
   if (!cron || !format) return []
   const hours = [...cron.hour].sort((a, b) => a - b)
@@ -456,4 +467,21 @@ export function presetFor(expression: string): CronPreset {
   if (plainMinute && plainHour && dom === "*" && /^[0-7]$/.test(dow)) return "weekly"
   if (plainMinute && plainHour && /^\d{1,2}$/.test(dom) && dow === "*") return "monthly"
   return "custom"
+}
+
+/** Native crontab differs from the app scheduler for number steps and star-day rules. */
+export function isValidNativeCron(expression: string): boolean {
+  return expression.trim().toLowerCase() === "@reboot" || parseCron(expression, "native") !== null
+}
+
+export function describeNativeCron(expression: string): string {
+  return describeCron(expression, "native")
+}
+
+export function nextNativeCronRun(
+  expression: string,
+  from: Date = new Date(),
+  timeZone?: string,
+): Date | null {
+  return nextCronRun(expression, from, timeZone, "native")
 }
