@@ -152,3 +152,20 @@ function Initials({
     </span>
   )
 }
+
+/** Who a reading counts, drawn as them: a few faces in a row, then how many more. */
+export function AvatarRun({ users, max = 4 }: { users: DashboardUser[]; max?: number }) {
+  if (users.length === 0) return null
+  return (
+    <span aria-hidden className="flex shrink-0 items-center gap-0.5">
+      {users.slice(0, max).map((user) => (
+        <UserAvatar key={user.id} user={user} scope="admin" size="xs" />
+      ))}
+      {users.length > max && (
+        <span className="numeric ml-0.5 text-micro text-muted-foreground">
+          +{users.length - max}
+        </span>
+      )}
+    </span>
+  )
+}

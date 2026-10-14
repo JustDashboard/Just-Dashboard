@@ -6,22 +6,25 @@ import { ArrowRight, Check, Copy, Key, ShieldCheck, ShieldOff } from "@/componen
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
-import { parseAgent } from "@/lib/clients"
+import { describeClient } from "@/lib/clients"
 import { passwordChecks } from "@/lib/password"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
 import { Field, FieldCheck, FieldRow, FormSection } from "@/components/form"
 import { Well } from "@/components/panel"
-import { ProductLogo } from "@/components/product-logo"
+import { ClientMark, NetworkFact } from "@/components/client-mark"
+import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TotpSecret } from "@/components/account/totp-secret"
 import type { useSessions } from "@/components/account/sessions"
+import { sessionGuard } from "@/components/account/access"
+import { GUARD_WORDS } from "@/components/account/session-map"
 
-export function PasswordSection() {
+export function PasswordSection({ className }: { className?: string }) {
   const { logout } = useAuth()
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
@@ -53,6 +56,7 @@ export function PasswordSection() {
   return (
     <FormSection
       aside
+      className={className}
       title="Password"
       hint="Changing it signs out every session, this one included."
     >
@@ -179,7 +183,7 @@ function Verdict({
  * for themselves. The state is under the section's head, and its verdict opens
  * the section in the colour of what it means.
  */
-export function TwoFactorSection() {
+export function TwoFactorSection({ className }: { className?: string }) {
   const { status, refresh } = useAuth()
   const [enrollment, setEnrollment] = useState<{ secret: string; otpauthUrl: string } | null>(null)
   const [code, setCode] = useState("")
@@ -256,6 +260,7 @@ export function TwoFactorSection() {
   return (
     <FormSection
       aside
+      className={className}
       title="Two-factor"
       hint={
         <span className="flex flex-col items-start gap-1.5">
@@ -376,24 +381,32 @@ export function TwoFactorSection() {
 }
 
 /**
- * Where this account is signed in, drawn as the clients themselves, beside
- * the password that would sign every one of them out. The sessions page is
- * where they are read one by one.
+ * Where this account is signed in, each session drawn as the client it is
+ * with the network it came in on and what let it in, beside the password
+ * that would sign every one of them out. The sessions page is where they are
+ * read in full and signed out one by one.
  */
-export function SessionsSection({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
+export function SessionsSection({
+  sessions,
+  className,
+}: {
+  sessions: ReturnType<typeof useSessions>
+  className?: string
+}) {
   // The sessions page says why they could not be read; here the section is
   // only a way there, and one stuck on "loading" would be a reading that lies.
   if (sessions.error && !sessions.data) return null
-  const list = sessions.data ?? []
-  const clients = [
-    ...new Set(list.map((s) => parseAgent(s.userAgent).product).filter((id) => id !== undefined)),
-  ]
+  const list = [...(sessions.data ?? [])].sort(
+    (a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt.localeCompare(a.lastSeenAt),
+  )
   const bare = list.filter((s) => s.authMethod === "password" && s.twoFactorPassed).length
   const pending = list.filter((s) => !s.twoFactorPassed).length
   const unknown = list.filter((s) => !s.authMethod || s.authMethod === "unknown").length
+  const shown = list.slice(0, 4)
   return (
     <FormSection
       aside
+      className={className}
       title="Sessions"
       hint={
         sessions.data
@@ -401,14 +414,35 @@ export function SessionsSection({ sessions }: { sessions: ReturnType<typeof useS
           : "loading"
       }
     >
-      <div className="flex flex-wrap items-center gap-3">
-        {clients.length > 0 && (
-          <span aria-hidden className="flex items-center gap-1">
-            {clients.map((id) => (
-              <ProductLogo key={id} id={id} size="sm" />
-            ))}
-          </span>
-        )}
+      {shown.length > 0 && (
+        <RowList>
+          {shown.map((session) => {
+            const guard = sessionGuard(session)
+            return (
+              <Row
+                key={session.id}
+                className="px-0"
+                leading={<ClientMark userAgent={session.userAgent} />}
+                title={describeClient(session.userAgent)}
+                subtitle={<NetworkFact ip={session.ip} />}
+                trailing={
+                  <span
+                    className={cn(
+                      "text-hint",
+                      guard === "password" || guard === "pending"
+                        ? "text-warning"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {session.current ? "this device" : GUARD_WORDS[guard]}
+                  </span>
+                }
+              />
+            )
+          })}
+        </RowList>
+      )}
+      <div>
         <Button size="sm" variant="outline" asChild>
           <Link href="/account/sessions">
             Review where you are signed in

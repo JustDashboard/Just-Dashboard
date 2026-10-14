@@ -176,9 +176,12 @@ taking a frame:
   much is covered — every thing on it is taken, opening the job that covers it or the form written
   for it — with a job's own page opening on an identity line and its own picture over its
   readings, and its runs one frame around a rail of the runs and an inspector of the picked one,
-  the run page's Details shape; the six account pages — the profile's identity line, readings and capability rows,
-  sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, Security as `FormSection aside`s, and Workspace as the first-run purposes'
+  the run page's Details shape; the six account pages — no tiles on any of them: the profile's identity line over everything
+  signed in as the account wired into its face and the roles as a ladder, Sessions' identity line over
+  the path each session takes and rows that carry its life on a shared axis, the keys wired through
+  their roles into the API over rows under chips, the users' identity line and band over cards in a
+  `ChoiceList` under chips, Security's picture of what a sign-in passes over `FormSection aside`s two
+  to a row, and Workspace as the first-run purposes'
   lit cards, the experimental one carrying its amber tag, beside the rail itself, the one frame, in the
   sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
@@ -508,7 +511,9 @@ with what is left; when everything went through it says *Saved* and when it appl
 so the forms no longer toast their own success. A clean page has nothing to save and no button:
 re-checking an untouched Source means saving an edit to it. The game server's settings take the
 same bar, and hold its Save while a value is outside its declared range; so does Account → Workspace,
-whose purposes and rail switches are one draft of the sidebar. Each form keeps its draft keyed on
+whose purposes and rail switches are one draft of the sidebar, and the profile, whose display name
+and sign-in name are a draft beside the rail's card drawn from it (the picture still applies the
+moment it is chosen). Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
 
@@ -2283,6 +2288,32 @@ The passes, in order. Each one is a diff you can review on its own.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
+
+   The account pages took the exit together in 0.7.5, at the operator's request — "no metric cards,
+   make them feel alive, real logos and colouring" — with the deploy pages and Configuration as the
+   reference: every figure the tiles gave became a wire, a chip or a verdict, and each page gained a
+   picture in the wiring vocabulary. The profile's four (two-factor, sessions, keys, users) are the
+   identity line's verdict and the shield on the account's face, the two sides of *Signed in as you*
+   (`components/account/access-picture.tsx`: the sessions as their browsers wired into the face, the
+   account's own keys as the products holding them wired out of it, each side counted and a way to
+   its page) and, for an administrator, the accounts' faces among the line's facts. The keys page's
+   four (in use, used this week, never used, expiring soon) are the list's count and three chips that
+   count and narrow, and wires in `key-map.tsx`, where each key reaches the API through the role it
+   carries: called today pulses, never called is dashed, about to stop is amber. The users page's four
+   (accounts, administrators, two-factor, signed in this week) are an identity line whose verdict is
+   how many accounts a password alone opens — a press narrowing the cards to exactly those — and
+   `people-band.tsx`, System users' band for the dashboard's own people: last sign-ins as dots in each
+   account's hue on an axis ending now, two-factor as one bar of the accounts by whether a code is
+   asked, roles as one bar in the ladder's hues. Sessions had no tiles, and gained the path each
+   session takes (`session-map.tsx`: browser, network, server) and each row's life on an axis every row
+   shares, from its sign-in to its expiry with *now* one hairline through all of them. Security gained
+   what a sign-in passes (`sign-in-path.tsx`), where an account with no second factor is a dashed ring
+   with an amber line bowed past it from the password to the server, and its sections went two to a
+   row as Configuration's are. The capability rows became a ladder of the three roles
+   (`role-ladder.tsx`), lit in each rung's hue up to the account's own, so the powers past it say why
+   a page is missing from the sidebar. A role's hue (`ROLE_HUE`: cyan, green, violet — none red or
+   amber) is the same on the ladder, the users' Roles bar, the keys' role nodes and every role tag.
+   The reads behind every wire, chip and verdict are `components/account/access.ts` (unit-tested).
 
    The Security section took a second pass in 0.7.1, because the operator found its pages grey and
    still. The overview's figures count up as they land (`NumberTicker`) and Intrusion's carries the
