@@ -51,10 +51,8 @@ test("a new account is asked what the server is for, and the answer shapes the s
   }
   await expect(purposes.getByText("1 project here")).toBeVisible()
   await expect(purposes.getByText("4 databases here")).toBeVisible()
-  for (const name of ["Run databases", "Work on the server"]) {
-    await purpose(name).click()
-    await expect(purpose(name)).toHaveAttribute("aria-pressed", "false")
-  }
+  await purpose("Work on the server").click()
+  await expect(purpose("Work on the server")).toHaveAttribute("aria-pressed", "false")
   await page.getByRole("button", { name: "Continue" }).click()
 
   // Continue is the answer: saved, and drawn as the server wired to each
@@ -62,14 +60,16 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(page.getByRole("heading", { level: 1, name: "Your server is ready" })).toBeVisible()
   await expect(
     page.getByRole("list", { name: "What this server is for" }).getByRole("listitem"),
-  ).toHaveText(["Ship apps"])
-  await expect(page.getByText(/^9 sections in your sidebar/)).toBeVisible()
+  ).toHaveText(["Ship apps", "Run databases"])
+  await expect(page.getByText(/^7 sections in your sidebar/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
     [
+      "docker",
       "excalidraw",
       "files",
+      "git",
       "network",
       "remote-desktop",
       "security",
@@ -80,29 +80,25 @@ test("a new account is asked what the server is for, and the answer shapes the s
 
   await page.getByRole("button", { name: "Go to dashboard" }).click()
   await expect(page).toHaveURL(/\/$/)
-  for (const shown of [
-    "Overview",
-    "Deployments",
-    "Databases",
-    "Docker",
-    "Git",
-    "Proxy & TLS",
-    "Backups",
-  ]) {
+  for (const shown of ["Overview", "Deployments", "Databases", "Proxy & TLS", "Backups"]) {
     await expect(rail(page).getByRole("link", { name: shown, exact: true })).toBeVisible()
   }
-  for (const hidden of ["Network", "Security", "Terminal", "Excalidraw"]) {
+  for (const hidden of ["Docker", "Network", "Security", "Terminal", "Excalidraw", "Git"]) {
     await expect(rail(page).getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
   }
-  // Protection keeps Backups, which shipping apps uses, and Server
-  // configuration is in every answer, so both stay.
+  // Workspace held only hidden sections, so a label with nothing left under it
+  // goes with its rows. Protection keeps Backups, which running databases
+  // brings, and Server configuration is in every answer, so both stay.
+  await expect(rail(page).getByText("Workspace", { exact: true })).toHaveCount(0)
   await expect(rail(page).getByText("Protection", { exact: true })).toBeVisible()
   await expect(rail(page).getByText("Server configuration")).toBeVisible()
   // The Overview drops the tiles of what was hidden, and keeps the rest —
   // Packages among them, because every answer keeps it.
-  await expect(page.getByRole("link", { name: /^Docker/ }).first()).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: /^Security/ })).toHaveCount(0)
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: /^Packages/ })).toBeVisible()
+  const tile = (name: RegExp) => page.locator("[data-slot=stat-tile]", { hasText: name })
+  await expect(tile(/^Databases/)).toBeVisible()
+  await expect(tile(/^Packages/)).toBeVisible()
+  await expect(tile(/^Docker/)).toHaveCount(0)
+  await expect(tile(/^Security/)).toHaveCount(0)
 
   // Answered once, never asked again.
   await page.reload()

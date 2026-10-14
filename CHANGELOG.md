@@ -15,7 +15,7 @@ Automatic attention panels and settings recommendations are removed from the das
 - Show updates in a compact notice and a dedicated installation dialog
   - The update notice compares the installed and available versions, opens the installation progress in its own dialog, and leaves the complete patch notes on the Version page.
 - Start the first-run question with the stable purposes and mark the experimental ones
-  - Ship apps, Run databases and Work on the server are chosen to begin with; Manage containers, Route the network and Secure the server sit on their own Experimental shelf. Packages, System users and the audit log stay in every answer. Account → Workspace shows the same purposes beside the sidebar itself, with a switch on every section it can hide.
+  - Ship apps (Deployments, Proxy & TLS), Run databases (Databases, Backups) and Work on the server (the Workspace tools) are chosen to begin with; Manage containers (Docker), Route the network (Network) and Secure the server (Security) sit on their own Experimental shelf. Every section belongs to one purpose only, so each choice adds something, and Packages, System users and the audit log stay in every answer. Account → Workspace shows the same purposes beside the sidebar itself, with a switch on every section it can hide.
 
 ### Removed
 

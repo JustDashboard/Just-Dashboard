@@ -48,8 +48,11 @@ export function sectionOf(pathname: string): SectionKey | null {
 
 /**
  * The answers to "what will you use this server for?", each the sections it
- * needs. They overlap on purpose: Backups belongs to shipping apps and to
- * running databases alike, and choosing both shows it once.
+ * brings into the rail. No two share a section, and none takes one of the
+ * base's: Manage containers used to be Docker, Files and Terminal, which the
+ * stable three already brought, so pressing it changed nothing, and Route the
+ * network and Secure the server brought the same two rows. Now every card
+ * turns on something no other card does.
  *
  * The stable three come first and a new account starts with them chosen; the
  * experimental three work but are still being tested, so they are offered
@@ -60,15 +63,15 @@ export const PURPOSES = [
     key: "ship",
     title: "Ship apps",
     stage: "stable",
-    products: ["github", "docker", "lets-encrypt"],
-    sections: ["deploy", "docker", "proxy", "databases", "git", "backups"],
+    products: ["github", "nginx", "lets-encrypt"],
+    sections: ["deploy", "proxy"],
   },
   {
     key: "databases",
     title: "Run databases",
     stage: "stable",
     products: ["postgres", "mongodb", "redis"],
-    sections: ["databases", "backups", "docker"],
+    sections: ["databases", "backups"],
   },
   {
     key: "workspace",
@@ -82,21 +85,21 @@ export const PURPOSES = [
     title: "Manage containers",
     stage: "experimental",
     products: ["docker", "docker-compose", "terminal"],
-    sections: ["docker", "files", "terminal"],
+    sections: ["docker"],
   },
   {
     key: "network",
     title: "Route the network",
     stage: "experimental",
-    products: ["wireguard", "tailscale", "nginx"],
-    sections: ["network", "proxy", "security"],
+    products: ["wireguard", "tailscale", "adguard"],
+    sections: ["network"],
   },
   {
     key: "secure",
     title: "Secure the server",
     stage: "experimental",
     products: ["crowdsec", "fail2ban", "netfilter"],
-    sections: ["security", "network", "packages", "audit", "backups", "system-users"],
+    sections: ["security"],
   },
 ] as const satisfies readonly {
   key: string
@@ -158,14 +161,10 @@ export function purposeShown(
 }
 
 /**
- * The hidden sections after a purpose is pressed. One that is wholly shown
- * leaves the rail, keeping what another wholly shown purpose still uses, so
- * dropping Ship apps does not take Docker from somebody running databases —
- * unless that keeps all of it: Run databases is three of Ship apps' six, and
- * a press that changed nothing would read as one that did not register, so
- * then every section it needs goes and Ship apps is left partly shown. Any
- * other comes back whole. Sections the account is not offered are never
- * touched — a switch for them would decide nothing.
+ * The hidden sections after a purpose is pressed: one that is wholly shown
+ * leaves the rail, and any other comes back whole. Purposes share no section,
+ * so a press never touches another card. Sections the account is not offered
+ * are left alone — a switch for them would decide nothing.
  */
 export function pressPurpose(
   key: PurposeKey,
@@ -173,18 +172,11 @@ export function pressPurpose(
   offered: ReadonlySet<string>,
 ): Set<string> {
   const next = new Set(hidden)
-  const sections = offeredSections(key, offered)
-  if (!purposeShown(key, hidden, offered)) {
-    for (const section of sections) next.delete(section)
-    return next
+  const shown = purposeShown(key, hidden, offered)
+  for (const section of offeredSections(key, offered)) {
+    if (shown) next.add(section)
+    else next.delete(section)
   }
-  const kept = new Set(
-    PURPOSES.filter(
-      (purpose) => purpose.key !== key && purposeShown(purpose.key, hidden, offered),
-    ).flatMap((purpose) => purpose.sections),
-  )
-  const own = sections.filter((section) => !kept.has(section))
-  for (const section of own.length > 0 ? own : sections) next.add(section)
   return next
 }
 

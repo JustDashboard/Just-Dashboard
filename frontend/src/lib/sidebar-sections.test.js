@@ -35,11 +35,9 @@ describe("sectionOf", () => {
 })
 
 describe("hiddenFor", () => {
-  test("hides every section no chosen purpose uses, in the rail's order", () => {
+  test("hides every section no chosen purpose brings, in the rail's order", () => {
     expect(hiddenFor(["databases"])).toEqual(
-      SECTION_KEYS.filter(
-        (key) => ![...BASE_SECTIONS, "databases", "backups", "docker"].includes(key),
-      ),
+      SECTION_KEYS.filter((key) => ![...BASE_SECTIONS, "databases", "backups"].includes(key)),
     )
   })
 
@@ -50,15 +48,8 @@ describe("hiddenFor", () => {
   })
 
   // The answer a new account gets if it only presses Continue.
-  test("the stable three leave only the network and its protection out", () => {
-    expect(hiddenFor(STABLE_PURPOSES)).toEqual(["network", "security"])
-  })
-
-  test("shows a section two purposes share once", () => {
-    const hidden = hiddenFor(["ship", "databases"])
-    expect(hidden).not.toContain("backups")
-    expect(hidden).not.toContain("docker")
-    expect(new Set(hidden).size).toBe(hidden.length)
+  test("the stable three leave out exactly what the experimental three bring", () => {
+    expect(hiddenFor(STABLE_PURPOSES)).toEqual(["docker", "network", "security"])
   })
 
   test("hides all but the base when nothing is chosen, and nothing when everything is", () => {
@@ -75,7 +66,18 @@ describe("hiddenFor", () => {
   })
 })
 
-describe("stages", () => {
+describe("categories", () => {
+  // A section two cards shared made one of them a press that changed nothing.
+  test("every section is one purpose's or the base's, and only one", () => {
+    const owners = SECTION_KEYS.map((key) => [
+      ...PURPOSES.filter((purpose) => purpose.sections.includes(key)).map((purpose) => purpose.key),
+      ...(BASE_SECTIONS.includes(key) ? ["base"] : []),
+    ])
+    for (const [index, owner] of owners.entries()) {
+      expect(owner, SECTION_KEYS[index]).toHaveLength(1)
+    }
+  })
+
   test("a new account starts with the three finished purposes, and they come first", () => {
     expect(STABLE_PURPOSES).toEqual(["ship", "databases", "workspace"])
     expect(PURPOSES.slice(0, 3).map((purpose) => purpose.key)).toEqual(STABLE_PURPOSES)
@@ -99,20 +101,12 @@ describe("pressPurpose", () => {
     expect(purposeShown("workspace", next, all)).toBe(true)
   })
 
-  test("drops a shown purpose but keeps what another shown purpose uses", () => {
-    const shown = new Set(hiddenFor(["ship", "databases"]))
-    const next = pressPurpose("ship", shown, all)
-    for (const kept of ["databases", "backups", "docker"]) expect(next.has(kept)).toBe(false)
-    for (const gone of ["deploy", "proxy", "git"]) expect(next.has(gone)).toBe(true)
-    expect(purposeShown("databases", next, all)).toBe(true)
-  })
-
-  test("takes a purpose wholly out when every section it needs is another's too", () => {
-    const shown = new Set(hiddenFor(["ship", "databases"]))
+  test("takes a shown purpose out and leaves every other card as it was", () => {
+    const shown = new Set(hiddenFor(STABLE_PURPOSES))
     const next = pressPurpose("databases", shown, all)
-    for (const gone of ["databases", "backups", "docker"]) expect(next.has(gone)).toBe(true)
-    expect(purposeShown("databases", next, all)).toBe(false)
-    expect(purposeShown("ship", next, all)).toBe(false)
+    expect([...next].sort()).toEqual(["backups", "databases", "docker", "network", "security"])
+    expect(purposeShown("ship", next, all)).toBe(true)
+    expect(purposeShown("workspace", next, all)).toBe(true)
   })
 
   test("leaves the sections the account is not offered alone", () => {

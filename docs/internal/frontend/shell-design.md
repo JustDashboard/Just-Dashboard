@@ -80,7 +80,12 @@ a list of sections kept out of its sidebar — stored on the account (`users.hid
 to every browser rather than living in this one's storage. `lib/sidebar-sections.ts` names the
 sections that can be hidden — the first segment of their path: Deployments, Databases, Docker, the
 six Workspace tools, Network, Proxy & TLS, Security, Backups, Packages, System users and the audit
-log — and the purposes the question offers, each the sections it needs. Overview, Monitoring,
+log — and the purposes the question offers, each the sections it brings. Every section belongs to
+exactly one purpose or to the base, so every card turns on something no other card does: Ship apps
+is Deployments and Proxy & TLS, Run databases is Databases and Backups, Work on the server is the six
+Workspace tools, and the experimental three are Docker, Network and Security, one each. Until this
+was a partition, Manage containers brought nothing the stable three had not, and Route the network
+and Secure the server brought the same two rows. Overview, Monitoring,
 Settings and the account cannot be hidden: a rail without them has no way to say how the machine is,
 or back to the switch. Packages, System users and the audit log can be, but every answer keeps them
 (`BASE_SECTIONS`): they are how the machine itself is changed and checked, whatever it is for.
@@ -119,8 +124,9 @@ screens, centred on arrival's ground (`.auth-backdrop`, design system §16), the
    Manage containers, Route the network and Secure the server, which work but are still being
    tested, so they say so beside their shelf's name and are taken only by somebody who presses them.
    On a server that already has projects or saved databases, those cards carry the count.
-   *Continue* saves the sidebar they keep (`hiddenFor`, which always keeps `BASE_SECTIONS`); *Show
-   me everything* hides nothing and goes straight to the dashboard.
+   *Continue* saves the sidebar they keep (`hiddenFor`, which always keeps `BASE_SECTIONS`), so the
+   defaults leave out exactly what the experimental three bring — Docker, Network and Security;
+   *Show me everything* hides nothing and goes straight to the dashboard.
 2. **The answer**: `ServerPicture` (`components/onboarding/server-picture.tsx`) filling the screen —
    this server's rack in the middle, named and marked with its distribution, each purpose chosen a
    card of its products around it on an ellipse, with an `AnimatedBeam` running out to each — and one
@@ -141,9 +147,8 @@ but the rail. *What you use this server for* is the question's purposes on the s
 lit cards (`PurposePicker`), each its three products, its name and the sections it means with the
 ones out of the rail dimmed; *Ask me again* goes back to `/welcome`. Only sections are stored, so a
 purpose is chosen when every section of it the role is offered is shown (`purposeShown`); pressing a
-chosen one takes out what no other chosen purpose uses, or all of it when another holds every one —
-Run databases inside Ship apps — so a press always changes something (`pressPurpose`), and pressing
-any other brings it back whole. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
+chosen one takes its sections out and pressing any other brings them back whole (`pressPurpose`).
+Purposes share no section, so a press never moves another card. Beside it, *Sidebar* is the rail itself (`SidebarEditor`), walked
 from the same registry in its groups and order with a switch on every row the role may hide;
 Overview, Monitoring and Settings say *Always* instead, and Server configuration heads the three
 sections it holds. A list of sections beside a separate picture of the rail was the same list twice.
