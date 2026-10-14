@@ -66,6 +66,7 @@ export function SidePanel({
   footer,
   width = "lg",
   initialFocus = "first",
+  onCloseAutoFocus,
   bodyClassName,
   className,
   children,
@@ -84,6 +85,7 @@ export function SidePanel({
    * value wants the body, because landing in it selects that value.
    */
   initialFocus?: "first" | "body"
+  onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>["onCloseAutoFocus"]
   bodyClassName?: string
   className?: string
   children: React.ReactNode
@@ -97,7 +99,8 @@ export function SidePanel({
         side="right"
         className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[width], className)}
         onCloseAutoFocus={(event) => {
-          if (restoreFocus?.()) event.preventDefault()
+          onCloseAutoFocus?.(event)
+          if (!event.defaultPrevented && restoreFocus?.()) event.preventDefault()
         }}
         onOpenAutoFocus={
           initialFocus === "body"

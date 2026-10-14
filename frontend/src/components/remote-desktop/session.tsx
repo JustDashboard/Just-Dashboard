@@ -130,6 +130,7 @@ export function RemoteSession({
   const [immersive, setImmersive] = useState(false)
   const narrow = useMediaQuery("(max-width: 1279px)")
   const [mobileTools, setMobileTools] = useState(false)
+  const toolsTrigger = useRef<HTMLButtonElement>(null)
   const [playing, setPlaying] = useState(false)
   const [tools, setTools] = useViewState("remote-desktop.tools", true)
   const [rail, setRail] = useViewState("remote-desktop.rail", true)
@@ -596,6 +597,7 @@ export function RemoteSession({
               </IconAction>
             )}
             <IconAction
+              ref={toolsTrigger}
               label={toolsOpen ? "Hide the session tools" : "Show the session tools"}
               onClick={() => (narrow ? setMobileTools((held) => !held) : setTools((held) => !held))}
             >
@@ -723,6 +725,10 @@ export function RemoteSession({
             <SidePanel
               open={mobileTools}
               onOpenChange={setMobileTools}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                toolsTrigger.current?.focus({ preventScroll: true })
+              }}
               title="Session tools"
               width="sm"
               bodyClassName="p-0"

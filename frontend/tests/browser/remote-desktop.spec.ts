@@ -516,11 +516,16 @@ for (const width of [390, 1024]) {
     await expect(
       tools.getByRole("switch", { name: "Show this computer's pointer too" }),
     ).toBeVisible()
-    await tools.getByRole("radio", { name: /Control/ }).click()
+    await tools.getByRole("radio", { name: /Screen Sharing/ }).click()
     await page.getByRole("button", { name: "Show the session tools" }).click()
     await expect(tools.getByLabel("Text to paste on studio-mac")).toBeVisible()
     await tools.getByRole("button", { name: "Close", exact: true }).click()
-    await expect(page.getByRole("button", { name: "Show the session tools" })).toBeVisible()
+    const trigger = page.getByRole("button", { name: "Show the session tools" })
+    await expect(trigger).toBeFocused()
+    await trigger.press("Enter")
+    await expect(tools).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(trigger).toBeFocused()
   })
 }
 
