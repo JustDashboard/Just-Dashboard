@@ -2301,18 +2301,27 @@ The passes, in order. Each one is a diff you can review on its own.
    count and narrow, and wires in `key-map.tsx`, where each key reaches the API through the role it
    carries: called today pulses, never called is dashed, about to stop is amber. The users page's four
    (accounts, administrators, two-factor, signed in this week) are an identity line whose verdict is
-   how many accounts a password alone opens — a press narrowing the cards to exactly those — and
-   `people-band.tsx`, System users' band for the dashboard's own people: last sign-ins as dots in each
-   account's hue on an axis ending now, two-factor as one bar of the accounts by whether a code is
-   asked, roles as one bar in the ladder's hues. Sessions had no tiles, and gained the path each
-   session takes (`session-map.tsx`: browser, network, server) and each row's life on an axis every row
-   shares, from its sign-in to its expiry with *now* one hairline through all of them. Security gained
+   how many accounts a password alone opens — a press narrowing the cards to exactly those — the
+   chips over the cards, and each card's own readings: its role, what guards it, when it last signed
+   in. A band of three blocks stood between the line and the cards for a while — last sign-ins as dots
+   on an axis ending now, two-factor and roles as share bars — and went at the operator's request ("I
+   don't need the metrics"): every figure in it was already on the cards under it. Sessions had no
+   tiles, and gained the path each session takes (`session-map.tsx`: browser, network, server). Its
+   rows carried each session's life as a bar on an axis every row shared, and that went too, at the
+   operator's request: a dot on a dashed line said less than the *seen 5h ago* beside it. Security gained
    what a sign-in passes (`sign-in-path.tsx`), where an account with no second factor is a dashed ring
    with an amber line bowed past it from the password to the server, and its sections went two to a
    row as Configuration's are. The capability rows became a ladder of the three roles
    (`role-ladder.tsx`), lit in each rung's hue up to the account's own, so the powers past it say why
    a page is missing from the sidebar. A role's hue (`ROLE_HUE`: cyan, green, violet — none red or
-   amber) is the same on the ladder, the users' Roles bar, the keys' role nodes and every role tag.
+   amber) is the same on the ladder, the keys' role nodes and every role tag.
+   The three fan pictures — the profile's, Sessions' and the keys' — draw every node at Configuration's
+   scale, which the operator named as the picture to match: a full-size (`lg`) tile, a word over its
+   name in the eyebrow and a line of detail under it, with addresses in mono. A session's eyebrow is
+   what it is doing (*this device*, green while open; *seen 5h ago*), its detail its address and what
+   let it in; a key's eyebrow is its role; a network's is what it is to the server (*Tailnet*,
+   *Network*, *Loopback*); a role's is *Role*. The shared pieces are `SessionState` and `keyHint` in
+   `components/account/marks.tsx`. On a phone the fans keep only their marks, one size up from before.
    The reads behind every wire, chip and verdict are `components/account/access.ts` (unit-tested).
 
    The Security section took a second pass in 0.7.1, because the operator found its pages grey and

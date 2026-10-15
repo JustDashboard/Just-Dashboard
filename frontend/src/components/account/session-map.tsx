@@ -14,28 +14,34 @@ import { ProductGlyph } from "@/components/product-logo"
 import {
   activeNow,
   byNetwork,
-  placeOn,
   sessionGuard,
   sessionLine,
   type Guard,
   type Line,
 } from "@/components/account/access"
-import { SessionWireMark } from "@/components/account/marks"
+import { SessionState, SessionWireMark } from "@/components/account/marks"
 
 /** How many sessions the picture draws before it counts the rest. */
 const SHOWN = 6
 
 /**
- * Each network's hue, the same on its node's sessions in the list's
- * lifetime bars: Tailscale in its own blue, the open internet in violet —
- * neither red nor amber, because arriving from the internet is a fact about
- * a session rather than a verdict on it.
+ * Each network's hue on its node: Tailscale in its own blue, the open
+ * internet in violet — neither red nor amber, because arriving from the
+ * internet is a fact about a session rather than a verdict on it.
  */
 export const NETWORK_HUE: Record<NetworkKind, string> = {
   tailscale: "var(--tag-blue)",
   local: "var(--tag-cyan)",
   server: "var(--tag-slate)",
   internet: "var(--tag-violet)",
+}
+
+/** What each network is to the server, as the word over its node — Configuration's "Tailnet". */
+const NETWORK_EYEBROW: Record<NetworkKind, string> = {
+  tailscale: "Tailnet",
+  local: "Network",
+  server: "Loopback",
+  internet: "Network",
 }
 
 export const GUARD_WORDS: Record<Guard, string> = {
@@ -51,7 +57,9 @@ export const GUARD_WORDS: Record<Guard, string> = {
  * the server: the browsers and programs on the left as themselves, the
  * networks they came in on in the middle — the tailnet as Tailscale, the rest
  * as the place they are — and this server on the right. Configuration's
- * request path, for every session at once.
+ * request path, for every session at once, and drawn at its scale: every
+ * node is a full-size tile with a word over its name and a line of detail
+ * under it, the address in mono.
  *
  * The page is read to answer "is every one of these me", and the picture
  * answers it before a word is read: a session open now pulses down its
@@ -105,7 +113,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
       tone: lines.some((l) => l.tone === "warning") ? "warning" : "default",
     }
     const mark = (
-      <WireMark tone="logo" size={wide ? "md" : "sm"}>
+      <WireMark tone="logo" size={wide ? "lg" : "md"}>
         {network.product ? (
           <ProductGlyph id={network.product} />
         ) : (
@@ -130,6 +138,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             nodeRef={networkRef[network.kind]}
             align="center"
             mark={mark}
+            eyebrow={NETWORK_EYEBROW[network.kind]}
             title={<span className="inline-block first-letter:uppercase">{network.label}</span>}
             hint={`${network.sessions.length} ${network.sessions.length === 1 ? "session" : "sessions"}`}
           />
@@ -146,11 +155,11 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
   const hint = open > 0 ? `${open} open now` : "none open now"
 
   return (
-    <div ref={container} className="relative mx-auto w-full max-w-5xl py-2">
+    <div ref={container} className="relative w-full py-4">
       <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid grid-cols-[minmax(0,1.1fr)_minmax(2rem,0.35fr)_auto_minmax(2rem,0.35fr)_minmax(0,0.9fr)] items-center">
-          <div role="group" aria-label="Sessions" className="flex flex-col items-end gap-5">
+          <div role="group" aria-label="Sessions" className="flex flex-col items-end gap-6">
             {left}
             {ordered.length > SHOWN && (
               <p className="text-hint text-muted-foreground">
@@ -159,7 +168,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             )}
           </div>
           <div aria-hidden />
-          <div role="group" aria-label="Networks" className="flex flex-col gap-16 pb-12">
+          <div role="group" aria-label="Networks" className="flex flex-col gap-20 pb-16">
             {middle}
           </div>
           <div aria-hidden />
@@ -180,7 +189,7 @@ export function SessionMap({ sessions }: { sessions: SessionInfo[] }) {
             {middle}
           </div>
           <div ref={server} className="relative z-10 mt-10 flex">
-            <WireHost size="md" />
+            <WireHost />
           </div>
           <p className="mt-2 text-hint text-muted-foreground">
             {ordered.length} signed in · {hint}
@@ -230,7 +239,7 @@ function SessionNode({
       <div className="min-w-0">
         {beam}
         <div ref={node} className="relative z-10 flex">
-          <SessionWireMark userAgent={session.userAgent} size="sm" />
+          <SessionWireMark userAgent={session.userAgent} />
         </div>
         <span className="sr-only">{`${describeClient(session.userAgent)}: ${state}`}</span>
       </div>
@@ -241,85 +250,19 @@ function SessionNode({
       <WireNode
         nodeRef={node}
         align="end"
-        mark={<SessionWireMark userAgent={session.userAgent} />}
+        mark={<SessionWireMark userAgent={session.userAgent} size="lg" />}
+        eyebrow={<SessionState session={session} now={now} />}
         title={describeClient(session.userAgent)}
         hint={
           <>
+            <span className="numeric font-mono">{session.ip}</span>
+            {" · "}
             <span className={cn(line.tone === "warning" && "text-warning")}>
               {GUARD_WORDS[guard]}
             </span>
-            {" · "}
-            <span className={cn(activeNow(session, now) && "text-success")}>{state}</span>
           </>
         }
       />
     </div>
-  )
-}
-
-/**
- * A session's life on the axis every row shares: solid from its sign-in to
- * when it was last seen, in its network's hue, then dashed to when it
- * expires, with "now" one hairline through every row. A dot marks the last
- * time it was seen, breathing while it is open — so a session signed in a
- * month ago and never seen since reads as a short stroke a long way left.
- */
-export function SessionSpan({
-  session,
-  axis,
-  now,
-  kind,
-}: {
-  session: SessionInfo
-  axis: { from: number; to: number }
-  now: number
-  kind: NetworkKind
-}) {
-  const start = placeOn(new Date(session.createdAt).getTime(), axis)
-  const seen = placeOn(new Date(session.lastSeenAt).getTime(), axis)
-  const end = placeOn(new Date(session.expiresAt).getTime(), axis)
-  const here = placeOn(now, axis)
-  const hue = NETWORK_HUE[kind]
-  const open = activeNow(session, now)
-  return (
-    <span
-      role="img"
-      aria-label={`Signed in ${relativeTime(session.createdAt)}, seen ${relativeTime(session.lastSeenAt)}, expires ${relativeTime(session.expiresAt)}`}
-      className="relative block h-3 w-full"
-    >
-      <span aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-hairline" />
-      <span
-        aria-hidden
-        className="absolute inset-y-0 w-px bg-muted-foreground/40"
-        style={{ left: `${here}%` }}
-      />
-      <span
-        aria-hidden
-        className="absolute top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-[width,left] duration-700 ease-out"
-        style={{ left: `${start}%`, width: `${Math.max(seen - start, 0.5)}%`, background: hue }}
-      />
-      <span
-        aria-hidden
-        className="absolute top-1/2 h-0 -translate-y-1/2 border-t border-dashed transition-[width,left] duration-700 ease-out"
-        style={{
-          left: `${seen}%`,
-          width: `${Math.max(end - seen, 0)}%`,
-          borderColor: `color-mix(in oklab, ${hue} 60%, transparent)`,
-        }}
-      />
-      <span
-        aria-hidden
-        className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2"
-        style={{ left: `${seen}%` }}
-      >
-        {open && (
-          <span
-            className="absolute -inset-1 animate-breathe rounded-full"
-            style={{ background: hue }}
-          />
-        )}
-        <span className="absolute inset-0 rounded-full" style={{ background: hue }} />
-      </span>
-    </span>
   )
 }

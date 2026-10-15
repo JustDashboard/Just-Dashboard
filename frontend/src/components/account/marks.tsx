@@ -11,10 +11,12 @@ import {
   Terminal,
 } from "@/components/icons"
 import { keyProduct, parseAgent } from "@/lib/clients"
-import type { DashboardUser } from "@/lib/types"
+import { relativeTime } from "@/lib/format"
+import type { ApiToken, DashboardUser, SessionInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { WireMark } from "@/components/deploy/wire"
+import { activeNow } from "@/components/account/access"
 import { UserAvatar } from "@/components/account/user-avatar"
 
 type Size = "lg" | "md" | "sm"
@@ -133,4 +135,32 @@ export function WireMore({
       +{count}
     </Link>
   )
+}
+
+/**
+ * A session's eyebrow on a wire: what it is doing, green while it is open —
+ * the word over the mark that Configuration's nodes carry ("You", "Proxy"),
+ * so every node in a picture reads eyebrow, name, detail.
+ */
+export function SessionState({ session, now }: { session: SessionInfo; now: number }) {
+  const open = session.current || activeNow(session, now)
+  return (
+    <span className={cn(open && "text-success")}>
+      {session.current
+        ? "this device"
+        : open
+          ? "active now"
+          : `seen ${relativeTime(session.lastSeenAt)}`}
+    </span>
+  )
+}
+
+/** When a key was last called and when it stops: the line under its name on a wire. */
+export function keyHint(token: ApiToken) {
+  return [
+    token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used",
+    token.expiresAt && `expires ${relativeTime(token.expiresAt)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 }

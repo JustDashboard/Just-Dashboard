@@ -12,7 +12,15 @@ import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { useNow } from "@/components/deploy/vocabulary"
 import { activeNow, keyLine, sessionLine, usableKeys, type Line } from "@/components/account/access"
-import { AccountWireMark, KeyWireMark, SessionWireMark, WireMore } from "@/components/account/marks"
+import {
+  AccountWireMark,
+  KeyWireMark,
+  SessionState,
+  SessionWireMark,
+  WireMore,
+  keyHint,
+} from "@/components/account/marks"
+import { ROLE_NAME } from "@/components/account/capabilities"
 import { displayNameOf } from "@/components/account/user-avatar"
 
 /** How many marks each side of the picture draws before it counts the rest. */
@@ -33,8 +41,11 @@ const SHOWN = 4
  * understood one of them has understood this one.
  *
  * Wide, the three balance across the page the way Notifications' fan-out
- * does. On a phone the two lists already name everything, so the picture
- * shrinks to the marks, the lines running down through the account.
+ * does, every node drawn at Configuration's scale — a full-size tile with a
+ * word over its name and a line of detail under it — because that is the
+ * picture the reader already knows how to read. On a phone the two lists
+ * already name everything, so the picture shrinks to the marks, the lines
+ * running down through the account.
  */
 export function AccessPicture({
   user,
@@ -65,7 +76,7 @@ export function AccessPicture({
   )
   const shownSessions = ordered.slice(0, SHOWN)
   const shownKeys = usable.slice(0, SHOWN)
-  const size = wide ? "md" : "sm"
+  const size = wide ? "lg" : "md"
   const name = displayNameOf(user)
 
   const left = (
@@ -79,8 +90,14 @@ export function AccessPicture({
           compact={!wide}
           line={sessionLine(session, now)}
           mark={<SessionWireMark userAgent={session.userAgent} size={size} />}
+          eyebrow={<SessionState session={session} now={now} />}
           title={describeClient(session.userAgent)}
-          hint={sessionHint(session, now)}
+          hint={
+            <>
+              {networkOf(session.ip).label} ·{" "}
+              <span className="numeric font-mono">{session.ip}</span>
+            </>
+          }
           label={`${describeClient(session.userAgent)}, ${sessionHint(session, now)}`}
         />
       ))}
@@ -116,9 +133,10 @@ export function AccessPicture({
           compact={!wide}
           line={keyLine(token, now)}
           mark={<KeyWireMark name={token.name} size={size} />}
+          eyebrow={ROLE_NAME[token.role]}
           title={<span className="font-mono">{token.name}</span>}
           hint={keyHint(token)}
-          label={`Key ${token.name}, ${keyHint(token)}`}
+          label={`Key ${token.name}, ${ROLE_NAME[token.role]}, ${keyHint(token)}`}
         />
       ))}
       {usable.length > SHOWN && (
@@ -169,11 +187,11 @@ export function AccessPicture({
       : "password only"
 
   return (
-    <div ref={container} className="relative mx-auto w-full max-w-5xl py-2">
+    <div ref={container} className="relative w-full py-4">
       <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.45fr)_auto_minmax(3rem,0.45fr)_minmax(0,1fr)] items-center pb-8">
-          <div role="group" aria-label="Signed in" className="flex flex-col items-end gap-5">
+          <div role="group" aria-label="Signed in" className="flex flex-col items-end gap-6">
             <Lane href="/account/sessions" count={sessions.length} noun="session" align="end" />
             {left}
           </div>
@@ -189,7 +207,7 @@ export function AccessPicture({
             }
           />
           <div aria-hidden />
-          <div role="group" aria-label="API keys" className="flex flex-col gap-5">
+          <div role="group" aria-label="API keys" className="flex flex-col gap-6">
             {keys && <Lane href="/account/keys" count={usable.length} noun="key" align="start" />}
             {right}
           </div>
@@ -275,6 +293,7 @@ function Spoke({
   compact,
   line,
   mark,
+  eyebrow,
   title,
   hint,
   label,
@@ -285,6 +304,7 @@ function Spoke({
   compact: boolean
   line: Line
   mark: React.ReactNode
+  eyebrow?: React.ReactNode
   title: React.ReactNode
   hint?: React.ReactNode
   label?: string
@@ -319,6 +339,7 @@ function Spoke({
         nodeRef={node}
         align={side === "in" ? "end" : "start"}
         mark={mark}
+        eyebrow={eyebrow}
         title={title}
         hint={hint}
       />
@@ -331,9 +352,4 @@ export function sessionHint(session: SessionInfo, now: number) {
   if (session.current) return `${network} · this device`
   if (activeNow(session, now)) return `${network} · active now`
   return `${network} · seen ${relativeTime(session.lastSeenAt)}`
-}
-
-function keyHint(token: ApiToken) {
-  const use = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
-  return `${token.role} · ${use}`
 }

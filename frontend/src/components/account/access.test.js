@@ -8,10 +8,7 @@ import {
   inKeyScope,
   inUserScope,
   keyLine,
-  lastSignIns,
-  lifetimeAxis,
   peopleVerdict,
-  placeOn,
   sessionGuard,
   sessionLine,
   usableKeys,
@@ -95,21 +92,6 @@ test("sessions group by the network they came in on, the tailnet first", () => {
   expect(groups[0].product).toBe("tailscale")
 })
 
-test("every session's life shares one axis, from the oldest sign-in to the last expiry", () => {
-  const axis = lifetimeAxis(
-    [
-      session({ createdAt: ago(9 * DAY), expiresAt: ahead(21 * DAY) }),
-      session({ createdAt: ago(3 * DAY), expiresAt: ahead(27 * DAY) }),
-    ],
-    NOW,
-  )
-  expect(axis).toEqual({ from: NOW - 9 * DAY, to: NOW + 27 * DAY })
-  expect(placeOn(NOW, axis)).toBeCloseTo(25)
-  expect(placeOn(NOW - 30 * DAY, axis)).toBe(0)
-  // No sessions still gives "now" room either side.
-  expect(lifetimeAxis([], NOW)).toEqual({ from: NOW - HOUR, to: NOW + HOUR })
-})
-
 test("a key's wire pulses when called today, is dashed when never called, amber near its end", () => {
   expect(keyLine(key({ lastUsedAt: ago(2 * HOUR) }), NOW)).toEqual({
     still: false,
@@ -167,22 +149,6 @@ test("the user chips narrow by role and by what guards an account", () => {
   expect(ids("bare")).toEqual([2])
   expect(ids("never")).toEqual([2])
   expect(ids("disabled")).toEqual([3])
-})
-
-test("last sign-ins split by the window and count who never signed in", () => {
-  const { within, older, never } = lastSignIns(
-    [
-      user({ id: 1, lastLoginAt: ago(2 * HOUR) }),
-      user({ id: 2, lastLoginAt: ago(10 * MINUTE) }),
-      user({ id: 3, lastLoginAt: ago(40 * DAY) }),
-      user({ id: 4, lastLoginAt: "0001-01-01T00:00:00Z" }),
-    ],
-    NOW,
-    7 * DAY,
-  )
-  expect(within.map((e) => e.user.id)).toEqual([2, 1])
-  expect(older).toBe(1)
-  expect(never).toBe(1)
 })
 
 test("required two-factor warns for every enabled unenrolled account and excludes disabled accounts", () => {
