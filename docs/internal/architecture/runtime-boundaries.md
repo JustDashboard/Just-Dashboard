@@ -145,6 +145,15 @@ clears the counter with the account update.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
+The account keys page replaces an owned key through the existing create route, followed by an
+optional, separately confirmed revoke after the tool has switched credentials. The old key remains
+valid until revoked or expired; creating a replacement does not impersonate another owner.
+`DELETE /tokens/{id}` revokes and retains the record. The session-only
+`DELETE /tokens/{id}/record` additionally requires `system.admin` and `s.destructive`; it deletes
+only revoked or expired metadata through `auth.DeleteInactiveAPIToken`'s conditional SQL write.
+An active record returns `409 token_active`, an absent record `404`, and a successful deletion is
+audited as `dashboard.token.delete` with its token ID. Removing a record never deletes the audit
+trail. No schema change or credential recovery is involved.
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
