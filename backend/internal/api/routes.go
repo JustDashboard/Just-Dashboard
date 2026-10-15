@@ -170,6 +170,12 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 			r.Use(httpx.RequireSession)
 			r.Method(http.MethodPost, "/", s.handle(s.handleCreateToken))
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleRevokeToken))
+			r.Group(func(r chi.Router) {
+				r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+				s.destructive(r, func(r chi.Router) {
+					r.Method(http.MethodDelete, "/{id}/record", s.handle(s.handleDeleteTokenRecord))
+				})
+			})
 		})
 	})
 

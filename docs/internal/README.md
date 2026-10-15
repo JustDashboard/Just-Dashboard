@@ -110,6 +110,10 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-15-api-keys/README.md`](../audits/2026-10-15-api-keys/README.md)
+  — researched key lifecycle improvements, discovery filters, replacement handoff, inactive-record
+  deletion with retained audit, focused verification and before/after images.
+
 - [`../audits/2026-10-14-current-non-network-fixes/README.md`](../audits/2026-10-14-current-non-network-fixes/README.md)
   — follow-up repairs for retained board/proxy drafts, image revisions, streamed authentication,
   measured account/security wording and atomic concurrent backup edits.

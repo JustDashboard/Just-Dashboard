@@ -186,6 +186,7 @@ free.
 - System users, an audit log of every change and the panel's own settings
 - Address, certificate, allowlist and ports applied with automatic rollback
 - Roles, two-factor, sessions and API keys for every account
+- Search and replace API keys, with explicit revocation and inactive-record cleanup
 - A first-run question that keeps the sections you don't use out of your sidebar
 - One-click self-update, with the release notes compiled in
 
@@ -299,6 +300,13 @@ that existed before 0.7.3 are not asked and keep every section.
 **Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
 followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and
 sessions.
+
+**API keys:** under **Account → API keys**, search by name, prefix, role or owner and filter keys
+that have never been used, have been unused for 30 days, expire soon or have no expiry. **Replace key**
+creates a new credential for your account; copy it into your tool and check it works before choosing
+**Revoke previous key**. Revocation immediately stops access and keeps the record in the folded
+**Revoked or expired** history. An administrator can use **Delete record** there to remove inactive
+metadata; the audit trail is kept. A key's secret is shown only once.
 
 ## Terminal admin scripts
 
