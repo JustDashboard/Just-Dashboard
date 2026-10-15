@@ -4,8 +4,8 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * The account pages after their 0.7.5 pass, against a mocked API: no page
  * opens on tiles; the profile wires everything signed in as the account into
  * its face, sessions are drawn as the path each takes to the server, keys as
- * what holds them wired through their role, users by their faces in a band
- * over cards that chips narrow, and Security opens on what a sign-in passes.
+ * what holds them wired through their role, users by their faces on cards
+ * that chips narrow, and Security opens on what a sign-in passes.
  */
 
 const now = Date.now()
@@ -213,6 +213,8 @@ test("the profile opens on the account's identity line and what is signed in as 
   // Maria's grafana key is hers, not something signed in as this account.
   await expect(keyring.locator('img[src="/logos/grafana.svg"]')).toHaveCount(0)
   await expect(keyring).toContainText("never used")
+  // Each key carries its role over its name, as Configuration's nodes carry theirs.
+  await expect(keyring).toContainText("Limited")
 
   // The ladder lights up to this account's role and says what each adds.
   const ladder = page.getByRole("list", { name: "Roles" })
@@ -262,9 +264,15 @@ test("sessions are the browser, the system and the network each came from", asyn
   // Written lower case and set with a capital, as a sentence would start.
   await expect(networks).toContainText("local network")
   await expect(networks).toContainText("internet")
-  await expect(page.getByRole("group", { name: "Sessions" })).toContainText("owes a code")
-  // Each other session's life on the shared axis.
-  await expect(phone.getByRole("img", { name: /^Signed in .* expires/ })).toBeVisible()
+  // Each session is drawn as Configuration's nodes are: what it is doing
+  // over its name, its address and what let it in under it.
+  const drawn = page.getByRole("group", { name: "Sessions" })
+  await expect(drawn).toContainText("owes a code")
+  await expect(drawn).toContainText("this device")
+  await expect(drawn).toContainText("203.0.113.7")
+  await expect(page.getByRole("group", { name: "Networks" })).toContainText("Tailnet")
+  // The rows carry no lifetime line: when a session was seen is its words.
+  await expect(phone.getByRole("img", { name: /^Signed in .* expires/ })).toHaveCount(0)
 })
 
 test("keys are drawn as what holds them, wired through their role", async ({ page }) => {
@@ -308,7 +316,7 @@ test("keys are drawn as what holds them, wired through their role", async ({ pag
   ).toBeVisible()
 })
 
-test("users are cards drawn by their faces, under a band of who they are", async ({ page }) => {
+test("users are cards drawn by their faces, under the line that counts them", async ({ page }) => {
   await mockAccount(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto("/account/users")
@@ -317,10 +325,8 @@ test("users are cards drawn by their faces, under a band of who they are", async
   await expect(line).toContainText("4 accounts")
   await expect(line).toContainText("2 administrators")
 
-  const band = page.locator("[data-slot=people-band]")
-  await expect(band.getByRole("list", { name: "Sign-ins" })).toContainText("Ion Moisei")
-  await expect(band).toContainText(/1\s*of 3 ask for a code/)
-  await expect(band).toContainText("Administrator")
+  // The band of sign-ins, two-factor and roles went: each card says them.
+  await expect(page.locator("[data-slot=people-band]")).toHaveCount(0)
 
   const cards = page.locator("[data-slot=choice-row]")
   await expect(cards).toHaveCount(4)
@@ -441,8 +447,6 @@ for (const required of [false, true]) {
         ? "1 administrator must enrol before signing in"
         : "1 administrator on a password alone",
     )
-    const band = page.locator("[data-slot=people-band]")
-    await expect(band).toContainText(required ? /1\s*of 3 enrolled/ : /1\s*of 3 ask for a code/)
     const chip = page
       .getByRole("group", { name: "Show" })
       .getByRole("button", { name: required ? /^Enrollment required/ : /^Password only/ })
@@ -485,7 +489,6 @@ test("required enrollment remains visible when only non-administrators need a fa
   const reading = page.locator("[data-slot=host-identity]")
   await expect(reading).toContainText("2 accounts must enrol before signing in")
   await expect(reading).not.toContainText("password alone")
-  await expect(page.locator("[data-slot=people-band]")).toContainText(/1\s*of 3 enrolled/)
   await expect(
     page.getByRole("group", { name: "Show" }).getByRole("button", { name: /^Enrollment required/ }),
   ).toContainText("2")

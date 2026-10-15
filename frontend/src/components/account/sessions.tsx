@@ -4,7 +4,7 @@ import { DesktopDevice, Terminal } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { plural, relativeTime } from "@/lib/format"
-import { describeClient, networkOf, parseAgent } from "@/lib/clients"
+import { describeClient, parseAgent } from "@/lib/clients"
 import type { SessionInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { DimActions } from "@/components/icon-action"
@@ -16,8 +16,8 @@ import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { useNow } from "@/components/deploy/vocabulary"
-import { activeNow, lifetimeAxis } from "@/components/account/access"
-import { SessionMap, SessionSpan } from "@/components/account/session-map"
+import { activeNow } from "@/components/account/access"
+import { SessionMap } from "@/components/account/session-map"
 
 export function useSessions() {
   return usePoll((signal) => get<SessionInfo[]>("/account/sessions", undefined, signal), 20000)
@@ -83,7 +83,6 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
   const others = (data ?? [])
     .filter((s) => !s.current)
     .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
-  const axis = lifetimeAxis(data ?? [], now)
 
   return (
     <Panel plain>
@@ -121,25 +120,15 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
                   </span>
                 }
                 trailing={
-                  <>
-                    <span className="hidden w-56 xl:block">
-                      <SessionSpan
-                        session={session}
-                        axis={axis}
-                        now={now}
-                        kind={networkOf(session.ip).kind}
-                      />
-                    </span>
-                    <span className="flex justify-end sm:w-24">
-                      {activeNow(session, now) ? (
-                        <Status tone="running" label="active now" />
-                      ) : (
-                        <span className="hidden text-xs text-muted-foreground sm:inline">
-                          seen {relativeTime(session.lastSeenAt)}
-                        </span>
-                      )}
-                    </span>
-                  </>
+                  <span className="flex justify-end sm:w-24">
+                    {activeNow(session, now) ? (
+                      <Status tone="running" label="active now" />
+                    ) : (
+                      <span className="hidden text-xs text-muted-foreground sm:inline">
+                        seen {relativeTime(session.lastSeenAt)}
+                      </span>
+                    )}
+                  </span>
                 }
               >
                 <DimActions>

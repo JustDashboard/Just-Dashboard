@@ -37,7 +37,6 @@ import {
   peopleVerdict,
   type UserScope,
 } from "@/components/account/access"
-import { PeopleBand } from "@/components/account/people-band"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { cn } from "@/lib/utils"
@@ -307,8 +306,8 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
   const list = useRef<HTMLDivElement>(null)
   const { data, error, loading, refresh } = users
 
-  // A press in the band narrows the cards and brings them into view, as a
-  // verdict's press does on the System users page.
+  // A press on the verdict narrows the cards and brings them into view, as
+  // it does on the System users page.
   const narrow = (next: UserScope) => {
     setScope(next)
     list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -427,7 +426,6 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
         onScope={narrow}
         action={<CreateDashboardUserDialog onDone={refresh} />}
       />
-      <PeopleBand users={data} require2fa={require2fa} onScope={narrow} />
       <Panel plain ref={list} className="scroll-mt-6">
         <PanelHeader
           title="Accounts"

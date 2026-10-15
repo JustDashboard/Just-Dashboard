@@ -4,7 +4,7 @@ import type { ApiToken, DashboardUser, Role, SessionInfo } from "@/lib/types"
 /**
  * The account pages' reads, kept apart from what draws them so each one is a
  * fact a test can pin: whether a session is open right now, what proved it,
- * how a key's line is drawn, where a sign-in falls on an axis.
+ * how a key's line is drawn, which accounts a password alone opens.
  *
  * A wire in these pictures says one of four things, the same four the
  * deployment and Configuration pictures say: it is carrying something now
@@ -84,29 +84,6 @@ export function byNetwork<T extends Pick<SessionInfo, "ip">>(sessions: T[]): Net
     groups.set(network.kind, group)
   }
   return NETWORK_ORDER.flatMap((kind) => groups.get(kind) ?? [])
-}
-
-/**
- * The shared axis every session's lifetime is drawn on: from the oldest
- * sign-in to the furthest expiry, so "now" is one vertical line through every
- * row and a session's length and what it has left read against each other.
- */
-export function lifetimeAxis(
-  sessions: Pick<SessionInfo, "createdAt" | "expiresAt">[],
-  now: number,
-): { from: number; to: number } {
-  const starts = sessions.map((s) => new Date(s.createdAt).getTime()).filter(Number.isFinite)
-  const ends = sessions.map((s) => new Date(s.expiresAt).getTime()).filter(Number.isFinite)
-  const from = Math.min(now - HOUR, ...starts)
-  const to = Math.max(now + HOUR, ...ends)
-  return { from, to }
-}
-
-/** Where a moment falls on an axis, 0 to 100. */
-export function placeOn(at: number, axis: { from: number; to: number }) {
-  const span = axis.to - axis.from
-  if (span <= 0) return 0
-  return Math.min(100, Math.max(0, ((at - axis.from) / span) * 100))
 }
 
 export function expired(token: Pick<ApiToken, "expiresAt">, now: number) {
@@ -221,34 +198,4 @@ export function peopleVerdict(
   const admins = bare.filter((u) => u.role === "admin").length
   if (bare.length === 0) return { tone: "running", bare: 0, admins: 0 }
   return { tone: require2fa || admins > 0 ? "warning" : "notice", bare: bare.length, admins }
-}
-
-/** The windows the sign-in axis can span, shortest first. */
-export const WINDOWS = [
-  { key: "24h", label: "24h", ms: DAY },
-  { key: "7d", label: "7d", ms: 7 * DAY },
-  { key: "30d", label: "30d", ms: 30 * DAY },
-] as const
-
-export type WindowKey = (typeof WINDOWS)[number]["key"]
-
-/**
- * Each account's last sign-in, newest first, split by whether it falls
- * inside the window; the accounts that never signed in are counted apart.
- */
-export function lastSignIns<T extends Pick<DashboardUser, "lastLoginAt">>(
-  users: T[],
-  now: number,
-  windowMs: number,
-) {
-  const all = users
-    .filter((u) => !neverSignedIn(u))
-    .map((user) => ({ user, at: new Date(user.lastLoginAt).getTime() }))
-    .filter((entry) => Number.isFinite(entry.at))
-    .sort((a, b) => b.at - a.at)
-  return {
-    within: all.filter((entry) => now - entry.at <= windowMs),
-    older: all.filter((entry) => now - entry.at > windowMs).length,
-    never: users.filter(neverSignedIn).length,
-  }
 }

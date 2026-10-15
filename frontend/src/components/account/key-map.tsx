@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, type RefObject } from "react"
-import { relativeTime } from "@/lib/format"
 import type { ApiToken, Role } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -17,7 +16,7 @@ import {
   usedToday,
   type Line,
 } from "@/components/account/access"
-import { KeyWireMark, WireMore } from "@/components/account/marks"
+import { KeyWireMark, WireMore, keyHint } from "@/components/account/marks"
 
 /** How many keys the picture draws before it counts the rest. */
 const SHOWN = 6
@@ -35,6 +34,10 @@ const SHOWN = 6
  * The roles in the middle say what each key may do without a column of
  * badges, and the line out of a role is as busy as the busiest key in it.
  * The counts went to the chips over the list below, which narrow it as well.
+ *
+ * Every node is drawn at Configuration's scale — a full-size tile with a word
+ * over its name and a line of detail under it — so the request path there
+ * and the keys' path here are one picture at one size.
  */
 export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string }) {
   const wide = useMediaQuery("(min-width: 1024px)")
@@ -52,7 +55,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
       (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""),
   )
   const shown = usable.slice(0, SHOWN)
-  const size = wide ? "md" : "sm"
+  const size = wide ? "lg" : "md"
 
   const keys = (
     <>
@@ -103,10 +106,11 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
             nodeRef={roleRef[role]}
             align="center"
             mark={
-              <WireMark tone="logo" size="md" className={held.length === 0 ? "opacity-50" : ""}>
+              <WireMark tone="logo" className={held.length === 0 ? "opacity-50" : ""}>
                 <Mark aria-hidden style={{ color: ROLE_HUE[role] }} />
               </WireMark>
             }
+            eyebrow="Role"
             title={ROLE_NAME[role]}
             hint={
               held.length === 0 ? "no key" : `${held.length} ${held.length === 1 ? "key" : "keys"}`
@@ -114,7 +118,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
           />
         ) : (
           <div ref={roleRef[role]} className="relative z-10 flex">
-            <WireMark tone="logo" size="sm" className={held.length === 0 ? "opacity-50" : ""}>
+            <WireMark tone="logo" size="md" className={held.length === 0 ? "opacity-50" : ""}>
               <Mark aria-hidden style={{ color: ROLE_HUE[role] }} />
             </WireMark>
             <span className="sr-only">{`${ROLE_NAME[role]}: ${held.length} keys`}</span>
@@ -127,15 +131,15 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
   const host = new URL(origin).host
 
   return (
-    <div ref={container} className="relative mx-auto w-full max-w-5xl py-2">
+    <div ref={container} className="relative w-full py-4">
       <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid grid-cols-[minmax(0,1.1fr)_minmax(2rem,0.35fr)_auto_minmax(2rem,0.35fr)_minmax(0,0.9fr)] items-center">
-          <div role="group" aria-label="Keys" className="flex flex-col items-end gap-5">
+          <div role="group" aria-label="Keys" className="flex flex-col items-end gap-6">
             {keys}
           </div>
           <div aria-hidden />
-          <div role="group" aria-label="Roles" className="flex flex-col gap-16 pb-12">
+          <div role="group" aria-label="Roles" className="flex flex-col gap-20 pb-16">
             {roles}
           </div>
           <div aria-hidden />
@@ -156,7 +160,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
             {roles}
           </div>
           <div ref={server} className="relative z-10 mt-10 flex">
-            <WireHost size="md" />
+            <WireHost />
           </div>
           <p className="mt-2 font-mono text-hint text-muted-foreground">{host}/api/v1</p>
         </div>
@@ -179,12 +183,7 @@ function KeyNode({
   line: Line
 }) {
   const node = useRef<HTMLDivElement>(null)
-  const hint = [
-    token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used",
-    token.expiresAt && `expires ${relativeTime(token.expiresAt)}`,
-  ]
-    .filter(Boolean)
-    .join(" · ")
+  const hint = keyHint(token)
   const beam = (
     <AnimatedBeam
       containerRef={containerRef}
@@ -203,7 +202,7 @@ function KeyNode({
       <div className="min-w-0">
         {beam}
         <div ref={node} className="relative z-10 flex">
-          <KeyWireMark name={token.name} size="sm" />
+          <KeyWireMark name={token.name} />
         </div>
         <span className="sr-only">{`${token.name}: ${hint}`}</span>
       </div>
@@ -214,7 +213,8 @@ function KeyNode({
       <WireNode
         nodeRef={node}
         align="end"
-        mark={<KeyWireMark name={token.name} />}
+        mark={<KeyWireMark name={token.name} size="lg" />}
+        eyebrow={ROLE_NAME[token.role]}
         title={<span className="font-mono">{token.name}</span>}
         hint={<span className={line.tone === "warning" ? "text-warning" : undefined}>{hint}</span>}
       />
