@@ -744,6 +744,11 @@
        tighter default tracking a dashboard wants — the palette's own value,
        now that it has one. */
     letter-spacing: var(--tracking-normal);
+    /* Chromium on Linux hints a web font and rounds every glyph's advance to a
+       whole pixel, which against that tracking broke 11–13px text into uneven
+       pieces — "No tes", "Emp ty", "Howitis listed". Geometric precision lays
+       glyphs out at their real widths there; macOS and Windows already do. */
+    text-rendering: geometricPrecision;
   }
 
   /* Tailwind v4 dropped the browser's pointer cursor on buttons, which leaves
