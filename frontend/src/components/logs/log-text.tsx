@@ -156,6 +156,7 @@ export function LogText({
   text,
   hits,
   skipTime,
+  body,
   hostname,
   className,
 }: {
@@ -164,12 +165,14 @@ export function LogText({
   hits?: [number, number][]
   /** The console shows the time in a column, so the line's own is not drawn twice. */
   skipTime?: boolean
+  /** Where the message starts, the lens having read what is before it into columns. */
+  body?: number
   /** This host's name, which syslog repeats on every line. */
   hostname?: string
   className?: string
 }) {
   const spans = tokenize(text)
-  const prefix = skipTime ? leadingTime(spans, text, hostname) : 0
+  const prefix = Math.max(skipTime ? leadingTime(spans, text, hostname) : 0, body ?? 0)
   // A search that matched the prefix itself — a hostname, a second of the
   // clock — keeps it drawn, or the line would be a result with no hit on it.
   const from = hits?.some(([start]) => start < prefix) ? 0 : prefix

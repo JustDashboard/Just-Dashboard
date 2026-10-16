@@ -139,6 +139,8 @@ type WorkspaceProps = {
    * them answers carries no count, since the tile says it over its window.
    */
   answered?: LensReadingsState
+  /** Insights without its row of figures, for a section that draws no tiles. */
+  insightTiles?: false
   /** A page's verbs for one line — "Block this address" on an auth line. */
   lineVerbs?: (line: LogLine) => Verb[]
   /** One column of a workbench that draws the frame: no frame of its own. */
@@ -642,6 +644,7 @@ export function LogWorkspace(props: WorkspaceProps) {
       ) : mode === "insights" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Insights
+            tiles={props.insightTiles}
             sourceId={sourceId}
             lens={lens}
             lensId={lensId}

@@ -52,6 +52,8 @@ const GROUP_ROWS = 20
 const BY_SAMPLE_ONLY = new Set(["fp"])
 
 type InsightsProps = {
+  /** False leaves out the row of figures over the chart. */
+  tiles?: false
   sourceId: string
   lens: LogLens | undefined
   /** The lens the lines are read through, which names event values. */
@@ -148,14 +150,16 @@ export function Insights(props: InsightsProps) {
           key={runId}
           className={cn("flex flex-col transition-opacity", loading && "opacity-60")}
         >
-          <Readings
-            overview={answer.overview}
-            lens={lens}
-            lensId={lensId}
-            loading={loading}
-            filter={filter}
-            onFilterChange={onFilterChange}
-          />
+          {props.tiles !== false && (
+            <Readings
+              overview={answer.overview}
+              lens={lens}
+              lensId={lensId}
+              loading={loading}
+              filter={filter}
+              onFilterChange={onFilterChange}
+            />
+          )}
           {answer.overview.histogram.length > 0 && (
             <Histogram
               className="animate-rise"

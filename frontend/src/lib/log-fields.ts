@@ -107,10 +107,21 @@ export const LOG_FIELDS: Record<string, LogField> = {
 
   // What went wrong.
   code: { label: "code", kind: "code" },
+  // A SQLSTATE's class in a word: constraint, syntax or access, auth.
+  error_class: { label: "error class", kind: "code" },
+  reason: { label: "reason", kind: "code" },
   severity: { label: "severity", kind: "code" },
   error: { label: "error", kind: "text", filterable: false },
 
+  // A session and what it waited on: kept apart from duration_ms, which is a
+  // statement's own time.
+  session_ms: { label: "session", kind: "duration" },
+  wait_ms: { label: "waited", kind: "duration" },
+  lock: { label: "lock", kind: "code" },
+  auth_method: { label: "auth method", kind: "code" },
+
   // A checkpoint.
+  interval_s: { label: "apart", kind: "text" },
   buffers: { label: "buffers", kind: "text" },
   write_s: { label: "write", kind: "text" },
   sync_s: { label: "sync", kind: "text" },
