@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { statementVerb } from "@/components/database/home/kinds"
 import { compact } from "@/components/database/home/readings"
 import { CodeView, EngineMark } from "@/components/database/kit"
 import { oneLine } from "@/components/database/ops/queries"
@@ -271,6 +272,10 @@ export function StatementsView() {
                                 className="block h-full rounded-full bg-primary"
                                 style={{
                                   width: `${Math.max(longest > 0 ? (statement.share / longest) * 100 : 0, 1)}%`,
+                                  // In the hue of what the statement does, the
+                                  // home's ranking's: one heavy write among
+                                  // reads shows before it is read.
+                                  background: statementVerb(statement.query)?.color,
                                 }}
                               />
                             </span>

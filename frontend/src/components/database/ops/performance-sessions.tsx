@@ -29,6 +29,9 @@ import {
 } from "@/components/ui/table"
 import { compact } from "@/components/database/home/readings"
 import { EngineMark } from "@/components/database/kit"
+import { DbClientMark } from "@/components/database/client-mark"
+import { clientOf, type KnownClient } from "@/components/database/clients"
+import { useKnownClients } from "@/components/database/use-known-clients"
 import {
   SESSION_STATES,
   THRESHOLDS,
@@ -140,7 +143,9 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
   const stopping = useStops(activity.refresh)
   const stops = stopping.can
 
+  const known = useKnownClients()
   const rowProps = {
+    known,
     held,
     queued,
     stops,
@@ -285,6 +290,8 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
 }
 
 type RowTools = {
+  /** What uses this database, for drawing a session as the deployment it names. */
+  known: ReadonlyMap<string, KnownClient>
   held: Map<string, string[]>
   /** How many sessions stand behind each, however long the queue. */
   queued: Map<string, number>
@@ -330,6 +337,17 @@ function StateFigure({ session }: { session: DbActivity }) {
       {seconds < 1 && seconds > 0 ? "<1s" : duration(seconds)}
     </span>
   )
+}
+
+/** The program a session is, as its logo: the deployment it names, or what its name says. */
+function ClientTile({
+  session,
+  known,
+}: {
+  session: DbActivity
+  known: ReadonlyMap<string, KnownClient>
+}) {
+  return <DbClientMark product={clientOf(session.application, known).product} self={session.self} />
 }
 
 /** Who a session is: the account and the application, each in its own hue. */
@@ -449,7 +467,7 @@ function SessionRows({
   continued,
   ...tools
 }: { sessions: DbActivity[]; continued?: boolean } & RowTools) {
-  const { queued, wide, onOpen } = tools
+  const { known, queued, wide, onOpen } = tools
   if (!wide) {
     return (
       <ul className="divide-y divide-hairline border-y border-hairline">
@@ -472,6 +490,7 @@ function SessionRows({
               className="flex w-full min-w-0 flex-col gap-1 rounded-sm text-left text-xs focus-ring"
             >
               <span className="flex min-w-0 items-center gap-2">
+                <ClientTile session={session} known={known} />
                 <span className="font-mono text-muted-foreground">{session.pid}</span>
                 <Who session={session} />
               </span>
@@ -489,7 +508,7 @@ function SessionRows({
     <Table className="table-fixed">
       <colgroup>
         <col className="w-40" />
-        <col className="w-48" />
+        <col className="w-56" />
         <col className="w-14" />
         <col className="w-40" />
         <col />
@@ -521,10 +540,15 @@ function SessionRows({
               </span>
             </TableCell>
             <TableCell className="px-2 py-2">
-              <Who session={session} />
-              <span className="flex min-w-0 items-center gap-1.5 font-mono text-hint text-muted-foreground">
-                <span>{session.pid}</span>
-                {session.client && <span className="truncate">· {session.client}</span>}
+              <span className="flex min-w-0 items-center gap-2.5">
+                <ClientTile session={session} known={known} />
+                <span className="min-w-0">
+                  <Who session={session} />
+                  <span className="flex min-w-0 items-center gap-1.5 font-mono text-hint text-muted-foreground">
+                    <span>{session.pid}</span>
+                    {session.client && <span className="truncate">· {session.client}</span>}
+                  </span>
+                </span>
               </span>
             </TableCell>
             <TableCell className="px-2 py-2 text-right">
