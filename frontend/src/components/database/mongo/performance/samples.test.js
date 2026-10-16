@@ -6,6 +6,7 @@ import {
   lifetimeTargeting,
   rate,
   ratio,
+  recordedServers,
   reportsNothing,
   runningWords,
   seriesOf,
@@ -189,5 +190,56 @@ describe("a server that reports no counters", () => {
     expect(reportsNothing(sample(0))).toBe(false)
     // A storage engine with no cache still counts its operations.
     expect(reportsNothing(sample(0, { cache: null }))).toBe(false)
+  })
+})
+
+describe("the recorder's snapshots", () => {
+  const snapshot = (seconds, over = {}) => ({
+    at: 0,
+    stats: {
+      server: {
+        timestamp: 1_790_000_000_000 + seconds * 1000,
+        host: "mongo-1",
+        version: "8.0.4",
+        process: "mongod",
+        uptime: 1000 + seconds,
+        opcounters: { query: seconds * 10, command: seconds * 20 },
+        connections: { current: 12, available: 388, totalCreated: 900 },
+        network: { bytesIn: seconds * 100, bytesOut: seconds * 400, numRequests: 1 },
+        mem: { resident: 291, virtual: 906 },
+        documents: { returned: seconds * 30 },
+        scanned: { documents: seconds * 90 },
+        queue: { queuedReaders: 0, queuedWriters: 0 },
+        cache: { bytes: 64, maxBytes: 256, dirtyBytes: 1 },
+        ...over,
+      },
+    },
+  })
+
+  test("read as samples on the server's clock, without the reads that failed", () => {
+    const servers = recordedServers([
+      snapshot(0),
+      { at: 0, stats: { error: "connection refused" } },
+      snapshot(30),
+    ])
+    expect(servers.map((server) => server.timestamp)).toEqual([
+      1_790_000_000_000, 1_790_000_030_000,
+    ])
+    expect(servers[0].memory.resident).toBe(291)
+    expect(servers[0].topology).toBe("standalone")
+    const rows = statRows(servers)
+    expect(rows[1].query).toBe(10)
+    expect(rows[1].netOut).toBe(400)
+  })
+
+  test("keep no latency, so the interval has no mean rather than a wrong one", () => {
+    const rows = statRows([...recordedServers([snapshot(0)]), sample(3)])
+    expect(rows[1].readLatency).toBeNull()
+  })
+
+  test("know a replica set by its name", () => {
+    expect(recordedServers([snapshot(0, { repl: { setName: "rs0" } })])[0].topology).toBe(
+      "replicaset",
+    )
   })
 })

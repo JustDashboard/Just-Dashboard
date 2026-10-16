@@ -6,10 +6,10 @@ import type { MongoServer } from "@/components/database/mongo/types"
  * `serverStatus` counts things from the moment the server started —
  * operations, bytes, documents returned — and a count since start says
  * nothing about now. Two samples do: the difference between them, over the
- * time between them on the server's own clock, is a rate. The page keeps the
- * samples it has taken since it was opened and derives every rate from
- * neighbouring pairs, so nothing here is recorded history and nothing claims
- * to be.
+ * time between them on the server's own clock, is a rate. The page opens on
+ * the recorder's last hour of the same counters (`recordedServers`) and keeps
+ * the samples it takes from then on, deriving every rate from neighbouring
+ * pairs.
  */
 
 /** How many samples are kept: a few minutes at the page's pace. */
@@ -44,6 +44,100 @@ export function rate(
 ): number | null {
   if (before === undefined || after === undefined || seconds <= 0 || after < before) return null
   return (after - before) / seconds
+}
+
+const number = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0
+const record = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
+
+/** What the recorder keeps no reading of: the latency counters are read only on this page. */
+const UNRECORDED = {
+  readsMicros: NaN,
+  readsOps: NaN,
+  writesMicros: NaN,
+  writesOps: NaN,
+  commandsMicros: NaN,
+  commandsOps: NaN,
+}
+
+/**
+ * The recorder's snapshots of this server as samples. The recorder keeps a
+ * part of `serverStatus` every thirty seconds while the dashboard runs —
+ * the operation counters, connections, network, documents, the queue and
+ * the cache — stamped on the server's own clock as this page's samples are,
+ * so the charts open on the last hour it kept and carry on from there
+ * (`joinRecorded`). It keeps no latency counters, so that one chart starts
+ * with the page. A snapshot that is not one — a read that failed — is left out.
+ */
+export function recordedServers(
+  snapshots: readonly { at: number; stats: unknown }[],
+): MongoServer[] {
+  return snapshots.flatMap((snapshot) => {
+    const server = record(record(snapshot?.stats).server)
+    const timestamp = server.timestamp
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return []
+    const connections = record(server.connections)
+    const network = record(server.network)
+    const memory = record(server.mem)
+    const documents = record(server.documents)
+    const scanned = record(server.scanned)
+    const queue = record(server.queue)
+    const cache = server.cache ? record(server.cache) : undefined
+    const set = record(server.repl).setName
+    return [
+      {
+        timestamp,
+        host: String(server.host ?? ""),
+        version: String(server.version ?? ""),
+        process: String(server.process ?? ""),
+        uptime: number(server.uptime),
+        storageEngine: String(server.storageEngine ?? ""),
+        topology: set ? "replicaset" : "standalone",
+        role: (server.role as MongoServer["role"]) || "standalone",
+        opcounters: Object.fromEntries(
+          Object.entries(record(server.opcounters)).map(([kind, count]) => [kind, number(count)]),
+        ),
+        connections: {
+          current: number(connections.current),
+          available: number(connections.available),
+          active: number(connections.active),
+          totalCreated: number(connections.totalCreated),
+        },
+        network: {
+          bytesIn: number(network.bytesIn),
+          bytesOut: number(network.bytesOut),
+          numRequests: number(network.numRequests),
+        },
+        memory: { resident: number(memory.resident), virtual: number(memory.virtual) },
+        cache: cache
+          ? {
+              bytes: number(cache.bytes),
+              maxBytes: number(cache.maxBytes),
+              dirtyBytes: number(cache.dirtyBytes),
+              pagesRead: number(cache.pagesRead),
+              pagesWritten: number(cache.pagesWritten),
+            }
+          : null,
+        documents: {
+          inserted: number(documents.inserted),
+          returned: number(documents.returned),
+          updated: number(documents.updated),
+          deleted: number(documents.deleted),
+        },
+        scanned: { keys: number(scanned.keys), documents: number(scanned.documents) },
+        queue: {
+          activeReaders: number(queue.activeReaders),
+          activeWriters: number(queue.activeWriters),
+          queuedReaders: number(queue.queuedReaders),
+          queuedWriters: number(queue.queuedWriters),
+        },
+        latency: UNRECORDED,
+        cursors: { open: 0, timedOut: 0 },
+        asserts: {},
+      },
+    ]
+  })
 }
 
 /** The six kinds of operation the server counts, in the order a chart stacks them. */
@@ -106,6 +200,9 @@ export function statRows(samples: readonly MongoServer[]): StatRow[] {
       if (!before) return null
       const micros = time(sample) - time(before)
       const operations = count(sample) - count(before)
+      // A recorded snapshot keeps no latency: an interval that starts or ends
+      // on one has no mean to state.
+      if (!Number.isFinite(micros) || !Number.isFinite(operations)) return null
       return micros < 0 || operations <= 0 ? null : micros / operations
     }
     const cache = sample.cache

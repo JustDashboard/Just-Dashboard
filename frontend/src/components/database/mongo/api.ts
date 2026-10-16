@@ -1,5 +1,6 @@
 import { del, get, patch, post, put } from "@/lib/api"
 import { uploadForm } from "@/components/database/data/upload"
+import { recordedServers } from "@/components/database/mongo/performance/samples"
 import type {
   MongoAggregateResult,
   MongoClassification,
@@ -326,6 +327,19 @@ export function analyseSchema(
 export function mongoServer(id: number, signal?: AbortSignal) {
   return get<unknown>(`${at(id)}/mongo/server`, undefined, signal).then((answer) =>
     shaped<MongoServer>(answer, "opcounters", "the server's counters"),
+  )
+}
+
+/** The recorder's last hour of this server's counters, oldest first: what the charts open on. */
+export function mongoRecorded(id: number, signal?: AbortSignal) {
+  return get<unknown>(`${at(id)}/stats/history`, { hours: 1 }, signal).then((answer) =>
+    recordedServers(
+      shaped<{ samples: { at: number; stats: unknown }[] }>(
+        answer,
+        "samples",
+        "the recorded counters",
+      ).samples ?? [],
+    ),
   )
 }
 
