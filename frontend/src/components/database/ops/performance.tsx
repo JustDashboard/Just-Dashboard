@@ -208,6 +208,9 @@ function Answering() {
             stats={answer}
             loading={stats.loading}
             error={stats.error}
+            hours={stats.hours}
+            onHours={stats.setHours}
+            activity={engine.can("sessions") && !analytic ? activity : undefined}
           />
         ) : view === "file" ? (
           <FileView />

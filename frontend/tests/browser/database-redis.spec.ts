@@ -1969,6 +1969,48 @@ test.describe("performance", () => {
     await expect(page.getByRole("row").filter({ hasText: "db7" })).toContainText("41")
   })
 
+  test("performance opens on the recorder's last hour, each chart headed by its reading", async ({
+    page,
+  }) => {
+    await mockRedis(page)
+    const opened = Date.now()
+    const at = (index: number) => opened - 90_000 + index * 30_000
+    // Registered over the fixture's, so it answers first.
+    await page.route("**/api/v1/databases/4/stats/history**", (route) =>
+      route.fulfill({
+        json: {
+          everySeconds: 30,
+          retentionHours: 168,
+          samples: [0, 1, 2].map((index) => ({
+            at: at(index),
+            gap: false,
+            stats: {
+              server: {
+                sampledAtMs: at(index),
+                counters: {
+                  total_commands_processed: index * 30_000,
+                  keyspace_hits: index * 2_700,
+                  keyspace_misses: index * 300,
+                  used_memory: 8_000_000,
+                  connected_clients: 3,
+                },
+              },
+            },
+          })),
+        },
+      }),
+    )
+    // The page's own clock stands still: whatever rate is read is the recorder's.
+    await page.clock.install({ time: new Date(opened) })
+    await page.clock.pauseAt(new Date(opened + 1_000))
+    await page.goto(PERFORMANCE)
+
+    await expect(page.getByText("The last hour as the recorder kept it")).toBeVisible()
+    await expect(page.getByText("Commands, newest reading: 1,000/s commands")).toBeAttached()
+    await expect(page.getByText("Hits, newest reading: 90.0% hit")).toBeAttached()
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  })
+
   test("memory is analysed when asked, and says how much was measured", async ({ page }) => {
     const redis = await mockRedis(page)
     await page.goto(`${PERFORMANCE}?view=memory`)

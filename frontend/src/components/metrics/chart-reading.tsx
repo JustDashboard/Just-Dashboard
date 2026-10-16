@@ -56,3 +56,35 @@ export function ChartReading({
     </span>
   )
 }
+
+/** A chart head's readings, at its end, wrapping under one another on a narrow chart. */
+export function ChartReadings({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">{children}</span>
+  )
+}
+
+/** One series' newest reading, keyed by its line; a dash while it has none. */
+export function SeriesReading({
+  series,
+  value,
+  format,
+  note,
+  meter,
+}: {
+  series: { label: string; color: string }
+  value: number | null | undefined
+  format: (value: number) => string
+  note: string
+  meter?: number
+}) {
+  return (
+    <ChartReading
+      label={`${series.label}, newest reading`}
+      color={series.color}
+      value={value === null || value === undefined ? "—" : format(value)}
+      note={note}
+      meter={meter}
+    />
+  )
+}

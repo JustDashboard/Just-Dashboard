@@ -487,12 +487,13 @@ function eyebrowOf(node: DbTopoNode): string {
 }
 
 /** A busier link pulses quicker: three seconds idle, a second and a half at a dozen sessions. */
-function pulseFor(sessions: number): number {
+export function pulseFor(sessions: number): number {
   if (sessions <= 0) return 3
   return Math.max(1.2, 3 - Math.log2(sessions + 1) * 0.5)
 }
 
-function Lane({
+/** One lane of a picture: its name and count over its nodes. Performance's picture draws its lanes with it too. */
+export function Lane({
   title,
   count,
   className,

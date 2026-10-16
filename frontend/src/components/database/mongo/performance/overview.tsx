@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { bytes, duration, rate } from "@/lib/format"
 import type { PollState } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartReadings, SeriesReading } from "@/components/metrics/chart-reading"
 import type { Series } from "@/components/metrics/metric-chart"
 import { Detail, DetailList, RowLink } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -17,7 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { BusiestCollections } from "@/components/database/mongo/performance/busiest"
-import type { StatRow } from "@/components/database/mongo/performance/samples"
+import { latest, type StatRow } from "@/components/database/mongo/performance/samples"
 import { DatabaseMark } from "@/components/database/mongo/rail"
 import type { MongoDatabase, MongoServer } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
@@ -26,6 +27,8 @@ import { ReadError } from "@/components/database/redis/read-error"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a
 // formatter made fresh each render would redraw every chart on every sample.
+// Each line in its measurement's hue (§10), the database home's: connections
+// blue with the working green, as a SQL server's sessions are.
 const OPERATIONS: Series[] = [
   { key: "reads", label: "Queries", color: "var(--chart-1)", kind: "area" },
   { key: "insert", label: "Inserts", color: "var(--chart-5)", kind: "area" },
@@ -33,9 +36,11 @@ const OPERATIONS: Series[] = [
   { key: "delete", label: "Deletes", color: "var(--chart-3)", kind: "area" },
   { key: "command", label: "Commands", color: "var(--chart-2)", kind: "area" },
 ]
+/** The stack's total, as its head reads it: every kind at once. */
+const ALL_OPERATIONS = { label: "Operations", color: "var(--chart-2)" }
 const CONNECTIONS: Series[] = [
   { key: "connections", label: "Open", color: "var(--chart-2)", kind: "area" },
-  { key: "active", label: "Doing work", color: "var(--chart-1)", kind: "line" },
+  { key: "active", label: "Doing work", color: "var(--chart-5)", kind: "line" },
 ]
 const CACHE: Series[] = [
   { key: "cacheBytes", label: "In the cache", color: "var(--chart-2)", kind: "area" },
@@ -67,13 +72,13 @@ const microsLabel = (value: number) => micros(value)
 const grouped = (n: number) => n.toLocaleString("en-US")
 
 /**
- * The page's own samples as charts, and the readings that sit under them:
- * which collections the work is on, what the server is, and what each
- * database on it holds.
+ * The server's counters as charts, each headed by its newest reading, and the
+ * readings that sit under them: which collections the work is on, what the
+ * server is, and what each database on it holds.
  *
- * The charts are live samples and say so. A rate needs two of them, so a
- * chart is empty for the first few seconds, and a series the server does not
- * report is left out rather than drawn at zero.
+ * The charts open on the recorder's last hour and carry on with the page's
+ * own samples. A series the server does not report is left out rather than
+ * drawn at zero.
  */
 export function OverviewView({
   mongo,
@@ -82,6 +87,7 @@ export function OverviewView({
   databases,
   everyMs,
   silent,
+  recorded,
 }: {
   mongo: Mongo
   rows: StatRow[]
@@ -90,6 +96,8 @@ export function OverviewView({
   everyMs: number
   /** The server reports no counters: there is nothing to chart, and the page says so above. */
   silent: boolean
+  /** The rows open on the recorder's hour, before the page's own samples. */
+  recorded: boolean
 }) {
   const waiting = `A rate is the difference between two readings: the first appears ${Math.round((everyMs * 2) / 1000)} seconds after the page opens.`
   // Queries and the cursors that continue them are one kind of work to a reader.
@@ -106,6 +114,10 @@ export function OverviewView({
   const most = rows.reduce((top, row) => Math.max(top, row.connections, row.active), 0)
   const connectionScale = useMemo(() => countScale(most), [most])
   const hasCache = rows.some((row) => row.cacheBytes !== null)
+  const limit = server ? server.connections.current + server.connections.available : 0
+  const open = latest(rows, "connections")
+  const cacheCeiling = server?.cache?.maxBytes ?? 0
+  const cached = latest(rows, "cacheBytes")
 
   const serverPanel = (
     <Panel plain>
@@ -161,6 +173,16 @@ export function OverviewView({
               plain
               stacked
               title="Operations"
+              actions={
+                <ChartReadings>
+                  <SeriesReading
+                    series={ALL_OPERATIONS}
+                    value={latest(rows, "ops")}
+                    format={perSecondLabel}
+                    note="operations"
+                  />
+                </ChartReadings>
+              }
               rows={charted}
               series={OPERATIONS}
               format={perSecondLabel}
@@ -169,6 +191,23 @@ export function OverviewView({
             <ChartPanel
               plain
               title="Connections"
+              actions={
+                <ChartReadings>
+                  <SeriesReading
+                    series={CONNECTIONS[0]}
+                    value={open}
+                    format={wholeLabel}
+                    note={limit > 0 ? `of ${grouped(limit)}` : "open"}
+                    meter={limit > 0 && open !== null ? (open / limit) * 100 : undefined}
+                  />
+                  <SeriesReading
+                    series={CONNECTIONS[1]}
+                    value={latest(rows, "active")}
+                    format={wholeLabel}
+                    note="working"
+                  />
+                </ChartReadings>
+              }
               rows={charted}
               series={CONNECTIONS}
               format={countLabel}
@@ -180,6 +219,21 @@ export function OverviewView({
               <ChartPanel
                 plain
                 title="Cache"
+                actions={
+                  <ChartReadings>
+                    <SeriesReading
+                      series={CACHE[0]}
+                      value={cached}
+                      format={bytesLabel}
+                      note={cacheCeiling > 0 ? `of ${bytes(cacheCeiling)}` : "cached"}
+                      meter={
+                        cacheCeiling > 0 && cached !== null
+                          ? (cached / cacheCeiling) * 100
+                          : undefined
+                      }
+                    />
+                  </ChartReadings>
+                }
                 rows={charted}
                 series={CACHE}
                 format={bytesLabel}
@@ -189,6 +243,22 @@ export function OverviewView({
             <ChartPanel
               plain
               title="Documents"
+              actions={
+                <ChartReadings>
+                  <SeriesReading
+                    series={DOCUMENTS[0]}
+                    value={latest(rows, "scanned")}
+                    format={perSecondLabel}
+                    note="examined"
+                  />
+                  <SeriesReading
+                    series={DOCUMENTS[1]}
+                    value={latest(rows, "returned")}
+                    format={perSecondLabel}
+                    note="returned"
+                  />
+                </ChartReadings>
+              }
               rows={charted}
               series={DOCUMENTS}
               format={perSecondLabel}
@@ -197,6 +267,22 @@ export function OverviewView({
             <ChartPanel
               plain
               title="Time an operation takes"
+              actions={
+                <ChartReadings>
+                  <SeriesReading
+                    series={LATENCY[0]}
+                    value={latest(rows, "readLatency")}
+                    format={microsLabel}
+                    note="a read"
+                  />
+                  <SeriesReading
+                    series={LATENCY[1]}
+                    value={latest(rows, "writeLatency")}
+                    format={microsLabel}
+                    note="a write"
+                  />
+                </ChartReadings>
+              }
               rows={charted}
               series={LATENCY}
               format={microsLabel}
@@ -205,6 +291,22 @@ export function OverviewView({
             <ChartPanel
               plain
               title="Network"
+              actions={
+                <ChartReadings>
+                  <SeriesReading
+                    series={NETWORK[0]}
+                    value={latest(rows, "netIn")}
+                    format={rateLabel}
+                    note="in"
+                  />
+                  <SeriesReading
+                    series={NETWORK[1]}
+                    value={latest(rows, "netOut")}
+                    format={rateLabel}
+                    note="out"
+                  />
+                </ChartReadings>
+              }
               rows={charted}
               series={NETWORK}
               format={rateLabel}
@@ -212,8 +314,9 @@ export function OverviewView({
             />
           </div>
           <p className="text-hint text-muted-foreground">
-            Sampled every {Math.round(everyMs / 1000)} seconds since this page was opened. Nothing
-            here is recorded: the charts start again when the page does.
+            {recorded
+              ? `The last hour as the recorder kept it, every 30 seconds, then sampled every ${Math.round(everyMs / 1000)} seconds since this page was opened. How long an operation takes is read only here, so its chart starts with the page.`
+              : `Sampled every ${Math.round(everyMs / 1000)} seconds since this page was opened. The recorder has kept nothing for this server yet.`}
           </p>
         </>
       )}
