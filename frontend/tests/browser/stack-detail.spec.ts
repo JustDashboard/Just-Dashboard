@@ -386,16 +386,15 @@ test("progress: Compose output is visible inside the confirmation while the comm
           ],
         }),
       )
-      const overlay = dialog.locator("[data-slot=operation-overlay]")
-      await expect(overlay).toContainText("Waiting for the container")
-      const title = await dialog.getByRole("heading").boundingBox()
+      const progress = dialog.locator("[data-slot=operation-progress]")
+      await expect(progress).toContainText("Waiting for the container")
+      // The latest line shares the footer with the buttons: cut to one line
+      // there rather than growing the footer as the command talks.
       const cancel = await dialog.getByRole("button", { name: "Cancel", exact: true }).boundingBox()
-      const box = await overlay.boundingBox()
-      expect(box!.y).toBeGreaterThanOrEqual(title!.y + title!.height)
-      expect(box!.y + box!.height).toBeLessThanOrEqual(cancel!.y)
-      expect(await overlay.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
-        true,
-      )
+      const box = await progress.boundingBox()
+      expect(box!.height).toBeLessThanOrEqual(cancel!.height + 2)
+      const line = progress.locator("p").last()
+      expect(await line.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
     },
     dialog.locator("[data-slot=operation-progress]"),
     async () => {

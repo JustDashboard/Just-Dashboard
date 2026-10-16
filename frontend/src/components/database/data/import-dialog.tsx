@@ -1,5 +1,4 @@
 "use client"
-import { OperationProgress } from "@/components/operation-progress"
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CloudUpload } from "@/components/icons"
@@ -379,21 +378,19 @@ export function ImportDialog({
             : "A table made from a file's columns and filled with its rows, previewed first"
         }
         progress={
-          run.pending && (
-            <OperationProgress
-              label={progress.words}
-              completed={progress.sending ? run.sent : undefined}
-              total={progress.sending ? run.total : undefined}
-              showCount={false}
-            />
-          )
+          run.pending && {
+            label: progress.words,
+            completed: progress.sending ? run.sent : undefined,
+            total: progress.sending ? run.total : undefined,
+            showCount: false,
+          }
         }
         footer={
           done ? (
             <Button onClick={() => close(false)}>Done</Button>
           ) : (
             <>
-              {run.error && !run.pending ? (
+              {run.pending ? null : run.error ? (
                 // Why the import did not happen, beside the button that was
                 // pressed: the body may be scrolled anywhere, and said at its
                 // top the refusal was out of sight with nothing changed on screen.

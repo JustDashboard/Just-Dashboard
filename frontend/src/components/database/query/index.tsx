@@ -1,6 +1,4 @@
 "use client"
-import { OperationProgress } from "@/components/operation-progress"
-import { OperationOverlay } from "@/components/operation-overlay"
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -560,14 +558,6 @@ export function SqlQuery() {
 
   return (
     <SectionFrame section="query">
-      {exporter.progress && (
-        <OperationOverlay>
-          <OperationProgress {...exporter.progress} />
-          <Button size="sm" variant="outline" onClick={exporter.cancel}>
-            Cancel export
-          </Button>
-        </OperationOverlay>
-      )}
       {/* One frame around the whole workbench: the rail and the editor are
           columns of one working surface, with a hairline between them. */}
       <div

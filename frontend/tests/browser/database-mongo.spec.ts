@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
-import { heldResponse, recordProgress, streamedExport } from "./progress-recording"
+import { heldResponse, recordProgress } from "./progress-recording"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -2663,22 +2663,6 @@ for (const [label, viewport] of [
     }
   })
 }
-
-test("progress: MongoDB export exposes bytes in the workbench", async ({ page }) => {
-  await mockMongo(page)
-  const finish = await streamedExport(page, "/databases/5/mongo/export")
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto(collection("orders"))
-  await page.getByRole("button", { name: "Export", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Export orders" })
-  await recordProgress(
-    page,
-    "database-mongo-export",
-    () => dialog.getByRole("button", { name: "Export", exact: true }).click(),
-    page.locator("[data-slot=operation-progress]"),
-    finish,
-  )
-})
 
 test("progress: MongoDB import waits for document writes after sending the file", async ({
   page,

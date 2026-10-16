@@ -9,7 +9,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 
 import { Field, FormFacts } from "@/components/form"
 import { Modal } from "@/components/modal"
-import { OperationProgress, type OperationReading } from "@/components/operation-progress"
+import type { OperationReading } from "@/components/operation-progress"
 
 export type ConfirmRequest = {
   /** Short title, e.g. "Remove container". */
@@ -119,7 +119,7 @@ function ConfirmBody({
       open
       onOpenChange={(open) => !busy && onOpenChange(open)}
       title={request.title}
-      progress={busy && <OperationProgress {...progress} startedAt={startedAt} />}
+      progress={busy && { ...progress, startedAt }}
       footer={
         <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>

@@ -19,7 +19,6 @@ import { ConflictList, NetworkChangeDialog } from "@/components/docker/network-c
 import { ownerLabel } from "@/components/docker/networks"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
-import { OperationProgress } from "@/components/operation-progress"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -361,7 +360,7 @@ export function PruneDialog({
       size="sm"
       title="Remove unused networks"
       description="The networks a prune would remove, and the ones it keeps because something still names them."
-      progress={busy && <OperationProgress label="Removing unused networks…" />}
+      progress={busy && { label: "Removing unused networks…" }}
       footer={
         <>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>

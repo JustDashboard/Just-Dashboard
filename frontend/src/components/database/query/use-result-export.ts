@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchResponse, get } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { bytes } from "@/lib/format"
 import type { DbExportFormat } from "@/lib/types"
 import {
   EXPORT_ROWS,
@@ -13,7 +12,6 @@ import {
   exportReport,
 } from "@/components/database/data/export"
 import type { DbExportState } from "@/components/database/data/types"
-import type { OperationReading } from "@/components/operation-progress"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -43,7 +41,6 @@ async function settled(id: number, exportId: string): Promise<DbExportState | nu
  */
 export function useResultExport(id: number) {
   const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState<OperationReading & { startedAt: number }>()
   const flight = useRef<AbortController | null>(null)
   useEffect(() => () => flight.current?.abort(), [])
   // The toast's own "export more" asks for the same export again, larger.
@@ -59,11 +56,6 @@ export function useResultExport(id: number) {
       const toast = notify.loading("Exporting the result…", {
         action: { label: "Cancel", onClick: () => controller.abort() },
       })
-      setProgress({
-        label: "Exporting query result…",
-        detail: "0 B received",
-        startedAt: Date.now(),
-      })
       try {
         const response = await fetchResponse(`/databases/${id}/export/query`, {
           method: "POST",
@@ -75,28 +67,8 @@ export function useResultExport(id: number) {
         if (!response.body) throw new Error("The export response has no body")
         let cut = false
         let blob = new Blob([])
-        let received = 0
-        let lastRead = 0
-        // Observe the stream without retaining a second copy of a large export
-        // in JavaScript; the browser still owns assembling the download Blob.
-        const body = response.body.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, output) {
-              received += chunk.byteLength
-              if (Date.now() - lastRead >= 250) {
-                lastRead = Date.now()
-                setProgress((held) => held && { ...held, detail: `${bytes(received)} received` })
-              }
-              output.enqueue(chunk)
-            },
-          }),
-        )
         try {
-          blob = await new Response(body, {
-            headers: {
-              "Content-Type": response.headers.get("Content-Type") ?? "application/octet-stream",
-            },
-          }).blob()
+          blob = await response.blob()
         } catch (err) {
           if (controller.signal.aborted) throw err
           // The server ends a failed export by breaking the connection.
@@ -140,7 +112,6 @@ export function useResultExport(id: number) {
       } finally {
         flight.current = null
         setRunning(false)
-        setProgress(undefined)
       }
     },
     [id],
@@ -150,5 +121,5 @@ export function useResultExport(id: number) {
     again.current = (sql, format, limit) => void run(sql, format, limit)
   }, [run])
 
-  return { run, running, progress, cancel: () => flight.current?.abort() }
+  return { run, running }
 }

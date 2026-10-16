@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { OperationProgress, type OperationReading } from "@/components/operation-progress"
 import { ApiError, fetchResponse, errorMessage } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -46,7 +45,6 @@ export type ExportRequest = {
  */
 export function useMongoExport() {
   const [running, setRunning] = useState<string | null>(null)
-  const [progress, setProgress] = useState<OperationReading & { startedAt: number }>()
   const flight = useRef<AbortController | null>(null)
   useEffect(() => () => flight.current?.abort(), [])
 
@@ -56,11 +54,6 @@ export function useMongoExport() {
     const controller = new AbortController()
     flight.current = controller
     setRunning(target.collection)
-    setProgress({
-      label: `Exporting ${target.collection}…`,
-      detail: "0 B received",
-      startedAt: Date.now(),
-    })
     const name = target.collection
     const toast = notify.loading(`Exporting ${name}…`, {
       action: { label: "Cancel", onClick: () => controller.abort() },
@@ -90,7 +83,6 @@ export function useMongoExport() {
       const reader = response.body.getReader()
       let received = 0
       let said = 0
-      let lastRead = 0
       for (;;) {
         // The server ends a failed export by breaking the connection: the
         // read throws, and nothing is saved.
@@ -98,10 +90,8 @@ export function useMongoExport() {
         if (done) break
         parts.push(value)
         received += value.byteLength
-        if (received - said >= 1 << 20 || Date.now() - lastRead >= 250) {
+        if (received - said >= 1 << 20) {
           said = received
-          lastRead = Date.now()
-          setProgress((held) => held && { ...held, detail: `${bytes(received)} received` })
           notify.raw.loading(`Exporting ${name}… ${bytes(received)}`, { id: toast })
         }
       }
@@ -157,11 +147,10 @@ export function useMongoExport() {
     } finally {
       flight.current = null
       setRunning(null)
-      setProgress(undefined)
     }
   }
 
-  return { run, running, progress, cancel: () => flight.current?.abort() }
+  return { run, running }
 }
 
 /** What to export and how, before the file is asked for. */
@@ -429,21 +418,16 @@ export function ImportDialog({
       title={`Import into ${target.collection}`}
       description={`Add the documents of a file to ${target.collection}`}
       progress={
-        busy === "importing" && (
-          <OperationProgress
-            label={
-              sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…"
-            }
-            detail={
-              sendTotal > 0 && sent < sendTotal
-                ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
-                : "Waiting for the database to finish the import"
-            }
-            completed={sendTotal > 0 && sent < sendTotal ? sent : undefined}
-            total={sendTotal > 0 && sent < sendTotal ? sendTotal : undefined}
-            showCount={false}
-          />
-        )
+        busy === "importing" && {
+          label: sendTotal > 0 && sent >= sendTotal ? "Writing documents…" : "Uploading documents…",
+          detail:
+            sendTotal > 0 && sent < sendTotal
+              ? `${bytes(sent)} of ${bytes(sendTotal)} sent`
+              : "Waiting for the database to finish the import",
+          completed: sendTotal > 0 && sent < sendTotal ? sent : undefined,
+          total: sendTotal > 0 && sent < sendTotal ? sendTotal : undefined,
+          showCount: false,
+        }
       }
       footer={
         report ? (

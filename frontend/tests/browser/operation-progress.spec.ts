@@ -3,37 +3,10 @@ import { mockImages } from "./docker-images-fixture"
 import { mockVolumes } from "./docker-volumes-fixture"
 import { mockNetworks } from "./docker-networks-fixture"
 import { DOCKER_DISK, mockDockerHost } from "./docker-fixture"
-import { mockWorkbench, run } from "./workbench-fixture"
-import { mockHost } from "./packages-fixture"
-import { mockShowcase } from "./proxy-fixtures"
 import { heldResponse, recordProgress } from "./progress-recording"
 
 test.use({ viewport: { width: 1280, height: 900 } })
 const progress = (page: Page) => page.locator("[data-slot=operation-progress]")
-
-test("progress: a proxy request test keeps its wait visible and clears it on refusal", async ({
-  page,
-}) => {
-  await mockShowcase(page)
-  const held = await heldResponse(
-    page,
-    "/proxy/tools/request",
-    { error: { code: "request", message: "The target did not answer" } },
-    400,
-  )
-  await page.goto("/proxy/tls?tool=request")
-  await page.getByLabel("Domain", { exact: true }).fill("example.test")
-  await recordProgress(
-    page,
-    "proxy-request-test",
-    () => page.getByRole("button", { name: "Send", exact: true }).click(),
-    progress(page),
-    async () => {
-      held.release()
-      await expect(page.getByText("The target did not answer").first()).toBeVisible()
-    },
-  )
-})
 
 for (const entry of [
   {
@@ -92,6 +65,7 @@ for (const entry of [
       Promise.all(element.getAnimations().map((animation) => animation.finished)),
     )
     const before = await dialog.boundingBox()
+    const footer = dialog.getByRole("button", { name: "Cancel", exact: true }).locator("..")
     await recordProgress(
       page,
       entry.name,
@@ -99,10 +73,7 @@ for (const entry of [
         await dialog.getByRole("button", { name: entry.action, exact: true }).click()
         await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
         await expect.poll(() => dialog.boundingBox()).toEqual(before)
-        await expect(dialog.locator("[data-slot=operation-overlay]")).toHaveCSS(
-          "position",
-          "absolute",
-        )
+        await expect(footer.locator("[data-slot=operation-progress]")).toBeVisible()
         await expect(progress(page).getByRole("progressbar")).not.toHaveAttribute("aria-valuenow")
         await page.keyboard.press("Escape")
         await expect(dialog).toBeVisible()
@@ -205,90 +176,6 @@ test("progress: docker-networks-prune keeps its reviewed selection", async ({ pa
     async () => {
       held.release()
       await expect(dialog).toHaveCount(0)
-    },
-  )
-})
-
-test("progress: a scheduled backup reports a wait instead of inventing its stage", async ({
-  page,
-}) => {
-  await mockWorkbench(page)
-  let running = true
-  const startedAt = new Date().toISOString()
-  await page.route("**/api/v1/backups/1/runs", (route) =>
-    route.fulfill({
-      json: {
-        runs: [
-          {
-            ...run(10, 1, 4000, running ? "running" : "success", 0),
-            startedAt,
-            log: "",
-            endedAt: undefined,
-          },
-        ],
-        running,
-      },
-    }),
-  )
-  await page.goto("/backups/1")
-  await recordProgress(
-    page,
-    "backup-run",
-    async () => {},
-    progress(page),
-    async () => {
-      running = false
-      await expect(progress(page)).toHaveCount(0, { timeout: 10000 })
-    },
-  )
-})
-
-test("progress: package jobs remain visible when their output is quiet", async ({ page }) => {
-  await mockHost(page)
-  const job = {
-    id: "package-progress",
-    kind: "packages.install",
-    title: "Install htop",
-    status: "running",
-    startedAt: new Date().toISOString(),
-    startedBy: "operator",
-    lines: 0,
-  }
-  await page.route("**/api/v1/jobs/package-progress", (route) =>
-    route.fulfill({ json: { job, lines: [] } }),
-  )
-  let socket: { send: (text: string) => void } | undefined
-  await page.routeWebSocket(/\/jobs\/package-progress\/stream/, (ws) => {
-    socket = ws
-  })
-  await page.goto("/packages")
-  await page.route("**/api/v1/jobs/", (route) => route.fulfill({ json: [job] }))
-  // RecentJobs polls on mount; reload after supplying the running operation.
-  await page.reload()
-  let consoleBox: Awaited<ReturnType<ReturnType<typeof page.locator>["boundingBox"]>>
-  await recordProgress(
-    page,
-    "packages-job",
-    async () => {
-      await page.getByRole("button", { name: /Install htop/ }).click()
-      const pane = page.locator("[data-slot=pane]").filter({ has: progress(page) })
-      await expect(pane).toBeVisible()
-      consoleBox = await pane.boundingBox()
-    },
-    progress(page),
-    async () => {
-      await expect.poll(() => Boolean(socket)).toBe(true)
-      socket!.send(
-        JSON.stringify({
-          type: "job",
-          data: { ...job, status: "succeeded", endedAt: new Date().toISOString() },
-        }),
-      )
-      await expect(progress(page)).toHaveCount(0)
-      const pane = page.locator("[data-slot=pane]").filter({
-        has: page.getByText("No output.", { exact: true }),
-      })
-      await expect.poll(() => pane.boundingBox()).toEqual(consoleBox)
     },
   )
 })

@@ -1,5 +1,5 @@
 import { expect as baseExpect, test, type Page, type Route } from "@playwright/test"
-import { heldResponse, recordProgress, streamedExport } from "./progress-recording"
+import { heldResponse, recordProgress } from "./progress-recording"
 import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -1879,33 +1879,6 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "a key being added to a document")
   })
 }
-
-test("progress: a table export reports received bytes and can be cancelled", async ({ page }) => {
-  await mockEditor(page)
-  await streamedExport(page, "/databases/1/export")
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto(ITEMS)
-  await expect(cell(page, 0, 1)).toHaveText("Item 1")
-  await page.getByRole("button", { name: "Export", exact: true }).click()
-  const workbench = page.locator("[data-slot=table-editor]")
-  const before = await workbench.boundingBox()
-  await recordProgress(
-    page,
-    "database-table-export",
-    async () => {
-      await page.getByRole("menuitem", { name: /^CSV/ }).click()
-      await expect(page.locator("[data-slot=operation-overlay]")).toHaveCSS("position", "fixed")
-      await expect.poll(() => workbench.boundingBox()).toEqual(before)
-    },
-    page.locator("[data-slot=operation-progress]"),
-    async () => {
-      await expect(page.locator("[data-slot=operation-progress]")).toContainText(/received/)
-      await page.getByRole("button", { name: "Cancel export", exact: true }).click()
-    },
-  )
-  await expect(page.getByText("The export of items was cancelled")).toBeVisible()
-  await expect.poll(() => workbench.boundingBox()).toEqual(before)
-})
 
 test("progress: a SQL import separates upload from database processing", async ({ page }) => {
   await mockEditor(page)
