@@ -28,7 +28,7 @@ var mongodbCases = []dbCase{
 		},
 		want: []dbWant{
 			{level: "info", at: "2026-09-27 10:00:00Z", event: "connection", attrs: mongoAttrs("NETWORK", "listener",
-				"client", "10.0.1.9", "port", "32988")},
+				"client", "10.0.1.9", "port", "32988", "connections", "1")},
 			{level: "info", at: "2026-09-27 10:00:00.01Z", event: "client_metadata", attrs: mongoAttrs("NETWORK", "conn305",
 				"client", "10.0.1.9", "port", "32988", "app", "MongoDB Shell")},
 			{level: "info", at: "2022-06-28 15:13:14.754Z", event: "authorized", attrs: mongoAttrs("ACCESS", "conn331646",
@@ -36,7 +36,7 @@ var mongodbCases = []dbCase{
 			{level: "info", at: "2022-06-21 08:05:59.634Z", event: "auth_failed", attrs: mongoAttrs("ACCESS", "conn18",
 				"client", "10.10.10.10", "port", "49440", "user", "root", "code", "UserNotFound")},
 			{level: "info", at: "2026-09-27 10:05:00Z", event: "disconnection", attrs: mongoAttrs("NETWORK", "conn305",
-				"client", "10.0.1.9", "port", "32988")},
+				"client", "10.0.1.9", "port", "32988", "connections", "0")},
 		},
 	},
 	{
@@ -46,6 +46,7 @@ var mongodbCases = []dbCase{
 			{level: "info", at: "2024-06-01 13:24:10.034Z", event: "slow", attrs: mongoAttrs("COMMAND", "conn3",
 				"client", "192.168.1.100", "port", "12345", "ns", "db.coll", "app", "MongoDB Shell", "plan", "COLLSCAN",
 				"duration_ms", "1234", "docs_examined", "20889", "keys_examined", "0", "rows", "0",
+				"query_hash", "DEF456",
 				"query", `{"find":"coll","filter":{"b":-1},"sort":{"splitPoint":1},"$db":"db"}`,
 				// The keys stay and the values go: two finds on the same
 				// fields with other values are one shape.
@@ -68,10 +69,11 @@ var mongodbCases = []dbCase{
 		want: []dbWant{
 			{},
 			{level: "info", at: "2026-09-27 09:59:58.1Z", event: "startup", attrs: mongoAttrs("CONTROL", "initandlisten")},
-			{level: "warn", at: "2026-09-27 09:59:58.9Z", attrs: mongoAttrs("CONTROL", "initandlisten")},
+			{level: "warn", at: "2026-09-27 09:59:58.9Z", event: "config_warning", attrs: mongoAttrs("CONTROL", "initandlisten")},
 			{level: "info", at: "2026-09-27 09:59:59.2Z", event: "ready", attrs: mongoAttrs("NETWORK", "listener")},
 			{level: "info", at: "2026-09-27 10:01:00.456Z", event: "checkpoint", attrs: mongoAttrs("WTCHKPT", "Checkpointer")},
-			{level: "info", at: "2026-09-27 10:10:00Z", event: "replication", attrs: mongoAttrs("REPL", "ReplCoord-0")},
+			{level: "warn", at: "2026-09-27 10:10:00Z", event: "election", attrs: mongoAttrs("REPL", "ReplCoord-0",
+				"state", "PRIMARY", "prev_state", "SECONDARY")},
 			{level: "info", at: "2026-09-27 10:11:00Z", event: "index", attrs: mongoAttrs("INDEX", "IndexBuildsCoordinatorMongod-0")},
 			{level: "info", at: "2026-09-27 11:00:00Z", event: "shutdown", attrs: mongoAttrs("CONTROL", "SignalHandler")},
 			{level: "info", at: "2026-09-27 11:00:00.5Z", event: "shutdown", attrs: mongoAttrs("CONTROL", "SignalHandler")},
@@ -86,11 +88,52 @@ var mongodbCases = []dbCase{
 		},
 		want: []dbWant{
 			{level: "error", at: "2026-09-27 10:20:00Z", attrs: mongoAttrs("CONTROL", "initandlisten")},
-			{level: "critical", at: "2026-09-27 10:20:00.001Z", attrs: mongoAttrs("CONTROL", "initandlisten")},
+			{level: "critical", at: "2026-09-27 10:20:00.001Z", event: "crash", attrs: mongoAttrs("CONTROL", "initandlisten")},
 			{level: "debug", at: "2026-09-27 10:21:00Z", attrs: mongoAttrs("COMMAND", "conn12")},
 		},
 	},
+	{
+		name:  "a slow query before 8.0 names its hash queryHash, and says what it cost",
+		lines: []string{mongoSlowQueryOld},
+		want: []dbWant{
+			{level: "info", at: "2024-06-01 13:24:10.034Z", event: "slow", attrs: mongoAttrs("COMMAND", "conn3",
+				"client", "192.168.1.100", "port", "12345", "ns", "db.coll", "plan", "IXSCAN { b: 1 }",
+				"duration_ms", "250", "docs_examined", "9", "keys_examined", "9", "rows", "9",
+				"query_hash", "ABC123", "cpu_ms", "3.5", "yields", "12",
+				"query", `{"find":"coll","filter":{"b":-1},"$db":"db"}`,
+				"fp", Fingerprint("db.coll find filter:{b:?} find:?"))},
+		},
+	},
+	{
+		name: "the connection limit, an election and the disk running out",
+		lines: []string{
+			// The ids of the election and fatal lines are as the research
+			// recalled them; the lens keys those on their text.
+			`{"t":{"$date":"2026-09-27T12:00:00.000+00:00"},"s":"I","c":"NETWORK","id":22942,"ctx":"listener","msg":"Connection refused because there are too many open connections","attr":{"remote":"10.0.1.9:40112","connectionCount":1000}}`,
+			`{"t":{"$date":"2026-09-27T12:00:30.000+00:00"},"s":"I",  "c":"REPL",     "id":21215,   "ctx":"ReplCoord-0","msg":"Member is in new state","attr":{"hostAndPort":"mongo2:27017","newState":"SECONDARY"}}`,
+			`{"t":{"$date":"2026-09-27T12:01:00.000+00:00"},"s":"I",  "c":"ELECTION", "id":21450,   "ctx":"ReplCoord-3","msg":"Election succeeded, assuming primary role","attr":{"term":5}}`,
+			`{"t":{"$date":"2026-09-27T12:01:30.000+00:00"},"s":"I",  "c":"ELECTION", "id":21437,   "ctx":"ReplCoord-4","msg":"Not running for primary, we have been superseded already","attr":{"dryRun":false}}`,
+			`{"t":{"$date":"2026-09-27T12:02:00.000+00:00"},"s":"E",  "c":"STORAGE",  "id":22435,   "ctx":"conn5","msg":"WiredTiger error message","attr":{"error":28,"message":{"ts_sec":1790510520,"ts_usec":1,"thread":"1:0x7f1c2d3e4640","session_name":"WT_SESSION.checkpoint","category":"WT_VERB_DEFAULT","category_id":9,"verbose_level":"ERROR","verbose_level_id":-3,"msg":"__posix_file_write:540:/data/db/WiredTiger.turtle.set: handle-write: pwrite: failed to write 1234 bytes at offset 0: No space left on device"}}}`,
+			`{"t":{"$date":"2026-09-27T12:03:00.000+00:00"},"s":"F",  "c":"ASSERT",   "id":23079,   "ctx":"conn3","msg":"Fatal assertion","attr":{"msgid":40526,"file":"src/mongo/db/repl/oplog.cpp","line":123}}`,
+			`{"t":{"$date":"2026-09-27T12:03:01.000+00:00"},"s":"F",  "c":"CONTROL",  "id":6384300, "ctx":"conn3","msg":"Writing fatal message","attr":{"message":"Got signal: 6 (Aborted)."}}`,
+			`{"t":{"$date":"2026-09-27T12:03:02.000+00:00"},"s":"F",  "c":"REPL",     "id":21200,   "ctx":"conn3","msg":"Fatal assertion","attr":{"msgid":34436}}`,
+		},
+		want: []dbWant{
+			{level: "error", at: "2026-09-27 12:00:00Z", event: "too_many_connections", attrs: mongoAttrs("NETWORK", "listener",
+				"client", "10.0.1.9", "port", "40112", "connections", "1000")},
+			{level: "info", at: "2026-09-27 12:00:30Z", event: "replication", attrs: mongoAttrs("REPL", "ReplCoord-0")},
+			{level: "warn", at: "2026-09-27 12:01:00Z", event: "election", attrs: mongoAttrs("ELECTION", "ReplCoord-3")},
+			{level: "warn", at: "2026-09-27 12:01:30Z", event: "election", attrs: mongoAttrs("ELECTION", "ReplCoord-4")},
+			{level: "critical", at: "2026-09-27 12:02:00Z", event: "disk_full", attrs: mongoAttrs("STORAGE", "conn5")},
+			{level: "critical", at: "2026-09-27 12:03:00Z", event: "crash", attrs: mongoAttrs("ASSERT", "conn3")},
+			{level: "critical", at: "2026-09-27 12:03:01Z", event: "crash", attrs: mongoAttrs("CONTROL", "conn3")},
+			// Not replication: the fatal line outranks its component.
+			{level: "critical", at: "2026-09-27 12:03:02Z", event: "crash", attrs: mongoAttrs("REPL", "conn3")},
+		},
+	},
 }
+
+const mongoSlowQueryOld = `{"t":{"$date":"2024-06-01T13:24:10.034+00:00"},"s":"I","c":"COMMAND","id":51803,"ctx":"conn3","msg":"Slow query","attr":{"type":"command","ns":"db.coll","command":{"find":"coll","filter":{"b":-1},"$db":"db"},"planSummary":"IXSCAN { b: 1 }","queryHash":"ABC123","keysExamined":9,"docsExamined":9,"numYields":12,"nreturned":9,"cpuNanos":3500000,"remote":"192.168.1.100:12345","durationMillis":250}}`
 
 func TestMongodbLens(t *testing.T) {
 	dbRun(t, "mongodb", mongodbCases)
@@ -105,9 +148,9 @@ func TestMongodbLensReadsLinesOutOfOrderAndWithService(t *testing.T) {
 	)
 	want := []dbWant{
 		{level: "info", at: "2026-09-27 10:00:00Z", event: "connection", attrs: mongoAttrs("NETWORK", "listener",
-			"client", "10.0.1.9", "port", "32988")},
+			"client", "10.0.1.9", "port", "32988", "connections", "1")},
 		{level: "info", at: "2026-09-27 08:00:01Z", event: "disconnection", attrs: mongoAttrs("NETWORK", "conn305",
-			"client", "::1", "port", "40112")},
+			"client", "::1", "port", "40112", "connections", "0")},
 	}
 	for i := range got {
 		dbCheckLine(t, i, got[i], want[i])

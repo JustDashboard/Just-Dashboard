@@ -30,10 +30,12 @@ func init() {
 		Events: []string{
 			"connection", "disconnection", "client_metadata", "slow", "authorized",
 			"auth_failed", "startup", "ready", "shutdown", "checkpoint", "replication", "index",
+			"too_many_connections", "election", "crash", "disk_full", "config_warning",
 		},
 		Attrs: []string{
 			"component", "ctx", "ns", "plan", "duration_ms", "docs_examined", "keys_examined",
-			"rows", "client", "port", "app", "user", "code", "query", "fp",
+			"rows", "client", "port", "app", "user", "code", "query", "fp", "connections",
+			"state", "prev_state", "query_hash", "cpu_ms", "yields",
 		},
 		New: func() Reader { return ReaderFunc(readMongo) },
 	})
@@ -69,6 +71,12 @@ type mongoAttr struct {
 	NReturned      json.Number     `json:"nreturned"`
 	DurationMillis json.Number     `json:"durationMillis"`
 	ErrName        string          `json:"errName"`
+	// The query's shape hash is planCacheShapeHash from 8.0 and queryHash
+	// before it.
+	PlanCacheShapeHash string      `json:"planCacheShapeHash"`
+	QueryHash          string      `json:"queryHash"`
+	CPUNanos           json.Number `json:"cpuNanos"`
+	NumYields          json.Number `json:"numYields"`
 }
 
 func readMongo(l *Line) {
@@ -101,9 +109,16 @@ func readMongo(l *Line) {
 	case h.id == 22943 || h.msg == "Connection accepted":
 		l.Event = "connection"
 		dbPeer(l, dbBetween(h.attr, `"remote":"`, `"`))
+		dbNumberAttr(l, "connections", mongoNumber(h.attr, `"connectionCount":`))
 	case h.id == 22944 || h.msg == "Connection ended":
 		l.Event = "disconnection"
 		dbPeer(l, dbBetween(h.attr, `"remote":"`, `"`))
+		dbNumberAttr(l, "connections", mongoNumber(h.attr, `"connectionCount":`))
+	case h.id == 22942 || h.msg == "Connection refused because there are too many open connections":
+		l.Event = "too_many_connections"
+		l.SetLevel("error")
+		dbPeer(l, dbBetween(h.attr, `"remote":"`, `"`))
+		dbNumberAttr(l, "connections", mongoNumber(h.attr, `"connectionCount":`))
 	case h.id == 51800 || h.msg == "client metadata":
 		l.Event = "client_metadata"
 		a := mongoDecodeAttr(h.attr)
@@ -123,6 +138,13 @@ func readMongo(l *Line) {
 		dbNumberAttr(l, "docs_examined", a.DocsExamined.String())
 		dbNumberAttr(l, "keys_examined", a.KeysExamined.String())
 		dbNumberAttr(l, "rows", a.NReturned.String())
+		dbNumberAttr(l, "yields", a.NumYields.String())
+		dbMillis(l, "cpu_ms", a.CPUNanos.String(), 1e-6)
+		if a.PlanCacheShapeHash != "" {
+			dbSetWord(l, "query_hash", a.PlanCacheShapeHash)
+		} else {
+			dbSetWord(l, "query_hash", a.QueryHash)
+		}
 		if len(a.Command) > 0 {
 			dbSetWord(l, "query", string(a.Command))
 			dbSetWord(l, "fp", Fingerprint(mongoShape(a.NS, a.Command)))
@@ -153,6 +175,27 @@ func readMongo(l *Line) {
 		l.Event = "ready"
 	case h.msg == "Received signal", h.msg == "Shutting down", h.msg == "Now exiting":
 		l.Event = "shutdown"
+	case strings.Contains(h.msg, "WiredTiger error") && strings.Contains(h.attr, "No space left on device"):
+		// Ahead of the checkpoint case: a checkpoint that cannot write is
+		// reported by the checkpointer and is the disk's news, not its own.
+		l.Event = "disk_full"
+		l.SetLevel("critical")
+	case h.id == 21358 || h.msg == "Replica set state transition":
+		l.Event = "election"
+		l.SetLevel("warn")
+		l.SetAttr("state", dbBetween(h.attr, `"newState":"`, `"`))
+		l.SetAttr("prev_state", dbBetween(h.attr, `"oldState":"`, `"`))
+	case mongoElectionMsg(h.msg):
+		l.Event = "election"
+		l.SetLevel("warn")
+	case h.s == "W" && strings.Contains(l.Text, `"tags":["startupWarnings"]`):
+		// The tag follows attr, so it is looked for only on warnings.
+		l.Event = "config_warning"
+	case h.s == "F":
+		// A fatal line nothing above names is the process dying: a fatal
+		// assertion, the message it writes, a signal. It comes before the
+		// component cases so that one in REPL is a crash, not replication.
+		l.Event = "crash"
 	case h.c == "WTCHKPT", h.ctx == "Checkpointer", h.ctx == "WTCheckpointThread":
 		l.Event = "checkpoint"
 	case h.c == "REPL", h.c == "REPL_HB", h.c == "ELECTION", h.c == "ROLLBACK", h.c == "INITSYNC":
@@ -160,6 +203,32 @@ func readMongo(l *Line) {
 	case h.c == "INDEX":
 		l.Event = "index"
 	}
+}
+
+// mongoElectionMsg is the replica set winning or losing the vote for its
+// primary. The text is what keys it: the statements' ids are not pinned
+// down across versions the way a connection's are.
+func mongoElectionMsg(msg string) bool {
+	for _, p := range []string{"Election succeeded", "Lost election", "Lost dry run election",
+		"Not becoming primary", "Not running for primary"} {
+		if strings.HasPrefix(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// mongoNumber answers the number after key in attr, or "" when it is absent.
+func mongoNumber(attr, key string) string {
+	i := strings.Index(attr, key)
+	if i < 0 {
+		return ""
+	}
+	s := attr[i+len(key):]
+	if j := strings.IndexAny(s, ",}"); j >= 0 {
+		return s[:j]
+	}
+	return ""
 }
 
 // mongoDecodeAttr decodes attr for the lines that need more than the address. A

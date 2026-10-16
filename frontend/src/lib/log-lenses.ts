@@ -284,9 +284,15 @@ const MYSQL: LogLens = {
     },
     { id: "deadlocks", label: "Deadlocks", fields: event("deadlock") },
     {
+      id: "resources",
+      label: "Resources",
+      fields: event("disk_full", "oom", "table_full", "io_slow"),
+    },
+    { id: "replication", label: "Replication", fields: event("replication", "replication_failed") },
+    {
       id: "lifecycle",
       label: "Lifecycle",
-      fields: event("startup", "ready", "shutdown", "crash"),
+      fields: event("startup", "ready", "shutdown", "crash", "recovery", "startup_failed"),
     },
   ],
   events: {
@@ -294,6 +300,14 @@ const MYSQL: LogLens = {
     ready: { label: "ready", tone: "success" },
     shutdown: { label: "shutdown" },
     crash: { label: "crash", tone: "danger" },
+    recovery: { label: "recovery", tone: "warning" },
+    startup_failed: { label: "startup failed", tone: "danger" },
+    disk_full: { label: "disk full", tone: "danger" },
+    table_full: { label: "table full", tone: "warning" },
+    oom: { label: "out of memory", tone: "danger" },
+    io_slow: { label: "slow io", tone: "warning" },
+    table_crashed: { label: "table crashed", tone: "danger" },
+    replication_failed: { label: "replication failed", tone: "danger" },
     innodb: { label: "innodb" },
     deadlock: { label: "deadlock", tone: "danger" },
     aborted_connection: { label: "aborted", tone: "warning" },
@@ -326,6 +340,13 @@ const MYSQL: LogLens = {
       tone: "danger",
       hint: "InnoDB rolled one back",
     },
+    {
+      id: "resources",
+      label: "Resource trouble",
+      fields: event("disk_full", "oom", "table_full", "io_slow"),
+      tone: "danger",
+      hint: "Disk, memory, slow I/O",
+    },
     restartsReading,
   ],
   groups: [
@@ -351,9 +372,13 @@ const REDIS: LogLens = {
     {
       id: "persistence",
       label: "Persistence",
-      fields: event("saved", "bgsave", "aof", "persistence_failed"),
+      fields: event("saved", "bgsave", "aof", "aof_slow", "persistence_failed"),
     },
-    { id: "replication", label: "Replication", fields: event("replication") },
+    {
+      id: "replication",
+      label: "Replication",
+      fields: event("replication", "replication_failed", "full_sync"),
+    },
     { id: "memory", label: "Memory", fields: event("memory_warning") },
     {
       id: "lifecycle",
@@ -375,6 +400,10 @@ const REDIS: LogLens = {
     security_attack: { label: "attack", tone: "danger" },
     client_closed: { label: "client closed", tone: "warning" },
     crash: { label: "crash", tone: "danger" },
+    replication_failed: { label: "replication failed", tone: "danger" },
+    full_sync: { label: "full sync", tone: "warning" },
+    aof_slow: { label: "slow aof", tone: "warning" },
+    config_warning: { label: "config warning", tone: "warning" },
   },
   readings: [
     {
@@ -415,13 +444,22 @@ const MONGODB: LogLens = {
     {
       id: "connections",
       label: "Connections",
-      fields: event("connection", "disconnection", "client_metadata"),
+      fields: event("connection", "disconnection", "client_metadata", "too_many_connections"),
     },
-    { id: "replication", label: "Replication", fields: event("replication") },
+    { id: "replication", label: "Replication", fields: event("replication", "election") },
+    { id: "resources", label: "Resources", fields: event("disk_full", "too_many_connections") },
     {
       id: "lifecycle",
       label: "Lifecycle",
-      fields: event("startup", "ready", "shutdown", "checkpoint", "index"),
+      fields: event(
+        "startup",
+        "ready",
+        "shutdown",
+        "checkpoint",
+        "index",
+        "crash",
+        "config_warning",
+      ),
     },
   ],
   events: {
@@ -437,6 +475,11 @@ const MONGODB: LogLens = {
     checkpoint: { label: "checkpoint" },
     replication: { label: "replication" },
     index: { label: "index" },
+    too_many_connections: { label: "too many connections", tone: "danger" },
+    election: { label: "election", tone: "warning" },
+    crash: { label: "crash", tone: "danger" },
+    disk_full: { label: "disk full", tone: "danger" },
+    config_warning: { label: "config warning", tone: "warning" },
   },
   readings: [
     errorsReading,
