@@ -48,7 +48,7 @@ export function settingsPages(engine: Engine): SettingsPage[] {
     engine.can("settings") &&
       engine.kind !== "document" && {
         key: "parameters",
-        title: keyvalue ? "Configuration" : "Parameters",
+        title: "Parameters",
         path: "parameters",
         icon: SettingsSliders,
       },
