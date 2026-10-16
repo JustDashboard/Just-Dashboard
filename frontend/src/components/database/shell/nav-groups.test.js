@@ -1,25 +1,45 @@
 import { describe, expect, test } from "bun:test"
 import { engineFor } from "../engine"
 import { databaseNavGroups, knownDatabase, knownDatabases, learnedDatabase } from "./nav-groups"
+import catalogue from "../../../../../backend/internal/api/testdata/database-drivers.json"
+
+/** The engine as the server describes it: what its driver says it can do. */
+const served = (driver) =>
+  engineFor({ driver, capabilities: catalogue.find((entry) => entry.id === driver).capabilities })
 
 const titles = (engine) =>
-  databaseNavGroups(engine.sections, (section) => `/databases/7/${section}`).map((group) => [
+  databaseNavGroups(engine, (section) => `/databases/7/${section}`).map((group) => [
     group.label,
     group.items.map((item) => item.title),
   ])
 
 describe("a database's pages as the rail's panel", () => {
-  test("Home alone, then the four groups, in the engine's own words", () => {
-    expect(titles(engineFor({ driver: "redis" }))).toEqual([
+  test("Home alone, then the four groups and Settings' pages, in the engine's own words", () => {
+    expect(titles(served("redis"))).toEqual([
       [undefined, ["Home"]],
       ["Work", ["Keys", "Console"]],
       ["Insights", ["Performance", "Logs"]],
-      ["Operate", ["Access", "Backups", "Settings"]],
+      ["Operate", ["Access", "Backups"]],
+      [
+        "Settings",
+        ["General", "Network", "Parameters", "Modules", "Numbered databases", "Danger zone"],
+      ],
     ])
     expect(titles(engineFor({ driver: "mongodb" }))[1]).toEqual([
       "Work",
       ["Documents", "Aggregations"],
     ])
+  })
+
+  test("Settings lists only the pages the engine has, each at its own address", () => {
+    const sqlite = databaseNavGroups(served("sqlite"), (section) => `/databases/7/${section}`)
+    const settings = sqlite.find((group) => group.label === "Settings")
+    expect(settings?.items.map((item) => [item.title, item.href])).toEqual([
+      ["General", "/databases/7/settings"],
+      ["Parameters", "/databases/7/settings/parameters"],
+      ["Danger zone", "/databases/7/settings/danger"],
+    ])
+    expect(settings?.items.at(-1)?.capability).toBe("destructive")
   })
 
   test("a group the engine has nothing in is left out", () => {

@@ -21,6 +21,6 @@ export function useDatabaseNavScope() {
     replaces: false,
     title: conn.name,
     mark: <EngineGlyph engine={engine} className="size-4" />,
-    groups: databaseNavGroups(engine.sections, href),
+    groups: databaseNavGroups(engine, href),
   })
 }

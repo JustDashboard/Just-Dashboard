@@ -1,30 +1,35 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import Link from "next/link"
-import { Warning } from "@/components/icons"
+import { Globe, Servers, Warning } from "@/components/icons"
 import { put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DbAccess, DbAccessChange } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { FormFact, FormNote, FormSection } from "@/components/form"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { FormFact, FormNote } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
+import { ProductGlyph } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { CouldNotRead, FactsSkeleton } from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
-import { EngineMark } from "@/components/database/kit"
+import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import {
   EXPOSURE,
   firewallOutcome,
   firewallWords,
   reachRefusal,
 } from "@/components/database/ops/settings-model"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
@@ -148,12 +153,10 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
   }
 
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="reachability"
-      className={UNDER_STRIP}
-      title="Reachability"
-      hint={
+      title="Where it can be reached from"
+      state={
         <span className="flex">
           {exposure === "public" ? (
             <Status verdict="warning" label={words.word} />
@@ -163,16 +166,78 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
         </span>
       }
     >
-      <div className="space-y-1">
-        <p className="text-body font-medium">
-          {changing ? <TextShimmer>Changing where it is reachable from…</TextShimmer> : words.word}
-        </p>
-        <p className="text-body leading-relaxed text-muted-foreground">{words.sentence}</p>
-      </div>
+      <ReachPicture access={data} exposure={exposure} changing={Boolean(changing)} />
+      <p className="text-body leading-relaxed text-muted-foreground">
+        {changing ? (
+          <TextShimmer>Changing where it is reachable from…</TextShimmer>
+        ) : (
+          words.sentence
+        )}
+      </p>
+
+      {mayChange && data && (
+        <ChoiceGrid columns={2} role="group" aria-label="Where it is reachable from">
+          <ChoiceCard
+            selected={data.exposure === "local"}
+            disabled={Boolean(changing)}
+            onClick={() => change("local")}
+          >
+            <span className="flex items-center gap-2">
+              <Servers
+                aria-hidden
+                className={cn(
+                  "size-4 shrink-0",
+                  data.exposure === "local" ? "text-brand" : "text-muted-foreground",
+                )}
+              />
+              <ChoiceCardTitle>This server only</ChoiceCardTitle>
+            </span>
+            <ChoiceCardHint>
+              Port {port} on loopback. Programs on this machine and the deployments linked to it
+              reach it; nothing else does.
+            </ChoiceCardHint>
+          </ChoiceCard>
+          <ChoiceCard
+            selected={data.exposure === "public"}
+            disabled={Boolean(changing)}
+            onClick={() => change("public")}
+          >
+            <span className="flex items-center gap-2">
+              <Globe
+                aria-hidden
+                className={cn(
+                  "size-4 shrink-0",
+                  data.exposure === "public" ? "text-warning" : "text-muted-foreground",
+                )}
+              />
+              <ChoiceCardTitle>Anywhere</ChoiceCardTitle>
+            </span>
+            <ChoiceCardHint>
+              Port {port} on every interface
+              {firewall?.active && firewall.editable
+                ? `, with a rule in ${rule} that lets it in from anywhere.`
+                : "."}{" "}
+              Only the password stands between it and the internet.
+            </ChoiceCardHint>
+          </ChoiceCard>
+        </ChoiceGrid>
+      )}
+
+      {data?.exposure === "public" && (
+        <Notice
+          tone="warning"
+          icon={Warning}
+          title="Anything that can reach this machine can try it"
+        >
+          {firewall?.active && !firewall.open
+            ? `${rule} is on and port ${port} is closed in it, so for now only this machine's own networks get through.`
+            : "The password is the only thing in the way. Restrict it to this server unless something outside has to connect."}
+        </Notice>
+      )}
 
       {admin &&
         (data ? (
-          <DetailList className="animate-rise gap-y-2.5">
+          <DetailList className="animate-rise gap-y-2.5 border-t border-hairline pt-5">
             {conn.port && (
               <Detail label="Listens on" className="font-mono">
                 {conn.host}:{conn.port}
@@ -206,48 +271,6 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
           <FactsSkeleton rows={3} />
         ))}
 
-      {mayChange && data && (
-        <ChoiceGrid columns={2} role="group" aria-label="Where it is reachable from">
-          <ChoiceCard
-            selected={data.exposure === "local"}
-            disabled={Boolean(changing)}
-            onClick={() => change("local")}
-          >
-            <ChoiceCardTitle>This server only</ChoiceCardTitle>
-            <ChoiceCardHint>
-              Port {port} bound to loopback. Programs on this machine and deployments linked to it
-              reach it; nothing else does.
-            </ChoiceCardHint>
-          </ChoiceCard>
-          <ChoiceCard
-            selected={data.exposure === "public"}
-            disabled={Boolean(changing)}
-            onClick={() => change("public")}
-          >
-            <ChoiceCardTitle>Anywhere</ChoiceCardTitle>
-            <ChoiceCardHint>
-              Port {port} on every interface
-              {firewall?.active && firewall.editable
-                ? `, with a rule in ${rule} allowing it from anywhere.`
-                : "."}{" "}
-              Only the password stands between it and the internet.
-            </ChoiceCardHint>
-          </ChoiceCard>
-        </ChoiceGrid>
-      )}
-
-      {data?.exposure === "public" && (
-        <Notice
-          tone="warning"
-          icon={Warning}
-          title="Anything that can reach this machine can try it"
-        >
-          {firewall?.active && !firewall.open
-            ? `${rule} is on and port ${port} is closed in it, so for now only this machine's own networks get through.`
-            : "The password is the only thing in the way. Restrict it to this server unless something outside has to connect."}
-        </Notice>
-      )}
-
       {admin && refusal && (
         <FormNote data-slot="reach-refusal">
           <span className="font-medium text-foreground">Not changed from here.</span> {refusal}
@@ -261,6 +284,171 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
           The addresses and the firewall are an administrator&rsquo;s to read and to change.
         </FormNote>
       )}
-    </FormSection>
+    </SettingSection>
+  )
+}
+
+/**
+ * Who can reach the server's port, drawn as the way in: this machine's own
+ * programs and the internet on the left, the container that publishes the
+ * port in the middle — Docker's whale, its name, the binding — and the server
+ * itself, as its product, at the end.
+ *
+ * The internet's line is the answer to the page's question. Dashed, with the
+ * globe a ring not yet there, while the port is on loopback: nothing outside
+ * gets in. Amber while it is published on every interface, because it works
+ * and should not be relied on (§3's amber, as a project's Runtime draws a
+ * port that bypasses the proxy). A server on another machine is one line
+ * from here to it, since where it listens is that machine's to say.
+ */
+function ReachPicture({
+  access,
+  exposure,
+  changing,
+}: {
+  access?: DbAccess
+  exposure: string
+  changing: boolean
+}) {
+  const { conn, engine, summary, status } = useDatabase()
+  const container = useRef<HTMLDivElement>(null)
+  const localMark = useRef<HTMLDivElement>(null)
+  const outsideMark = useRef<HTMLDivElement>(null)
+  const boxMark = useRef<HTMLDivElement>(null)
+  const serverMark = useRef<HTMLDivElement>(null)
+  const remote = exposure === "remote"
+  const open = exposure === "public" || exposure === "private"
+  const running = status.state === "running"
+  const port = access?.port ?? (Number(conn.port) || undefined)
+  const boxed = Boolean(access?.container) && !remote
+  const bind =
+    exposure === "public" ? "0.0.0.0" : exposure === "private" ? "one address" : "127.0.0.1"
+  const firewall = access?.firewall
+  const wall = !firewall
+    ? undefined
+    : !firewall.active
+      ? "no firewall in the way"
+      : `${firewall.backend ?? "firewall"} ${firewall.open ? "lets it in" : "keeps it out"}`
+
+  const local = (
+    <WireNode
+      key="local"
+      nodeRef={localMark}
+      align="end"
+      mark={<WireHost size="md" />}
+      eyebrow="This server"
+      title="Programs and linked deployments"
+      hint={remote ? "the dashboard dials it" : "over loopback"}
+    />
+  )
+  const outside = !remote && (
+    <WireNode
+      key="outside"
+      nodeRef={outsideMark}
+      align="end"
+      mark={
+        open ? (
+          <WireMark size="md" tone="warning" className="animate-rise">
+            <Globe />
+          </WireMark>
+        ) : (
+          <WirePlaceholder size="md" className="animate-rise">
+            <Globe />
+          </WirePlaceholder>
+        )
+      }
+      eyebrow="Anywhere"
+      title={
+        open ? (
+          <span className="font-mono text-xs">
+            {access?.publicAddresses.length ? access.publicAddresses.join(", ") : "every interface"}
+          </span>
+        ) : (
+          "Other machines"
+        )
+      }
+      hint={
+        <span className={cn(open && "text-warning")}>
+          {open ? (wall ?? "reachable") : "cannot reach it"}
+        </span>
+      }
+    />
+  )
+  const box = (
+    <WireNode
+      nodeRef={boxMark}
+      align="center"
+      mark={
+        <WireMark size="md" tone="logo">
+          <ProductGlyph id="docker" />
+        </WireMark>
+      }
+      eyebrow="Container"
+      title={<span className="font-mono text-xs wrap-anywhere">{access?.container}</span>}
+      hint={
+        <span className="font-mono">
+          {bind}:{port ?? "?"}
+        </span>
+      }
+    />
+  )
+  const server = (
+    <WireNode
+      nodeRef={serverMark}
+      align="start"
+      mark={
+        <WireMark size="md" tone="logo">
+          <EngineGlyph engine={engine} />
+        </WireMark>
+      }
+      eyebrow={`${engine.label}${summary?.versionNumber ? ` ${summary.versionNumber}` : ""}`}
+      title={
+        <span className="font-mono text-xs wrap-anywhere">
+          {remote ? `${conn.host}:${conn.port}` : `:${port ?? conn.port}`}
+        </span>
+      }
+      hint={remote ? "on its own machine" : "listens"}
+    />
+  )
+  const inner = boxed ? boxMark : serverMark
+  return (
+    <SettingPicture
+      label="Who can reach it"
+      containerRef={container}
+      className="py-4"
+      lines={
+        <>
+          <AnimatedBeam
+            containerRef={container}
+            fromRef={localMark}
+            toRef={inner}
+            still={!running || changing}
+          />
+          {!remote && (
+            <AnimatedBeam
+              key={open ? "open" : "closed"}
+              containerRef={container}
+              fromRef={outsideMark}
+              toRef={inner}
+              still
+              dashed={!open}
+              tone={open ? "warning" : "default"}
+            />
+          )}
+          {boxed && (
+            <AnimatedBeam
+              containerRef={container}
+              fromRef={boxMark}
+              toRef={serverMark}
+              still={!running || changing}
+              delay={0.6}
+            />
+          )}
+        </>
+      }
+      start={outside ? [local, outside] : [local]}
+      middle={boxed ? box : undefined}
+      end={server}
+    />
   )
 }

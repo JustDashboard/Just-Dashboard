@@ -9,13 +9,13 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import { GroupRule } from "@/components/flow"
 import {
   Disclosure,
   Field,
   FormFact,
   FormNote,
-  FormSection,
   OptionList,
   OptionRow,
   Statement,
@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
+import { EngineGlyph } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import {
@@ -49,7 +50,6 @@ import {
   type RedisConfig,
   type RedisConfigChange,
 } from "@/components/database/ops/settings-parameters-model"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** Where the list came from, which decides how one of its parameters is set. */
@@ -253,25 +253,20 @@ export function ParametersSection() {
   }
 
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="parameters"
-      className={UNDER_STRIP}
       title={title}
-      hint={
+      state={
         data?.supported ? (
-          <>
-            <span className="numeric block">
-              {plural(parameters.length, noun)}
-              {changed > 0 ? ` · ${changed} changed` : ""}
-            </span>
-            {pending > 0 && (
-              <span className="flex pt-1">
-                <Status verdict="warning" label={`${pending} waiting for a restart`} />
-              </span>
-            )}
-          </>
+          <span className="numeric flex flex-wrap items-center gap-x-1.5">
+            <EngineGlyph engine={engine} className="size-3.5" />
+            {plural(parameters.length, noun)}
+            {changed > 0 ? ` · ${changed} changed from the default` : " · every one at its default"}
+          </span>
         ) : undefined
+      }
+      status={
+        pending > 0 && <Status verdict="warning" label={`${pending} waiting for a restart`} />
       }
     >
       {down ? (
@@ -455,7 +450,7 @@ export function ParametersSection() {
           }}
         />
       )}
-    </FormSection>
+    </SettingSection>
   )
 }
 

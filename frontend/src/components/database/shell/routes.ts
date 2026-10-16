@@ -41,15 +41,23 @@ export function databaseIdFrom(pathname: string): number | null {
   return match && DATABASE_ID.test(match[1]) ? Number(match[1]) : null
 }
 
-/** The database and the page of it a path names, or `null` when it names neither. */
+/**
+ * The database and the page of it a path names, or `null` when it names
+ * neither. Settings is the one section with pages of its own under it
+ * (`/settings/network`), and each of them is a page of Settings.
+ */
 export function databasePlace(pathname: string): { id: number; section: SectionId } | null {
-  const match = /^\/databases\/([^/]+)(?:\/([a-z]+))?\/?$/.exec(pathname)
+  const match = /^\/databases\/([^/]+)(?:\/([a-z]+)(?:\/([a-z]+))?)?\/?$/.exec(pathname)
   if (!match || !DATABASE_ID.test(match[1])) return null
   const section = (match[2] ?? "home") as SectionId
   // `home` is the bare path; spelled out it is no page.
   if (match[2] === "home" || !SECTION_IDS.includes(section)) return null
+  if (match[3] && (section !== "settings" || !SETTINGS_PATHS.includes(match[3]))) return null
   return { id: Number(match[1]), section }
 }
+
+/** The pages under Settings, as their address spells them. */
+const SETTINGS_PATHS = ["network", "parameters", "extensions", "databases", "danger"]
 
 /**
  * The pages the section had while the connection was a query parameter, and
