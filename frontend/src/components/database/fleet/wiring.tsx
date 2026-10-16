@@ -34,7 +34,7 @@ import { EngineGlyph } from "@/components/database/kit"
  * rack every picture draws it as (`WireHost`), a container or a deployment the
  * product it runs where one is known; whether each is up is the dot in its
  * corner, as it is on the services Configuration draws. It stands on the
- * page's own ground with no dot grid behind it, at the operator's request.
+ * page's own ground with no dot grid behind it, as every picture does.
  *
  * The lanes are ordered for the wires rather than the alphabet: databases that
  * feed something first, and each reader across from the databases it is fed

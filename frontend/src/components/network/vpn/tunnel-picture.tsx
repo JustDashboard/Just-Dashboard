@@ -43,7 +43,6 @@ export function TunnelPicture({
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative">
         {tunnel.peers.map((peer, index) => {
           const ref = refs.get(peer.publicKey)

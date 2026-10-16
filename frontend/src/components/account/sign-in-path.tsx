@@ -50,7 +50,6 @@ export function SignInPath({
 
   return (
     <div className="relative min-w-0 py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className={cn("relative min-w-0", !enrolled && !required && "lg:pt-12")}>
         <AnimatedBeam containerRef={container} fromRef={you} toRef={password} duration={2.4} />
         <AnimatedBeam

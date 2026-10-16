@@ -49,9 +49,9 @@ type Node = {
  * Docker networks reaching it. Where nothing is set up yet a dashed ring
  * stands in the place it would go, with the way to set it up.
  *
- * On the page's own ground over the dot grid. Three lanes from `lg`; below it
- * the lanes stack, the wires are not drawn, and each node says its traffic in
- * words.
+ * On the page's own ground, with no frame or dot grid. Three lanes from `lg`;
+ * below it the lanes stack, the wires are not drawn, and each node says its
+ * traffic in words.
  */
 export function Topology({
   overview,
@@ -92,7 +92,6 @@ export function Topology({
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative">
         {nodes.map((node, index) => {
           const ref = refs.get(node.id)

@@ -81,10 +81,9 @@ type Edge = {
  * an image is, a database's engine. Pointing at a node steps every wire that
  * is not its own back.
  *
- * On the page's own ground over the dot grid, like the settings pictures: the
- * grid gives it a middle where a frame would give it an outline. Three lanes
- * from `lg`; below it the lanes stack, the wires are not drawn, and each node
- * says in words what it is wired to.
+ * On the page's own ground with no frame or dot grid, like the settings
+ * pictures. Three lanes from `lg`; below it the lanes stack, the wires are not
+ * drawn, and each node says in words what it is wired to.
  */
 export function RuntimeMap({
   services,
@@ -171,7 +170,6 @@ export function RuntimeMap({
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const service = edge.from.startsWith("s:")

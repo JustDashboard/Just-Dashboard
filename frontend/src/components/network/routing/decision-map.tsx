@@ -64,7 +64,6 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div className="relative mb-5 space-y-2">
         <ChipStrip aria-label="Route diagram family">
           <FilterChip

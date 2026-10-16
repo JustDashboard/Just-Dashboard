@@ -371,7 +371,6 @@ function Picture({
     <section className="space-y-3" aria-label="Who is on it">
       <p className="eyebrow">On the wire</p>
       <div className="relative py-2">
-        <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
         <div ref={container} className="relative">
           {network.members.map((member, index) => {
             const ref = refs.get(member.id)

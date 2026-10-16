@@ -668,14 +668,9 @@ export function NotificationsPage() {
         <LoadingPanel plain rows={3} />
       ) : (
         <>
-          {/* On the page's own ground rather than in a frame: the dot grid a
-              wiring picture is drawn on fades out towards its edges, so the
-              picture has a middle and needs no border to read as one thing. */}
+          {/* On the page's own ground rather than in a frame, with no dot grid
+              behind it: a wiring picture reads as one thing without either. */}
           <div className="relative animate-rise py-2 lg:py-6">
-            <div
-              aria-hidden
-              className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
-            />
             <Fanout
               channels={list}
               fleet={fleet.data?.deployments ?? []}

@@ -132,7 +132,6 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
 
   return (
     <div ref={container} className="relative w-full py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid grid-cols-[minmax(0,1.1fr)_minmax(2rem,0.35fr)_auto_minmax(2rem,0.35fr)_minmax(0,0.9fr)] items-center">
           <div role="group" aria-label="Keys" className="flex flex-col items-end gap-6">
