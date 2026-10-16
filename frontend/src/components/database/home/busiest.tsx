@@ -7,12 +7,13 @@ import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { BarList, type BarListItem } from "@/components/bar-list"
-import { Detail, DetailList } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import {
   BarsSkeleton,
   Block,
   BlockLink,
+  FactRow,
+  FactRows,
   FactsSkeleton,
   Quiet,
   Read,
@@ -122,6 +123,9 @@ export function BusiestStatements() {
         title: `${opening(statement.query)} — ${share} of runtime. Open Performance`,
         value: share,
         share: longest > 0 ? statement.share / longest : 0,
+        // The bar in the hue of what the statement does, so a list of reads
+        // with one heavy write in it shows the write before it is read.
+        color: statementVerb(statement.query)?.color,
         hint: `${calls(statement.calls)} · ${millis(statement.meanMs)} each`,
         onClick: () => goto("performance", { view: "statements" }),
       }
@@ -380,20 +384,20 @@ export function FileFacts() {
     >
       <Read poll={file} what="the file" skeleton={<FactsSkeleton rows={7} />}>
         {(data) => (
-          <DetailList>
-            <Detail label="Path" className="font-mono wrap-anywhere">
+          <FactRows>
+            <FactRow label="Path" className="font-mono wrap-anywhere">
               {data.path}
-            </Detail>
-            <Detail label="Size">
+            </FactRow>
+            <FactRow label="Size">
               {bytes(data.fileBytes)}
               {data.walBytes > 0 ? ` · ${bytes(data.walBytes)} write-ahead log` : ""}
-            </Detail>
+            </FactRow>
             {data.modified && (
-              <Detail label="Last written">
+              <FactRow label="Last written">
                 <span title={timestamp(data.modified)}>{relativeTime(data.modified)}</span>
-              </Detail>
+              </FactRow>
             )}
-            <Detail label="Holds">
+            <FactRow label="Holds">
               {(["table", "index", "view", "trigger"] as const)
                 .filter((kind) => data.objects[kind])
                 .map(
@@ -403,15 +407,15 @@ export function FileFacts() {
                     }`,
                 )
                 .join(" · ") || "nothing yet"}
-            </Detail>
-            <Detail label="Journal">
+            </FactRow>
+            <FactRow label="Journal">
               {data.journalMode} · synchronous {data.synchronous}
-            </Detail>
-            <Detail label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</Detail>
-            <Detail label="Auto-vacuum">{data.autoVacuum}</Detail>
-            <Detail label="Text">{data.encoding}</Detail>
-            <Detail label="SQLite">{data.version}</Detail>
-          </DetailList>
+            </FactRow>
+            <FactRow label="Foreign keys">{data.foreignKeys ? "enforced" : "not enforced"}</FactRow>
+            <FactRow label="Auto-vacuum">{data.autoVacuum}</FactRow>
+            <FactRow label="Text">{data.encoding}</FactRow>
+            <FactRow label="SQLite">{data.version}</FactRow>
+          </FactRows>
         )}
       </Read>
     </Block>

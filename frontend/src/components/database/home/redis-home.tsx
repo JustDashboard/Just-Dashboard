@@ -16,17 +16,22 @@ import {
   RunsAs,
   useBackups,
 } from "@/components/database/home/reference"
+import { nameHue } from "@/components/database/home/kinds"
+import { HomePicture, type Holding } from "@/components/database/home/picture"
+import { compact } from "@/components/database/home/readings"
 import { gauge, redisSample } from "@/components/database/home/samples"
+import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
 import type { RedisServer, RedisStats, RedisTree } from "@/components/database/home/types"
 import { useSamples } from "@/components/database/home/use-samples"
-import { UsedBy } from "@/components/database/home/used-by"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Key } from "@/components/icons"
 import { usePoll } from "@/hooks/use-poll"
+import { plural } from "@/lib/format"
 import { useMemo } from "react"
 
 export function KeyValueHome() {
-  const { id, engine } = useDatabase()
+  const { id, engine, href } = useDatabase()
   // One bounded walk of the keyspace when the page opens. Never on a timer:
   // it costs the server a SCAN and a TYPE for every key it covers.
   const walks = engine.can("keyTree")
@@ -69,6 +74,23 @@ export function KeyValueHome() {
   const loading = stats.loading || !walked
   const dumps = backups.data?.files
   const events = useMemo(() => chartEvents(samples, "uptime_in_seconds", dumps), [samples, dumps])
+  const keyspace = server.data?.keyspace
+  const holdings = useMemo<Holding[] | undefined>(
+    () =>
+      keyspace &&
+      [...keyspace]
+        .sort((a, b) => b.keys - a.keys)
+        .map((space) => ({
+          key: String(space.db),
+          name: `db ${space.db}`,
+          kind: "Database",
+          detail: `${plural(space.keys, "key")} · ${compact(space.expires)} expiring`,
+          color: nameHue(`db${space.db}`),
+          glyph: Key,
+          href: href("data", { db: String(space.db) }),
+        })),
+    [keyspace, href],
+  )
 
   return (
     <>
@@ -77,8 +99,14 @@ export function KeyValueHome() {
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
+      <HomePicture
+        holdings={engine.can("serverInfo") ? holdings : []}
+        holdingsWord="Databases"
+        sessions={gauge(samples, "connected_clients")}
+        size={gauge(samples, "used_memory")}
+        backups={engine.can("dump") ? backups : undefined}
+      />
       <Activity
-        id={id}
         hours={stats.hours}
         onHours={stats.setHours}
         views={REDIS_VIEWS}
@@ -87,7 +115,7 @@ export function KeyValueHome() {
         error={stats.error}
         events={events}
       />
-      <UsedBy />
+      {engine.has("logs") && <ServerLog />}
       <Pair>
         {engine.can("commandStats") && <BusiestCommands />}
         {walks && <LargestNamespacesBlock poll={tree} />}

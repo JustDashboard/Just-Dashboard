@@ -13,7 +13,6 @@ import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
-import { Detail, DetailList } from "@/components/page"
 import { ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -27,6 +26,8 @@ import {
   Block,
   BlockLink,
   CardsSkeleton,
+  FactRow,
+  FactRows,
   FactsSkeleton,
   Quiet,
   Read,
@@ -99,52 +100,52 @@ export function RunsAs() {
         </>
       }
     >
-      <DetailList className="animate-rise">
+      <FactRows className="animate-rise">
         {container && (
           <>
-            <Detail label="Container" className="font-mono wrap-anywhere">
+            <FactRow label="Container" className="font-mono wrap-anywhere">
               {container.name}
-            </Detail>
-            <Detail label="Image" className="font-mono wrap-anywhere">
+            </FactRow>
+            <FactRow label="Image" className="font-mono wrap-anywhere">
               {container.image}
-            </Detail>
-            <Detail label="Docker says">
+            </FactRow>
+            <FactRow label="Docker says">
               {container.status ?? container.state}
               {container.health ? ` · ${container.health}` : ""}
-            </Detail>
+            </FactRow>
             {container.composeProject && (
-              <Detail label="Compose" className="font-mono wrap-anywhere">
+              <FactRow label="Compose" className="font-mono wrap-anywhere">
                 {container.composeProject}
                 {container.composeService ? ` / ${container.composeService}` : ""}
-              </Detail>
+              </FactRow>
             )}
-            <Detail label="Limits">
+            <FactRow label="Limits">
               <ContainerLimits poll={limits} />
-            </Detail>
+            </FactRow>
             {limits.data?.restartPolicy && (
-              <Detail label="Restarts" className="font-mono">
+              <FactRow label="Restarts" className="font-mono">
                 {limits.data.restartPolicy}
-              </Detail>
+              </FactRow>
             )}
           </>
         )}
         {!container && unit && (
           <>
-            <Detail label="Unit" className="font-mono wrap-anywhere">
+            <FactRow label="Unit" className="font-mono wrap-anywhere">
               {unit.name}
-            </Detail>
-            <Detail label="systemd says">
+            </FactRow>
+            <FactRow label="systemd says">
               {unit.activeState}
               {unit.subState ? ` (${unit.subState})` : ""}
-            </Detail>
+            </FactRow>
           </>
         )}
         {file && (
           <>
-            <Detail label="File" className="font-mono wrap-anywhere">
+            <FactRow label="File" className="font-mono wrap-anywhere">
               {file.path}
-            </Detail>
-            <Detail label="On disk">
+            </FactRow>
+            <FactRow label="On disk">
               {file.exists ? (
                 <>
                   {bytes(file.size)}
@@ -160,26 +161,26 @@ export function RunsAs() {
                   <Status tone="danger" label="the file is missing" />
                 </span>
               )}
-            </Detail>
+            </FactRow>
           </>
         )}
         {!container && !unit && !file && (
-          <Detail label="Where">
+          <FactRow label="Where">
             {summary.source === "remote"
               ? `On another machine, at ${conn.host}${conn.port ? `:${conn.port}` : ""}`
               : summary.source === "host"
                 ? `A process on this server, listening on port ${conn.port}`
                 : "Not known"}
-          </Detail>
+          </FactRow>
         )}
-        <Detail label="Start and stop">
+        <FactRow label="Start and stop">
           {summary.power.via === "docker"
             ? "From here, through Docker"
             : summary.power.via === "systemd"
               ? "From here, through systemd"
               : (summary.power.reason ?? "Not from here")}
-        </Detail>
-      </DetailList>
+        </FactRow>
+      </FactRows>
     </Block>
   )
 }
@@ -270,8 +271,8 @@ export function ReachableFrom() {
       stale={staleOf(access)}
       actions={<BlockLink href={href("settings")}>{admin ? "Change" : "Settings"}</BlockLink>}
     >
-      <DetailList className="animate-rise">
-        <Detail label="From">
+      <FactRows className="animate-rise">
+        <FactRow label="From">
           {open ? (
             <span className="flex">
               <Status verdict="warning" label={exposure.word} />
@@ -280,26 +281,26 @@ export function ReachableFrom() {
             <span className="font-medium">{exposure.word}</span>
           )}
           <span className="mt-0.5 block text-muted-foreground">{exposure.sentence}</span>
-        </Detail>
+        </FactRow>
         {conn.port && (
-          <Detail label="Listens on" className="font-mono">
+          <FactRow label="Listens on" className="font-mono">
             {conn.host}:{conn.port}
-          </Detail>
+          </FactRow>
         )}
         {admin && open && access.data && access.data.publicAddresses.length > 0 && (
-          <Detail label="Public address" className="font-mono wrap-anywhere">
+          <FactRow label="Public address" className="font-mono wrap-anywhere">
             {access.data.publicAddresses.join(", ")}
-          </Detail>
+          </FactRow>
         )}
         {admin && firewall && (
-          <Detail label="Firewall">
+          <FactRow label="Firewall">
             {firewall.active
               ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : "closed"}`
               : "No firewall is active on this machine"}
-          </Detail>
+          </FactRow>
         )}
         {admin && access.error && !access.data && (
-          <Detail label="Firewall">
+          <FactRow label="Firewall">
             <span className="text-muted-foreground">Could not be read: {access.error.message}</span>{" "}
             <button
               type="button"
@@ -308,16 +309,16 @@ export function ReachableFrom() {
             >
               Try again
             </button>
-          </Detail>
+          </FactRow>
         )}
-        <Detail label="Changed">
+        <FactRow label="Changed">
           {summary.managed
             ? "From Settings: the dashboard owns the binding"
             : summary.source === "remote"
               ? "On the machine it runs on"
               : "In the server's own configuration"}
-        </Detail>
-      </DetailList>
+        </FactRow>
+      </FactRows>
     </Block>
   )
 }
@@ -441,8 +442,8 @@ export function BackupsBlock({
                   {answering ? "." : "; one can be taken once the server answers."}
                 </Quiet>
               ) : (
-                <DetailList>
-                  <Detail label="Kept">
+                <FactRows>
+                  <FactRow label="Kept">
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <OutcomeStrip
                         items={outcomes}
@@ -452,21 +453,21 @@ export function BackupsBlock({
                         {plural(data.files.length, "dump")} · {bytes(kept)}
                       </span>
                     </span>
-                  </Detail>
+                  </FactRow>
                   {newest && (
-                    <Detail label="Newest">
+                    <FactRow label="Newest">
                       <span title={timestamp(newest.takenAt)}>{relativeTime(newest.takenAt)}</span>
                       {" · "}
                       {bytes(newest.size)}
                       {" · "}
                       {newest.tool ?? newest.format}
                       {newest.summary ? ` · ${newest.summary}` : ""}
-                    </Detail>
+                    </FactRow>
                   )}
-                  <Detail label="Directory" className="font-mono wrap-anywhere">
+                  <FactRow label="Directory" className="font-mono wrap-anywhere">
                     {data.dir}
-                  </Detail>
-                </DetailList>
+                  </FactRow>
+                </FactRows>
               )}
               {job ? (
                 <p className="flex text-xs font-medium" data-slot="backup-running">

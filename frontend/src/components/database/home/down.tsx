@@ -17,6 +17,7 @@ import {
   useBackups,
 } from "@/components/database/home/reference"
 import { mongoSample, redisSample, sqlSample } from "@/components/database/home/samples"
+import { ServerLog } from "@/components/database/home/server-log"
 import { StateRegion } from "@/components/database/home/state-region"
 import type { DbServerStats, MongoStats, RedisStats } from "@/components/database/home/types"
 import { useSamples } from "@/components/database/home/use-samples"
@@ -36,7 +37,7 @@ import { useCallback } from "react"
  * It is still that database's page: the identity line, what state the server
  * is in and why, the one thing to do about it, and the reference blocks that
  * need no dial — what it runs as, where it listens, the dumps that would
- * bring it back. Nothing that asks the engine a question is mounted, so a
+ * bring it back — with the last lines its log holds. Nothing that asks the engine a question is mounted, so a
  * stopped server is not dialled by its own home any more than by the fleet.
  */
 export function DownHome() {
@@ -52,6 +53,8 @@ export function DownHome() {
         <StateNotice />
       </StateRegion>
       {engine.can("stats") && !engine.can("fileBased") && <RecordedHistory />}
+      {/* The lines a server wrote before it stopped are usually the ones that say why. */}
+      {known && engine.has("logs") && <ServerLog />}
       {known && (
         <Columns>
           <RunsAs />
@@ -211,7 +214,6 @@ function RecordedHistory() {
           : SQL_VIEWS
   return (
     <Activity
-      id={id}
       views={views}
       samples={stats.samples}
       loading={stats.loading}

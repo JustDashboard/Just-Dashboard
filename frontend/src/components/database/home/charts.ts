@@ -4,10 +4,13 @@ import { compact, perSecond } from "@/components/database/home/readings"
 import { TRANSACTIONS, sourced, type Sample, type Source } from "@/components/database/home/samples"
 
 /**
- * What the home's one chart can show, per engine family.
+ * What the home's activity charts show, per engine family.
  *
  * A view is a group of lines that share a unit — sessions, throughput, the
- * cache — and a family is a short list of views. Each line names where its
+ * cache — drawn as one chart of its own, and a family is a short list of
+ * them. A line takes its measurement's hue (§10), so the charts of one home
+ * read apart before a title is: sessions blue, work done violet, rows green
+ * against magenta, the cache in the brand's pale blue. Each line names where its
  * numbers come from in a sample, so adding a measurement is naming a series
  * (§10) and the chart itself is `ChartPanel`, untouched.
  *
@@ -23,15 +26,24 @@ export type ChartView = {
   unit: ChartUnit
   series: Series[]
   sources: Source[]
+  /** The gauge the first line is a share of, where the server states one: sessions of the most it accepts. */
+  ceiling?: string
 }
 
 type Line = Series & { from: Omit<Source, "key"> }
 
-function view(id: string, label: string, unit: ChartUnit, lines: Line[]): ChartView {
+function view(
+  id: string,
+  label: string,
+  unit: ChartUnit,
+  lines: Line[],
+  ceiling?: string,
+): ChartView {
   return {
     id,
     label,
     unit,
+    ceiling,
     series: lines.map(({ key, label: name, color, kind }) =>
       kind ? { key, label: name, color, kind } : { key, label: name, color },
     ),
@@ -39,36 +51,49 @@ function view(id: string, label: string, unit: ChartUnit, lines: Line[]): ChartV
   }
 }
 
+// A line rather than an area: a cache that hits 99% of the time filled the
+// plot to its top rule with one grey slab, and the dip worth seeing was a
+// notch in its edge.
 const CACHE_HIT = (hits: string, misses: string): Line => ({
   key: "hit",
   label: "Hit rate",
-  color: "var(--chart-2)",
-  kind: "area",
+  color: "var(--chart-1)",
   from: { share: [hits, misses] },
 })
 
 export const SQL_VIEWS: ChartView[] = [
-  view("sessions", "Sessions", "count", [
-    {
-      key: "open",
-      label: "Open",
-      color: "var(--chart-1)",
-      kind: "area",
-      from: { gauge: "sessions" },
-    },
-    { key: "active", label: "Active", color: "var(--chart-5)", from: { gauge: "sessionsActive" } },
-    {
-      key: "waiting",
-      label: "Waiting on a lock",
-      color: "var(--chart-3)",
-      from: { gauge: "sessionsWaiting" },
-    },
-  ]),
+  view(
+    "sessions",
+    "Sessions",
+    "count",
+    [
+      {
+        key: "open",
+        label: "Open",
+        color: "var(--chart-2)",
+        kind: "area",
+        from: { gauge: "sessions" },
+      },
+      {
+        key: "active",
+        label: "Active",
+        color: "var(--chart-5)",
+        from: { gauge: "sessionsActive" },
+      },
+      {
+        key: "waiting",
+        label: "Waiting on a lock",
+        color: "var(--chart-3)",
+        from: { gauge: "sessionsWaiting" },
+      },
+    ],
+    "sessionsMax",
+  ),
   view("throughput", "Throughput", "rate", [
     {
       key: "transactions",
       label: "Transactions",
-      color: "var(--chart-1)",
+      color: "var(--chart-4)",
       kind: "area",
       from: { rate: TRANSACTIONS },
     },
@@ -78,11 +103,11 @@ export const SQL_VIEWS: ChartView[] = [
     {
       key: "read",
       label: "Read",
-      color: "var(--chart-2)",
+      color: "var(--chart-5)",
       kind: "area",
       from: { rate: "rowsRead" },
     },
-    { key: "written", label: "Written", color: "var(--chart-5)", from: { rate: "rowsWritten" } },
+    { key: "written", label: "Written", color: "var(--chart-3)", from: { rate: "rowsWritten" } },
   ]),
   view("cache", "Cache", "percent", [CACHE_HIT("blocksHit", "blocksRead")]),
 ]
@@ -92,7 +117,7 @@ export const CLICKHOUSE_VIEWS: ChartView[] = [
     {
       key: "select",
       label: "Selects",
-      color: "var(--chart-1)",
+      color: "var(--chart-2)",
       kind: "area",
       from: { rate: "selectQueries" },
     },
@@ -146,7 +171,7 @@ export const REDIS_VIEWS: ChartView[] = [
     {
       key: "commands",
       label: "Commands",
-      color: "var(--chart-1)",
+      color: "var(--chart-2)",
       kind: "area",
       from: { rate: "total_commands_processed" },
     },
@@ -155,14 +180,14 @@ export const REDIS_VIEWS: ChartView[] = [
     {
       key: "used",
       label: "Used",
-      color: "var(--chart-1)",
+      color: "var(--chart-4)",
       kind: "area",
       from: { gauge: "used_memory" },
     },
     {
       key: "resident",
       label: "Resident",
-      color: "var(--chart-4)",
+      color: "var(--chart-1)",
       from: { gauge: "used_memory_rss" },
     },
   ]),
@@ -170,7 +195,7 @@ export const REDIS_VIEWS: ChartView[] = [
     {
       key: "connected",
       label: "Connected",
-      color: "var(--chart-2)",
+      color: "var(--chart-5)",
       kind: "area",
       from: { gauge: "connected_clients" },
     },
