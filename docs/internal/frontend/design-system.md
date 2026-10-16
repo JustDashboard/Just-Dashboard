@@ -2713,6 +2713,38 @@ identity line and no tiles (the Databases rule above); what changed, block by bl
   (`blocks.tsx`): the name on the left at the body's size, the value beside it, a hairline under each,
   as a project's Runtime lists what a container may use.
 
+**A database's Performance took the home's shape in 0.7.5**, at the operator's request — "more
+alive, more real logos and colouring" — because beside the new home it read as the grey page of the
+two: the Overview drew the same activity in the brand's near-white with no reading in any head, the
+cache hit as one slab, and four figures of the dashboard's own pool under it; Redis and MongoDB
+opened on empty plots that said a rate would appear in six seconds, though the recorder had kept the
+last week; sessions, clients and operations were names in a column. It keeps its view strip (the
+Databases rule above); what changed, view by view:
+
+- **Right now** (`ops/performance-picture.tsx`) heads the SQL Overview: the session list grouped
+  by the name each client gave the server (`clientGroups`, unit-tested), each drawn as its program
+  (`database/clients.ts`, `DbClientMark`) — a deployment or container the consumers route found as
+  the product it runs, otherwise what the name says (`psql`, `pg_dump`, Grafana, Metabase, a JDBC or
+  Node driver), the dashboard's own connection as its J carrying the pool's words that the four
+  figures said — wired to the server and on to the four things a session can be doing, each counted
+  and a way into Sessions narrowed to it. A client's wire pulses while one of its sessions runs, red
+  while one waits on a lock, amber while one holds a transaction or runs too long; a state's wire is
+  dashed while nothing is in it. It moves with the five-second session poll.
+- **Activity** is the home's: each chart through `ViewChart` with its newest reading in the head
+  (sessions against the server's ceiling), every line in its measurement's hue, the cache a line,
+  and the range presses (`HistoryRange`) over all of them — the Overview had no range before.
+- **Redis and MongoDB** open on the recorder's last hour (`joinRecorded`, `recordedSamples`,
+  `recordedServers`, unit-tested) and carry on with the page's three-second samples; each chart is
+  headed by its readings (`ChartReadings`, `SeriesReading`), memory, the cache and connections with
+  a meter against their ceiling. MongoDB's latency is not recorded, so that one chart starts with the
+  page and its caption says so.
+- **Logos where a client is named**: SQL sessions, Redis clients (by name, else the library the
+  client reported) and MongoDB operations each lead with `DbClientMark`.
+- **Statements** take their verb's hue, as the home's ranking does.
+- **Replication** (`ops/replication-picture.tsx`) replaced its three figures with the picture of
+  where the data goes: the server it follows, this one by its role, the replicas streaming from it,
+  and the slots holding its log — a slot with no reader dashed amber, the one reading to act on.
+
 **The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
 held the source's name, its facts, an outlined Export box and the view tabs, the box and the
 underline meeting edge to edge at the right end of a 40px row, over a stray line holding nothing but
