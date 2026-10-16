@@ -990,10 +990,66 @@ test("the page opens on recorded activity and offers the views its engine has", 
   // A chart with nothing above zero in the window is named, not drawn flat.
   await expect(page.getByText(/Nothing else has moved\./)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Lock waits and deadlocks" })).toHaveCount(0)
-  // The snapshot and the session list are the page's; a view's own read waits for the view.
-  expect(ops.seen.filter((request) => !/\/(stats|stats\/history|activity)$/.test(request))).toEqual(
-    [],
+  // The snapshot and the session list are the page's, and what uses the database, which draws
+  // each client as itself; a view's own read waits for the view.
+  expect(
+    ops.seen.filter((request) => !/\/(stats|stats\/history|activity|consumers)$/.test(request)),
+  ).toEqual([])
+})
+
+test("the Overview draws who is connected right now as their programs, and a state opens its sessions", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/consumers": {
+        checkedAt: NOW,
+        nodes: [
+          { id: "db:1", kind: "database", name: "shop", product: "postgres", connId: 1 },
+          {
+            id: "deploy:7",
+            kind: "deployment",
+            name: "checkout-api",
+            product: "nodejs",
+            href: "/deploy/7",
+          },
+        ],
+        edges: [
+          { from: "db:1", to: "deploy:7", via: ["binding"], sessions: 1, status: "connected" },
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance")
+  const now = region(page, "Right now")
+  const clients = now.getByRole("list", { name: "Connected" }).getByRole("listitem")
+  // What is wrong first — a session stuck behind a lock, then one holding a transaction open —
+  // then the busiest, and the dashboard's own connection last, with its pool.
+  await expect(clients).toHaveCount(5)
+  await expect(clients.nth(0)).toContainText("billing-worker")
+  await expect(clients.nth(0)).toContainText("1 waiting on a lock")
+  await expect(clients.nth(1)).toContainText("Deployment")
+  await expect(clients.nth(1).getByRole("link", { name: "Open checkout-api" })).toHaveAttribute(
+    "href",
+    "/deploy/7",
   )
+  await expect(clients.nth(1)).toContainText("1 in a transaction")
+  await expect(clients.nth(2)).toContainText("reports")
+  await expect(clients.nth(4)).toContainText("This dashboard")
+  await expect(clients.nth(4)).toContainText("1 of 5 pooled open")
+  // The four states, each counted, and the dashboard's own read is none of them.
+  const doing = now.getByRole("list", { name: "Doing" }).getByRole("link")
+  await expect(doing).toHaveText([
+    /1\s*Running a statement/,
+    /1\s*Waiting on a lock/,
+    /1\s*Holding a transaction/,
+    /1\s*Connected, idle/,
+  ])
+  await now.getByRole("link", { name: "1 session waiting on a lock: open them" }).click()
+  await expect(view(page, /^Sessions/)).toHaveAttribute("aria-pressed", "true")
+  await expect(page).toHaveURL(/state=blocked/)
+  await expect(sessionRow(page, "40,77")).toBeVisible()
+  await expect(sessionRow(page, "52")).toHaveCount(0)
 })
 
 test("a file-based engine is read as its file, and is asked nothing a server would be", async ({
@@ -2126,9 +2182,8 @@ test("an analytic engine's charts leave out what it has no notion of", async ({ 
   await visit(page, "/databases/2/performance")
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  const sessions = page
-    .locator("[data-slot=panel]")
-    .filter({ has: page.getByRole("heading", { name: "Sessions", level: 2 }) })
+  // Each chart is found by its name, as the database home's are.
+  const sessions = page.getByRole("group", { name: "Sessions", exact: true })
   await expect(sessions.getByRole("row", { name: /Open/ })).toBeVisible()
   // It has no transactions to sit idle in and no lock waits: neither is a line at zero.
   await expect(sessions).not.toContainText("Idle in a transaction")
