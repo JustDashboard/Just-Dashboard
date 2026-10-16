@@ -1,5 +1,4 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { heldResponse, recordProgress } from "./progress-recording"
 
 /**
  * The Git page's claims, checked in a browser.
@@ -774,32 +773,3 @@ test("workspace: Git retains its commit draft and walks changed files without a 
   await expect(rows.nth(1)).toBeFocused()
   await expect(rows.nth(1)).toHaveAttribute("aria-pressed", "false")
 })
-
-for (const action of ["Fetch", "Pull", "Push"]) {
-  test(`progress: Git ${action.toLowerCase()} stays visible until the remote answers`, async ({
-    page,
-  }) => {
-    await mockGit(page)
-    const held = await heldResponse(page, `/git/${action.toLowerCase()}`, {
-      command: "git",
-      output: "Done",
-      ok: true,
-    })
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto("/git?repo=%2Fsrv%2Fapp")
-    const progress = page.locator("[data-slot=operation-progress]")
-    await recordProgress(
-      page,
-      `git-${action.toLowerCase()}`,
-      () => page.getByRole("button", { name: new RegExp(`^${action}(\\s|$)`) }).click(),
-      progress,
-      async () => {
-        held.release()
-        await expect(
-          page.getByRole("button", { name: new RegExp(`^${action}(\\s|$)`) }),
-        ).toBeEnabled()
-      },
-    )
-    expect(held.calls()).toBe(1)
-  })
-}

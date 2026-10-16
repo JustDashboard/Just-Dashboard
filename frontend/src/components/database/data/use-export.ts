@@ -14,7 +14,6 @@ import {
 } from "@/components/database/data/export"
 import type { DbExportState } from "@/components/database/data/types"
 import { rowsQuery, type ViewState } from "@/components/database/data/view"
-import type { OperationReading } from "@/components/operation-progress"
 
 export interface ExportRequest {
   schema: string
@@ -55,7 +54,6 @@ async function settled(id: number, exportId: string): Promise<DbExportState | nu
  */
 export function useExport(id: number) {
   const [running, setRunning] = useState<string | null>(null)
-  const [progress, setProgress] = useState<OperationReading & { startedAt: number }>()
   const flight = useRef<AbortController | null>(null)
   useEffect(() => () => flight.current?.abort(), [])
 
@@ -65,11 +63,6 @@ export function useExport(id: number) {
       const controller = new AbortController()
       flight.current = controller
       setRunning(request.table)
-      setProgress({
-        label: `Exporting ${request.table}…`,
-        detail: "0 B received",
-        startedAt: Date.now(),
-      })
       const limit = request.limit ?? EXPORT_ROWS
       const exportId = crypto.randomUUID()
       const toast = notify.loading(`Exporting ${request.table}…`, {
@@ -98,7 +91,6 @@ export function useExport(id: number) {
         const parts: BlobPart[] = []
         const reader = response.body.getReader()
         let said = 0
-        let lastRead = 0
         let cut = false
         try {
           for (;;) {
@@ -107,10 +99,8 @@ export function useExport(id: number) {
             parts.push(value)
             received += value.byteLength
             // Once a megabyte, so a long export is seen to be moving.
-            if (received - said >= 1 << 20 || Date.now() - lastRead >= 250) {
+            if (received - said >= 1 << 20) {
               said = received
-              lastRead = Date.now()
-              setProgress((held) => held && { ...held, detail: `${bytes(received)} received` })
               notify.raw.loading(`Exporting ${request.table}… ${bytes(received)}`, { id: toast })
             }
           }
@@ -166,11 +156,10 @@ export function useExport(id: number) {
       } finally {
         flight.current = null
         setRunning(null)
-        setProgress(undefined)
       }
     },
     [id],
   )
 
-  return { run, running, progress, cancel: () => flight.current?.abort() }
+  return { run, running }
 }

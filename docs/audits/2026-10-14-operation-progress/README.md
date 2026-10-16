@@ -1,5 +1,10 @@
 # Operation progress feedback
 
+> **Superseded on 2026-10-16.** The working bar now appears only inside dialogs, drawn into `Modal`'s
+> footer; the page panel, the job-console overlay, `OperationOverlay` and `use-operations` were
+> removed. See the [dialog progress recordings](../2026-10-16-dialog-progress/). What follows is the
+> record of the earlier placements.
+
 Long waits now keep an action name, elapsed time and a visible working track above the content.
 Docker prunes and cleanup, Compose confirmations, file operations, Git, backup runs/restores,
 database transfers, network tools and shared job consoles use the same reading. A measured byte or

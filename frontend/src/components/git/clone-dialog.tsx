@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils"
 import type { GitHubRepoSummary, GitHubStatus, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
-import { OperationProgress } from "@/components/operation-progress"
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { Textarea } from "@/components/ui/textarea"
 import { SearchInput } from "@/components/page"
@@ -155,11 +154,7 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
       title="Add a repository"
       size="md"
       progress={
-        busy && (
-          <OperationProgress
-            label={mode === "clone" ? "Cloning repository…" : "Initialising repository…"}
-          />
-        )
+        busy && { label: mode === "clone" ? "Cloning repository…" : "Initialising repository…" }
       }
       footer={
         <>

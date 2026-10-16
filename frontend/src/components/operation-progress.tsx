@@ -13,7 +13,14 @@ export type OperationReading = {
   showCount?: boolean
 }
 
-/** A wait is not a percentage: only a measured count fills the track. */
+/**
+ * A dialog's action in flight, drawn as part of `Modal`'s footer rather than
+ * as a box of its own: the words take the footer's free side beside the
+ * buttons, and the footer's top hairline becomes the track. The track is
+ * positioned against the footer, so this only makes sense rendered there.
+ *
+ * A wait is not a percentage: only a measured count fills the track.
+ */
 export function OperationProgress({
   label,
   detail,
@@ -21,8 +28,7 @@ export function OperationProgress({
   total,
   startedAt,
   showCount = true,
-  className,
-}: OperationReading & { startedAt?: number | string; className?: string }) {
+}: OperationReading & { startedAt?: number | string }) {
   const [mountedAt] = useState(() => Date.now())
   const [now, setNow] = useState(mountedAt)
   useEffect(() => {
@@ -33,28 +39,43 @@ export function OperationProgress({
   const since = parsed !== undefined && Number.isFinite(parsed) ? parsed : mountedAt
   const measured = total !== undefined && total > 0 && completed !== undefined
   const percent = measured ? Math.max(0, Math.min(100, (completed / total) * 100)) : undefined
+  const count = measured && showCount ? `${completed} of ${total} processed` : undefined
 
   return (
-    <div data-slot="operation-progress" className={cn("min-w-0 space-y-2", className)}>
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <p role="status" className="min-w-0 text-body">
-          <TextShimmer>{label}</TextShimmer>
-        </p>
-        <span aria-hidden className="numeric shrink-0 text-hint text-muted-foreground">
+    // Where the buttons leave it less than its minimum — a phone, a long
+    // confirm label — it takes the footer's first line and they the second.
+    <div data-slot="operation-progress" className="mr-auto min-w-32 flex-1">
+      <p role="status" className="text-body leading-tight">
+        <TextShimmer className="block truncate">{label}</TextShimmer>
+      </p>
+      <p className="truncate text-hint text-muted-foreground">
+        <span aria-hidden className="numeric">
           {duration(Math.max(0, Math.floor((now - since) / 1000)))} elapsed
         </span>
-      </div>
+        {count && (
+          <>
+            {" · "}
+            <span className="numeric">{count}</span>
+          </>
+        )}
+        {detail && (
+          <>
+            {" · "}
+            <span>{detail}</span>
+          </>
+        )}
+      </p>
       <div
         role="progressbar"
         aria-label={label}
         aria-valuemin={measured ? 0 : undefined}
         aria-valuemax={measured ? total : undefined}
         aria-valuenow={measured ? Math.max(0, Math.min(total, completed)) : undefined}
-        className="relative h-1 overflow-hidden rounded-full bg-meter-track"
+        className="absolute inset-x-0 -top-px h-0.5 overflow-hidden"
       >
         <span
           className={cn(
-            "block h-full rounded-full bg-brand",
+            "block h-full bg-brand",
             measured
               ? "transition-[width]"
               : "absolute inset-y-0 left-0 w-1/3 animate-sweep motion-reduce:w-full motion-reduce:animate-none",
@@ -62,16 +83,6 @@ export function OperationProgress({
           style={measured ? { width: `${percent}%` } : undefined}
         />
       </div>
-      {(detail || (measured && showCount)) && (
-        <p className="min-w-0 text-hint break-words text-muted-foreground">
-          {measured && showCount && (
-            <span className="numeric">
-              {completed} of {total} processed{detail ? " · " : ""}
-            </span>
-          )}
-          {detail}
-        </p>
-      )}
     </div>
   )
 }

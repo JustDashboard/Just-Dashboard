@@ -2,7 +2,7 @@
 
 import { useRef } from "react"
 import { cn } from "@/lib/utils"
-import { OperationOverlay } from "@/components/operation-overlay"
+import { OperationProgress, type OperationReading } from "@/components/operation-progress"
 import {
   Dialog,
   DialogContent,
@@ -70,8 +70,11 @@ export function Modal({
   /** Controls that sit in the title strip, beside the close button. */
   actions?: React.ReactNode
   footer?: React.ReactNode
-  /** Working feedback overlays the body without changing the frame or footer. */
-  progress?: React.ReactNode
+  /**
+   * The action in flight, drawn into the footer: its words beside the buttons
+   * and its track along the footer's top edge, so the dialog keeps its frame.
+   */
+  progress?: (OperationReading & { startedAt?: number | string }) | false
   /**
    * Where the keyboard lands when the dialog opens. A form wants its first
    * field; a viewer wants nothing in particular — its first control is an
@@ -123,30 +126,16 @@ export function Modal({
         </DialogHeader>
 
         <div
-          className={cn(
-            "relative flex min-h-0 flex-1 flex-col",
-            progress !== undefined && "min-h-20",
-          )}
+          ref={body}
+          tabIndex={initialFocus === "body" ? -1 : undefined}
+          className={cn("min-h-0 flex-1 overflow-y-auto outline-none", bodyClassName ?? "p-4")}
         >
-          <div
-            ref={body}
-            tabIndex={initialFocus === "body" ? -1 : undefined}
-            className={cn("min-h-0 flex-1 overflow-y-auto outline-none", bodyClassName ?? "p-4")}
-          >
-            {children}
-          </div>
-          {progress && (
-            <OperationOverlay
-              local
-              className="bottom-3 mb-0 max-h-[calc(100%-1.5rem)] overflow-y-auto p-3"
-            >
-              {progress}
-            </OperationOverlay>
-          )}
+          {children}
         </div>
 
-        {footer && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-hairline bg-surface-header px-4 py-3">
+        {(footer || progress) && (
+          <div className="relative flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-hairline bg-surface-header px-4 py-3">
+            {progress && <OperationProgress {...progress} />}
             {footer}
           </div>
         )}

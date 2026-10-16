@@ -1274,33 +1274,3 @@ test("progress: cloning a repository keeps the task and elapsed time visible", a
   )
   expect(held.calls()).toBe(1)
 })
-
-for (const action of ["submodule", "lfs"]) {
-  test(`progress: Git ${action} work uses the workspace's working strip`, async ({ page }) => {
-    await fixture(page)
-    const held = await heldResponse(page, action === "submodule" ? "/git/submodule" : "/git/lfs", {
-      command: "git",
-      output: "Done",
-      ok: true,
-    })
-    await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto("/git?repo=%2Fsrv%2Fapp")
-    await openAction(page, action === "submodule" ? "Submodules" : "Git LFS")
-    await recordProgress(
-      page,
-      `git-${action}`,
-      () =>
-        page
-          .getByRole("button", {
-            name: action === "submodule" ? "Update to recorded commit" : "Fetch objects",
-            exact: true,
-          })
-          .click(),
-      page.locator("[data-slot=operation-progress]"),
-      async () => {
-        held.release()
-        await expect(page.locator("[data-slot=operation-progress]")).toHaveCount(0)
-      },
-    )
-  })
-}

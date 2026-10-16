@@ -28,54 +28,6 @@ export async function heldResponse(
   return { release, calls: () => calls }
 }
 
-/** A bounded byte stream lets the real export reader report measured bytes. */
-export async function streamedExport(page: Page, path: string) {
-  await page.addInitScript((path) => {
-    const original = window.fetch
-    window.fetch = async (...args) => {
-      const request = args[0]
-      const url = new URL(
-        typeof request === "string" ? request : request instanceof URL ? request.href : request.url,
-        location.href,
-      )
-      if (url.pathname !== `/api/v1${path}`) return original(...args)
-      let timer: ReturnType<typeof setInterval>
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          const chunk = new TextEncoder().encode("id,name\n1,Example\n".repeat(64))
-          timer = setInterval(() => controller.enqueue(chunk), 300)
-          const finish = () => {
-            clearInterval(timer)
-            controller.close()
-          }
-          Object.assign(window, { finishProgressExport: finish })
-          args[1]?.signal?.addEventListener(
-            "abort",
-            () => {
-              clearInterval(timer)
-              controller.error(new DOMException("Cancelled", "AbortError"))
-            },
-            { once: true },
-          )
-        },
-        cancel() {
-          clearInterval(timer)
-        },
-      })
-      return new Response(body, {
-        headers: {
-          "Content-Type": "text/csv",
-          "Content-Disposition": 'attachment; filename="progress.csv"',
-        },
-      })
-    }
-  }, path)
-  return () =>
-    page.evaluate(() =>
-      (window as unknown as { finishProgressExport: () => void }).finishProgressExport(),
-    )
-}
-
 export async function recordProgress(
   page: Page,
   name: string,

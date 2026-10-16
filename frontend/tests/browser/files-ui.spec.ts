@@ -1948,8 +1948,10 @@ test("a partially failed cut paste retries only files that have not moved", asyn
   expect(moved.filter((path) => path.endsWith("logo.png"))).toHaveLength(2)
 })
 
-for (const action of ["copy", "move", "duplicate", "extract", "delete"]) {
-  test(`progress: file ${action} reports work in the workspace`, async ({ page }) => {
+// The working bar belongs to dialogs. A page operation keeps its own
+// feedback — the toast it ends with — and draws no bar over the workspace.
+for (const action of ["copy", "move", "duplicate", "extract"]) {
+  test(`progress: file ${action} draws no working bar on the page`, async ({ page }) => {
     await mockFiles(page)
     await page.setViewportSize({ width: 1280, height: 900 })
     if (action === "extract")
@@ -1968,69 +1970,73 @@ for (const action of ["copy", "move", "duplicate", "extract", "delete"]) {
     )
     await openFiles(page)
     const item = (name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
-    let start: () => Promise<unknown>
     if (action === "copy" || action === "move") {
       await item("notes.md").click()
       await page.keyboard.press(action === "copy" ? "ControlOrMeta+c" : "ControlOrMeta+x")
       await item("site").dblclick()
-      start = () => page.getByRole("button", { name: "Paste here", exact: true }).click()
-    } else if (action === "delete") {
-      await item("notes.md").getByRole("checkbox").click()
-      await item("logo.png").getByRole("checkbox").click()
-      await page.keyboard.press("Delete")
-      start = () =>
-        page.getByRole("dialog").getByRole("button", { name: "Delete all", exact: true }).click()
+      await page.getByRole("button", { name: "Paste here", exact: true }).click()
     } else {
       await item(action === "extract" ? "backup.zip" : "notes.md").click({ button: "right" })
-      start = () =>
-        page
-          .getByRole("menuitem", {
-            name: action === "extract" ? /Extract/ : "Duplicate",
-            exact: action !== "extract",
-          })
-          .click()
+      await page
+        .getByRole("menuitem", {
+          name: action === "extract" ? /Extract/ : "Duplicate",
+          exact: action !== "extract",
+        })
+        .click()
     }
-    const progress = page.locator("[data-slot=operation-progress]")
-    await recordProgress(page, `files-${action}`, start, progress, async () => {
-      held.release()
-      await expect(progress).toHaveCount(0)
-    })
-    expect(held.calls()).toBe(action === "delete" ? 2 : 1)
+    await expect.poll(() => held.calls()).toBe(1)
+    await expect(page.locator("[data-slot=operation-progress]")).toHaveCount(0)
+    await expect(page.getByRole("progressbar")).toHaveCount(0)
+    held.release()
   })
 }
 
 for (const width of [1280, 390]) {
-  test(`overlay: file copy keeps the listing in place at ${width}px`, async ({ page }) => {
+  test(`progress: file delete counts its items in the dialog's footer at ${width}px`, async ({
+    page,
+  }) => {
     await mockFiles(page)
     await page.setViewportSize({ width, height: 900 })
-    const held = await heldResponse(page, "/files/copy", { ok: true })
+    const held = await heldResponse(page, "/files/delete", { ok: true })
     await openFiles(page)
-    await page.locator(`[data-entry-path='${home}/notes.md']`).click()
-    await page.keyboard.press("ControlOrMeta+c")
-    await page.locator(`[data-entry-path='${home}/site']`).dblclick()
-    const listing = page.locator("[data-file-listing]")
-    const before = await listing.boundingBox()
-    const overlay = page.locator("[data-slot=operation-overlay]")
+    const item = (name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+    await item("notes.md").getByRole("checkbox").click()
+    await item("logo.png").getByRole("checkbox").click()
+    await page.keyboard.press("Delete")
+    const dialog = page.getByRole("dialog")
+    await dialog.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    )
+    const before = await dialog.boundingBox()
+    const footer = dialog.getByRole("button", { name: "Cancel", exact: true }).locator("..")
+    const strip = await footer.boundingBox()
+    const progress = page.locator("[data-slot=operation-progress]")
     await recordProgress(
       page,
-      "files-overlay",
+      `files-delete-${width}`,
       async () => {
-        await page.getByRole("button", { name: "Paste here", exact: true }).click()
-        await expect(overlay).toHaveCSS("position", "fixed")
-        await expect.poll(() => listing.boundingBox()).toEqual(before)
-        await expect(overlay).toBeInViewport()
+        await dialog.getByRole("button", { name: "Delete all", exact: true }).click()
+        // Part of the footer, not a box over the body: the words sit beside
+        // the buttons, the track runs along the footer's top edge, and the
+        // dialog keeps its size.
+        await expect(footer.locator("[data-slot=operation-progress]")).toBeVisible()
+        await expect(progress).toContainText("0 of 2 processed")
+        const track = await footer.getByRole("progressbar").boundingBox()
+        expect(Math.abs(track!.y - strip!.y)).toBeLessThanOrEqual(1)
+        expect(Math.abs(track!.width - strip!.width)).toBeLessThanOrEqual(1)
+        await expect.poll(() => dialog.boundingBox()).toEqual(before)
+        expect(await footer.boundingBox()).toEqual(strip)
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
           width,
         )
       },
-      page.locator("[data-slot=operation-progress]"),
+      progress,
       async () => {
         held.release()
-        await expect(overlay).toHaveCount(0)
-        await expect.poll(() => listing.boundingBox()).toEqual(before)
+        await expect(dialog).toHaveCount(0)
       },
     )
-    expect(held.calls()).toBe(1)
+    expect(held.calls()).toBe(2)
   })
 }
 

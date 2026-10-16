@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test"
-import { heldResponse, recordProgress } from "./progress-recording"
 import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
 import { forwardPreview, gateway, overrides, pressure, protection } from "./network-gateway-fixture"
 
@@ -878,26 +877,4 @@ test.describe("protection lifecycle", () => {
     await page.getByRole("button", { name: /Per-interface values/ }).click()
     await expect(page.getByText(/device Strict, all Off/)).toBeVisible()
   })
-})
-
-test("progress: refreshing a blocklist reports its working state", async ({ page }) => {
-  await open(page, "/network/protection")
-  await page.setViewportSize({ width: 1280, height: 900 })
-  const list = protection.blocklists[0]
-  const held = await heldResponse(page, `/network/protection/blocklists/${list.id}/refresh`, {
-    ok: true,
-  })
-  await page
-    .getByRole("button", { name: `Refresh ${list.name}`, exact: true })
-    .scrollIntoViewIfNeeded()
-  await recordProgress(
-    page,
-    "network-blocklist",
-    () => page.getByRole("button", { name: `Refresh ${list.name}`, exact: true }).click(),
-    page.locator("[data-slot=operation-progress]"),
-    async () => {
-      held.release()
-      await expect(page.locator("[data-slot=operation-progress]")).toHaveCount(0)
-    },
-  )
 })
