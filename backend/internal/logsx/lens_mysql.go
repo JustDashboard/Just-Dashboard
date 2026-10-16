@@ -23,10 +23,13 @@ func init() {
 		Events: []string{
 			"startup", "ready", "shutdown", "crash", "innodb", "deadlock",
 			"aborted_connection", "too_many_connections", "auth_failed", "replication",
-			"config_warning", "error",
+			"replication_failed", "recovery", "startup_failed", "disk_full", "table_full", "oom",
+			"io_slow", "table_crashed", "config_warning", "error",
 		},
-		Attrs: []string{"thread", "code", "component", "user", "client", "db"},
-		New:   func() Reader { return &mysqlReader{} },
+		Attrs: []string{
+			"thread", "code", "component", "user", "client", "db", "reason", "table", "duration_ms",
+		},
+		New: func() Reader { return &mysqlReader{} },
 	})
 }
 
@@ -62,6 +65,8 @@ func (r *mysqlReader) Read(l *Line) {
 	if h.at != nil {
 		l.Timestamp = h.at
 	}
+	// The thread, label, code and subsystem are the attrs and the level.
+	l.SetBody(h.msg)
 	if r.dump && (h.code == "MY-012469" || strings.HasPrefix(h.msg, "*** ")) {
 		l.Cont = true
 		l.SetLevel(r.level)
@@ -86,7 +91,7 @@ func (r *mysqlReader) Read(l *Line) {
 	msg := h.msg
 	switch {
 	case h.crash || strings.Contains(msg, "got signal ") || strings.Contains(msg, "Assertion failure") ||
-		strings.Contains(msg, "got exception"):
+		strings.Contains(msg, "got exception") || strings.Contains(msg, "We intentionally crash the server"):
 		l.Event = "crash"
 		l.SetLevel("critical")
 	case strings.Contains(msg, "deadlock detected"):
@@ -120,8 +125,50 @@ func (r *mysqlReader) Read(l *Line) {
 			l.SetAttr("user", user)
 		}
 		l.SetAttr("client", dbIP(dbBetween(msg, "host: '", "'")))
+		if l.Event == "aborted_connection" {
+			l.SetAttr("reason", mysqlReason(msg))
+		}
 	case strings.Contains(msg, "Too many connections"):
 		l.Event = "too_many_connections"
+	case msg == "Aborting":
+		// The server gave up starting; the line before it says why.
+		l.Event = "startup_failed"
+		l.SetLevel("critical")
+	case strings.HasPrefix(msg, "Database was not shutdown normally"), strings.HasPrefix(msg, "Starting crash recovery"):
+		// A restart that nothing shut down first is what the OOM killer
+		// leaves behind, so it is worth a warning though InnoDB calls it news.
+		l.Event = "recovery"
+		l.SetLevel("warn")
+	case strings.HasPrefix(msg, "Disk is full writing"), strings.Contains(msg, "Operating system error number 28"),
+		strings.Contains(msg, "No space left on device"):
+		l.Event = "disk_full"
+		l.SetLevel("critical")
+	case strings.Contains(msg, "Out of memory"), strings.Contains(msg, "bytes) failed; errno 12"),
+		strings.Contains(msg, "Cannot allocate memory"):
+		l.Event = "oom"
+		l.SetLevel("critical")
+	case strings.HasSuffix(msg, "' is full") && strings.Contains(msg, "The table '"):
+		// MariaDB prefixes the program name to errors it passes through.
+		l.Event = "table_full"
+		l.SetLevel("error")
+		l.SetAttr("table", dbBetween(msg, "The table '", "'"))
+	case strings.Contains(msg, "is marked as crashed"):
+		l.Event = "table_crashed"
+		l.SetLevel("error")
+		l.SetAttr("table", dbBetween(msg, "Table '", "'"))
+	case strings.Contains(msg, "intended loop took"), strings.HasPrefix(msg, "A long semaphore wait"):
+		// Both say the disk is not keeping up; only the page cleaner says by
+		// how much. The semaphore wait that ends in a crash is caught above.
+		l.Event = "io_slow"
+		l.SetLevel("warn")
+		dbMillis(l, "duration_ms", dbBetween(msg, "loop took ", "ms"), 1)
+	case mysqlReplicationFailed(h.component, l.Level, msg):
+		l.Event = "replication_failed"
+		l.SetLevel("error")
+		if h.code == "" {
+			l.SetAttr("code", strings.TrimRight(dbWord(msg, "Error_code: "), ";,"))
+		}
+		l.SetAttr("client", mysqlSourceHost(msg))
 	case h.component == "Repl", strings.HasPrefix(msg, "Slave "), strings.HasPrefix(msg, "Replica "):
 		l.Event = "replication"
 	case l.Level == "warn" && mysqlConfigWarning(msg):
@@ -132,6 +179,49 @@ func (r *mysqlReader) Read(l *Line) {
 		l.Event = "error"
 	}
 	r.open, r.level = true, l.Level
+}
+
+// mysqlReason is the text in the last parentheses of an aborted connection's
+// message: the server's account of why it let go.
+func mysqlReason(msg string) string {
+	i := strings.LastIndexByte(msg, '(')
+	if i < 0 {
+		return ""
+	}
+	reason, _, _ := strings.Cut(msg[i+1:], ")")
+	return reason
+}
+
+// mysqlReplicationFailed is a replication thread that stopped or could not
+// connect: anything the Repl component logs as an error, and the older
+// "Slave SQL" and "Replica I/O" lines, which carry no component but say
+// Error_code when they are failing and nothing when they are merely working.
+func mysqlReplicationFailed(component, level, msg string) bool {
+	if component == "Repl" && level == "error" {
+		return true
+	}
+	for _, p := range []string{"Replica SQL", "Slave SQL", "Replica I/O", "Slave I/O"} {
+		if strings.HasPrefix(msg, p) && strings.Contains(msg, "Error_code:") {
+			return true
+		}
+	}
+	return strings.HasPrefix(msg, "Error reconnecting to ")
+}
+
+// mysqlSourceHost is the address in "source 'repl@10.0.0.1:3306'", "master"
+// before 8.0.26, or "" when it is a host name.
+func mysqlSourceHost(msg string) string {
+	src := dbBetween(msg, "source '", "'")
+	if src == "" {
+		src = dbBetween(msg, "master '", "'")
+	}
+	_, host, _ := strings.Cut(src, "@")
+	if strings.HasPrefix(host, "[") {
+		host, _, _ = strings.Cut(host[1:], "]")
+	} else if i := strings.LastIndexByte(host, ':'); i > 0 {
+		host = host[:i]
+	}
+	return dbIP(host)
 }
 
 // mysqlConfigWarning is the warnings about how the server was configured

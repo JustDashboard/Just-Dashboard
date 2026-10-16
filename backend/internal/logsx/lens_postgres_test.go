@@ -3,6 +3,7 @@ package logsx
 import (
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 // pgAttrs is what every Postgres head carries — its pid and severity — and
@@ -72,10 +73,12 @@ var postgresCases = []dbCase{
 		want: []dbWant{
 			{level: "info", at: "2026-09-18 09:47:43.282Z", event: "shutdown", attrs: pgAttrs("1", "LOG")},
 			{level: "info", at: "2026-09-18 09:47:43.284Z", attrs: pgAttrs("1", "LOG")},
-			{level: "error", at: "2026-09-18 09:47:43.284Z", event: "terminated", attrs: pgAttrs("82", "FATAL", "code", "57P01")},
+			{level: "error", at: "2026-09-18 09:47:43.284Z", event: "terminated", attrs: pgAttrs("82", "FATAL",
+				"code", "57P01", "error_class", "operator", "reason", "administrator command")},
 			{level: "info", at: "2026-09-18 09:47:43.325Z", attrs: pgAttrs("1", "LOG")},
 			{level: "info", at: "2026-09-18 09:47:43.326Z", attrs: pgAttrs("55", "LOG")},
-			{level: "info", at: "2026-09-18 09:47:43.328Z", event: "checkpoint", attrs: pgAttrs("55", "LOG")},
+			{level: "info", at: "2026-09-18 09:47:43.328Z", event: "checkpoint", attrs: pgAttrs("55", "LOG",
+				"reason", "shutdown immediate")},
 			{level: "info", at: "2026-09-18 09:47:43.335Z", event: "checkpoint", attrs: pgAttrs("55", "LOG",
 				"buffers", "0", "write_s", "0.002", "sync_s", "0.001", "total_s", "0.009")},
 			{level: "info", at: "2026-09-18 09:47:43.342Z", event: "shutdown", attrs: pgAttrs("1", "LOG")},
@@ -105,11 +108,13 @@ var postgresCases = []dbCase{
 			"\t\t\tSELECT n.nspname, c.relname,",
 		},
 		want: []dbWant{
-			{level: "error", at: "2026-09-17 13:34:41.385Z", event: "cancel", attrs: pgAttrs("56569", "ERROR", "code", "57014")},
+			{level: "error", at: "2026-09-17 13:34:41.385Z", event: "cancel", attrs: pgAttrs("56569", "ERROR",
+				"code", "57014", "error_class", "operator", "reason", "user request")},
 			{level: "error", at: "2026-09-17 13:34:41.385Z", cont: true},
 			{level: "error", cont: true},
 			{level: "error", cont: true},
-			{level: "error", at: "2026-09-17 13:34:41.385Z", event: "cancel", attrs: pgAttrs("56623", "ERROR", "code", "57014")},
+			{level: "error", at: "2026-09-17 13:34:41.385Z", event: "cancel", attrs: pgAttrs("56623", "ERROR",
+				"code", "57014", "error_class", "operator", "reason", "user request")},
 			{level: "error", at: "2026-09-17 13:34:41.385Z", cont: true},
 			{level: "error", cont: true},
 		},
@@ -123,10 +128,13 @@ var postgresCases = []dbCase{
 			"2026-09-27 12:15:27.963 UTC [4392] FATAL:  connection to client lost",
 		},
 		want: []dbWant{
-			{level: "error", at: "2026-09-25 08:54:17.942Z", event: "error", attrs: pgAttrs("79", "ERROR", "code", "42P01")},
+			{level: "error", at: "2026-09-25 08:54:17.942Z", event: "error", attrs: pgAttrs("79", "ERROR",
+				"code", "42P01", "error_class", "syntax or access")},
 			{level: "error", at: "2026-09-25 08:54:17.942Z", cont: true},
-			{level: "info", at: "2026-09-27 12:15:27.955Z", attrs: pgAttrs("4392", "LOG")},
-			{level: "error", at: "2026-09-27 12:15:27.963Z", event: "fatal", attrs: pgAttrs("4392", "FATAL", "code", "08006")},
+			// The client went away; the server did not fail.
+			{level: "warn", at: "2026-09-27 12:15:27.955Z", event: "client_lost", attrs: pgAttrs("4392", "LOG")},
+			{level: "warn", at: "2026-09-27 12:15:27.963Z", event: "client_lost", attrs: pgAttrs("4392", "FATAL",
+				"code", "08006", "error_class", "connection")},
 		},
 	},
 	{
@@ -138,7 +146,7 @@ var postgresCases = []dbCase{
 		},
 		want: []dbWant{
 			{level: "error", at: "2026-01-01 00:00:00Z", event: "auth_failed", attrs: pgAttrs("123", "FATAL",
-				"user", "app", "db", "shop", "code", "28P01")},
+				"user", "app", "db", "shop", "code", "28P01", "error_class", "auth")},
 			{level: "error", at: "2026-01-01 00:00:00Z", cont: true},
 			// A socket connection has no address to offer.
 			{level: "info", at: "2026-01-01 00:00:01Z", event: "connection", attrs: pgAttrs("124", "LOG")},
@@ -159,21 +167,22 @@ var postgresCases = []dbCase{
 		want: []dbWant{
 			{level: "info", at: "2026-09-27 10:00:05.1Z", event: "connection", attrs: pgAttrs("812", "LOG",
 				"client", "172.18.0.5", "port", "51234")},
-			{level: "info", at: "2026-09-27 10:00:05.104Z", attrs: pgAttrs("812", "LOG", "client", "172.18.0.5")},
+			{level: "info", at: "2026-09-27 10:00:05.104Z", event: "authenticated", attrs: pgAttrs("812", "LOG",
+				"user", "app", "auth_method", "scram-sha-256", "client", "172.18.0.5")},
 			{level: "info", at: "2026-09-27 10:00:05.105Z", event: "authorized", attrs: pgAttrs("812", "LOG",
 				"user", "app", "db", "shop", "app", "psql", "client", "172.18.0.5")},
 			{level: "info", at: "2026-09-27 10:01:07.45Z", event: "disconnection", attrs: pgAttrs("812", "LOG",
-				"duration_ms", "62345", "user", "app", "db", "shop", "client", "172.18.0.5", "port", "51234")},
+				"session_ms", "62345", "user", "app", "db", "shop", "client", "172.18.0.5", "port", "51234")},
 			{level: "info", at: "2026-09-27 10:02:00Z", event: "connection", attrs: pgAttrs("813", "LOG",
 				"client", "203.0.113.7", "port", "40022")},
 			// The failure does not repeat the address; the session's
 			// "connection received" did, and the lens carried it.
 			{level: "error", at: "2026-09-27 10:02:00.01Z", event: "auth_failed", attrs: pgAttrs("813", "FATAL",
-				"user", "admin", "code", "28P01", "client", "203.0.113.7")},
+				"user", "admin", "code", "28P01", "error_class", "auth", "client", "203.0.113.7")},
 			{level: "error", at: "2026-09-27 10:02:00.01Z", cont: true},
 			// The FATAL ended that backend: a later process with the pid
 			// is not that client.
-			{level: "info", at: "2026-09-27 10:02:05Z", event: "checkpoint", attrs: pgAttrs("813", "LOG")},
+			{level: "info", at: "2026-09-27 10:02:05Z", event: "checkpoint", attrs: pgAttrs("813", "LOG", "reason", "time")},
 		},
 	},
 	{
@@ -187,15 +196,15 @@ var postgresCases = []dbCase{
 		},
 		want: []dbWant{
 			{level: "error", at: "2026-09-27 10:03:00Z", event: "auth_failed", attrs: pgAttrs("900", "FATAL",
-				"client", "8.8.8.8", "user", "postgres", "db", "postgres", "code", "28000")},
+				"client", "8.8.8.8", "user", "postgres", "db", "postgres", "code", "28000", "error_class", "auth")},
 			{level: "error", at: "2026-09-27 10:03:01Z", event: "auth_failed", attrs: pgAttrs("901", "FATAL",
-				"user", "root", "code", "28000")},
+				"user", "root", "code", "28000", "error_class", "auth")},
 			{level: "error", at: "2026-09-27 10:03:02Z", event: "auth_failed", attrs: pgAttrs("902", "FATAL",
-				"db", "root", "code", "3D000")},
+				"db", "root", "code", "3D000", "error_class", "catalog")},
 			{level: "error", at: "2026-09-27 10:03:03Z", event: "too_many_clients", attrs: pgAttrs("903", "FATAL",
-				"code", "53300")},
+				"code", "53300", "error_class", "resources")},
 			{level: "error", at: "2026-09-27 10:03:04Z", event: "too_many_clients", attrs: pgAttrs("904", "FATAL",
-				"code", "53300")},
+				"code", "53300", "error_class", "resources")},
 		},
 	},
 	{
@@ -241,11 +250,15 @@ var postgresCases = []dbCase{
 			`2026-09-27 10:05:01.000 UTC [9788] CONTEXT:  while inserting index tuple (1,42) in relation "x"`,
 		},
 		want: []dbWant{
-			{level: "info", at: "2026-09-27 10:05:00Z", event: "lock_wait", attrs: pgAttrs("2078", "LOG", "duration_ms", "1000.1")},
+			// Time spent waiting is not a statement's time: it is wait_ms, so
+			// the statement time Insights ranks is statements alone.
+			{level: "info", at: "2026-09-27 10:05:00Z", event: "lock_wait", attrs: pgAttrs("2078", "LOG",
+				"lock", "ShareLock", "wait_ms", "1000.1")},
 			{level: "info", at: "2026-09-27 10:05:00Z", cont: true},
 			{level: "info", at: "2026-09-27 10:05:00Z", cont: true},
 			{level: "info", at: "2026-09-27 10:05:00Z", cont: true},
-			{level: "error", at: "2026-09-27 10:05:01Z", event: "deadlock", attrs: pgAttrs("9788", "ERROR", "code", "40P01")},
+			{level: "error", at: "2026-09-27 10:05:01Z", event: "deadlock", attrs: pgAttrs("9788", "ERROR",
+				"code", "40P01", "error_class", "rollback")},
 			{level: "error", at: "2026-09-27 10:05:01Z", cont: true},
 			{level: "error", cont: true},
 			{level: "error", at: "2026-09-27 10:05:01Z", cont: true},
@@ -271,8 +284,9 @@ var postgresCases = []dbCase{
 			{level: "info", at: "2026-09-27 10:06:01Z", event: "autoanalyze", attrs: pgAttrs("4242", "LOG", "table", "shop.public.orders")},
 			{level: "info", at: "2026-09-27 10:06:02Z", event: "temp_file", attrs: pgAttrs("812", "LOG", "bytes", "104857600")},
 			{level: "info", at: "2026-09-27 10:06:02Z", cont: true},
-			{level: "info", at: "2026-09-27 10:06:03Z", event: "checkpoint", attrs: pgAttrs("27", "LOG")},
-			{level: "info", at: "2026-09-27 10:06:03Z", cont: true},
+			{level: "warn", at: "2026-09-27 10:06:03Z", event: "checkpoint_pressure", attrs: pgAttrs("27", "LOG",
+				"interval_s", "12")},
+			{level: "warn", at: "2026-09-27 10:06:03Z", cont: true},
 		},
 	},
 	{
@@ -290,11 +304,13 @@ var postgresCases = []dbCase{
 		want: []dbWant{
 			{level: "critical", at: "2026-09-27 10:07:00Z", event: "crash", attrs: pgAttrs("1", "LOG")},
 			{level: "critical", at: "2026-09-27 10:07:00Z", cont: true},
-			{level: "info", at: "2026-09-27 10:07:00.001Z", attrs: pgAttrs("1", "LOG")},
+			{level: "warn", at: "2026-09-27 10:07:00.001Z", event: "recovery", attrs: pgAttrs("1", "LOG")},
 			{level: "critical", at: "2026-09-27 10:08:00Z", event: "oom", attrs: pgAttrs("1", "LOG")},
-			{level: "critical", at: "2026-09-27 10:09:00Z", event: "oom", attrs: pgAttrs("700", "ERROR", "code", "53200")},
+			{level: "critical", at: "2026-09-27 10:09:00Z", event: "oom", attrs: pgAttrs("700", "ERROR",
+				"code", "53200", "error_class", "resources")},
 			{level: "critical", at: "2026-09-27 10:09:00Z", cont: true},
-			{level: "critical", at: "2026-09-27 10:10:00Z", event: "disk_full", attrs: pgAttrs("29", "PANIC", "code", "53100")},
+			{level: "critical", at: "2026-09-27 10:10:00Z", event: "disk_full", attrs: pgAttrs("29", "PANIC",
+				"code", "53100", "error_class", "resources")},
 			{level: "critical", at: "2026-09-27 10:11:00Z", event: "crash", attrs: pgAttrs("30", "PANIC")},
 		},
 	},
@@ -328,7 +344,8 @@ var postgresCases = []dbCase{
 			{level: "info", at: "2026-09-27 10:14:00.1Z", event: "replication", attrs: pgAttrs("35", "LOG")},
 			{level: "info", at: "2026-09-27 10:14:00.2Z", event: "ready", attrs: pgAttrs("1", "LOG")},
 			{level: "error", at: "2026-09-27 10:15:00Z", event: "replication", attrs: pgAttrs("35", "FATAL")},
-			{level: "error", at: "2026-09-27 10:16:00Z", event: "cancel", attrs: pgAttrs("880", "ERROR", "code", "40001")},
+			{level: "error", at: "2026-09-27 10:16:00Z", event: "cancel", attrs: pgAttrs("880", "ERROR",
+				"code", "40001", "error_class", "rollback", "reason", "conflict with recovery")},
 			{level: "error", at: "2026-09-27 10:16:00Z", cont: true},
 		},
 	},
@@ -340,8 +357,9 @@ var postgresCases = []dbCase{
 			"2026-09-27 10:06:01.003 UTC [812] STATEMENT:  select * from userz",
 		},
 		want: []dbWant{
-			{level: "error", at: "2026-09-27 10:06:01.001Z", event: "error", attrs: pgAttrs("812", "ERROR", "code", "42P01")},
-			{level: "info", at: "2026-09-27 10:06:01.002Z", event: "checkpoint", attrs: pgAttrs("27", "LOG")},
+			{level: "error", at: "2026-09-27 10:06:01.001Z", event: "error", attrs: pgAttrs("812", "ERROR",
+				"code", "42P01", "error_class", "syntax or access")},
+			{level: "info", at: "2026-09-27 10:06:01.002Z", event: "checkpoint", attrs: pgAttrs("27", "LOG", "reason", "time")},
 			{at: "2026-09-27 10:06:01.003Z"},
 		},
 	},
@@ -360,7 +378,8 @@ var postgresCases = []dbCase{
 				"user", "app", "db", "shop", "app", "psql", "client", "172.18.0.5",
 				"query", "SELECT 1", "fp", Fingerprint("SELECT 1"))},
 			{level: "error", at: "2026-09-27 10:00:00.5Z", event: "error", attrs: pgAttrs("813", "ERROR",
-				"user", "app", "db", "shop", "app", "psql", "client", "172.18.0.5", "code", "42P01")},
+				"user", "app", "db", "shop", "app", "psql", "client", "172.18.0.5", "code", "42P01",
+				"error_class", "syntax or access")},
 			{level: "info", at: "2026-09-27 10:00:00.123Z", event: "ready", attrs: pgAttrs("1", "LOG")},
 		},
 	},
@@ -372,7 +391,62 @@ var postgresCases = []dbCase{
 		want: []dbWant{
 			{level: "error", at: "2026-09-27 10:06:01.001Z", event: "error", attrs: pgAttrs("812", "ERROR",
 				"user", "app", "db", "shop", "app", "psql", "client", "172.18.0.5", "port", "51234",
-				"code", "42P01", "query", "select * from userz", "fp", Fingerprint("select * from userz"))},
+				"code", "42P01", "error_class", "syntax or access", "query", "select * from userz",
+				"fp", Fingerprint("select * from userz"))},
+		},
+	},
+	{
+		name: "an exposed port: scanners, a lost client, a restart after a crash",
+		lines: []string{
+			"2026-10-16 03:12:00.000 UTC [7001] LOG:  incomplete startup packet",
+			"2026-10-16 03:12:01.000 UTC [7002] FATAL:  unsupported frontend protocol 0.0: server supports 3.0 to 3.0",
+			"2026-10-16 03:12:02.000 UTC [7003] LOG:  could not accept SSL connection: wrong version number",
+			"2026-10-16 03:12:03.000 UTC [7004] LOG:  could not receive data from client: Connection reset by peer",
+			"2026-10-16 03:12:04.000 UTC [7005] LOG:  unexpected EOF on client connection with an open transaction",
+			"2026-10-16 03:13:00.000 UTC [1] LOG:  all server processes terminated; reinitializing",
+			"2026-10-16 03:13:00.100 UTC [7010] LOG:  database system was interrupted; last known up at 2026-10-16 03:10:00 UTC",
+			"2026-10-16 03:13:00.200 UTC [7010] LOG:  database system was not properly shut down; automatic recovery in progress",
+			"2026-10-16 03:13:00.300 UTC [7010] LOG:  redo starts at 0/1A82B58",
+			"2026-10-16 03:13:00.400 UTC [7011] FATAL:  the database system is starting up",
+		},
+		want: []dbWant{
+			{level: "warn", at: "2026-10-16 03:12:00Z", event: "probe", attrs: pgAttrs("7001", "LOG")},
+			// A FATAL to Postgres, but a scanner's, not the server failing.
+			{level: "warn", at: "2026-10-16 03:12:01Z", event: "probe", attrs: pgAttrs("7002", "FATAL",
+				"code", "08P01", "error_class", "connection")},
+			{level: "warn", at: "2026-10-16 03:12:02Z", event: "probe", attrs: pgAttrs("7003", "LOG")},
+			{level: "warn", at: "2026-10-16 03:12:03Z", event: "client_lost", attrs: pgAttrs("7004", "LOG")},
+			{level: "warn", at: "2026-10-16 03:12:04Z", event: "client_lost", attrs: pgAttrs("7005", "LOG")},
+			{level: "warn", at: "2026-10-16 03:13:00Z", event: "recovery", attrs: pgAttrs("1", "LOG")},
+			{level: "warn", at: "2026-10-16 03:13:00.1Z", event: "recovery", attrs: pgAttrs("7010", "LOG")},
+			{level: "warn", at: "2026-10-16 03:13:00.2Z", event: "recovery", attrs: pgAttrs("7010", "LOG")},
+			{level: "warn", at: "2026-10-16 03:13:00.3Z", event: "recovery", attrs: pgAttrs("7010", "LOG")},
+			{level: "error", at: "2026-10-16 03:13:00.4Z", event: "fatal", attrs: pgAttrs("7011", "FATAL",
+				"code", "57P03", "error_class", "operator")},
+		},
+	},
+	{
+		name: "the waits and the limits Docker sets",
+		lines: []string{
+			"2026-10-16 04:00:00.000 UTC [2078] LOG:  process 2078 acquired AccessExclusiveLock on relation 16384 of database 16385 after 4567.890 ms",
+			`2026-10-16 04:00:01.000 UTC [2079] ERROR:  could not resize shared memory segment "/PostgreSQL.1197429420" to 12615680 bytes: No space left on device`,
+			"2026-10-16 04:00:02.000 UTC [2080] ERROR:  canceling statement due to statement timeout",
+			`2026-10-16 04:00:03.000 UTC [2081] WARNING:  database "shop" must be vacuumed within 9999999 transactions`,
+			`2026-10-16 04:00:04.000 UTC [2082] ERROR:  database is not accepting commands to avoid wraparound data loss in database "shop"`,
+			"2026-10-16 04:00:05.000 UTC [2083] LOG:  checkpoint starting: wal",
+		},
+		want: []dbWant{
+			{level: "info", at: "2026-10-16 04:00:00Z", event: "lock_acquired", attrs: pgAttrs("2078", "LOG",
+				"lock", "AccessExclusiveLock", "wait_ms", "4567.89")},
+			// /dev/shm, not the disk: a different fix.
+			{level: "error", at: "2026-10-16 04:00:01Z", event: "shm_full", attrs: pgAttrs("2079", "ERROR",
+				"code", "53100", "error_class", "resources")},
+			{level: "error", at: "2026-10-16 04:00:02Z", event: "cancel", attrs: pgAttrs("2080", "ERROR",
+				"code", "57014", "error_class", "operator", "reason", "statement timeout")},
+			{level: "warn", at: "2026-10-16 04:00:03Z", event: "wraparound", attrs: pgAttrs("2081", "WARNING", "db", "shop")},
+			{level: "critical", at: "2026-10-16 04:00:04Z", event: "wraparound", attrs: pgAttrs("2082", "ERROR",
+				"db", "shop", "code", "54000", "error_class", "limits")},
+			{level: "info", at: "2026-10-16 04:00:05Z", event: "checkpoint", attrs: pgAttrs("2083", "LOG", "reason", "wal")},
 		},
 	},
 }
@@ -393,6 +467,45 @@ func TestPostgresLensReadsZoneAbbreviationsInTheHostZone(t *testing.T) {
 	}
 	if got[0].Timestamp == nil || !got[0].Timestamp.Equal(want) {
 		t.Fatalf("stamped %v, want %v", got[0].Timestamp, want)
+	}
+}
+
+// The viewer draws a line from its body: the prefix the lens read into the
+// columns is not drawn twice, a part keeps the word that says what it is, and
+// a line the lens read from a copy — jsonlog — is drawn whole.
+func TestPostgresLensMarksWhereTheMessageStarts(t *testing.T) {
+	lines := readThrough(t, "postgres",
+		`2026-01-01 00:00:00.000 UTC [123] app@shop FATAL:  password authentication failed for user "app"`,
+		`2026-01-01 00:00:00.000 UTC [123] app@shop DETAIL:  Role "app" does not exist.`,
+		"\tConnection matched file \"/var/lib/postgresql/data/pg_hba.conf\" line 128",
+		"waiting for server to start....2026-09-18 09:25:53.958 UTC [41] LOG:  starting PostgreSQL 16.15",
+		`{"timestamp":"2026-09-27 10:06:01.001 UTC","pid":812,"error_severity":"ERROR","message":"relation \"userz\" does not exist"}`,
+	)
+	want := []string{
+		`password authentication failed for user "app"`,
+		`DETAIL:  Role "app" does not exist.`,
+		"",
+		"starting PostgreSQL 16.15",
+		"",
+	}
+	for i, l := range lines {
+		got := ""
+		if l.Body > 0 {
+			got = l.Text[l.Body:]
+		}
+		if got != want[i] {
+			t.Errorf("line %d drawn from %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+// The browser indexes the text in UTF-16 units, so a name outside ASCII in
+// the prefix moves the body by its units, not its bytes.
+func TestPostgresLensCountsTheBodyInUTF16(t *testing.T) {
+	const prefix = "2026-01-01 00:00:00.000 UTC [123] ionuț@magazin LOG:  "
+	l := readThrough(t, "postgres", prefix+"statement: SELECT 1")[0]
+	if want := len(utf16.Encode([]rune(prefix))); l.Body != want {
+		t.Fatalf("body at %d, want %d", l.Body, want)
 	}
 }
 

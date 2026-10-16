@@ -242,7 +242,12 @@
       "shutdown",
       "checkpoint",
       "replication",
-      "index"
+      "index",
+      "too_many_connections",
+      "election",
+      "crash",
+      "disk_full",
+      "config_warning"
     ],
     "attrs": [
       "component",
@@ -259,7 +264,13 @@
       "user",
       "code",
       "query",
-      "fp"
+      "fp",
+      "connections",
+      "state",
+      "prev_state",
+      "query_hash",
+      "cpu_ms",
+      "yields"
     ]
   },
   "mssql": {
@@ -292,6 +303,14 @@
       "too_many_connections",
       "auth_failed",
       "replication",
+      "replication_failed",
+      "recovery",
+      "startup_failed",
+      "disk_full",
+      "table_full",
+      "oom",
+      "io_slow",
+      "table_crashed",
       "config_warning",
       "error"
     ],
@@ -301,7 +320,10 @@
       "component",
       "user",
       "client",
-      "db"
+      "db",
+      "reason",
+      "table",
+      "duration_ms"
     ]
   },
   "nginx": {
@@ -429,16 +451,24 @@
       "crash",
       "oom",
       "disk_full",
+      "shm_full",
+      "recovery",
+      "wraparound",
       "checkpoint",
+      "checkpoint_pressure",
       "autovacuum",
       "autoanalyze",
       "connection",
+      "authenticated",
       "authorized",
       "disconnection",
+      "client_lost",
+      "probe",
       "auth_failed",
       "too_many_clients",
       "deadlock",
       "lock_wait",
+      "lock_acquired",
       "slow",
       "duration",
       "statement",
@@ -459,8 +489,14 @@
       "port",
       "app",
       "code",
+      "error_class",
       "severity",
       "duration_ms",
+      "session_ms",
+      "wait_ms",
+      "lock",
+      "auth_method",
+      "reason",
       "query",
       "fp",
       "table",
@@ -468,7 +504,8 @@
       "buffers",
       "write_s",
       "sync_s",
-      "total_s"
+      "total_s",
+      "interval_s"
     ]
   },
   "redis": {
@@ -485,11 +522,21 @@
       "replication",
       "security_attack",
       "client_closed",
-      "crash"
+      "crash",
+      "replication_failed",
+      "full_sync",
+      "aof_slow",
+      "config_warning"
     ],
     "attrs": [
       "pid",
-      "role"
+      "role",
+      "duration_ms",
+      "keys",
+      "changes",
+      "client",
+      "cmd",
+      "version"
     ]
   },
   "syslog": {

@@ -5,12 +5,17 @@ import (
 	"time"
 )
 
-// redisAttrs is a Redis line's pid and the role its letter names.
-func redisAttrs(pid, role string) map[string]string {
-	if role == "" {
-		return map[string]string{"pid": pid}
+// redisAttrs is a Redis line's pid and the role its letter names, and the
+// pairs given.
+func redisAttrs(pid, role string, pairs ...string) map[string]string {
+	m := map[string]string{"pid": pid}
+	if role != "" {
+		m["role"] = role
 	}
-	return map[string]string{"pid": pid, "role": role}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		m[pairs[i]] = pairs[i+1]
+	}
+	return m
 }
 
 // redisYearless is the stamp a line without a year must read as: this year's
@@ -52,14 +57,14 @@ var redisCases = []dbCase{
 		want: []dbWant{
 			{level: "warn", at: "2026-09-27 10:00:00.001", event: "memory_warning", attrs: redisAttrs("1", "child")},
 			{level: "info", at: "2026-09-27 10:00:00.001", event: "startup", attrs: redisAttrs("1", "child")},
-			{level: "info", at: "2026-09-27 10:00:00.001", attrs: redisAttrs("1", "child")},
-			{level: "warn", at: "2026-09-27 10:00:00.001", attrs: redisAttrs("1", "child")},
+			{level: "info", at: "2026-09-27 10:00:00.001", attrs: redisAttrs("1", "child", "version", "7.4.1")},
+			{level: "warn", at: "2026-09-27 10:00:00.001", event: "config_warning", attrs: redisAttrs("1", "child")},
 			{level: "info", at: "2026-09-27 10:00:00.003", attrs: redisAttrs("1", "primary")},
 			{level: "info", at: "2026-09-27 10:00:00.004", event: "loading", attrs: redisAttrs("1", "primary")},
-			{level: "info", at: "2026-09-27 10:00:00.005", event: "loading", attrs: redisAttrs("1", "primary")},
-			{level: "info", at: "2026-09-27 10:00:00.005", event: "loading", attrs: redisAttrs("1", "primary")},
+			{level: "info", at: "2026-09-27 10:00:00.005", event: "loading", attrs: redisAttrs("1", "primary", "keys", "1203")},
+			{level: "info", at: "2026-09-27 10:00:00.005", event: "loading", attrs: redisAttrs("1", "primary", "duration_ms", "2")},
 			{level: "info", at: "2026-09-27 10:00:00.005", event: "ready", attrs: redisAttrs("1", "primary")},
-			{level: "info", at: "2026-09-27 11:00:01", event: "bgsave", attrs: redisAttrs("1", "primary")},
+			{level: "info", at: "2026-09-27 11:00:01", event: "bgsave", attrs: redisAttrs("1", "primary", "changes", "1")},
 			{level: "info", at: "2026-09-27 11:00:01.001", event: "bgsave", attrs: redisAttrs("1", "primary")},
 			{level: "info", at: "2026-09-27 11:00:01.020", event: "saved", attrs: redisAttrs("42", "child")},
 			{level: "info", at: "2026-09-27 11:00:01.021", event: "bgsave", attrs: redisAttrs("42", "child")},
@@ -85,7 +90,7 @@ var redisCases = []dbCase{
 			{level: "error", at: "2026-09-27 13:00:00", event: "persistence_failed", attrs: redisAttrs("1", "primary")},
 			{level: "error", at: "2026-09-27 13:00:05", event: "persistence_failed", attrs: redisAttrs("1", "primary")},
 			{level: "info", at: "2026-09-27 13:01:00", event: "aof", attrs: redisAttrs("1", "primary")},
-			{level: "info", at: "2026-09-27 13:01:02", event: "aof", attrs: redisAttrs("1", "primary")},
+			{level: "warn", at: "2026-09-27 13:01:02", event: "aof_slow", attrs: redisAttrs("1", "primary")},
 			{level: "info", at: "2026-09-27 13:01:03", event: "aof", attrs: redisAttrs("1", "primary")},
 			{level: "error", at: "2026-09-27 13:02:00", event: "persistence_failed", attrs: redisAttrs("1", "primary")},
 		},
@@ -116,8 +121,10 @@ var redisCases = []dbCase{
 		},
 		want: []dbWant{
 			{level: "warn", at: "2026-09-27 15:00:00", event: "security_attack", attrs: redisAttrs("1", "primary")},
-			{level: "debug", at: "2026-09-27 15:00:01", event: "client_closed", attrs: redisAttrs("1", "primary")},
-			{level: "warn", at: "2026-09-27 15:00:02", event: "client_closed", attrs: redisAttrs("1", "primary")},
+			{level: "debug", at: "2026-09-27 15:00:01", event: "client_closed", attrs: redisAttrs("1", "primary",
+				"client", "172.18.0.5", "cmd", "quit")},
+			{level: "warn", at: "2026-09-27 15:00:02", event: "client_closed", attrs: redisAttrs("1", "primary",
+				"client", "172.18.0.7", "cmd", "psubscribe")},
 		},
 	},
 	{
@@ -156,6 +163,49 @@ var redisCases = []dbCase{
 			{level: "info", at: "2026-09-27 10:00:00.005Z", event: "ready", attrs: redisAttrs("1", "primary")},
 		},
 	},
+	{
+		name: "a replica that cannot follow its primary, and the resyncs that follow",
+		lines: []string{
+			"1:S 27 Sep 2026 17:00:00.000 # Error condition on socket for SYNC: Connection refused",
+			"1:S 27 Sep 2026 17:00:01.000 # Timeout connecting to the MASTER...",
+			"1:S 27 Sep 2026 17:00:02.000 # MASTER timeout: no data nor PING received...",
+			"1:S 27 Sep 2026 17:00:03.000 # Unable to AUTH to MASTER: -ERR invalid password",
+			"1:S 27 Sep 2026 17:00:04.000 # MASTER aborted replication with an error: NOAUTH Authentication required.",
+			"1:S 27 Sep 2026 17:00:05.000 * Master is currently unable to PSYNC but should be in the future: -NOMASTERLINK Can't SYNC while not connected with my master",
+			// Redis's own warning stands: the primary losing a replica is routine.
+			"1:M 27 Sep 2026 17:00:06.000 # Connection with replica 10.0.0.6:6379 lost.",
+			"1:M 27 Sep 2026 17:01:00.000 * Full resync requested by replica 10.0.0.6:6379",
+			"1:M 27 Sep 2026 17:01:01.000 * Unable to partial resync with replica 10.0.0.6:6379 for lack of backlog (Replica request was: 1234).",
+			"1:S 27 Sep 2026 17:01:02.000 * Full resync from master: 3c4f9ab8c3a6b0d1e5f7:0",
+		},
+		want: []dbWant{
+			{level: "error", at: "2026-09-27 17:00:00", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "error", at: "2026-09-27 17:00:01", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "error", at: "2026-09-27 17:00:02", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "error", at: "2026-09-27 17:00:03", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "error", at: "2026-09-27 17:00:04", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "error", at: "2026-09-27 17:00:05", event: "replication_failed", attrs: redisAttrs("1", "replica")},
+			{level: "warn", at: "2026-09-27 17:00:06", event: "replication", attrs: redisAttrs("1", "primary")},
+			{level: "warn", at: "2026-09-27 17:01:00", event: "full_sync", attrs: redisAttrs("1", "primary", "client", "10.0.0.6")},
+			{level: "warn", at: "2026-09-27 17:01:01", event: "full_sync", attrs: redisAttrs("1", "primary", "client", "10.0.0.6")},
+			{level: "warn", at: "2026-09-27 17:01:02", event: "full_sync", attrs: redisAttrs("1", "replica")},
+		},
+	},
+	{
+		name: "settings the server says are wrong, and a file loaded from the AOF",
+		lines: []string{
+			"1:M 27 Sep 2026 18:00:00.000 # WARNING: The TCP backlog setting of 511 cannot be enforced because /proc/sys/net/core/somaxconn is set to the lower value of 128.",
+			"1:M 27 Sep 2026 18:00:00.001 # You requested maxclients of 10000 requiring at least 10032 max file descriptors.",
+			"1:M 27 Sep 2026 18:00:01.000 * DB loaded from append only file: 0.250 seconds",
+			"1:M 27 Sep 2026 18:00:02.000 - Closing client that reached max query buffer length: id=9 addr=[::1]:41234 laddr=[::1]:6379 fd=8 name= age=1 idle=0 flags=N db=0 sub=0 psub=0 multi=-1 cmd=NULL",
+		},
+		want: []dbWant{
+			{level: "warn", at: "2026-09-27 18:00:00", event: "config_warning", attrs: redisAttrs("1", "primary")},
+			{level: "warn", at: "2026-09-27 18:00:00.001", event: "config_warning", attrs: redisAttrs("1", "primary")},
+			{level: "info", at: "2026-09-27 18:00:01", event: "loading", attrs: redisAttrs("1", "primary", "duration_ms", "250")},
+			{level: "debug", at: "2026-09-27 18:00:02", event: "client_closed", attrs: redisAttrs("1", "primary", "client", "::1")},
+		},
+	},
 }
 
 func TestRedisLens(t *testing.T) {
@@ -168,4 +218,23 @@ func BenchmarkLensRedis(b *testing.B) {
 		texts = append(texts, c.lines...)
 	}
 	dbBench(b, "redis", texts)
+}
+
+// The viewer draws a Redis line from its message: the pid, the role letter
+// and the level character are the attrs and the level beside it.
+func TestRedisLensMarksWhereTheMessageStarts(t *testing.T) {
+	l := readThrough(t, "redis", "1:M 27 Sep 2026 11:00:01.001 * Background saving started by pid 42")[0]
+	if got := l.Text[l.Body:]; got != "Background saving started by pid 42" {
+		t.Fatalf("drawn from %q", got)
+	}
+}
+
+// A client on an IPv6 address keeps its brackets in the client list; the
+// address inside them is the client.
+func TestRedisLensReadsAnIPv6Client(t *testing.T) {
+	l := readThrough(t, "redis",
+		"1:M 27 Sep 2026 11:00:01.001 # Client id=7 addr=[2001:db8::5]:51234 laddr=[::1]:6379 fd=8 name= age=1 idle=0 flags=S cmd=psync scheduled to be closed ASAP for overcoming of output buffer limits.")[0]
+	if l.Event != "client_closed" || l.Attrs["client"] != "2001:db8::5" {
+		t.Fatalf("read as %q with client %q", l.Event, l.Attrs["client"])
+	}
 }

@@ -184,6 +184,8 @@ export type DatabaseMock = {
   logSources?: unknown
   /** What `GET /databases/{id}/querylog` answers. */
   queryLog?: unknown
+  /** The lines `GET /logs/search` answers with, for every question. */
+  logLines?: { text: string; level?: string; timestamp?: string; [key: string]: unknown }[]
 }
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -229,14 +231,27 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
     // A server log read on a database's page: described, and with no lines.
     if (path === "/logs/source" || path === "/logs/retention") return json(route, {})
     if (path === "/logs/search") {
+      const lines = options.logLines ?? []
+      const levels: Record<string, number> = {}
+      for (const line of lines) {
+        if (!line.cont && line.level) levels[line.level] = (levels[line.level] ?? 0) + 1
+      }
+      const matched = lines.filter((line) => !line.cont).length
       return json(route, {
-        lines: [],
-        scanned: 0,
-        matched: 0,
+        lines,
+        scanned: lines.length,
+        matched,
+        facets: {
+          level: {
+            values: Object.entries(levels).map(([value, count]) => ({ value, count })),
+            distinct: Object.keys(levels).length,
+          },
+        },
+        histogram: matched ? [{ start: lines[0].timestamp, total: matched, counts: levels }] : [],
+        bucketSeconds: 60,
         truncated: false,
         complete: true,
         files: [],
-        histogram: [],
         tookMillis: 1,
       })
     }

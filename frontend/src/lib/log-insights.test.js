@@ -98,6 +98,7 @@ describe("readings", () => {
     expect(events.params.f).toEqual([
       "event:slow",
       "event:auth_failed",
+      "event:probe",
       "event:deadlock",
       "event:lock_wait",
       "event:startup",

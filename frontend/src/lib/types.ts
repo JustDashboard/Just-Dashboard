@@ -1544,6 +1544,12 @@ export type LogLine = {
    * filter, and is folded under it.
    */
   cont?: boolean
+  /**
+   * Where the message starts in `text`, past a prefix the lens read into the
+   * line's time, level and attrs — Postgres's "[812] app@shop FATAL:  ".
+   * Coloured, the console draws the line from there; `text` keeps every byte.
+   */
+  body?: number
   /** The lens that named `event`, where it is not the stream's own (a syslog line read as auth). */
   lens?: string
 }
