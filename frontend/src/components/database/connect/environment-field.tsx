@@ -37,7 +37,7 @@ export function EnvironmentField({
     <Field
       label="Environment"
       htmlFor={id}
-      hint="What it is for, as its tag says it everywhere. Empty for none."
+      hint="Drawn as a coloured tag beside its name everywhere. Empty for none."
       error={environmentProblem(value)}
     >
       <Input

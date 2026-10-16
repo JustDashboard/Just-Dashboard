@@ -1,23 +1,26 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Puzzle } from "@/components/icons"
 import { del, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { FormFact, FormNote, FormSection } from "@/components/form"
+import { FormFact, FormNote } from "@/components/form"
 import { SearchInput } from "@/components/page"
+import { ProductLogo } from "@/components/product-logo"
 import { LoadingRows, Notice } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
+import type { Engine } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** One extension of `GET /databases/{id}/server/extensions`. */
@@ -46,14 +49,79 @@ type ServerModules = { modules: { name: string; version: number }[] }
 const LISTED = 12
 
 /**
- * One extension or module as a row you read: its name as the engine spells
- * it, its version, the whole sentence that says what it is — that sentence is
- * what a reader chooses by — and its one command at the row's edge. No mark
- * leads it: nothing draws an extension as itself, and the same glyph down
- * sixty rows says nothing sixty times.
+ * The extensions PostgreSQL ships in its own contrib package, and its own
+ * procedural language: the elephant is the honest mark for these, because
+ * they are PostgreSQL's. Anything else is somebody else's project, drawn as
+ * its own logo where one is bundled and as a plain piece of a puzzle where
+ * none is — a mark is never guessed (`product-logo.tsx`).
+ */
+const POSTGRES_OWN = new Set([
+  "adminpack",
+  "amcheck",
+  "autoinc",
+  "bloom",
+  "btree_gin",
+  "btree_gist",
+  "citext",
+  "cube",
+  "dblink",
+  "dict_int",
+  "dict_xsyn",
+  "earthdistance",
+  "file_fdw",
+  "fuzzystrmatch",
+  "hstore",
+  "insert_username",
+  "intagg",
+  "intarray",
+  "isn",
+  "lo",
+  "ltree",
+  "moddatetime",
+  "old_snapshot",
+  "pageinspect",
+  "pg_buffercache",
+  "pg_freespacemap",
+  "pg_prewarm",
+  "pg_stat_statements",
+  "pg_surgery",
+  "pg_trgm",
+  "pg_visibility",
+  "pg_walinspect",
+  "pgcrypto",
+  "pgrowlocks",
+  "pgstattuple",
+  "plpgsql",
+  "postgres_fdw",
+  "refint",
+  "seg",
+  "sslinfo",
+  "tablefunc",
+  "tcn",
+  "tsm_system_rows",
+  "tsm_system_time",
+  "unaccent",
+  "uuid-ossp",
+  "xml2",
+])
+
+/** The logo an extension is drawn as, or `undefined` for one with none bundled. */
+function extensionLogo(name: string, engine: Engine, catalogue: boolean): string | undefined {
+  if (name.startsWith("timescaledb")) return "timescaledb"
+  // A plugin catalogue is the server's own: MySQL's plugins are MySQL's.
+  if (catalogue || POSTGRES_OWN.has(name)) return engine.logo
+  return undefined
+}
+
+/**
+ * One extension or module as a row you read: led by what it is — the
+ * engine's own mark for what ships with it, a project's logo where one is
+ * bundled — then its name as the engine spells it, its version, the sentence
+ * that says what it does, and its one command at the row's edge.
  */
 function ExtensionRow({
   name,
+  logo,
   version,
   newer,
   where,
@@ -61,6 +129,7 @@ function ExtensionRow({
   action,
 }: {
   name: string
+  logo?: string
   version?: string | number
   /** A later version the server could update it to. */
   newer?: string
@@ -70,19 +139,22 @@ function ExtensionRow({
   action?: React.ReactNode
 }) {
   return (
-    <li data-extension={name} className="flex min-w-0 items-start gap-3 py-2.5">
+    <li data-extension={name} className="flex min-w-0 items-center gap-3 py-2.5">
+      <ProductLogo id={logo} size="sm" fallback={Puzzle} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          <span className="min-w-0 font-mono text-xs wrap-anywhere">{name}</span>
+          <span className="min-w-0 font-mono text-xs font-medium wrap-anywhere">{name}</span>
           {version !== undefined && version !== "" && <Tag mono>{version}</Tag>}
           {newer && <Tag tone="warning">{newer} available</Tag>}
           {where && <span className="text-hint text-muted-foreground">in {where}</span>}
         </p>
         {about && (
-          <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground">{about}</p>
+          <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground first-letter:uppercase">
+            {about}
+          </p>
         )}
       </div>
-      {action && <div className="-my-0.5 flex shrink-0 items-center">{action}</div>}
+      {action && <div className="flex shrink-0 items-center">{action}</div>}
     </li>
   )
 }
@@ -192,12 +264,10 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
     })
 
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="extensions"
-      className={UNDER_STRIP}
       title="Extensions"
-      hint={
+      state={
         data?.supported ? (
           <span className="numeric">
             {enabled.length} enabled
@@ -281,6 +351,7 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
                     // A plugin catalogue lists one name once per kind of plugin.
                     key={`${extension.schema ?? ""}:${extension.name}`}
                     name={extension.name}
+                    logo={extensionLogo(extension.name, engine, !data.editable)}
                     version={extension.version ?? extension.availableVersion}
                     newer={
                       extension.installed &&
@@ -334,13 +405,13 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
           )}
         </div>
       )}
-    </FormSection>
+    </SettingSection>
   )
 }
 
 /** A key–value server's loaded modules. They are loaded by its configuration, so this is a reading. */
 function Modules() {
-  const { id, conn, status } = useDatabase()
+  const { id, conn, engine, status } = useDatabase()
   const down = isDown(status.state)
   const server = usePoll(
     (signal) =>
@@ -356,12 +427,10 @@ function Modules() {
   )
   const modules = server.data?.modules
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="extensions"
-      className={UNDER_STRIP}
       title="Modules"
-      hint={
+      state={
         modules ? (
           <span className="numeric">{plural(modules.length, "module")} loaded</span>
         ) : undefined
@@ -387,7 +456,12 @@ function Modules() {
         <div className="animate-rise space-y-3">
           <ul className="divide-y divide-hairline" aria-label="Modules">
             {modules.map((module) => (
-              <ExtensionRow key={module.name} name={module.name} version={module.version} />
+              <ExtensionRow
+                key={module.name}
+                name={module.name}
+                logo={engine.logo}
+                version={module.version}
+              />
             ))}
           </ul>
           <FormNote>
@@ -395,6 +469,6 @@ function Modules() {
           </FormNote>
         </div>
       )}
-    </FormSection>
+    </SettingSection>
   )
 }

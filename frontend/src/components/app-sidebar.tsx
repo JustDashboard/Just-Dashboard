@@ -207,7 +207,7 @@ function databasePlaceholder(id: number, known: KnownDatabase): Panel {
     named: true,
     title: known.name,
     mark: <EngineGlyph engine={engine} className="size-4" />,
-    groups: databaseNavGroups(engine.sections, (section) => sectionHref(id, section)),
+    groups: databaseNavGroups(engine, (section) => sectionHref(id, section)),
   }
 }
 

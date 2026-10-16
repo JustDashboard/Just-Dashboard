@@ -1,26 +1,28 @@
 "use client"
 
-import { useEffect, useId, useState } from "react"
-import { Pencil, Router } from "@/components/icons"
+import { useEffect, useId, useRef, useState } from "react"
+import Link from "next/link"
+import { Database, Pencil, Router } from "@/components/icons"
 import { errorMessage, get, post, put } from "@/lib/api"
-import { timestamp } from "@/lib/format"
+import { calendarDate, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import type { DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
-  Field,
-  FieldRow,
-  FormFact,
-  FormNote,
-  FormSection,
-  OptionList,
-  OptionRow,
-} from "@/components/form"
+  SettingForm,
+  SettingSection,
+  settingStatus,
+} from "@/components/deploy/settings/setting-card"
+import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
+import { Field, FieldRow, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Detail, DetailList } from "@/components/page"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -31,7 +33,7 @@ import {
 } from "@/components/database/connect/environment-field"
 import { CONNECTION_NAME } from "@/components/database/connect/rules"
 import type { DbTestResponse } from "@/components/database/fleet/types"
-import { EnvironmentTag, ProtectedTag } from "@/components/database/kit"
+import { EngineGlyph, EnvironmentTag, ProtectedTag } from "@/components/database/kit"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { maskedDsn, patchDsn, readDsn } from "@/components/database/ops/settings-dsn"
 import {
@@ -40,21 +42,24 @@ import {
   notesProblem,
   type ConnectionDraft,
 } from "@/components/database/ops/settings-model"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import type { DbConnectionSummary } from "@/components/database/shell/types"
 
+/** The fields of the labels form, as `connectionChanges` names them. */
+const LABELS = ["name", "environment", "notes"] as const
+
 /**
- * The connection itself: what the dashboard calls it, what it is for, whether
- * the dashboard may change what is in it, and the address it dials.
+ * What the dashboard keeps about the connection: what it calls it, what it
+ * is for, notes, and whether it may change what is in it.
  *
- * The labels are a form with one save, which sends only what changed. The
- * address is not a field of that form: it is sealed on the server and read
- * back only when an administrator asks to change it, in its own dialog.
+ * One form and one write over two sections, the way a project's Runtime is
+ * one form over five: the labels and the protection are the same `PUT`, and
+ * it sends only what changed. The form draws no Save of its own — the page's
+ * bar carries it, with its count, from the first keystroke.
  */
-export function ConnectionSection() {
-  const { id, conn, engine, summary, status } = useDatabase()
+export function ConnectionForm() {
+  const { id, conn, engine, summary, status, href } = useDatabase()
   const { connections, refresh } = useDatabases()
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -63,13 +68,12 @@ export function ConnectionSection() {
   const [edits, setEdits] = useState<Partial<ConnectionDraft>>({})
   const [saving, setSaving] = useState(false)
   const [refusal, setRefusal] = useState<string>()
-  const [editing, setEditing] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [tested, setTested] = useState<{ ok: boolean; words: string }>()
 
   const draft: ConnectionDraft = { ...saved, ...edits }
   const changes = connectionChanges(saved, draft)
   const count = Object.keys(changes).length
+  const labelsEdited = LABELS.some((key) => key in changes)
+  const protectionEdited = "readOnly" in changes
   const set = (patch: Partial<ConnectionDraft>) => {
     setEdits((held) => ({ ...held, ...patch }))
     setRefusal(undefined)
@@ -91,21 +95,187 @@ export function ConnectionSection() {
     Boolean(notesProblem(draft.notes))
 
   const save = async () => {
-    if (count === 0 || invalid || saving) return
+    if (count === 0) return true
+    if (invalid) return false
     setSaving(true)
     setRefusal(undefined)
     try {
       await put<DbConnection>(`/databases/${id}`, changes)
-      notify.success(`Saved ${typedName}`)
       setEdits({})
       refresh()
       status.refresh()
+      return true
     } catch (err) {
       setRefusal(errorMessage(err))
+      return false
     } finally {
       setSaving(false)
     }
   }
+
+  // What the connection is, under its name: the product that answered, and
+  // when the dashboard was given it.
+  const what = (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      <EngineGlyph engine={engine} className="size-3.5" />
+      <span>
+        {engine.label}
+        {summary?.versionNumber ? ` ${summary.versionNumber}` : ""}
+      </span>
+      <span aria-hidden>·</span>
+      <span title={timestamp(conn.createdAt)}>added {calendarDate(conn.createdAt)}</span>
+    </span>
+  )
+  const protection = conn.readOnly
+    ? "On — every change to its data or schema made here is refused"
+    : "Off — its data and schema can be changed from here"
+  const lock = (
+    <FormNote>
+      It is the dashboard reading each request, not a lock in the engine: a statement that calls a
+      function which writes still passes.{" "}
+      {engine.has("access") ? (
+        <>
+          For a lock the server keeps, connect with an account that cannot write — one is made under{" "}
+          <Link href={href("access")} className="rounded-sm underline focus-ring">
+            Access
+          </Link>
+          .
+        </>
+      ) : (
+        "For a lock the server keeps, connect with an account that cannot write."
+      )}
+    </FormNote>
+  )
+
+  if (!admin) {
+    return (
+      <>
+        <SettingSection id="connection" title="Name and labels" state={what}>
+          <DetailList className="gap-y-2.5">
+            <Detail label="Name">{conn.name}</Detail>
+            <Detail label="Environment">
+              {conn.environment ? (
+                <span className="flex">
+                  <EnvironmentTag environment={conn.environment} />
+                </span>
+              ) : (
+                <span className="text-muted-foreground">None</span>
+              )}
+            </Detail>
+            {conn.notes && (
+              <Detail label="Notes" className="whitespace-pre-wrap">
+                {conn.notes}
+              </Detail>
+            )}
+          </DetailList>
+        </SettingSection>
+        <SettingSection id="protection" title="Protection" state={protection}>
+          {conn.readOnly && (
+            <span className="flex">
+              <ProtectedTag />
+            </span>
+          )}
+          {lock}
+        </SettingSection>
+      </>
+    )
+  }
+
+  return (
+    <SettingForm
+      name="Connection labels"
+      onSave={save}
+      dirty={count > 0}
+      changes={count}
+      saving={saving}
+      invalid={invalid}
+      canEdit={admin}
+      applies="immediately"
+      onDiscard={() => {
+        setEdits({})
+        setRefusal(undefined)
+      }}
+      error={refusal && `It was not saved. ${refusal}`}
+    >
+      <SettingSection
+        id="connection"
+        title="Name and labels"
+        state={what}
+        status={settingStatus({ dirty: labelsEdited, refused: labelsEdited && Boolean(refusal) })}
+      >
+        <Field
+          label="Name"
+          htmlFor={`${field}-name`}
+          hint="How it is listed in the rail, the control center and the map."
+          error={nameProblem}
+        >
+          <Input
+            id={`${field}-name`}
+            value={draft.name}
+            onChange={(event) => set({ name: event.target.value })}
+            autoComplete="off"
+            maxLength={64}
+          />
+        </Field>
+        <EnvironmentField
+          id={`${field}-environment`}
+          value={draft.environment}
+          onChange={(environment) => set({ environment })}
+        />
+        <Field
+          label="Notes"
+          htmlFor={`${field}-notes`}
+          hint="Kept by the dashboard only; the server never sees them."
+          error={notesProblem(draft.notes)}
+        >
+          <Textarea
+            id={`${field}-notes`}
+            value={draft.notes}
+            onChange={(event) => set({ notes: event.target.value })}
+            placeholder="Who owns it, what reads it, when it can be restarted"
+            rows={3}
+          />
+        </Field>
+      </SettingSection>
+      <SettingSection
+        id="protection"
+        title="Protection"
+        state={protection}
+        status={settingStatus({
+          dirty: protectionEdited,
+          refused: protectionEdited && Boolean(refusal),
+        })}
+      >
+        <OptionList>
+          <OptionRow
+            title="Refuse every change to its data or schema made from this dashboard"
+            hint="For every role, on every page. Dumps are still taken."
+            checked={draft.readOnly}
+            onCheckedChange={(readOnly) => set({ readOnly })}
+          />
+        </OptionList>
+        {lock}
+      </SettingSection>
+    </SettingForm>
+  )
+}
+
+/**
+ * The address the dashboard dials, drawn as the way it goes — this server,
+ * the account it signs in as, the server that answers, the database it opens
+ * — with Test and Edit at the head's end.
+ *
+ * The string itself is sealed on the server and read back only when an
+ * administrator asks to change it, in its own dialog.
+ */
+export function AddressSection() {
+  const { id, conn, status } = useDatabase()
+  const { refresh } = useDatabases()
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const [editing, setEditing] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [tested, setTested] = useState<{ ok: boolean; words: string }>()
 
   const test = async () => {
     setTesting(true)
@@ -131,198 +301,49 @@ export function ConnectionSection() {
   }
 
   return (
-    <FormSection
-      aside
-      id="connection"
-      className={UNDER_STRIP}
-      title="Connection"
-      hint={
+    <SettingSection
+      id="address"
+      title="Address"
+      state={
+        <span className="font-mono wrap-anywhere">
+          {conn.port ? `${conn.host}:${conn.port}` : conn.database}
+        </span>
+      }
+      actions={
         <>
-          <span className="block">
-            {engine.label}
-            {summary?.versionNumber ? ` ${summary.versionNumber}` : ""}
-          </span>
-          <span className="block font-mono wrap-anywhere">
-            {conn.port ? `${conn.host}:${conn.port}` : conn.database}
-          </span>
+          <Button size="sm" variant="outline" pending={testing} onClick={() => void test()}>
+            <Router />
+            Test
+          </Button>
+          {admin && (
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+              <Pencil />
+              Edit
+            </Button>
+          )}
         </>
       }
     >
-      {admin ? (
-        <form
-          aria-label="Connection labels"
-          className="space-y-5"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void save()
-          }}
-        >
-          <Field
-            label="Name"
-            htmlFor={`${field}-name`}
-            hint="How it is listed."
-            error={nameProblem}
-          >
-            <Input
-              id={`${field}-name`}
-              value={draft.name}
-              onChange={(event) => set({ name: event.target.value })}
-              autoComplete="off"
-              maxLength={64}
-            />
-          </Field>
-          <EnvironmentField
-            id={`${field}-environment`}
-            value={draft.environment}
-            onChange={(environment) => set({ environment })}
-          />
-          <Field
-            label="Notes"
-            htmlFor={`${field}-notes`}
-            hint="Anything worth remembering about it. Only the dashboard keeps them."
-            error={notesProblem(draft.notes)}
-          >
-            <Textarea
-              id={`${field}-notes`}
-              value={draft.notes}
-              onChange={(event) => set({ notes: event.target.value })}
-              rows={3}
-            />
-          </Field>
-          <OptionList>
-            <OptionRow
-              title="Protected: refuse every change made to its data or schema through this dashboard"
-              hint="For every role. A dump can still be taken. It reads what a request says: a statement that calls a function which writes still passes, and only an account that cannot write stops the engine itself."
-              checked={draft.readOnly}
-              onCheckedChange={(readOnly) => set({ readOnly })}
-            />
-          </OptionList>
-          {refusal && (
-            <FormNote role="alert" tone="danger" className="break-words">
-              It was not saved. {refusal}
-            </FormNote>
-          )}
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {count > 0 && (
-              <FormNote className="mr-auto">
-                <span className="flex">
-                  <Status
-                    tone="warning"
-                    label={count === 1 ? "1 unsaved change" : `${count} unsaved changes`}
-                  />
-                </span>
-              </FormNote>
-            )}
-            {count > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={saving}
-                onClick={() => {
-                  setEdits({})
-                  setRefusal(undefined)
-                }}
-              >
-                Discard
-              </Button>
-            )}
-            <Button
-              type="submit"
-              size="sm"
-              variant={count > 0 ? "default" : "outline"}
-              disabled={count === 0 || invalid}
-              pending={saving}
-            >
-              Save
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <DetailList className="gap-y-2.5">
-          <Detail label="Name">{conn.name}</Detail>
-          <Detail label="Environment">
-            {conn.environment ? (
-              <span className="flex">
-                <EnvironmentTag environment={conn.environment} />
-              </span>
-            ) : (
-              <span className="text-muted-foreground">None</span>
-            )}
-          </Detail>
-          <Detail label="Protected">
-            {conn.readOnly ? (
-              <span className="flex">
-                <ProtectedTag />
-              </span>
-            ) : (
-              "No: its data and schema can be changed from the dashboard"
-            )}
-          </Detail>
-          {conn.notes && (
-            <Detail label="Notes" className="whitespace-pre-wrap">
-              {conn.notes}
-            </Detail>
-          )}
-        </DetailList>
-      )}
-
-      <div className="space-y-3 border-t border-hairline pt-5" data-slot="connection-address">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <h4 className="text-sm font-medium">Address</h4>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" pending={testing} onClick={() => void test()}>
-              <Router />
-              Test
-            </Button>
-            {admin && (
-              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                <Pencil />
-                Edit
-              </Button>
-            )}
-          </div>
-        </div>
-        <DetailList className="gap-y-2.5">
-          {conn.host && engine.can("server") && (
-            <Detail label="Server" className="font-mono wrap-anywhere">
-              {conn.host}
-              {conn.port ? `:${conn.port}` : ""}
-            </Detail>
-          )}
-          {conn.user && (
-            <Detail label="Account" className="font-mono wrap-anywhere">
-              {conn.user}
-            </Detail>
-          )}
-          {conn.database && (
-            <Detail label={engine.databaseField} className="font-mono wrap-anywhere">
-              {conn.database}
-            </Detail>
-          )}
-          <Detail label="Added">{timestamp(conn.createdAt)}</Detail>
-          {conn.broken && (
-            <Detail label="State">
-              <span className="text-destructive">
-                {conn.brokenReason ?? "It cannot be opened."}
-              </span>
-            </Detail>
-          )}
-        </DetailList>
-        <div aria-live="polite">
-          {tested &&
-            (tested.ok ? (
-              <span className="flex" data-slot="test-result">
-                <Status tone="running" label={tested.words} />
-              </span>
-            ) : (
-              <Notice tone="danger" title="It did not answer">
-                <span className="break-words whitespace-pre-wrap">{tested.words}</span>
-              </Notice>
-            ))}
-        </div>
+      <AddressPicture />
+      <div aria-live="polite" className="empty:hidden">
+        {tested &&
+          (tested.ok ? (
+            <span className="flex animate-rise" data-slot="test-result">
+              <Status tone="running" label={tested.words} />
+            </span>
+          ) : (
+            <Notice tone="danger" title="It did not answer">
+              <span className="break-words whitespace-pre-wrap">{tested.words}</span>
+            </Notice>
+          ))}
       </div>
-
+      {conn.broken && (
+        <Notice tone="danger" title="It cannot be opened">
+          <span className="break-words">
+            {conn.brokenReason ?? "The saved string cannot be read."} Edit the address to repair it.
+          </span>
+        </Notice>
+      )}
       {editing && (
         <EditAddress
           onClose={() => setEditing(false)}
@@ -334,7 +355,144 @@ export function ConnectionSection() {
           }}
         />
       )}
-    </FormSection>
+    </SettingSection>
+  )
+}
+
+/**
+ * How the dashboard reaches the database, in the wiring every settings
+ * picture speaks: this server, signing in as the connection's account, to
+ * the server that answers — drawn as its product — and the database it
+ * opens. A file is two marks: this server and the file.
+ *
+ * The line is the state. It carries a pulse while the server answers, is
+ * still while it is stopped or paused, red while it refuses or cannot be
+ * opened, and dashed until it has been checked at all.
+ */
+function AddressPicture() {
+  const { conn, engine, summary, status } = useDatabase()
+  const container = useRef<HTMLDivElement>(null)
+  const hostMark = useRef<HTMLDivElement>(null)
+  const serverMark = useRef<HTMLDivElement>(null)
+  const databaseMark = useRef<HTMLDivElement>(null)
+  const file = engine.can("fileBased")
+  const state = status.state
+  const broken = state === "unreachable" || state === "broken"
+  const line = {
+    still: state !== "running",
+    dashed: state === "checking" || state === "unknown",
+    tone: broken ? ("danger" as const) : ("default" as const),
+  }
+  const answer =
+    state === "running"
+      ? summary?.latencyMs
+        ? `answers in ${summary.latencyMs} ms`
+        : "answers"
+      : state === "stopped"
+        ? "stopped"
+        : state === "paused"
+          ? "paused"
+          : broken
+            ? "does not answer"
+            : "not checked yet"
+  const answerNode = <span className={cn(broken && "text-destructive")}>{answer}</span>
+  const numbered = engine.can("logicalDatabases")
+
+  const host = (
+    <WireNode
+      nodeRef={hostMark}
+      align="end"
+      mark={<WireHost size="md" />}
+      eyebrow="This server"
+      title="Just Dashboard"
+      hint={
+        conn.user ? (
+          <>
+            signs in as <span className="font-mono text-foreground">{conn.user}</span>
+          </>
+        ) : file ? (
+          "opens the file"
+        ) : engine.kind === "keyvalue" ? (
+          // A key–value server asked with no user name signs its client in as its default user.
+          <>
+            signs in as <span className="font-mono text-foreground">default</span>
+          </>
+        ) : (
+          "signs in with no account"
+        )
+      }
+    />
+  )
+  const server = (
+    <WireNode
+      nodeRef={serverMark}
+      align={file ? "start" : "center"}
+      mark={
+        <WireMark size="md" tone="logo">
+          <EngineGlyph engine={engine} />
+        </WireMark>
+      }
+      eyebrow={`${engine.label}${summary?.versionNumber ? ` ${summary.versionNumber}` : ""}`}
+      title={
+        <span className="font-mono text-xs wrap-anywhere">
+          {file ? conn.database : `${conn.host}:${conn.port || engine.defaultPort}`}
+        </span>
+      }
+      hint={file ? "a file on this server" : answerNode}
+    />
+  )
+  const database = (
+    <WireNode
+      nodeRef={databaseMark}
+      align="start"
+      mark={
+        <WireMark size="md" tone="logo">
+          <Database />
+        </WireMark>
+      }
+      eyebrow={engine.databaseField}
+      title={
+        <span className="font-mono text-xs wrap-anywhere">
+          {conn.database ? (numbered ? `db ${conn.database}` : conn.database) : "none named"}
+        </span>
+      }
+      hint={
+        conn.environment || conn.readOnly ? (
+          <span className="flex flex-wrap items-center gap-x-2">
+            {conn.environment && <EnvironmentTag environment={conn.environment} />}
+            {conn.readOnly && <ProtectedTag />}
+          </span>
+        ) : (
+          "what it opens"
+        )
+      }
+    />
+  )
+
+  return (
+    <SettingPicture
+      label="How the dashboard reaches it"
+      containerRef={container}
+      grid={false}
+      className="py-4"
+      lines={
+        <>
+          <AnimatedBeam containerRef={container} fromRef={hostMark} toRef={serverMark} {...line} />
+          {!file && (
+            <AnimatedBeam
+              containerRef={container}
+              fromRef={serverMark}
+              toRef={databaseMark}
+              delay={0.6}
+              {...line}
+            />
+          )}
+        </>
+      }
+      start={[host]}
+      middle={file ? undefined : server}
+      end={file ? server : database}
+    />
   )
 }
 

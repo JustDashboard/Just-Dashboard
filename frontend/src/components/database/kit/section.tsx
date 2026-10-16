@@ -26,12 +26,15 @@ export const WORKBENCH_FRAME = "gap-2 px-2 py-2 md:px-3 md:py-3"
  */
 export function SectionFrame({
   section,
+  part,
   actions,
   register,
   className,
   children,
 }: {
   section: SectionId
+  /** A page under the section's own, named after it: Settings' "Network". */
+  part?: string
   /** Controls beside the page's name, for a reading page that has some. */
   actions?: React.ReactNode
   register?: "reading" | "flow"
@@ -49,7 +52,7 @@ export function SectionFrame({
     >
       <PageContext
         eyebrow="Databases"
-        title={section === "home" || !page ? conn.name : `${conn.name} · ${page.title}`}
+        title={[conn.name, section !== "home" && page?.title, part].filter(Boolean).join(" · ")}
         actions={actions}
       />
       {children}

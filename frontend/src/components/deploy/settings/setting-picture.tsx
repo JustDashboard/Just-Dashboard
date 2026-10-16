@@ -32,6 +32,7 @@ export function SettingPicture({
   middle,
   end,
   startLabel,
+  grid = true,
   className,
 }: {
   /** What the picture shows, as the list's accessible name. */
@@ -45,11 +46,17 @@ export function SettingPicture({
   /** A `WireNode align="start"`. */
   end: React.ReactNode
   startLabel?: React.ReactNode
+  /**
+   * The dot grid under it. The Databases section's pictures stand on the
+   * page's ground alone (0.7.5, at the operator's request), its settings'
+   * among them.
+   */
+  grid?: boolean
   className?: string
 }) {
   return (
     <div className={cn("relative animate-rise py-6", className)}>
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
+      {grid && <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />}
       <div ref={containerRef} className="relative">
         {lines}
         <ol

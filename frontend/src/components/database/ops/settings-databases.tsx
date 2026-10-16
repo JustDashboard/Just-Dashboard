@@ -1,8 +1,8 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
+import { createRef, useId, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Plus } from "@/components/icons"
+import { Database, Plus } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -10,19 +10,22 @@ import { cn } from "@/lib/utils"
 import type { DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { WireMark, WireNode } from "@/components/deploy/wire"
 import { ChoiceRow, GroupRule } from "@/components/flow"
-import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Tag } from "@/components/tag"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { sectionHref } from "@/components/database/engine"
 import { CardsSkeleton, CouldNotRead } from "@/components/database/home/blocks"
 import { nameHue } from "@/components/database/home/kinds"
 import { read } from "@/components/database/home/read"
-import { EngineMark } from "@/components/database/kit"
+import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
-import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
@@ -153,12 +156,10 @@ export function ServerDatabasesSection() {
     ))
   }
   return (
-    <FormSection
-      aside
+    <SettingSection
       id="databases"
-      className={UNDER_STRIP}
       title={numbered ? "Numbered databases" : "Databases on this server"}
-      hint={
+      state={
         list.data ? (
           <span className="numeric">
             {numbered ? `${rows.length} of ${total} hold keys` : plural(total, "database")}
@@ -192,6 +193,7 @@ export function ServerDatabasesSection() {
         </p>
       ) : (
         <div className="animate-rise space-y-4">
+          <ServerPicture rows={rows} total={total} />
           {taken.length > 0 && (
             <ul
               data-slot="choice-list"
@@ -292,7 +294,125 @@ export function ServerDatabasesSection() {
           }}
         />
       )}
-    </FormSection>
+    </SettingSection>
+  )
+}
+
+/** How many of the server's databases the picture draws; the rest are its count. */
+const PICTURED = 5
+
+/**
+ * The server and what it holds, in the wiring the other settings pages
+ * speak: each database on the left — this connection's first, then the ones
+ * saved as connections, then the rest — wired to the server, drawn as its
+ * product, on the right.
+ *
+ * The line says how the dashboard reaches each one: a pulse to the one this
+ * connection opens while the server answers, still to one saved as another
+ * connection, dashed to one it has no connection to. On a server that
+ * numbers its databases every number is reached through this connection, so
+ * each line is still.
+ */
+function ServerPicture({
+  rows,
+  total,
+}: {
+  rows: { database: DbServerDatabase; current: boolean; saved?: DbConnection }[]
+  total: number
+}) {
+  const { conn, engine, summary, status } = useDatabase()
+  const numbered = engine.can("logicalDatabases")
+  const container = useRef<HTMLDivElement>(null)
+  const serverMark = useRef<HTMLDivElement>(null)
+  const shown = useMemo(() => rows.slice(0, PICTURED), [rows])
+  const names = shown.map((row) => row.database.name).join("\n")
+  // One ref per node, remade only when the set of databases changes.
+  const marks = useMemo(
+    () => new Map(names.split("\n").map((name) => [name, createRef<HTMLDivElement>()])),
+    [names],
+  )
+  const running = status.state === "running"
+  const rest = total - shown.length
+  return (
+    <SettingPicture
+      label="What the server holds"
+      containerRef={container}
+      grid={false}
+      className="py-2"
+      lines={shown.map(({ database, current, saved }, index) => {
+        const mark = marks.get(database.name)
+        if (!mark) return null
+        return (
+          <AnimatedBeam
+            key={database.name}
+            containerRef={container}
+            fromRef={mark}
+            toRef={serverMark}
+            still={!(current && running)}
+            dashed={!numbered && !current && !saved}
+            delay={index * 0.3}
+          />
+        )
+      })}
+      start={shown.map(({ database, current, saved }) => (
+        <WireNode
+          key={database.name}
+          nodeRef={marks.get(database.name)}
+          align="end"
+          mark={
+            <WireMark size="sm" tone="logo">
+              <Database className={cn(current && "text-brand")} />
+            </WireMark>
+          }
+          eyebrow={
+            current ? (
+              <span className="text-brand">This connection</span>
+            ) : saved ? (
+              `Saved as ${saved.name}`
+            ) : numbered ? (
+              "Same connection"
+            ) : (
+              "Not connected"
+            )
+          }
+          title={
+            <span className="font-mono text-xs">
+              {numbered ? `db ${database.name}` : database.name}
+            </span>
+          }
+          hint={
+            numbered
+              ? plural(database.size ?? 0, "key")
+              : database.size
+                ? bytes(database.size)
+                : undefined
+          }
+        />
+      ))}
+      end={
+        <WireNode
+          nodeRef={serverMark}
+          align="start"
+          mark={
+            <WireMark size="md" tone="logo">
+              <EngineGlyph engine={engine} />
+            </WireMark>
+          }
+          eyebrow={`${engine.label}${summary?.versionNumber ? ` ${summary.versionNumber}` : ""}`}
+          title={
+            <span className="font-mono text-xs wrap-anywhere">
+              {conn.host}
+              {conn.port ? `:${conn.port}` : ""}
+            </span>
+          }
+          hint={
+            rest > 0
+              ? `${plural(total, numbered ? "numbered database" : "database")}, ${rest} more below`
+              : plural(total, numbered ? "numbered database" : "database")
+          }
+        />
+      }
+    />
   )
 }
 

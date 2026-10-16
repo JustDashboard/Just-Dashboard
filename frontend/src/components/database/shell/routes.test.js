@@ -97,6 +97,16 @@ describe("reading an address", () => {
     expect(databasePlace("/databases/12/nonsense")).toBeNull()
     expect(databasePlace("/databases/new")).toBeNull()
   })
+
+  test("a page under Settings is a page of Settings, and nothing else has pages under it", () => {
+    expect(databasePlace("/databases/12/settings/danger")).toEqual({ id: 12, section: "settings" })
+    expect(databasePlace("/databases/12/settings/network")).toEqual({
+      id: 12,
+      section: "settings",
+    })
+    expect(databasePlace("/databases/12/settings/nonsense")).toBeNull()
+    expect(databasePlace("/databases/12/data/danger")).toBeNull()
+  })
 })
 
 describe("the way to add a database", () => {

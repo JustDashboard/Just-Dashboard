@@ -3,4 +3,11 @@ export { Access } from "@/components/database/ops/access"
 export { Backups } from "@/components/database/ops/backups"
 export { Logs } from "@/components/database/ops/logs"
 export { SqlPerformance } from "@/components/database/ops/performance"
-export { Settings } from "@/components/database/ops/settings"
+export {
+  Settings,
+  SettingsDanger,
+  SettingsDatabases,
+  SettingsExtensions,
+  SettingsNetwork,
+  SettingsParameters,
+} from "@/components/database/ops/settings"
