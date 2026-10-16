@@ -409,6 +409,10 @@ deleted.
 Reveal only where the controls share their space with something else. Where they have a column of
 their own — a container card's actions slot — use `DimActions` instead: always drawn, one step of opacity until
 the pointer is on the row. A reserved column left empty reads as a layout bug, not as an affordance.
+The Data page's rail is the shared case: a row's menu takes the place of its row count under the
+pointer, in the same grid cell, and the count's slot is at least the menu's width so the menu never
+covers the name. With a column of its own, every count stood a button's width short of the edge the
+rail's headings end on.
 
 ## 7. Which surface
 
@@ -715,7 +719,9 @@ menu rows are at least 32px on desktop and 44px on a phone, with the same hover 
 right-hand check for a selected option. Reduced motion removes the opening animation.
 
 `SelectTrigger` composes the shared outline `Button`, so its border, focus ring and press feedback
-are the button's. A select opens below its trigger with a 4px gap, aligned to its starting edge;
+are the button's. Its chevron turns on the trigger's own `data-state`: it keyed off
+`in-data-[state=open]`, which matches any open ancestor, so every select inside a dialog or a sheet
+pointed up while it was shut. A select opens below its trigger with a 4px gap, aligned to its starting edge;
 Radix can flip it above or constrain it to the viewport when space runs out. Its width accommodates
 the trigger and its options, without an ownership-specific minimum width. Arrow keys, typeahead,
 Home/End, Escape, focus restoration and scrolling remain the primitive's responsibility.
@@ -724,8 +730,13 @@ Home/End, Escape, focus restoration and scrolling remain the primitive's respons
 beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
 `ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
 closed trigger. `CredentialSelect` keeps the host's glyph beside the name and the host and kind
-below it. File locations, terminal snippets, database switchers, saved queries, column pickers and
-export menus use the same text component. Keyboard shortcut hints retain their end alignment.
+below it. File locations, terminal snippets, database switchers, saved queries and export menus use
+the same text component. Keyboard shortcut hints retain their end alignment. A one-word property
+stays on the option's own line instead: a column picker's option (the Data page's Sort and Columns
+menus) is the column as its grid header names it, the name and then its type as a mono `Tag`, and a
+schema picker's option ends on the schema's count where the rail under it ends its rows' figures.
+Beneath the name, each was a few characters on a line of their own, which made every option twice
+the height of the rows it was chosen beside.
 
 `OwnershipSelect`, shared by deployment domains, mounts and volume dependencies, offers only
 Managed, Linked and (where supported) Observed in the menu. Its button shows the chosen word;

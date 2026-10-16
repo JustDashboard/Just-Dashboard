@@ -151,6 +151,10 @@ export function RowField({
             <Reading id={id} column={column} value={value} />
           )}
         </div>
+        {/* An editable field keeps the menu's place when it has nothing to
+            offer, or the fields of one row end at two edges and a field
+            widens the moment its value leaves it nothing to be set to. */}
+        {states.length === 0 && editable && <span aria-hidden className="size-6 shrink-0" />}
         {states.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

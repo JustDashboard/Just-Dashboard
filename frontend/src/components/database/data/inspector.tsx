@@ -206,7 +206,8 @@ export function RowInspector({
         <span className="min-w-0 truncate text-body font-medium">
           {row ? (rowNumber !== null ? `Row ${grouped(rowNumber)}` : "New row") : "Row"}
         </span>
-        {row && row.state !== "clean" && (
+        {/* "New row" already says what the word would. */}
+        {row && row.state !== "clean" && !(row.state === "inserted" && rowNumber === null) && (
           <span className={`shrink-0 font-mono text-hint ${STATE_HUE[row.state]}`}>
             {STATE_WORD[row.state]}
           </span>
@@ -242,12 +243,13 @@ export function RowInspector({
       ) : (
         <>
           {row.cells.length > 8 && (
-            <div className="shrink-0 border-b border-hairline p-1.5">
+            <div className="shrink-0 border-b border-hairline p-1">
               <SearchInput
                 dense
                 value={query}
                 placeholder="Find a column"
                 aria-label="Find a column"
+                className="sm:h-7"
                 containerClassName="sm:w-full"
                 onChange={(event) => setQuery(event.target.value)}
               />

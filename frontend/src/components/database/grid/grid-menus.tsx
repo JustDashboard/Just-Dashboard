@@ -1,9 +1,8 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useState } from "react"
 import { ChipCount } from "@/components/tabs"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
   ContextMenuItem,
@@ -261,11 +260,13 @@ export function GridColumnsMenu({
                 onLayoutChange(setColumnHidden(layout, column.key, !checked))
               }
             >
-              <MenuItemText
-                hint={<span className="text-hint text-muted-foreground">{column.typeName}</span>}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
-              </MenuItemText>
+              {/* A column as its header names it: the name, then its type. */}
+              <span className="min-w-0 truncate font-mono text-xs">{column.name}</span>
+              {column.typeName && (
+                <Tag mono className="min-w-0 shrink-[999]">
+                  <span className="truncate">{column.typeName}</span>
+                </Tag>
+              )}
             </DropdownMenuCheckboxItem>
           ))}
           {shown.length === 0 && (
