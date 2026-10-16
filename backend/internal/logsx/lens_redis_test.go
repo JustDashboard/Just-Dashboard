@@ -185,7 +185,7 @@ var redisCases = []dbCase{
 			{level: "error", at: "2026-09-27 17:00:03", event: "replication_failed", attrs: redisAttrs("1", "replica")},
 			{level: "error", at: "2026-09-27 17:00:04", event: "replication_failed", attrs: redisAttrs("1", "replica")},
 			{level: "error", at: "2026-09-27 17:00:05", event: "replication_failed", attrs: redisAttrs("1", "replica")},
-			{level: "warn", at: "2026-09-27 17:00:06", event: "replication_failed", attrs: redisAttrs("1", "primary")},
+			{level: "warn", at: "2026-09-27 17:00:06", event: "replication", attrs: redisAttrs("1", "primary")},
 			{level: "warn", at: "2026-09-27 17:01:00", event: "full_sync", attrs: redisAttrs("1", "primary", "client", "10.0.0.6")},
 			{level: "warn", at: "2026-09-27 17:01:01", event: "full_sync", attrs: redisAttrs("1", "primary", "client", "10.0.0.6")},
 			{level: "warn", at: "2026-09-27 17:01:02", event: "full_sync", attrs: redisAttrs("1", "replica")},
@@ -226,5 +226,15 @@ func TestRedisLensMarksWhereTheMessageStarts(t *testing.T) {
 	l := readThrough(t, "redis", "1:M 27 Sep 2026 11:00:01.001 * Background saving started by pid 42")[0]
 	if got := l.Text[l.Body:]; got != "Background saving started by pid 42" {
 		t.Fatalf("drawn from %q", got)
+	}
+}
+
+// A client on an IPv6 address keeps its brackets in the client list; the
+// address inside them is the client.
+func TestRedisLensReadsAnIPv6Client(t *testing.T) {
+	l := readThrough(t, "redis",
+		"1:M 27 Sep 2026 11:00:01.001 # Client id=7 addr=[2001:db8::5]:51234 laddr=[::1]:6379 fd=8 name= age=1 idle=0 flags=S cmd=psync scheduled to be closed ASAP for overcoming of output buffer limits.")[0]
+	if l.Event != "client_closed" || l.Attrs["client"] != "2001:db8::5" {
+		t.Fatalf("read as %q with client %q", l.Event, l.Attrs["client"])
 	}
 }

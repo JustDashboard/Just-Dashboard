@@ -223,3 +223,13 @@ func TestMySQLLensMarksWhereTheMessageStarts(t *testing.T) {
 		t.Fatalf("drawn from %q", got)
 	}
 }
+
+// A replication source written as an IPv6 address keeps its brackets in the
+// message; the address inside them is the client.
+func TestMySQLLensReadsAnIPv6ReplicationSource(t *testing.T) {
+	l := readThrough(t, "mysql",
+		"2026-09-27T12:02:00.000000Z 10 [ERROR] [MY-010584] [Repl] Replica I/O for channel '': Error reconnecting to source 'repl@[2001:db8::1]:3306'. This was attempt 3/10, with a delay of 5 seconds between attempts.")[0]
+	if l.Event != "replication_failed" || l.Attrs["client"] != "2001:db8::1" {
+		t.Fatalf("read as %q with client %q", l.Event, l.Attrs["client"])
+	}
+}

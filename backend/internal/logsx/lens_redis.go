@@ -119,12 +119,8 @@ func redisName(l *Line, msg string) {
 	case "persistence_failed":
 		l.SetLevel("error")
 	case "replication_failed":
-		// A primary losing a replica is routine and the replica reconnects
-		// on its own, so Redis's warning stands; the others are a replica
-		// that cannot reach, trust or follow its primary.
-		if !strings.HasPrefix(msg, "Connection with replica") {
-			l.SetLevel("error")
-		}
+		// A replica that cannot reach, trust or follow its primary.
+		l.SetLevel("error")
 	case "full_sync", "aof_slow", "config_warning":
 		// Redis logs a full resync as news, but it copies the whole dataset
 		// and means the backlog was too small or the replica too far behind.
@@ -170,7 +166,7 @@ func redisFigures(l *Line, msg string) {
 // it is not one.
 func redisHost(hostport string) string {
 	if strings.HasPrefix(hostport, "[") {
-		hostport, _, _ = strings.Cut(hostport, "]")
+		hostport, _, _ = strings.Cut(hostport[1:], "]")
 	} else if i := strings.LastIndexByte(hostport, ':'); i > 0 {
 		hostport = hostport[:i]
 	}
@@ -244,7 +240,9 @@ var redisPrefixes = []struct{ text, event string }{
 	{"Unable to AUTH to MASTER", "replication_failed"},
 	{"MASTER aborted replication with an error", "replication_failed"},
 	{"Master is currently unable to PSYNC", "replication_failed"},
-	{"Connection with replica", "replication_failed"},
+	// A primary losing a replica is routine — the replica reconnects on its
+	// own — so it is replication news, not a failure.
+	{"Connection with replica", "replication"},
 	{"Full resync requested by replica", "full_sync"},
 	{"Unable to partial resync with replica", "full_sync"},
 	{"Full resync from", "full_sync"},

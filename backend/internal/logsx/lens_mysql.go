@@ -217,7 +217,7 @@ func mysqlSourceHost(msg string) string {
 	}
 	_, host, _ := strings.Cut(src, "@")
 	if strings.HasPrefix(host, "[") {
-		host, _, _ = strings.Cut(host, "]")
+		host, _, _ = strings.Cut(host[1:], "]")
 	} else if i := strings.LastIndexByte(host, ':'); i > 0 {
 		host = host[:i]
 	}
