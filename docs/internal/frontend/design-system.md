@@ -2739,7 +2739,8 @@ Databases rule above); what changed, view by view:
   a meter against their ceiling. MongoDB's latency is not recorded, so that one chart starts with the
   page and its caption says so.
 - **Logos where a client is named**: SQL sessions, Redis clients (by name, else the library the
-  client reported) and MongoDB operations each lead with `DbClientMark`.
+  client reported) and MongoDB operations each lead with `DbClientMark`; the lock queue sets the
+  bare logo beside each session's application.
 - **Statements** take their verb's hue, as the home's ranking does.
 - **Replication** (`ops/replication-picture.tsx`) replaced its three figures with the picture of
   where the data goes: the server it follows, this one by its role, the replicas streaming from it,
