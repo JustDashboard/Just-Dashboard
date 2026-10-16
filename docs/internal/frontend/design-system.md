@@ -469,7 +469,7 @@ keeps its name from that column, and now means a section of the page rather than
 
 **Where the column sits is the page's call.** A page that is only a form centres it: the nine
 project settings pages (`SettingsPage` centres its strip and readings with it, so they line up with
-the fields), a game server's settings, the account's Security and a database's Settings. A 48rem
+the fields), a game server's settings, the account's Security and each of a database's Settings pages. A 48rem
 column against the left edge of a wide page left the rest of it an empty band nothing explained. A
 form that is one block among full-width ones keeps their left edge instead — the proxy pages'
 password files, access lists, backups and watched domains, Security's findings and SSH — because
@@ -522,6 +522,26 @@ and sign-in name are a draft beside the rail's card drawn from it (the picture s
 moment it is chosen). Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
+
+**A database's Settings are that shape too, as pages.** They were one page of six sections under a
+sticky strip of anchors, and the section a reader most often came for — the danger zone, one
+parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
+own, listed under a *Settings* group in the database's rail the way a project's are
+(`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Parameters (a
+key–value server's *Configuration*), Extensions (its *Modules*), Databases and Danger zone, each
+listed only where the engine has it and the danger zone only for a role that may destroy. Every page
+is one centred column of `SettingSection`s under the page's one save bar, and the labels and the
+protection switch are one `SettingForm` over two sections, saved there rather than by a button of
+their own. Three of them open on a `SettingPicture` on the page's ground, without the dot grid, as
+the section's other pictures stand: General draws the address as the way the dashboard reaches it
+(this server, the account it signs in as, the server as its product, the database it opens), Network
+who can reach the port (this machine's programs and *Anywhere*, through the container as Docker's
+whale, to the server; amber while it is published on every interface, dashed while nothing outside
+reaches it) and Databases the server and what it holds. Access opens on who signs in, each account
+wired to the server and pulsing while it holds sessions, and Backups on where the dumps go — the
+database and its schedule, this server's dump tool, the directory — the line in the colour of how
+recent the newest dump is. An address from the one-page Settings (`#danger`, `#reachability`, a
+parameter search `?q=`) is sent on to the page that holds it.
 
 **A sheet is the same anatomy wherever it opens**, which is `SidePanel`'s doc comment and `Modal`'s
 too. The deployment section's sheets each put a different body in the one frame — a `Select` for a
@@ -690,6 +710,12 @@ italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font Lic
 loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
 `globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
 font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
+
+**Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
+glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
+lines into uneven pieces — "No tes", "Emp ty", a hint reading "Howitis listed" — at any device
+scale. `body` sets `text-rendering: geometricPrecision`, which lays glyphs out at their true
+advances there; macOS and Windows already did.
 
 The ladder is `text-micro` (10) → `text-hint` (11) → `text-xs` (12) → `text-body` (13) →
 `text-sm` (14) → `text-title` (15). An arbitrary `text-[Npx]` is a departure from it, and the linter
@@ -1311,6 +1337,13 @@ one file whose own colour failed that ground, MySQL's navy dolphin, was lifted t
 sits beside a card's words rather than in front of a header's title — and the source strip still
 stays muted, because four *kinds* are not four products. A repository row on the Git tab carries its
 owner's picture on the same reasoning: the face is the account, which a glyph could only guess at.
+
+An extension or a module on a database's Settings is drawn as the product it belongs to, on the
+same tile: what PostgreSQL ships in its contrib package and its own `plpgsql` as the elephant, a
+server's plugin catalogue as that server, a key–value server's loaded modules as it, TimescaleDB as
+its own mark, and anything else as a plain puzzle piece rather than a mark guessed from its name.
+They had no mark at all, on the argument that one glyph down sixty rows says nothing sixty times;
+drawn as their products they tell what came with the engine from what somebody added to it.
 
 The same marks carry into Docker and Databases, because they are the same products. A container,
 an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
