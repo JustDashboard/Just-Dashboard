@@ -380,7 +380,7 @@ export function TableView({
             {engine.has("query") && (
               <Button size="xs" variant="outline" className={TOUCH} onClick={openQuery}>
                 <Code />
-                <span className="max-sm:sr-only">Query</span>
+                <span className="max-sm:sr-only">Open in Query</span>
               </Button>
             )}
             <VerbMenu verbs={tableVerbs} label={`Actions for ${name}`} />
@@ -1114,10 +1114,13 @@ function Indexes({
     </>
   )
   // An index that enforces a constraint goes with it, under Keys &
-  // constraints; it cannot be dropped as an index.
+  // constraints; it cannot be dropped as an index. Its row keeps the
+  // button's height, or it stands shorter than the rows that have one.
   const drop = (index: Index) =>
     droppable &&
-    !index.constraint && (
+    (index.constraint ? (
+      <span aria-hidden className="block size-6" />
+    ) : (
       <VerbActions
         dim={!narrow}
         className={ROW_ACTIONS}
@@ -1131,7 +1134,7 @@ function Indexes({
           },
         ]}
       />
-    )
+    ))
 
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
@@ -1244,9 +1247,9 @@ function Keys({
   const acts = Object.values(drops).some(Boolean)
   const [box, width] = useColumnWidth<HTMLDivElement>()
   const narrow = width > 0 && width < NARROW
+  // A key this role cannot drop keeps the button's height, as the rows beside it do.
   const drop = (kind: KeyKind, name: string) =>
-    drops[kind] &&
-    name !== "" && (
+    drops[kind] && name !== "" ? (
       <VerbActions
         dim={!narrow}
         className={ROW_ACTIONS}
@@ -1260,6 +1263,8 @@ function Keys({
           },
         ]}
       />
+    ) : (
+      acts && <span aria-hidden className="block size-6" />
     )
 
   // Every key and constraint as one row of the reading, whichever shape draws it.
@@ -1470,7 +1475,7 @@ function Triggers({
           <li key={trigger.name}>
             <Link
               href={href("schema", objectParams(trigger))}
-              className="flex min-h-9 items-center gap-2 px-4 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
+              className="flex min-h-8 items-center gap-2 px-4 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
             >
               <GroupGlyph group="triggers" />
               <span className="font-mono text-xs font-medium">{trigger.name}</span>

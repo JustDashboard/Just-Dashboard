@@ -1,7 +1,5 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
@@ -153,12 +151,15 @@ export function TableRail({
           <RefreshClockwise />
         </IconAction>
       </div>
-      <div className="shrink-0 border-b border-hairline p-1.5">
+      {/* 28px from `sm` too, which `dense` asks for and `Input`'s own `sm:h-9`
+          overrode: the band is then the grid toolbar's height beside it. */}
+      <div className="shrink-0 border-b border-hairline p-1">
         <SearchInput
           dense
           value={query}
           placeholder={`Find a ${engine.nouns.object}`}
           aria-label={`Find a ${engine.nouns.object}`}
+          className="sm:h-7"
           containerClassName="sm:w-full"
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -274,9 +275,11 @@ function RailGroup({
   const shown = objects.slice(0, limit)
   return (
     <section aria-label={spec.plural} className="pt-2">
-      <h3 className="eyebrow flex items-center gap-1.5 px-2 pb-1">
-        {spec.plural}
-        <span className="numeric">{grouped(objects.length)}</span>
+      {/* The count stands at the row's end, over the rows' own figures, as the
+          Schema page's tree draws it. */}
+      <h3 className="flex items-baseline gap-1.5 px-2 pb-1">
+        <span className="eyebrow min-w-0 flex-1 truncate">{spec.plural}</span>
+        <span className="numeric text-hint text-muted-foreground">{grouped(objects.length)}</span>
       </h3>
       {error && <EmptyNote className="px-2 py-2 text-left text-hint">Not read: {error}</EmptyNote>}
       <ul>
@@ -286,11 +289,14 @@ function RailGroup({
           const pending = staged[tableKey(object.schema, object.name)] ?? 0
           const rows = object.estimatedRows
           return (
+            // The row's menu takes the place of its count rather than a column
+            // of its own: reserved, that column left every figure floating a
+            // button's width short of the edge the tree's heads end on.
             <li
               key={`${object.schema}.${object.name}`}
               data-current={selected || undefined}
               className={cn(
-                "group flex h-7 items-center rounded-md transition-colors max-sm:h-9",
+                "group grid h-7 grid-cols-1 items-center rounded-md transition-colors max-sm:h-9",
                 selected ? "bg-accent" : "hover:bg-row-hover",
               )}
             >
@@ -298,7 +304,7 @@ function RailGroup({
                 href={href("data", { schema: object.schema, table: object.name })}
                 aria-current={selected ? "page" : undefined}
                 title={object.comment || object.detail || undefined}
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-2 focus-ring-inset"
+                className="col-start-1 row-start-1 flex h-full min-w-0 items-center gap-1.5 rounded-md pr-2 pl-2 focus-ring-inset [@media(hover:none)]:pr-10"
               >
                 <KindGlyph kind={kind} />
                 <span className="min-w-0 flex-1 truncate font-mono text-xs">{object.name}</span>
@@ -308,14 +314,18 @@ function RailGroup({
                     <span className="sr-only"> unapplied changes</span>
                   </span>
                 )}
-                {rows !== undefined && rows >= 0 && (
-                  <span
-                    className="numeric shrink-0 text-hint text-muted-foreground"
-                    title={`About ${grouped(rows)} rows`}
-                  >
-                    {compactCount(rows)}
-                  </span>
-                )}
+                {/* As wide as the menu at least, so the menu never covers the name. */}
+                <span
+                  className={cn(
+                    "numeric min-w-5 shrink-0 text-right text-hint text-muted-foreground transition-opacity",
+                    "group-hover:opacity-0 [@media(hover:hover)]:group-has-[[data-state=open]]:opacity-0 [@media(hover:hover)]:group-has-[button:focus-visible]:opacity-0",
+                  )}
+                  title={
+                    rows !== undefined && rows >= 0 ? `About ${grouped(rows)} rows` : undefined
+                  }
+                >
+                  {rows !== undefined && rows >= 0 ? compactCount(rows) : null}
+                </span>
               </Link>
               <VerbMenu
                 verbs={verbsFor(object, kind)}
@@ -326,7 +336,10 @@ function RailGroup({
                     variant="ghost"
                     aria-label={`Actions for ${object.name}`}
                     {...{ [ACTIONS_OF]: actionsOf(object) }}
-                    className={cn("mr-0.5 shrink-0 max-sm:size-8", rowReveal())}
+                    className={cn(
+                      "col-start-1 row-start-1 mr-0.5 justify-self-end max-sm:size-8",
+                      rowReveal(),
+                    )}
                   >
                     <MoreHorizontal className="size-3.5" />
                   </Button>
@@ -450,19 +463,16 @@ function SchemaItem({
 }) {
   return (
     <DropdownMenuItem asChild className={cn(schema.name === current && "bg-accent")}>
+      {/* One line, as the rail's own rows are: a count under the name made
+          every option two lines tall for a figure of a few digits. */}
       <Link href={href("data", { schema: schema.name, table: null })}>
         <SchemaMark name={schema.name} />
-        <MenuItemText
-          hint={
-            schema.tables >= 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {grouped(schema.tables)}
-              </span>
-            )
-          }
-        >
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        </MenuItemText>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+        {schema.tables >= 0 && (
+          <span className="numeric shrink-0 text-hint text-muted-foreground">
+            {grouped(schema.tables)}
+          </span>
+        )}
       </Link>
     </DropdownMenuItem>
   )

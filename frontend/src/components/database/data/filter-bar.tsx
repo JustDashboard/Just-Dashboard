@@ -1,13 +1,12 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useId, useState } from "react"
 import { ArrowDown, ArrowUp, Cross, Filter as FilterIcon, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Field } from "@/components/form"
 import { FilterChip } from "@/components/tabs"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -185,13 +184,13 @@ export function FilterBar({
                   key={column.key}
                   onSelect={() => onSortChange([...sort, { column: column.name, desc: false }])}
                 >
-                  <MenuItemText
-                    hint={
-                      <span className="text-hint text-muted-foreground">{column.typeName}</span>
-                    }
-                  >
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
-                  </MenuItemText>
+                  {/* A column as its header names it: the name, then its type. */}
+                  <span className="min-w-0 truncate font-mono text-xs">{column.name}</span>
+                  {column.typeName && (
+                    <Tag mono className="min-w-0 shrink-[999]">
+                      <span className="truncate">{column.typeName}</span>
+                    </Tag>
+                  )}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

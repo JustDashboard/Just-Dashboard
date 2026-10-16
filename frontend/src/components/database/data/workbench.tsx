@@ -613,7 +613,9 @@ export function TableWorkbench({
     // nothing — before anything else does. Without, the commands take a
     // second line under the name and the views.
     <div className="@container shrink-0 border-b border-hairline bg-surface-header">
-      <div className="flex min-h-10 items-stretch px-1.5 @max-[34rem]:flex-wrap">
+      {/* 40px with its hairline, as the rail's head beside it is: tabs of a
+          full 40 over the rule put this one a pixel below the rail's. */}
+      <div className="flex min-h-[39px] items-stretch px-1.5 @max-[34rem]:flex-wrap">
         <div className="flex min-w-0 items-center gap-1.5 py-1 pr-2 @max-[34rem]:max-w-[calc(100%-13.5rem)]">
           <IconAction
             label={railOpen ? "Hide the tables" : "Show the tables"}
@@ -656,7 +658,7 @@ export function TableWorkbench({
                   aria-selected={selected}
                   aria-controls={selected ? `${tabsId}-panel` : undefined}
                   tabIndex={selected ? 0 : -1}
-                  className={cn(tabClasses(selected, "h-10"), "max-sm:px-2")}
+                  className={cn(tabClasses(selected, "h-[39px]"), "max-sm:px-2")}
                   onClick={() => setView({ view: entry.key })}
                 >
                   {entry.label}

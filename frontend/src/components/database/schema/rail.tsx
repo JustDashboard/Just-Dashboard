@@ -1,7 +1,5 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
@@ -216,12 +214,15 @@ export function SchemaRail({
           </Button>
         </div>
       )}
-      <div className="shrink-0 border-b border-hairline p-1.5">
+      {/* 28px from `sm` too, which `dense` asks for and `Input`'s own `sm:h-9`
+          overrode: the band is then the grid toolbar's height on the Data page. */}
+      <div className="shrink-0 border-b border-hairline p-1">
         <SearchInput
           dense
           value={query}
           placeholder="Find an object"
           aria-label="Find an object"
+          className="sm:h-7"
           containerClassName="sm:w-full"
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -328,7 +329,7 @@ function RailGroup({
         <button
           type="button"
           aria-expanded={!folded}
-          className="flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover max-sm:h-9"
+          className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 pl-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover max-sm:h-9"
           onClick={() => onFold(!folded)}
         >
           {folded ? (
@@ -337,11 +338,15 @@ function RailGroup({
             <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
           )}
           <GroupGlyph group={group} />
-          <span className="eyebrow min-w-0 flex-1 truncate">{spec.plural}</span>
-          <span className="numeric text-hint text-muted-foreground">
-            {searching && objects.length !== total
-              ? `${grouped(objects.length)} of ${grouped(total)}`
-              : grouped(total)}
+          {/* The caps and the figure share a baseline; centred, the figure
+              stood a pixel above the word it counts. */}
+          <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+            <span className="eyebrow min-w-0 flex-1 truncate">{spec.plural}</span>
+            <span className="numeric text-hint text-muted-foreground">
+              {searching && objects.length !== total
+                ? `${grouped(objects.length)} of ${grouped(total)}`
+                : grouped(total)}
+            </span>
           </span>
         </button>
       </h3>
@@ -393,7 +398,7 @@ function RailGroup({
             <Button
               size="xs"
               variant="ghost"
-              className="mt-1 ml-5 text-muted-foreground"
+              className="mt-1 ml-4 text-muted-foreground"
               onClick={() => setLimit((n) => n + GROUP_STEP)}
             >
               Show {Math.min(GROUP_STEP, listed.length - limit)} more of {grouped(listed.length)}
@@ -404,7 +409,7 @@ function RailGroup({
               size="xs"
               variant="ghost"
               aria-expanded={extensions}
-              className="mt-0.5 ml-5 max-w-[calc(100%-1.25rem)] text-muted-foreground"
+              className="mt-0.5 ml-4 max-w-[calc(100%-1rem)] text-muted-foreground"
               onClick={() => setExtensions(!extensions)}
             >
               <span className="min-w-0 truncate">
@@ -465,19 +470,16 @@ function SchemaPicker({ schemas, current }: { schemas: DbCatalogSchema[]; curren
       asChild
       className={cn(schema.name === current && "bg-accent")}
     >
+      {/* One line, as the tree's own rows are: a schema's count under its
+          name made every option two lines tall for a figure of a few digits. */}
       <Link href={href("schema", schemaParams(schema.name))}>
         <SchemaMark name={schema.name} />
-        <MenuItemText
-          hint={
-            schema.tables >= 0 && (
-              <span className="numeric text-hint text-muted-foreground">
-                {grouped(schema.tables)}
-              </span>
-            )
-          }
-        >
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        </MenuItemText>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+        {schema.tables >= 0 && (
+          <span className="numeric shrink-0 text-hint text-muted-foreground">
+            {grouped(schema.tables)}
+          </span>
+        )}
       </Link>
     </DropdownMenuItem>
   )

@@ -37,7 +37,8 @@ import { TableView } from "@/components/database/schema/table-view"
 import { useDestroy } from "@/components/database/schema/use-destroy"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 
-const RAIL = { min: 200, max: 480, fallback: 272 }
+// The Data page's rail width, so moving between the two pages does not move it.
+const RAIL = { min: 200, max: 480, fallback: 256 }
 const NO_VERBS: Verb[] = []
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
