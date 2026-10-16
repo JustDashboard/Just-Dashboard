@@ -962,7 +962,7 @@ test("staged edits are asked about before the table, its rows or the editor are 
   // A link out of the editor.
   await page
     .getByRole("navigation", { name: "Sidebar" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("link", { name: "General", exact: true })
     .click()
   await expect(guard).toContainText("Leaving the table editor")
   await expect.poll(() => where(page)).toContain("/data")

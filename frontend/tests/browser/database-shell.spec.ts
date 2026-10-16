@@ -36,7 +36,12 @@ test("Redis and MongoDB have only their own pages, under their own names", async
     "Logs",
     "Access",
     "Backups",
-    "Settings",
+    "General",
+    "Network",
+    "Parameters",
+    "Modules",
+    "Numbered databases",
+    "Danger zone",
   ])
 
   await page.goto("/databases/5")
@@ -50,7 +55,11 @@ test("Redis and MongoDB have only their own pages, under their own names", async
     "Logs",
     "Access",
     "Backups",
-    "Settings",
+    // A document database's parameters are status counters, which are Performance's.
+    "General",
+    "Network",
+    "Databases",
+    "Danger zone",
   ])
 })
 
@@ -126,7 +135,7 @@ test("an address under a database that is none of its pages stays inside it", as
     "href",
     "/databases/1",
   )
-  await expect(rail(page).getByRole("link", { name: "Settings", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "General", exact: true })).toBeVisible()
 })
 
 test("addresses from before the connection moved into the path land on the page that took their work", async ({
@@ -160,8 +169,9 @@ test("the reader's table survives a trip through a page that cannot hold it", as
 
   // Query can hold the schema; Settings can hold neither.
   await expect(link("Query")).toHaveAttribute("href", "/databases/1/query?schema=public")
-  await expect(link("Settings")).toHaveAttribute("href", "/databases/1/settings")
-  await link("Settings").click()
+  await expect(link("General")).toHaveAttribute("href", "/databases/1/settings")
+  await expect(link("Danger zone")).toHaveAttribute("href", "/databases/1/settings/danger")
+  await link("General").click()
   await expect(page).toHaveURL(/\/databases\/1\/settings$/)
   await expect(link("Data")).toHaveAttribute("href", "/databases/1/data?schema=public&table=orders")
   await link("Data").click()
