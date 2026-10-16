@@ -31,6 +31,11 @@
           "kind": "changed",
           "text": "Redraw the account pages without tiles, as pictures of what is signed in",
           "detail": "Profile wires every session and your own API keys into your face, with what guards it, and shows the three roles as a ladder lit up to yours. Sessions draws each session through the network it came in on to the server. API keys draws each key, as the product that holds it, through its role into the API, with chips for keys used this week, never used or about to expire. Every picture is drawn at the size of the one on Configuration, with a label over each name and the address under it. Users opens on the accounts and how many a password alone opens, straight over the accounts themselves. Security opens on what a sign-in passes, with an amber line past a missing second factor."
+        },
+        {
+          "kind": "changed",
+          "text": "Count backups and certificates on one bar instead of a track under every row",
+          "detail": "Databases → Backups shows how many databases were backed up today, this week, over a week ago or never on one bar, over a single line per database with the age of its newest dump. Proxy → Sites → Certificates counts valid, due for renewal and expired the same way, over a line per site with its days left."
         }
       ]
     },

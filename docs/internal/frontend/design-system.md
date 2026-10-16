@@ -2397,9 +2397,10 @@ The passes, in order. Each one is a diff you can review on its own.
    press of which narrows the cards to exactly them through a *Needs attention* chip — beside
    Export all, Import and New site. Under it `components/proxy/site-band.tsx` answers what the
    tiles never did: **Traffic**, the hour's requests as spans of one bar in each site's hue with the
-   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, each
-   enabled TLS site on an axis from "ends now" to ninety days, a dot in its hue, the last fortnight
-   washed amber; and **Applications**, what the sites stand in front of drawn as itself, each with
+   busiest five as rows and a 5xx share in amber from 1% and red from 5%; **Certificates**, the
+   enabled TLS sites' certificates counted valid, due for renewal and expired on one `StandingBar`
+   (`components/standing-bar.tsx`), over the five soonest to end with their days left, amber in
+   the last fortnight; and **Applications**, what the sites stand in front of drawn as itself, each with
    the health check's answer. A row opens its site. What a site fronts is read off the Ports page's
    sockets (`components/proxy/site-apps.ts`, unit-tested): the container's image, else the program,
    else its unit — never the port alone, so an upstream nothing on the list names keeps the
@@ -2417,8 +2418,8 @@ The passes, in order. Each one is a diff you can review on its own.
    nothing on the page told one database from another but its words. It had no tiles to give up;
    what it gave up was the attention list, which the operator asked to go, and nothing it said was
    lost — each concern is said, in its tone, where the thing is: the verdict and the first card on
-   its shelf for a server that does not answer, the runway and the card's foot for a dump that is
-   old or missing, the card's foot for a port open to the internet, *Found on this server* for a
+   its shelf for a server that does not answer, the Backups block and the card's foot for a dump
+   that is old or missing, the card's foot for a port open to the internet, *Found on this server* for a
    server that waits for a password, and every fix it carried (Start, Back up now, Restrict to this
    server, Settings) a verb on the card. The page opens on `HostIdentity`: the server's engines as
    a stack of their own logos, the commonest and then the largest first, the host's name, how many
@@ -2430,13 +2431,16 @@ The passes, in order. Each one is a diff you can review on its own.
    three ways the cards cannot: **Storage**, what each database holds as spans of one bar with the
    five largest as rows; **Sessions**, the open sessions — a key–value store's clients — as one
    bar, a server that did not answer counted apart rather than drawn as zero, the busiest beside
-   the products that read them; and **Backups**, every database the dashboard can dump on a
-   fortnight's runway, never-dumped first as a hollow amber ring at its far end, the stretch past a
-   week washed amber because a week is where every other reading of the section calls a dump stale.
-   A row opens the database, or on the runway its Backups page. Each database keeps one hue
-   (`fleetHues`, a lane hue without slate dealt in the order the connections were saved, so five
-   databases are five hues and a new one moves nobody's) on its span, its dot, its key in a row
-   and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+   the products that read them; and **Backups**, every database the dashboard can dump counted
+   backed up today, this week, over a week ago — the age every other reading of the section calls
+   stale — and never, on one `StandingBar`, over the worst five, never-dumped first, each with its
+   newest dump's age. A row opens the database, or under Backups its Backups page. This block and
+   the Sites page's Certificates drew a track under every row with a dot on it until 0.7.5, which
+   went at the operator's request: the track had no scale, so the dot said less than the age beside
+   it, a database never backed up was drawn at a place it did not have, and the track's hairline
+   under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
+   lane hue without slate dealt in the order the connections were saved, so five databases are
+   five hues and a new one moves nobody's) on its span, its key in a row and its table row; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
    the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.

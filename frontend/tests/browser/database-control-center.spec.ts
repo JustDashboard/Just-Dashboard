@@ -286,7 +286,10 @@ test.describe("the control center", () => {
     // Never dumped first, then the oldest; a row opens the database's dumps.
     const backups = band.getByRole("region", { name: "Backups" })
     await expect(backups).toContainText(/3\s*of 5 in the last day/)
-    expect(await names("Backup runway")).toEqual([
+    await expect(
+      backups.getByRole("img", { name: /^Databases by their newest backup: 3 today, .*1 never$/ }),
+    ).toBeVisible()
+    expect(await names("Databases by last backup")).toEqual([
       "Backups of cache",
       "Backups of app",
       "Backups of blog",

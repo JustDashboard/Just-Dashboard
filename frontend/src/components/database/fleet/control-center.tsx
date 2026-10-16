@@ -92,8 +92,8 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * It opened on a "Needs attention" list until the operator asked for it to
  * go. Nothing it said was lost: every concern is still said, in its weight,
  * where the thing is — the verdict and the first card on a shelf for a server
- * that does not answer, the runway and the card's foot for a dump that is old
- * or missing, the card's foot for a port open to the internet, and *Found on
+ * that does not answer, the Backups block and the card's foot for a dump that
+ * is old or missing, the card's foot for a port open to the internet, and *Found on
  * this server* for a server that waits for a password. The cards are still
  * ordered worst first, so what needed a hand is still what is met first.
  *
@@ -139,7 +139,7 @@ export function ControlCenter() {
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
   // Each database's hue, dealt once for the whole fleet so a filter never
-  // repaints one: the band's spans, the runway's dots, the cards' size bars.
+  // repaints one: the band's spans and keys, the cards' size bars.
   const hues = useMemo(() => fleetHues(entries), [entries])
   const hueOf = useCallback(
     (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",

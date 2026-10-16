@@ -94,10 +94,9 @@ export function workPages(engine: Engine) {
  * could tell which of them was the problem.
  *
  * What it stores is drawn as a short bar in the database's hue — the same as
- * its span on the band's bars, its dot on the backup runway and its key in a
- * row there — against the largest database on the server, so "which one is
- * the big one" is answered across the shelf without reading a figure. The
- * card's edge carries no hue: the operator found the coloured stripe down it
+ * its span on the band's bars and its key in a row there — against the
+ * largest database on the server, so "which one is the big one" is answered
+ * across the shelf without reading a figure. The card's edge carries no hue: the operator found the coloured stripe down it
  * noise rather than a reading.
  */
 export function FleetCard({
