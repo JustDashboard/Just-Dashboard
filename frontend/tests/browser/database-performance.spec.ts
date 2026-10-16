@@ -2178,6 +2178,60 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 query", { exact: true })).toBeVisible()
 })
 
+test("the server's log is drawn from each message, and Insights draws no cards", async ({
+  page,
+}) => {
+  const prefix = "2026-10-16 03:12:01.000 UTC [7002] app@shop "
+  const at = "2026-10-16T03:12:01Z"
+  await mockOps(page, {
+    logSources: {
+      sources: [
+        {
+          id: "docker:shop-db",
+          label: "shop-db",
+          kind: "container",
+          lens: "postgres",
+          primary: true,
+        },
+      ],
+    },
+    logLines: [
+      {
+        text: `${prefix}FATAL:  password authentication failed for user "app"`,
+        level: "error",
+        timestamp: at,
+        stream: "stderr",
+        event: "auth_failed",
+        attrs: { user: "app", db: "shop", error_class: "auth" },
+        body: prefix.length + "FATAL:  ".length,
+      },
+      {
+        text: `${prefix}DETAIL:  Role "app" does not exist.`,
+        level: "error",
+        timestamp: at,
+        stream: "stderr",
+        cont: true,
+        body: prefix.length,
+      },
+    ],
+  })
+  await visit(page, "/databases/1/logs?view=search")
+  const pane = page.getByLabel("Log lines")
+  await expect(pane.getByText('password authentication failed for user "app"')).toBeVisible()
+  // The pid, user@db and severity are the columns and the event word: the
+  // row does not say them twice, and a lens-read line carries no stderr mark.
+  await expect(pane).not.toContainText("[7002]")
+  await expect(pane).not.toContainText("FATAL:")
+  await expect(pane).toContainText('DETAIL:  Role "app" does not exist.')
+  await expect(pane).not.toContainText("stderr")
+
+  await page.getByRole("button", { name: "Insights", exact: true }).click()
+  await expect(page.getByText("Events over time")).toBeVisible()
+  for (const tile of ["Lines", "Busiest", "Warnings"]) {
+    await expect(page.getByText(tile, { exact: true })).toHaveCount(0)
+  }
+})
+
 test("a file has no server keeping a log: its list is what was run from here", async ({ page }) => {
   const ops = await mockOps(page, {
     answers: {
