@@ -7,7 +7,7 @@ import {
   splitTopology,
   worstStatus,
 } from "@/components/database/fleet/fleet"
-import { readFleet, readTopology } from "@/components/database/fleet/read"
+import { lastFleet, lastTopology, readFleet, readTopology } from "@/components/database/fleet/read"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useAddress } from "@/components/database/fleet/use-address"
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { fleetStatus, statusTone } from "@/components/database/shell/status"
 import { Plus } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -35,7 +36,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { plural } from "@/lib/format"
 import type { DbTopoNode } from "@/lib/types"
 import Link from "next/link"
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 
 /**
  * The map: what feeds what, as one picture.
@@ -58,10 +59,11 @@ import { useCallback, useMemo } from "react"
 export function DatabaseMap() {
   const { admin, connections, engineFor, newHref } = useDatabases()
   const address = useAddress()
-  const topology = usePoll(readTopology, 30_000)
+  const [seeds] = useState(() => ({ topology: lastTopology(), fleet: lastFleet() }))
+  const topology = usePoll(readTopology, 30_000, [], { seed: seeds.topology })
   // Only the fleet knows what answered behind a driver (MariaDB behind
   // `mysql`), so the marks follow it where it has been read.
-  const fleet = usePoll(readFleet, 60_000)
+  const fleet = usePoll(readFleet, 60_000, [], { seed: seeds.fleet })
   const engineFilter = address.read("engine")
   // The width from which the picture draws its wires (`Wiring` lays its
   // lanes side by side from `lg`).
@@ -75,6 +77,13 @@ export function DatabaseMap() {
       return saved ? engineFor(saved) : engineOf(node.product ?? "")
     },
     [fleet.data, connections, engineFor],
+  )
+  const stateOfNode = useCallback(
+    (node: DbTopoNode) => {
+      const entry = fleet.data?.connections.find((one) => one.id === node.connId)
+      return entry ? statusTone(fleetStatus(entry).state) : undefined
+    },
+    [fleet.data],
   )
   const keep = useCallback(
     (node: DbTopoNode) => !engineFilter || engineOfNode(node).id === engineFilter,
@@ -161,12 +170,19 @@ export function DatabaseMap() {
             ))}
           </ChipStrip>
         )}
-        <WiringLegend className="sm:ml-auto" />
+        {/* The lines it explains are drawn from `lg`; below it there are none. */}
+        <WiringLegend className="ml-auto max-lg:hidden" />
       </div>
 
       <div className="grid min-w-0 items-start gap-8 2xl:grid-cols-[minmax(0,1fr)_24rem] [&>*]:min-w-0">
         {split.databases.length > 0 ? (
-          <Wiring topology={topology.data} keep={keep} engineOf={engineOfNode} readers={wired} />
+          <Wiring
+            topology={topology.data}
+            keep={keep}
+            engineOf={engineOfNode}
+            stateOf={stateOfNode}
+            readers={wired}
+          />
         ) : (
           <EmptyState
             title="No database of that engine"

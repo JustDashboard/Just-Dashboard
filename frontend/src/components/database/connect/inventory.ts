@@ -175,9 +175,26 @@ export type FoundShelves = {
 }
 
 /**
+ * How far a found server is from being connected: one press, a password, a
+ * start, or nothing this page can do. The servers' shelf is in this order.
+ */
+const READINESS: Record<FoundAction["kind"], number> = {
+  connect: 0,
+  open: 0,
+  credentials: 1,
+  "start-container": 2,
+  "start-unit": 2,
+  look: 3,
+  none: 3,
+}
+
+/**
  * Everything discovery found that no saved connection points at, on the
- * shelves the list draws. The inventory's order is kept inside each: it is
- * stable between polls, so a row does not move under a pointer.
+ * shelves the list draws. Servers stand in the order they can be connected —
+ * the ones a press connects first, then the ones that want a password, then
+ * what has to be started, then what nothing here can open — and otherwise the
+ * inventory's order is kept inside each: it is stable between polls, so a row
+ * moves only when what it needs has changed.
  */
 export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
   const shelves: FoundShelves = { servers: [], files: [], kept: [], ignored: [], gone: [] }
@@ -192,6 +209,7 @@ export function foundShelves(inventory: DbInventory | undefined): FoundShelves {
     else shelves.files.push(instance)
   }
   shelves.gone = inventory.ignored.filter((key) => !present.has(key))
+  shelves.servers.sort((a, b) => READINESS[foundAction(a).kind] - READINESS[foundAction(b).kind])
   return shelves
 }
 

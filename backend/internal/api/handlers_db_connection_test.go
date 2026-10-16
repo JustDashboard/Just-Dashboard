@@ -48,6 +48,7 @@ type fakeDBContainer struct {
 	hostIP                 string
 	hostPort, port         int
 	labels                 map[string]string
+	env                    []string
 	// What the container may use and how it restarts, as its configuration
 	// holds them: bytes, billionths of a processor, Docker's own word.
 	memory, nanoCPUs int64
@@ -147,7 +148,7 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.inspections[c.name]++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"Id": c.id, "Name": "/" + c.name,
-			"Config": map[string]any{"Image": c.image, "Labels": c.labels},
+			"Config": map[string]any{"Image": c.image, "Labels": c.labels, "Env": c.env},
 			"State": map[string]any{
 				"Status": c.state, "Running": c.state == "running", "StartedAt": "2026-01-02T03:04:05Z",
 			},
@@ -2118,6 +2119,55 @@ func TestTopologyLinksADatabaseToItsOwnPage(t *testing.T) {
 	}](t, do(t, h.as(auth.RoleReadOnly), http.MethodGet, "/databases/topology", ""))
 	if len(topo.Nodes) != 1 || topo.Nodes[0].Href != pathf("/databases/%d", id) {
 		t.Errorf("topology nodes = %+v, want one linking to /databases/%d", topo.Nodes, id)
+	}
+}
+
+// A deployment that reaches its database the way an application would — at
+// one of this machine's addresses and the port the database container is
+// published on, which is not the loopback the dashboard saved it at — is the
+// database's reader, drawn as its project rather than its release's container.
+func TestTopologyFindsADeploymentByThePublishedAddressItHolds(t *testing.T) {
+	h := newConnHarness(t)
+	project, err := h.s.Store.DB.Exec(`INSERT INTO deploy_projects(name, repo_path, hook_secret, hook_id, created_at) VALUES('storefront', '/srv/storefront', 'sealed', 'storefront-hook', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	environment, err := h.s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id,name,slug,kind,created_at,updated_at) VALUES(?,'production','production','production',1,1)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, _ := environment.LastInsertId()
+	release := map[string]string{
+		"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10),
+	}
+	h.engine.containers = []*fakeDBContainer{
+		{id: "db0000000001", name: "shop-db", image: "postgres:17-alpine", state: "running", hostIP: "0.0.0.0", hostPort: 59435, port: 5432},
+		{id: "app000000001", name: pathf("jd-e%d-r1", environmentID), image: "3f2a1b0c9d8e", state: "running", labels: release,
+			env: []string{"PORT=3000", "DATABASE_URL=postgres://app:secret@host.docker.internal:59435/app?sslmode=disable"}},
+		// A port that only begins with the database's is not its address.
+		{id: "app000000002", name: "billing", image: "billing:1", state: "running",
+			env: []string{"DATABASE_URL=postgres://app:secret@host.docker.internal:594351/app"}},
+	}
+	id := h.add("shop", dbx.DriverPostgres, "postgres://app:secret@127.0.0.1:59435/app?sslmode=disable&connect_timeout=1")
+	topo := readJSON[topologyResponse](t, do(t, h.as(auth.RoleReadOnly), http.MethodGet, "/databases/topology", ""))
+
+	reader := "deploy:" + strconv.FormatInt(environmentID, 10)
+	var drawn *topoNode
+	for i := range topo.Nodes {
+		if topo.Nodes[i].ID == reader {
+			drawn = &topo.Nodes[i]
+		}
+		if strings.HasPrefix(topo.Nodes[i].ID, "container:") {
+			t.Errorf("a container is drawn as itself: %+v", topo.Nodes[i])
+		}
+	}
+	if drawn == nil || drawn.Kind != "deployment" || drawn.Name != "storefront" || drawn.Href != pathf("/deploy/%d", projectID) {
+		t.Fatalf("nodes = %+v, want the release drawn as the storefront deployment", topo.Nodes)
+	}
+	want := topoEdge{From: pathf("db:%d", id), To: reader, Via: []string{"env"}, Status: "observed"}
+	if len(topo.Edges) != 1 || topo.Edges[0].From != want.From || topo.Edges[0].To != want.To || strings.Join(topo.Edges[0].Via, ",") != "env" {
+		t.Errorf("edges = %+v, want only %+v", topo.Edges, want)
 	}
 }
 

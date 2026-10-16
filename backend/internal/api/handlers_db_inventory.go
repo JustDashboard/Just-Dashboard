@@ -190,6 +190,48 @@ func (s *Server) inventory(ctx context.Context, detail, fresh bool) dbInventoryK
 	return next
 }
 
+// keptInventory is the last reading at that level of detail, however old, for
+// a read that must not wait on the machine. The fleet is one: it is what the
+// Databases page waits on before it draws anything, and reading the machine
+// again — every container, every process's sockets, every systemd unit, and
+// the first walk for files — took it from a fifth of a second to two and a
+// half. A reading that is missing or past dbInventoryFresh is taken again in
+// the background, so the caller after this one has it.
+func (s *Server) keptInventory(detail bool) (dbInventoryKept, bool) {
+	state := &s.dbInventory
+	state.mu.Lock()
+	kept := state.reduced
+	if detail {
+		kept = state.full
+	}
+	state.mu.Unlock()
+	if kept == nil || time.Since(kept.at) >= dbInventoryFresh {
+		s.refreshInventory(detail)
+	}
+	if kept == nil {
+		return dbInventoryKept{}, false
+	}
+	return *kept, true
+}
+
+// refreshInventory reads the machine again on a context of its own, unless a
+// reading at that level of detail is already being taken.
+func (s *Server) refreshInventory(detail bool) {
+	building := &s.dbInventory.buildingReduced
+	if detail {
+		building = &s.dbInventory.buildingFull
+	}
+	if !building.TryLock() {
+		return
+	}
+	building.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		s.inventory(ctx, detail, false)
+	}()
+}
+
 // dropInventory forgets both kept readings, so the next request reads again.
 func (s *Server) dropInventory() {
 	s.dbInventory.mu.Lock()

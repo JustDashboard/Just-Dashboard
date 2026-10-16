@@ -11,7 +11,7 @@ type postgresDialect struct{}
 
 func (postgresDialect) Driver() Driver               { return DriverPostgres }
 func (postgresDialect) SQLDriverName() string        { return "pgx" }
-func (postgresDialect) NormaliseDSN(d string) string { return d }
+func (postgresDialect) NormaliseDSN(d string) string { return withApplicationName(d) }
 func (postgresDialect) VersionQuery() string         { return "SELECT version()" }
 func (postgresDialect) TunePool(*sql.DB)             {}
 func (postgresDialect) SupportsReturning() bool      { return true }
@@ -395,4 +395,27 @@ func (postgresDialect) explainSQL(_, statement string, opts ExplainOptions) (str
 		return "EXPLAIN " + statement, nil
 	}
 	return fmt.Sprintf("EXPLAIN (%s) %s", strings.Join(options, ", "), statement), nil
+}
+
+// ApplicationName is what the dashboard calls itself to a server that asks.
+// It is how the dashboard's own sessions are told apart from an
+// application's in the server's session list: through a published port every
+// client on this machine arrives from the same bridge gateway, so the address
+// alone draws the dashboard as a reader of every database it watches.
+const ApplicationName = "just-dashboard"
+
+// withApplicationName names the dashboard in a PostgreSQL connection string
+// that names no application of its own. It appends rather than parses, so the
+// rest of the string reaches the driver exactly as it was saved.
+func withApplicationName(dsn string) string {
+	if strings.TrimSpace(dsn) == "" || strings.Contains(dsn, "application_name") {
+		return dsn
+	}
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		if strings.Contains(dsn, "?") {
+			return dsn + "&application_name=" + ApplicationName
+		}
+		return dsn + "?application_name=" + ApplicationName
+	}
+	return dsn + " application_name=" + ApplicationName
 }

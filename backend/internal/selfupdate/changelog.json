@@ -36,6 +36,26 @@
           "kind": "changed",
           "text": "Count backups and certificates on one bar instead of a track under every row",
           "detail": "Databases → Backups shows how many databases were backed up today, this week, over a week ago or never on one bar, over a single line per database with the age of its newest dump. Proxy → Sites → Certificates counts valid, due for renewal and expired the same way, over a line per site with its days left."
+        },
+        {
+          "kind": "fixed",
+          "text": "Show a deployment as the reader of the database it reaches through a published port",
+          "detail": "Databases → What they feed and the map now recognise a deployment whose connection string names this server's own address with the database's published port, and draw a deployment's release as its project. The dashboard's own PostgreSQL sessions are no longer drawn as this server reading every database."
+        },
+        {
+          "kind": "changed",
+          "text": "Draw the Databases pictures like the Configuration stack",
+          "detail": "The control center's picture of what the databases feed and the map use full-size marks, a wide lane for the wires, lanes centred on each other and state dots on the marks, without the dotted background. Databases nothing reads are listed as links under the picture."
+        },
+        {
+          "kind": "fixed",
+          "text": "Stop offering browser profiles and temporary files as databases found on the server",
+          "detail": "SQLite files inside browser or browser-automation profiles and temporary directories are counted under Kept by other programs. Found servers are listed in the order they can be connected, and a file row shows the folder it is in."
+        },
+        {
+          "kind": "fixed",
+          "text": "Open the Databases page without waiting for the server to be re-scanned",
+          "detail": "The fleet reading answers from the last inventory of the machine and refreshes it in the background, and returning to the page draws the last reading at once while the new one loads."
         }
       ]
     },

@@ -459,6 +459,29 @@ export function edgeRank(status: string) {
   return 0
 }
 
+/**
+ * The lanes in the order that crosses fewest wires: databases that feed
+ * something first, then each reader at the mean position of the databases
+ * that reach it. Ties keep the order the split gave — the worst link first.
+ */
+export function wiredOrder(split: ReturnType<typeof splitTopology>) {
+  const databases = [
+    ...split.databases.filter((node) => split.feeds.has(node.id)),
+    ...split.databases.filter((node) => !split.feeds.has(node.id)),
+  ]
+  const at = new Map(databases.map((node, index) => [node.id, index]))
+  const mean = (node: DbTopoNode) => {
+    const sources = split.fedBy.get(node.id) ?? []
+    if (sources.length === 0) return Number.POSITIVE_INFINITY
+    return sources.reduce((sum, source) => sum + (at.get(source.from.id) ?? 0), 0) / sources.length
+  }
+  const consumers = split.consumers
+    .map((node, index) => ({ node, index, mean: mean(node) }))
+    .sort((a, b) => a.mean - b.mean || a.index - b.index)
+    .map((one) => one.node)
+  return { ...split, databases, consumers }
+}
+
 /** The worst link among several, as the word the map says it with. */
 export function worstStatus(edges: DbTopoEdge[]): string {
   return edges.reduce(
@@ -489,14 +512,4 @@ export function describeEdge(edge: DbTopoEdge): string {
     parts.push(edge.sessions === 1 ? "1 open session" : `${edge.sessions} open sessions`)
   else if (edge.via.includes("session")) parts.push("seen connected")
   return parts.join(" · ")
-}
-
-/** The same in the two words a small card has room for. */
-export function shortEdge(edge: DbTopoEdge): string {
-  if (edge.sessions > 0) return `${edge.sessions} open`
-  if (edge.via.includes("binding")) return "linked"
-  if (edge.via.includes("env")) return "configured"
-  if (edge.via.includes("stack")) return "same stack"
-  if (edge.via.includes("network")) return "same network"
-  return "seen"
 }

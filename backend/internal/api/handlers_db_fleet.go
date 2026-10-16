@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -380,11 +381,32 @@ func (s *Server) fillSQLReadings(ctx context.Context, pool *sql.DB, conn *dbConn
 		}
 	}
 	if sessions, err := d.Activity(ctx, pool); err == nil {
-		e.Sessions = len(sessions) - pool.Stats().OpenConnections
-		if e.Sessions < 0 {
-			e.Sessions = 0
-		}
+		e.Sessions = applicationSessions(conn.Driver, sessions, pool.Stats().OpenConnections)
 	}
+}
+
+// applicationSessions is how many of a server's sessions are an application's
+// rather than the dashboard's. Every dashboard session on a PostgreSQL server
+// gives the dashboard's name (dbx.ApplicationName), whichever connection's pool
+// holds it; on another engine the size of the pool that asked is all there is
+// to go on, and two saved connections to one server still count each other.
+func applicationSessions(driver dbx.Driver, sessions []dbx.Activity, pooled int) int {
+	if driver == dbx.DriverPostgres {
+		n := 0
+		for _, a := range sessions {
+			if !dashboardSession(a) {
+				n++
+			}
+		}
+		return n
+	}
+	return max(len(sessions)-pooled, 0)
+}
+
+// dashboardSession reports a session the dashboard holds: the one asking, or
+// one that connected under the dashboard's name.
+func dashboardSession(a dbx.Activity) bool {
+	return a.Self || a.Application == dbx.ApplicationName
 }
 
 // bindingCounts is how many deployment environments each connection is bound
@@ -416,9 +438,18 @@ func (s *Server) bindingCounts(ctx context.Context) (map[int64]int, error) {
 // and the list of what was found cannot tell three stories about one server:
 // a stopped one, one the operator set aside and one recognised only by its
 // port are left out here as they are left alone there.
+//
+// It is the inventory's last reading, never a new one: the fleet does not wait
+// on the machine (`keptInventory`). Before the first reading has been taken
+// both lists are empty, and the inventory's own route — which the page reads
+// beside the fleet — is the fuller account of the same servers.
 func (s *Server) undetectedServers(ctx context.Context) ([]unreachableServer, []credentialServer) {
 	unreachable, needs := []unreachableServer{}, []credentialServer{}
-	instances, _, err := s.annotateInventory(ctx, s.inventory(ctx, true, false).instances)
+	kept, ok := s.keptInventory(true)
+	if !ok {
+		return unreachable, needs
+	}
+	instances, _, err := s.annotateInventory(ctx, kept.instances)
 	if err != nil {
 		return unreachable, needs
 	}
@@ -719,6 +750,10 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 	if err != nil {
 		return nil, httpx.Internal(err)
 	}
+	environments, err := s.topologyEnvironments(ctx)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
 	running := s.inspectRunning(ctx)
 	byIP := map[string]*inspected{}
 	byName := map[string]*inspected{}
@@ -728,6 +763,7 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 		}
 		byName[running[i].c.Name] = &running[i]
 	}
+	hosts := hostAddresses()
 
 	nodes := map[string]*topoNode{}
 	edges := map[string]*topoEdge{}
@@ -762,6 +798,25 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 			e.Status = status
 		}
 	}
+	// A running container is drawn as the deployment it is a release of, where
+	// its labels say so: the reader knows the project, not jd-e291-r1.
+	consumer := func(c *inspected) string {
+		if env, ok := releaseOf(c.c, environments); ok {
+			id := "deploy:" + strconv.FormatInt(env.id, 10)
+			addNode(topoNode{
+				ID: id, Kind: "deployment", Name: deploymentName(env.project, env.environment),
+				Product: c.product, Detail: c.c.Name, Status: c.c.State,
+				Href: "/deploy/" + strconv.FormatInt(env.projectID, 10),
+			})
+			return id
+		}
+		id := "container:" + c.c.Name
+		addNode(topoNode{
+			ID: id, Kind: "container", Name: c.c.Name, Product: c.product,
+			Detail: c.c.Image, Status: c.c.State, Href: "/docker/containers/" + c.c.ID,
+		})
+		return id
+	}
 
 	for _, conn := range conns {
 		dbID := "db:" + strconv.FormatInt(conn.ID, 10)
@@ -779,8 +834,12 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 		if info != nil && conn.Driver != dbx.DriverSQLite {
 			server = s.serverBehind(ctx, conn, info)
 		}
+		var serverIPs []string
 		if server != nil {
 			node.Detail = server.container.Name + " · " + conn.Database
+			if c, ok := byName[server.container.Name]; ok {
+				serverIPs = c.ips
+			}
 		}
 
 		// 1. Deployments bound to it.
@@ -789,23 +848,19 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 				continue
 			}
 			depID := "deploy:" + strconv.FormatInt(b.envID, 10)
-			name := b.project
-			if b.environment != "" && !strings.EqualFold(b.environment, "production") {
-				name += " · " + b.environment
-			}
 			product := ""
 			if c, ok := byName[b.container]; ok {
 				product = c.product
 			}
 			addNode(topoNode{
-				ID: depID, Kind: "deployment", Name: name, Product: product,
+				ID: depID, Kind: "deployment", Name: deploymentName(b.project, b.environment), Product: product,
 				Detail: b.container, Status: b.status, Href: "/deploy/" + strconv.FormatInt(b.projectID, 10),
 			})
 			addEdge(dbID, depID, "binding", b.status, 0)
 		}
 
 		// 2. Containers whose environment names it, and stack siblings.
-		needles := topoNeedles(conn, info, port, server)
+		addresses := topoAddresses(conn, info, port, server, serverIPs, hosts)
 		for i := range running {
 			c := &running[i]
 			if server != nil && c.c.ID == server.container.ID {
@@ -814,23 +869,19 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 			if isDatabaseImage(c.c) {
 				continue
 			}
-			id := "container:" + c.c.Name
 			if bound := boundContainer(bindings, conn.ID, c.c.Name); bound != "" {
 				// Already drawn as its deployment; the container is that
 				// deployment's release.
 				continue
 			}
-			mentioned := envMentions(c.env, needles)
+			mentioned := addresses.namedIn(c.env)
 			sameStack := server != nil && server.container.ComposeStack != "" &&
 				c.c.ComposeStack == server.container.ComposeStack
 			sameNet := server != nil && sharesUserNetwork(server.container.Networks, c.networks)
 			if !mentioned && !sameStack {
 				continue
 			}
-			addNode(topoNode{
-				ID: id, Kind: "container", Name: c.c.Name, Product: c.product,
-				Detail: c.c.Image, Status: c.c.State, Href: "/docker/containers/" + c.c.ID,
-			})
+			id := consumer(c)
 			via := "env"
 			if !mentioned && sameStack {
 				via = "stack"
@@ -847,14 +898,11 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 				if server != nil && c.c.ID == server.container.ID {
 					continue
 				}
-				id := "container:" + c.c.Name
+				id := ""
 				if bound := boundContainer(bindings, conn.ID, c.c.Name); bound != "" {
 					id = "deploy:" + bound
 				} else {
-					addNode(topoNode{
-						ID: id, Kind: "container", Name: c.c.Name, Product: c.product,
-						Detail: c.c.Image, Status: c.c.State, Href: "/docker/containers/" + c.c.ID,
-					})
+					id = consumer(c)
 				}
 				addEdge(dbID, id, "session", "observed", n)
 				continue
@@ -891,6 +939,58 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 	return out, nil
 }
 
+// deploymentName is a deployment environment as the map names it: the
+// project, and the environment where it is not the one every project has.
+func deploymentName(project, environment string) string {
+	if environment != "" && !strings.EqualFold(environment, "production") {
+		return project + " · " + environment
+	}
+	return project
+}
+
+// topoEnvironment is a deployment environment by the id its releases carry.
+type topoEnvironment struct {
+	id          int64
+	projectID   int64
+	project     string
+	environment string
+}
+
+func (s *Server) topologyEnvironments(ctx context.Context) (map[int64]topoEnvironment, error) {
+	rows, err := s.Store.DB.QueryContext(ctx, `
+	  SELECT e.id, p.id, p.name, e.name
+	  FROM deploy_environments e
+	  JOIN deploy_projects p ON p.id = e.project_id
+	  WHERE p.archived_at = 0 AND e.archived_at = 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]topoEnvironment{}
+	for rows.Next() {
+		var e topoEnvironment
+		if err := rows.Scan(&e.id, &e.projectID, &e.project, &e.environment); err != nil {
+			return nil, err
+		}
+		out[e.id] = e
+	}
+	return out, rows.Err()
+}
+
+// releaseOf is the deployment environment a container is a release of, read
+// off the labels the deployment runtime starts every release with.
+func releaseOf(c dockerx.Container, environments map[int64]topoEnvironment) (topoEnvironment, bool) {
+	if c.Labels["io.just-dashboard.managed"] != "true" {
+		return topoEnvironment{}, false
+	}
+	id, err := strconv.ParseInt(c.Labels[deploymentEnvironmentLabel], 10, 64)
+	if err != nil {
+		return topoEnvironment{}, false
+	}
+	env, ok := environments[id]
+	return env, ok
+}
+
 func rank(status string) int {
 	switch status {
 	case "broken", "failed", "error":
@@ -919,52 +1019,161 @@ func kindRank(kind string) int {
 	return 4
 }
 
-// topoNeedles is every string a client's environment might carry to name
-// this server: its published address, the container's name and aliases, the
-// deployment alias.
-func topoNeedles(conn *dbConnection, info *dbx.ConnInfo, port int, server *dbServer) []string {
-	out := []string{"db-" + strconv.FormatInt(conn.ID, 10) + ".jd.internal"}
-	if info != nil && port > 0 {
+// topoAddressBook is every way a client's environment might name this server:
+// whole strings to look for in a value, and host and port pairs for an
+// environment that keeps the two apart (DB_HOST and DB_PORT).
+type topoAddressBook struct {
+	needles []string
+	pairs   [][2]string
+}
+
+// topoAddresses is the address book of one connection's server: the
+// `db-N.jd.internal` alias, the address it was saved with, the container's
+// name, compose service and addresses, and every address of this machine with
+// the port the server is published on. An application seldom names a server
+// the way the dashboard does — a deployment holding
+// postgres://…@203.0.113.7:5435/app reaches the container published on 5435
+// the dashboard reaches at 127.0.0.1:5435 — so each of those is looked for.
+func topoAddresses(conn *dbConnection, info *dbx.ConnInfo, port int, server *dbServer, serverIPs, hosts []string) topoAddressBook {
+	book := topoAddressBook{needles: []string{databaseDNSName(conn.ID)}}
+	seen := map[string]bool{}
+	reach := func(hosts []string, port int) {
 		p := strconv.Itoa(port)
+		for _, h := range hosts {
+			if h == "" || seen[h+":"+p] {
+				continue
+			}
+			seen[h+":"+p] = true
+			book.needles = append(book.needles, h+":"+p)
+			book.pairs = append(book.pairs, [2]string{h, p})
+		}
+	}
+	if info != nil && port > 0 {
 		if databaseLoopback(info.Host) {
-			out = append(out, "127.0.0.1:"+p, "localhost:"+p, "host.docker.internal:"+p, "172.17.0.1:"+p)
+			// A server this machine answers on: a container reaches it at any
+			// of the machine's addresses, never at the loopback it was saved at.
+			reach(hosts, port)
 		} else {
-			out = append(out, info.Host+":"+p)
+			reach([]string{info.Host}, port)
 		}
 	}
 	if server != nil {
-		name := server.container.Name
-		out = append(out, "@"+name+":", "@"+name+"/", "//"+name+":", "//"+name+"/", "="+name+"\n")
+		for _, b := range server.container.Ports {
+			if int(b.PrivatePort) == server.port && b.PublicPort > 0 {
+				reach(publishedOn(b.IP, hosts), int(b.PublicPort))
+			}
+		}
+		reach(serverIPs, server.port)
+		names := []string{server.container.Name}
 		if server.container.ComposeSvc != "" {
-			svc := server.container.ComposeSvc
-			out = append(out, "@"+svc+":", "@"+svc+"/", "//"+svc+":", "//"+svc+"/")
+			names = append(names, server.container.ComposeSvc)
+		}
+		for _, name := range names {
+			book.needles = append(book.needles, "@"+name+":", "@"+name+"/", "//"+name+":", "//"+name+"/")
+			book.pairs = append(book.pairs, [2]string{name, strconv.Itoa(server.port)})
+		}
+		// A bare value naming the container: HOST=dbcontainer.
+		book.needles = append(book.needles, "="+server.container.Name)
+	}
+	return book
+}
+
+// publishedOn is the addresses a port Docker published is reached at: every
+// address of the machine for an unspecified binding, the loopback names for a
+// loopback one, and otherwise the one address it is bound to.
+func publishedOn(bound string, hosts []string) []string {
+	ip := net.ParseIP(strings.Trim(bound, "[]"))
+	switch {
+	case bound == "" || (ip != nil && ip.IsUnspecified()):
+		return hosts
+	case ip != nil && ip.IsLoopback():
+		return []string{"127.0.0.1", "localhost"}
+	}
+	return []string{bound}
+}
+
+// hostAddresses is every name and address this machine is reached at from a
+// container or a process on it: loopback, Docker's names for the host, the
+// hostname, and every interface's address — the bridge gateways and the public
+// address among them.
+func hostAddresses() []string {
+	out := []string{"127.0.0.1", "localhost", "host.docker.internal", "172.17.0.1"}
+	if name, err := os.Hostname(); err == nil && name != "" {
+		out = append(out, name)
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP.IsLinkLocalUnicast() || ipnet.IP.IsLoopback() {
+			continue
+		}
+		if ip4 := ipnet.IP.To4(); ip4 != nil {
+			out = append(out, ip4.String())
+		} else {
+			out = append(out, "["+ipnet.IP.String()+"]")
 		}
 	}
 	return out
 }
 
-func envMentions(env []string, needles []string) bool {
+// namedIn reports an environment that names the server: a value holding one
+// of its addresses whole, or one variable holding a host and another its port.
+func (book topoAddressBook) namedIn(env []string) bool {
+	values := map[string]bool{}
 	for _, kv := range env {
 		_, value, ok := strings.Cut(kv, "=")
 		if !ok || value == "" {
 			continue
 		}
-		for _, n := range needles {
-			needle := strings.TrimSuffix(n, "\n")
-			if strings.HasPrefix(n, "=") {
-				// "=name" is a bare value: HOST=dbcontainer.
-				if value == needle[1:] {
+		values[value] = true
+		for _, needle := range book.needles {
+			if bare, ok := strings.CutPrefix(needle, "="); ok {
+				if value == bare {
 					return true
 				}
 				continue
 			}
-			if strings.Contains(value, needle) {
+			if containsAddress(value, needle) {
 				return true
 			}
 		}
 	}
+	for _, pair := range book.pairs {
+		if values[pair[0]] && values[pair[1]] {
+			return true
+		}
+	}
 	return false
 }
+
+// containsAddress finds an address in a value as a whole: 10.0.0.3:5432 is
+// not in 110.0.0.3:54321, though the bytes are.
+func containsAddress(value, needle string) bool {
+	for from := 0; from < len(value); {
+		i := strings.Index(value[from:], needle)
+		if i < 0 {
+			return false
+		}
+		i += from
+		end := i + len(needle)
+		before := i == 0 || !addressByte(needle[0]) || !addressByte(value[i-1])
+		after := end == len(value) || !isDigit(needle[len(needle)-1]) || !isDigit(value[end])
+		if before && after {
+			return true
+		}
+		from = i + 1
+	}
+	return false
+}
+
+func addressByte(b byte) bool {
+	return b == '.' || b == '-' || isDigit(b) || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 func isDatabaseImage(c dockerx.Container) bool {
 	cand, _ := dbx.Detect(c.Name, c.Image, nil, nil, nil)
@@ -1067,15 +1276,16 @@ func (s *Server) liveClients(ctx context.Context, conn *dbConnection, dsn string
 		return out
 	}
 	own := pool.Stats().OpenConnections
+	named := conn.Driver == dbx.DriverPostgres
 	for _, a := range sessions {
 		host := a.Client
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
-		if a.Self {
+		if dashboardSession(a) {
 			continue
 		}
-		if own > 1 && (host == "" || databaseLoopback(host) || strings.HasSuffix(host, ".1")) && a.User == conn.User {
+		if !named && own > 1 && (host == "" || databaseLoopback(host) || strings.HasSuffix(host, ".1")) && a.User == conn.User {
 			// The pool's other idle connections, which look exactly like a
 			// local client and are not one.
 			own--

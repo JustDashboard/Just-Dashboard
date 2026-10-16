@@ -109,7 +109,9 @@ taking a frame:
   `logo` tone, and the only circle left in a picture is the dashed ring of a thing not added yet
   (`WirePlaceholder`). The Databases map, Configuration's request path, a site's route map and the
   rollback dialog's picture took the page's own ground over `wire-grid` with the rest in 0.7.1,
-  the map giving up the frame it kept as the last picture with one. The rollback dialog holds a
+  the map giving up the frame it kept as the last picture with one; the Databases map and the
+  control center's picture of what the databases feed gave up the dot grid in 0.7.5, at the
+  operator's request, and stand on the page's ground alone. The rollback dialog holds a
   small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
@@ -2451,6 +2453,18 @@ The passes, in order. Each one is a diff you can review on its own.
    the operator's request), and its Stored figure carries a short bar in that hue
    against the largest database, as the table's Size cell does. The picture of what the databases
    feed moved above *Found on this server*, so the page's moving thing is not under a list of rows.
+   In 0.7.5, at the operator's request, it and the map are drawn the way Configuration draws the path
+   a request takes (`config/request-path.tsx`): every mark at the wiring vocabulary's full size (the
+   control center's smaller `compact` version went), the two lanes centred on each other with a wide
+   empty lane between them, no lane headings — each node's eyebrow says what it is — and whether a
+   database answers or a reader runs as the dot in its mark's corner, as on Configuration's services.
+   Neither stands over `wire-grid` any more. The lanes are ordered for the wires (`wiredOrder`):
+   databases that feed something first, each reader across from the mean of the databases that feed
+   it. The control center's picture is of what is wired, and the databases nothing is seen reading
+   are a line of their engine marks and names under it, each a link to the database, where a
+   sentence listed their names. *Found on this server* lists its servers in the order they can be
+   connected — one press, a password, a start, nothing this page can do — and a file row's second
+   line is the folder it is in, cut from its start, where it repeated the file's whole path.
 
    Three deployment pages took it in the same pass. A project's General settings did because the
    project identity line already is that page's reading line: each figure of the old Project

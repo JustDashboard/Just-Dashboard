@@ -439,3 +439,19 @@ describe("how a program connects", () => {
     }
   })
 })
+
+describe("asking for an engine", () => {
+  test("is answered once per question, so a page that asks hundreds of times builds a few", () => {
+    const catalogue = []
+    expect(engineOf("postgres", catalogue)).toBe(engineOf("postgres", catalogue))
+    expect(engineOf("mariadb")).toBe(engineOf("mariadb"))
+    // A different catalogue or different capabilities is a different question.
+    expect(engineOf("postgres", [])).not.toBe(engineOf("postgres", catalogue))
+    const given = { kill: false }
+    expect(engineFor({ driver: "postgres", capabilities: given })).toBe(
+      engineFor({ driver: "postgres", capabilities: given }),
+    )
+    expect(engineFor({ driver: "postgres", capabilities: given }).can("kill")).toBe(false)
+    expect(engineFor({ driver: "postgres", capabilities: { kill: true } }).can("kill")).toBe(true)
+  })
+})

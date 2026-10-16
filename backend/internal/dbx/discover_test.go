@@ -1298,6 +1298,11 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 			{Path: "/home/ubuntu/.local/share/pki/nssdb/cert9.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/home/ubuntu/analytics/events.duckdb", Engine: "duckdb", Size: 4096, Modified: when},
 			{Path: "/home/ubuntu/project/dev.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/network-audit-tmp/playwright_chromiumdev_profile-RReprD/Default/declarative_performance_observer.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/chrome-profile/Default/heavy_ad_intervention_opt_out.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/home/ubuntu/build/tmp/copy.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/srv/app/build_temp/seed.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/srv/templates/app.db", Engine: "sqlite", Size: 4096, Modified: when},
 		},
 		DataDirs: []DataDirFacts{
 			{Path: "/var/lib/docker/volumes/old-data/_data", Engine: "postgres", Version: "15\n", Modified: when},
@@ -1314,6 +1319,11 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 		"file:/home/ubuntu/.local/share/pki/nssdb/cert9.db":           HolderTool,
 		"file:/home/ubuntu/analytics/events.duckdb":                   HolderApplication,
 		"file:/home/ubuntu/project/dev.db":                            HolderApplication,
+		"file:/home/ubuntu/network-audit-tmp/playwright_chromiumdev_profile-RReprD/Default/declarative_performance_observer.db": HolderTool,
+		"file:/home/ubuntu/chrome-profile/Default/heavy_ad_intervention_opt_out.db":                                             HolderTool,
+		"file:/home/ubuntu/build/tmp/copy.db": HolderTool,
+		"file:/srv/app/build_temp/seed.db":    HolderTool,
+		"file:/srv/templates/app.db":          HolderApplication,
 	}
 	for key, want := range holders {
 		got := find(t, inv, key)

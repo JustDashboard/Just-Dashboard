@@ -656,6 +656,55 @@ test.describe("the control center", () => {
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 
+  test("draws what the databases feed at full size, ordered for the wires, and links the ones nothing reads", async ({
+    page,
+  }) => {
+    await mockFleet(page)
+    await page.goto("/databases")
+    const feed = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "What they feed" }),
+    })
+    const picture = feed.locator("[data-slot=wiring]")
+    await expect(
+      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
+    ).toHaveCount(4)
+    // On the page's own ground, with no dot grid behind it.
+    await expect(picture.locator(".wire-grid")).toHaveCount(0)
+    // Each reader across from the databases that feed it: the worker from
+    // shop and blog, the deployment from shop and cache, then cache's and
+    // app's own readers.
+    const readers = picture.getByRole("list", { name: "What reads them" }).getByRole("listitem")
+    await expect(readers).toHaveCount(4)
+    expect(
+      (await readers.allTextContents()).map((text) =>
+        ["worker", "storefront", "This server", "10.0.0.9"].find((name) => text.includes(name)),
+      ),
+    ).toEqual(["worker", "storefront", "This server", "10.0.0.9"])
+    await expect(readers.first()).toContainText("link broken")
+    // Nothing reads notes: it is a way to the database, not a name in a sentence.
+    await expect(feed.getByRole("link", { name: "notes", exact: true })).toHaveAttribute(
+      "href",
+      "/databases/7",
+    )
+  })
+
+  test("coming back to it draws the last reading at once while it asks again", async ({ page }) => {
+    const server = await mockFleet(page)
+    await page.goto("/databases")
+    await expect(card(page, "shop")).toBeVisible()
+    await page.getByRole("link", { name: "Map", exact: true }).click()
+    await expect(page.locator("[data-slot=wiring]")).toBeVisible()
+
+    const held = hold()
+    server.answer("GET /databases/fleet", async () => {
+      await held.until
+    })
+    await page.getByRole("link", { name: "Control center", exact: true }).click()
+    await expect(card(page, "shop")).toBeVisible()
+    await expect(page.getByRole("status", { name: "Loading databases" })).toHaveCount(0)
+    held.release()
+  })
+
   test("an empty server says so, offers the way to add one, and lists what was found under it", async ({
     page,
   }) => {
@@ -707,6 +756,17 @@ test.describe("found on this server", () => {
     )
     await expect(foundRow(page, "sales.duckdb")).toContainText("no driver for DuckDB")
     await expect(found.getByText("2 directories are outside the file roots")).toBeVisible()
+
+    // Servers stand in the order they can be connected: a press, a password,
+    // a start, and last what nothing here can open.
+    const rows = await found.locator("[data-slot=choice-row]").allTextContents()
+    const at = (name: string) => rows.findIndex((text) => text.includes(name))
+    expect(at("orders-db")).toBeLessThan(at("postgresql@17-main"))
+    expect(at("postgresql@17-main")).toBeLessThan(at("old-mysql"))
+    expect(at("old-mysql")).toBeLessThan(at("memcached"))
+    // A file's second line is the folder it is in; its name is the title.
+    await expect(foundRow(page, "data.db")).toContainText("/srv/app")
+    await expect(foundRow(page, "data.db")).not.toContainText("/srv/app/data.db")
 
     // The dashboard's own store is counted behind a fold, with no way to connect it.
     await found.getByText("Kept by other programs").click()
@@ -957,6 +1017,7 @@ test.describe("the map", () => {
     await expect(page.getByRole("list", { name: "How to read the map" })).toContainText(
       "link broken",
     )
+    await expect(picture.locator(".wire-grid")).toHaveCount(0)
 
     const readers = page.locator("[data-slot=row-list]")
     await expect(readers.locator("[data-slot=row]")).toHaveCount(4)
@@ -1000,6 +1061,8 @@ test.describe("the map", () => {
       picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
     ).toHaveCount(5)
     await expect(picture.getByRole("list", { name: "What reads them" })).toHaveCount(0)
+    // No wire is drawn, so there is no legend for one.
+    await expect(page.getByRole("list", { name: "How to read the map" })).toBeHidden()
     await expect(page.locator("[data-slot=row-list] [data-slot=row]")).toHaveCount(4)
     await expect(page.locator("[data-slot=row]").filter({ hasText: "worker" })).toHaveCount(1)
     await expect(picture).not.toContainText("worker")
