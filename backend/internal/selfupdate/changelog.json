@@ -56,6 +56,11 @@
           "kind": "fixed",
           "text": "Open the Databases page without waiting for the server to be re-scanned",
           "detail": "The fleet reading answers from the last inventory of the machine and refreshes it in the background, and returning to the page draws the last reading at once while the new one loads."
+        },
+        {
+          "kind": "changed",
+          "text": "Draw every wiring picture without the dotted background",
+          "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
         }
       ]
     },

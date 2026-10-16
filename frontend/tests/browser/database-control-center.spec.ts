@@ -668,8 +668,6 @@ test.describe("the control center", () => {
     await expect(
       picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
     ).toHaveCount(4)
-    // On the page's own ground, with no dot grid behind it.
-    await expect(picture.locator(".wire-grid")).toHaveCount(0)
     // Each reader across from the databases that feed it: the worker from
     // shop and blog, the deployment from shop and cache, then cache's and
     // app's own readers.
@@ -1017,7 +1015,6 @@ test.describe("the map", () => {
     await expect(page.getByRole("list", { name: "How to read the map" })).toContainText(
       "link broken",
     )
-    await expect(picture.locator(".wire-grid")).toHaveCount(0)
 
     const readers = page.locator("[data-slot=row-list]")
     await expect(readers.locator("[data-slot=row]")).toHaveCount(4)

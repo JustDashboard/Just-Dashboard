@@ -55,9 +55,9 @@ function traffic(reading: ServiceReading | undefined) {
  * itself — the service as its image's product with its state in the tile's
  * corner — and pointing at a node steps every wire that is not its own back.
  *
- * On the page's own ground over the dot grid. Three lanes from `lg`; below,
- * the lanes stack, the wires are not drawn and each node says in words what
- * it is wired to.
+ * On the page's own ground, with no frame or dot grid. Three lanes from `lg`;
+ * below, the lanes stack, the wires are not drawn and each node says in words
+ * what it is wired to.
  */
 export function StackMap({
   stack,
@@ -145,7 +145,6 @@ export function StackMap({
 
   return (
     <div data-slot="stack-map" className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const fromService = edge.from.startsWith("s:")

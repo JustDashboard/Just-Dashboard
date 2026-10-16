@@ -165,7 +165,6 @@ export function DriftPicture({
 
   return (
     <div ref={container} className="relative min-w-0">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid min-h-72 grid-cols-[auto_minmax(5rem,0.5fr)_minmax(0,1.6fr)] items-center py-4">
           <WireNode

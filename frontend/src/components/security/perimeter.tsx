@@ -103,7 +103,6 @@ export function Perimeter({
 
   return (
     <div className="relative min-w-0 animate-rise py-6">
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={container} className="relative min-w-0">
         {lines.map((line, index) => (
           <AnimatedBeam

@@ -56,7 +56,6 @@ export function RequestPath({
 
   return (
     <div className="relative min-w-0 py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div ref={container} className="relative min-w-0">
         {[
           [browserNode, networkNode],

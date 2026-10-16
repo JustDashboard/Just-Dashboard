@@ -218,7 +218,6 @@ export function ResolverChain({ view, asking }: { view: DNSView; asking: boolean
 
   return (
     <div className="relative animate-rise py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       <div className="relative">
         <div ref={container} className="relative">
           <AnimatedBeam

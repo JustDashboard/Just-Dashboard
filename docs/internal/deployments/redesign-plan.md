@@ -179,7 +179,7 @@ it were brought in through the shadcn registry (Magic UI, rewritten onto the des
 tokens; see `docs/internal/frontend/design-system.md` §11):
 
 - **Credentials:** the GitHub App as the accounts that installed it, the App and this server,
-  with the traffic between them as lines, drawn on the page's own ground over the dot grid rather
+  with the traffic between them as lines, drawn on the page's own ground rather
   than in a frame (`github-app-card.tsx`, `wire.tsx`).
 - **Deployment page:** the release path as a timeline — one bar in seven segments, each as long as
   the stage took, the working stage's name lit by `ui/text-shimmer` — and a burst of paper when a
@@ -202,7 +202,7 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   (`project-mark.tsx`, `handlers_deploy_favicon.go`).
 - **Notifications:** the projects on the left, this server in the middle and a mark per channel on
   the right, with dashed rings an administrator presses to add a kind not yet set up, drawn on the
-  page's own ground over the dot grid rather than in a frame; the cards under it are the list.
+  page's own ground rather than in a frame; the cards under it are the list.
 - **Projects:** cards land one after another, a card whose run is in progress carries a light
   around its frame and a seven-dot release path beside its state; the in-progress rows carry the
   same dots. **New project:** "Start with something ready" is a bento of the five other ways in.

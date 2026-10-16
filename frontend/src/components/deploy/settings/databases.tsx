@@ -1037,7 +1037,7 @@ function DatabaseRowGroup({ children }: { children: React.ReactNode }) {
 /**
  * How the application reaches its databases: each database on the left as
  * its engine, the managed network in the middle, the application on the
- * right, on the page's own ground over the dot grid (`SettingPicture`). The
+ * right, on the page's own ground (`SettingPicture`). The
  * line is the link's state: a pulse while it is connected, still when it has
  * not been seen lately, red and still when it needs reconnecting, dashed
  * before the first deployment binds it.
