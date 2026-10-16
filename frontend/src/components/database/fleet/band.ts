@@ -20,11 +20,11 @@ import {
 export const DATABASE_HUES = LANES.filter((hue) => hue !== "var(--tag-slate)")
 
 /**
- * Each database's hue, the same on its card's size bar, its span on a bar, its dot
- * on the backup runway and its key in a row. Dealt in the order the
- * connections were saved rather than hashed from the name: five databases are
- * five hues, where a hash of five names promised nothing, and a database
- * saved later takes the next hue without moving anybody else's.
+ * Each database's hue, the same on its card's size bar, its span on a bar and
+ * its key in a row. Dealt in the order the connections were saved rather than
+ * hashed from the name: five databases are five hues, where a hash of five
+ * names promised nothing, and a database saved later takes the next hue
+ * without moving anybody else's.
  */
 export function fleetHues(entries: readonly Pick<DbFleetEntry, "id">[]): Map<number, string> {
   const order = [...new Set(entries.map((entry) => entry.id))].sort((a, b) => a - b)
@@ -70,11 +70,6 @@ export function shares(
   }
 }
 
-/** The runway's far end: a fortnight, so a week's staleness sits at its middle. */
-export const RUNWAY_DAYS = 14
-
-const DAY_MS = 24 * 60 * 60 * 1000
-
 /**
  * How a database's newest dump stands: inside the day the readings call
  * backed up, inside the week the attention rules allow, older than that, or
@@ -82,13 +77,13 @@ const DAY_MS = 24 * 60 * 60 * 1000
  */
 export type BackupStanding = "fresh" | "aging" | "stale" | "never"
 
-export type RunwayRow = {
+export type BackupAge = {
   entry: DbFleetEntry
   standing: BackupStanding
   /** When the newest dump was taken. */
   newest?: string
-  /** Where it sits on the runway, 0 (now) to 1 (a fortnight or older). */
-  position?: number
+  /** How long ago that was, in milliseconds. */
+  age?: number
 }
 
 /**
@@ -97,19 +92,19 @@ export type RunwayRow = {
  * engine cannot be dumped from here is not "never backed up", and is left
  * off rather than counted against the server.
  */
-export function backupRunway(
+export function backupAges(
   entries: readonly DbFleetEntry[],
   options: {
     newestOf: (entry: DbFleetEntry) => string | undefined
     dumps?: (entry: DbFleetEntry) => boolean
     now?: number
   },
-): RunwayRow[] {
+): BackupAge[] {
   const now = options.now ?? Date.now()
   const rows = entries
     .filter((entry) => !entry.broken && entry.state !== "broken")
     .filter((entry) => options.dumps?.(entry) ?? true)
-    .map((entry): RunwayRow => {
+    .map((entry): BackupAge => {
       const newest = options.newestOf(entry)
       const taken = newest ? Date.parse(newest) : NaN
       if (!newest || Number.isNaN(taken)) return { entry, standing: "never" }
@@ -117,20 +112,24 @@ export function backupRunway(
       return {
         entry,
         newest,
-        position: Math.min(age / (RUNWAY_DAYS * DAY_MS), 1),
+        age,
         standing: age <= FRESH_BACKUP_MS ? "fresh" : age <= STALE_BACKUP_MS ? "aging" : "stale",
       }
     })
   return rows.sort(
     (a, b) =>
       Number(b.standing === "never") - Number(a.standing === "never") ||
-      (b.position ?? 0) - (a.position ?? 0) ||
+      (b.age ?? 0) - (a.age ?? 0) ||
       a.entry.name.localeCompare(b.entry.name),
   )
 }
 
-/** Where the runway's warning stretch begins: the age the attention rules call stale. */
-export const STALE_AT = STALE_BACKUP_MS / (RUNWAY_DAYS * DAY_MS)
+/** How many databases stand at each age: the spans of the block's one bar. */
+export function backupCounts(rows: readonly BackupAge[]): Record<BackupStanding, number> {
+  const counts: Record<BackupStanding, number> = { fresh: 0, aging: 0, stale: 0, never: 0 }
+  for (const row of rows) counts[row.standing] += 1
+  return counts
+}
 
 export type FleetVerdict = { tone: "running" | "warning" | "danger"; label: string }
 

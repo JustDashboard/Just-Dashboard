@@ -32,9 +32,6 @@ export function siteHue(name: string): string {
   return hueFor(name.toLowerCase(), SITE_HUES)
 }
 
-/** How far ahead the certificate axis reaches: Let's Encrypt's whole lifetime. */
-export const RUNWAY_DAYS = 90
-
 /** Where nginx connects for an upstream URL, the port filled in from its scheme. */
 export function upstreamEndpoint(url: string): { host: string; port: number } | undefined {
   const match = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(\[[^\]]+\]|[^/:?#\s]+)(?::(\d+))?/i.exec(url.trim())
@@ -192,19 +189,19 @@ export function errorTone(rate: number): "danger" | "warning" | undefined {
   return undefined
 }
 
-export type Runway = { vhost: VHost; cert: Certificate }
+export type CertRow = { vhost: VHost; cert: Certificate }
 
 /**
  * Every enabled site on TLS whose certificate the inventory read, soonest to
  * end first; the sites proxying an application in plain text; and those on
  * TLS whose certificate the inventory does not have — Caddy's own, or one
- * outside the directories it reads — which have no runway to draw.
+ * outside the directories it reads — which have no expiry to show.
  */
-export function certRunway(
+export function certRows(
   hosts: VHost[],
   certs: Certificate[] | undefined,
-): { rows: Runway[]; plain: VHost[]; unknown: number; tls: number } {
-  const rows: Runway[] = []
+): { rows: CertRow[]; plain: VHost[]; unknown: number; tls: number } {
+  const rows: CertRow[] = []
   let unknown = 0
   const tls = hosts.filter((v) => v.tls && v.enabled)
   for (const vhost of tls) {
@@ -216,16 +213,25 @@ export function certRunway(
   return { rows, plain: hosts.filter(isPlain), unknown, tls: tls.length }
 }
 
-/** Where a certificate sits on the runway, from 0 (ends now) to 100 (a full lifetime left). */
-export function placeOnRunway(daysLeft: number): number {
-  return Math.min(Math.max(daysLeft / RUNWAY_DAYS, 0), 1) * 100
-}
-
 /** How a certificate's days read: red once it has ended, amber in its last fortnight. */
-export function runwayTone(cert: Certificate): "danger" | "warning" | undefined {
+export function certTone(cert: Certificate): "danger" | "warning" | undefined {
   if (cert.expired || cert.daysLeft < 0) return "danger"
   if (cert.expiring || cert.daysLeft < 14) return "warning"
   return undefined
+}
+
+/** How many certificates are valid, due for renewal or expired: the spans of the block's bar. */
+export function certCounts(rows: readonly CertRow[]): {
+  valid: number
+  due: number
+  expired: number
+} {
+  const counts = { valid: 0, due: 0, expired: 0 }
+  for (const { cert } of rows) {
+    const tone = certTone(cert)
+    counts[tone === "danger" ? "expired" : tone === "warning" ? "due" : "valid"] += 1
+  }
+  return counts
 }
 
 export type SitesVerdict = {

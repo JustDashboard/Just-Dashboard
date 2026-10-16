@@ -8,7 +8,7 @@ import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet
  * feed is split into its two lanes.
  */
 
-/** A backup older than this is stale: amber on the runway, the card and the table. */
+/** A backup older than this is stale: amber under Backups, on the card and in the table. */
 export const STALE_BACKUP_MS = 7 * 24 * 60 * 60 * 1000
 
 /** "Backed up" on the readings means a dump taken inside this window. */
