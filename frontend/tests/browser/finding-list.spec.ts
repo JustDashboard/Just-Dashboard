@@ -51,7 +51,7 @@ for (const width of [390, 1280]) {
     await mockDatabases(page)
     const requests = advisoryRequests(page)
     await page.goto("/databases/1")
-    await expect(page.getByRole("region", { name: "Used by", exact: true })).toBeVisible()
+    await expect(page.getByRole("region", { name: "How it is used", exact: true })).toBeVisible()
     await expectNoAttention(page)
     await expect(page.getByRole("link", { name: "Advisor", exact: true })).toHaveCount(0)
     expect(requests).toEqual([])

@@ -2579,8 +2579,8 @@ then a band of storage, sessions and backups, then the saved databases with sear
 layout controls. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
 Individual database cards retain the facts needed to compare connections. A database home starts with its
-identity line and a `ChartPanel` of recorded activity, with 1-hour, 6-hour, 24-hour and 7-day windows,
-then attention, rankings and reference blocks. Activity is recorded by the backend every 30 seconds
+identity line, then a picture of how it is used, its recorded activity, its server log, its rankings
+and its reference blocks (below). Activity is recorded by the backend every 30 seconds
 while the dashboard runs, including when no database page is open. Performance opens on its view
 strip, Advisor on its findings with severity and category filters, Access on its accounts and list
 filters, and Backups on its schedule state, next run, action and dump list. These controls stay beside
@@ -2648,6 +2648,45 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**A database's home took the deploy pages' shape in 0.7.5**, at the operator's request — "more alive,
+more colouring, real logs", with the deploy pages as the reference — because it read as a grey page:
+one chart in the brand's near-white behind a strip of four tabs, a column of tall cards for what used
+the database, and three columns of 12px label-and-value pairs that ran into each other. It keeps its
+identity line and no tiles (the Databases rule above); what changed, block by block
+(`components/database/home/`):
+
+- **How it is used** (`picture.tsx`) is the Runtime map's three lanes on the page's own ground over
+  `wire-grid`: what reads the database on the left (the consumers route the cards listed, drawn with
+  the fleet map's `ConsumerMark`), the database in the middle as its engine with its sessions and
+  size, and on the right what it holds — a SQL engine's schemas summed from its table sizes
+  (`holdings.ts`, unit-tested), a key–value store's numbered databases, a document store's
+  collections, each in its name's hue and a way into Data — over where its copies go, the dumps. A
+  reader's wire pulses while it holds sessions, quicker the more it holds, dashed where it could only
+  reach the database, amber and red for a stale or broken link; a holding's wire is still, because
+  the record says how large a schema is, not which one a session reads; the dumps' wire is green
+  while the newest is under a day old, amber past a week, dashed when there is none, and pulses while
+  one is taken. Below `lg` the lanes stack and each node says in words how it is wired.
+- **Activity** draws every view the engine fills as a chart of its own, two to a row, each headed
+  by its newest reading through `ChartReading` (`metrics/chart-reading.tsx`, the Runtime page's head,
+  shared now) with a meter where the server states a ceiling — open sessions against the most it
+  accepts. Each line takes its measurement's hue (§10): sessions blue, transactions violet, rows read
+  green against written magenta, the cache hit rate a line in the brand's pale blue rather than an
+  area, which at 99% was one grey slab. The range is one row of presses (1h, 6h, 24h, 7d) over all
+  of them, where a select stood beside the tabs. Nothing here says Live: the record is polled.
+- **Server log** (`server-log.tsx`) follows the server's own log — the source the Logs page opens
+  on, read from Docker, the file or the journal, never by dialling the engine, so a stopped server's
+  home shows the lines that say why — over the same log socket, in a `Well`, each line in the console's
+  colours (`LogText`, the level's word, an error's row on the danger wash and a warning's on the
+  warning wash), held to the foot while the reader is there. Its head counts the errors and warnings it
+  holds and carries the socket's `Status live`. A reconnect keeps what is drawn and takes only what is
+  newer, through the console's own `resumeFrom`/`unseen` (`logs/resume.ts`). A server whose log is not
+  on this machine says why in the block's place.
+- **The rankings** keep their rows and gain colour that names a kind: a statement's bar in its verb's
+  `--tag-*` hue, a table's or a collection's in its name's hue, the one the picture draws it in.
+- **The reference blocks** — Runs as, Reachable from, Backups — and the file's facts are `FactRow`s
+  (`blocks.tsx`): the name on the left at the body's size, the value beside it, a hairline under each,
+  as a project's Runtime lists what a container may use.
 
 **The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
 held the source's name, its facts, an outlined Export box and the view tabs, the box and the

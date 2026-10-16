@@ -367,7 +367,7 @@ export function consumerKind(node: DbTopoNode) {
   }
 }
 
-function beamTone(edge: DbTopoEdge): "default" | "warning" | "danger" {
+export function beamTone(edge: DbTopoEdge): "default" | "warning" | "danger" {
   if (edgeRank(edge.status) >= 3) return "danger"
   if (edgeRank(edge.status) >= 1) return "warning"
   return "default"

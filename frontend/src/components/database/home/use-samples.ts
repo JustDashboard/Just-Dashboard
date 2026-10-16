@@ -9,10 +9,10 @@ import { useMemo } from "react"
 
 export const SAMPLE_EVERY_MS = 30_000
 export const HISTORY_RANGES = [
-  { hours: 1, label: "1 hour" },
-  { hours: 6, label: "6 hours" },
-  { hours: 24, label: "24 hours" },
-  { hours: 168, label: "7 days" },
+  { hours: 1, label: "1 hour", short: "1h" },
+  { hours: 6, label: "6 hours", short: "6h" },
+  { hours: 24, label: "24 hours", short: "24h" },
+  { hours: 168, label: "7 days", short: "7d" },
 ] as const
 
 export type StatsHistory<T> = { samples: { at: number; stats: T; gap: boolean }[] }

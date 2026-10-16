@@ -189,19 +189,47 @@ export function CardsSkeleton({ count = 3, className }: { count?: number; classN
   )
 }
 
-/** A list of facts that has not arrived: labels down one side, values down the other. */
+/** A list of facts that has not arrived: names down one side, values beside them, a rule under each. */
 export function FactsSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (
-    <div
-      className={cn("grid grid-cols-[6rem_minmax(0,1fr)] gap-x-4 gap-y-2.5", className)}
-      aria-hidden
-    >
+    <div className={cn("flex flex-col", className)} aria-hidden>
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="contents">
+        <div
+          key={index}
+          className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-4 border-b border-hairline py-2.5"
+        >
           <Skeleton className="h-3" style={{ width: `${70 - ((index * 13) % 30)}%` }} />
           <Skeleton className="h-3" style={{ width: `${64 - ((index * 19) % 38)}%` }} />
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * Facts as rows: the name on the left, its value beside it, a hairline under
+ * each — the way a project's Runtime lists what a container may use. A
+ * block's facts were a grid of 12px pairs with nothing between them, and in
+ * a column a third of the page wide a value that wrapped ran into the next
+ * one's name.
+ */
+export function FactRows({ className, ...props }: React.ComponentProps<"dl">) {
+  return <dl className={cn("flex min-w-0 flex-col", className)} {...props} />
+}
+
+export function FactRow({
+  label,
+  children,
+  className,
+}: {
+  label: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] items-baseline gap-x-4 border-b border-hairline py-2 text-body">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn("min-w-0", className)}>{children}</dd>
     </div>
   )
 }
