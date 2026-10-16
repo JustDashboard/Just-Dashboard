@@ -256,6 +256,19 @@ describe("the shelves of what was found", () => {
     expect(foundShelves(undefined).servers).toEqual([])
   })
 
+  test("servers stand in the order they can be connected, otherwise as the inventory lists them", () => {
+    const listed = {
+      ...inventory,
+      instances: [memcached, stopped, instance({ key: "docker:b", name: "b" }), instance()],
+    }
+    expect(foundShelves(listed).servers.map((one) => one.name)).toEqual([
+      "b",
+      "shop-db",
+      "old-db",
+      "mc",
+    ])
+  })
+
   test("private state is a tool's, the system's or the dashboard's own", () => {
     expect(privateState(own)).toBe(true)
     expect(privateState(file)).toBe(false)

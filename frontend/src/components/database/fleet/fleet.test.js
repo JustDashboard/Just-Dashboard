@@ -12,7 +12,6 @@ import {
   powerOffers,
   pushSample,
   reachWord,
-  shortEdge,
   sortFleet,
   sortRows,
   splitTopology,
@@ -20,6 +19,7 @@ import {
   storedBytes,
   topologyReadings,
   whereWord,
+  wiredOrder,
   worstStatus,
 } from "./fleet"
 
@@ -413,6 +413,16 @@ describe("the map", () => {
     expect(fedBy.get("deploy:7").map((f) => f.from.name)).toEqual(["shop", "cache"])
   })
 
+  test("drawn, a reader stands across from the databases that feed it and the unread go last", () => {
+    const unread = { id: "db:0", kind: "database", name: "archive", product: "postgres", connId: 3 }
+    const { databases, consumers } = wiredOrder(
+      splitTopology({ ...topology, nodes: [unread, ...topology.nodes] }),
+    )
+    expect(databases.map((n) => n.id)).toEqual(["db:1", "db:2", "db:0"])
+    // shop feeds this server, shop and cache the deployment, cache the worker.
+    expect(consumers.map((n) => n.id)).toEqual(["host", "deploy:7", "container:worker"])
+  })
+
   test("narrowed to some databases, the others leave with their links and their readers", () => {
     const split = splitTopology(topology, (node) => node.connId === 2)
     expect(split.databases.map((n) => n.id)).toEqual(["db:2"])
@@ -447,8 +457,6 @@ describe("the map", () => {
   test("a link is described by how it is known", () => {
     expect(describeEdge(topology.edges[1])).toBe("named in its environment · 3 open sessions")
     expect(describeEdge(topology.edges[3])).toBe("same compose stack · shares a network")
-    expect(shortEdge(topology.edges[1])).toBe("3 open")
-    expect(shortEdge(topology.edges[0])).toBe("linked")
     expect(worstStatus(topology.edges)).toBe("broken")
     expect(worstStatus([])).toBe("observed")
   })

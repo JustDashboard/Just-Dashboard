@@ -218,7 +218,7 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 			return HolderCompose, nil, s.Name
 		}
 	}
-	for _, segment := range strings.Split(path.Dir(view), "/") {
+	for i, segment := range strings.Split(path.Dir(view), "/") {
 		if strings.HasPrefix(segment, ".") && segment != "." && segment != ".." {
 			// A program's own state under somebody's home: a browser profile,
 			// an editor's index, a CLI's history.
@@ -227,6 +227,17 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 		if segment == "nssdb" {
 			return HolderSystem, nil, ""
 		}
+		// A browser's profile kept where it is not hidden — what an automated
+		// browser leaves behind it — or a scratch directory: a program's state
+		// as much as a hidden one is, and nobody's database. Listed among the
+		// files ready to open, four copies of Chromium's
+		// declarative_performance_observer.db were the first thing the control
+		// center offered. The system's own /tmp at the top of the tree is not
+		// one: the scan never walks it as an application's, so a file under it
+		// was found because the scan was pointed there.
+		if browserProfile(segment) || (i > 1 && scratchDir(segment)) {
+			return HolderTool, nil, ""
+		}
 	}
 	for _, system := range []string{"/var/lib", "/var/cache", "/usr", "/etc", "/var/spool", "/snap"} {
 		if within(system, view) {
@@ -234,6 +245,31 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 		}
 	}
 	return HolderApplication, nil, ""
+}
+
+// browserProfile reports a directory a browser or a browser driver keeps a
+// profile in: playwright_chromiumdev_profile-x, puppeteer_dev_profile-x,
+// chrome-profile, a Firefox profile.
+func browserProfile(name string) bool {
+	name = strings.ToLower(name)
+	for _, browser := range []string{"playwright", "puppeteer", "chromium", "chrome", "firefox", "mozilla"} {
+		if strings.Contains(name, browser) {
+			return true
+		}
+	}
+	return false
+}
+
+// scratchDir reports a directory named for temporary files: tmp, temp, and a
+// name ending in either (network-audit-tmp, build_temp).
+func scratchDir(name string) bool {
+	name = strings.ToLower(name)
+	for _, word := range []string{"tmp", "temp"} {
+		if name == word || strings.HasSuffix(name, "-"+word) || strings.HasSuffix(name, "_"+word) || strings.HasSuffix(name, "."+word) {
+			return true
+		}
+	}
+	return false
 }
 
 // discoverFiles adds the database files the scan confirmed, and the data

@@ -1025,7 +1025,10 @@ func TestTheFleetListsWhatIsNotConnectedAsTheInventorySeesIt(t *testing.T) {
 	s, r := inventoryRouter(t, auth.RoleAdmin, m)
 	listed := func() (map[string]string, []credentialServer) {
 		t.Helper()
+		// A reading of the machine, which the fleet reports from without
+		// taking one of its own.
 		s.dropInventory()
+		do(t, r, http.MethodGet, "/databases/inventory", "")
 		rec := do(t, r, http.MethodGet, "/databases/fleet", "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("fleet = %d %s", rec.Code, rec.Body.String())
@@ -1092,6 +1095,36 @@ func TestTheFleetListsWhatIsNotConnectedAsTheInventorySeesIt(t *testing.T) {
 	rec := do(t, viewer, http.MethodGet, "/databases/fleet", "")
 	if !strings.Contains(rec.Body.String(), `"unreachable":[]`) || !strings.Contains(rec.Body.String(), `"needsCredentials":[]`) {
 		t.Errorf("a viewer's fleet lists what is not connected: %s", rec.Body.String())
+	}
+}
+
+// The Databases page draws nothing until the fleet answers, so the fleet never
+// waits for the machine to be read: before the first reading it lists nothing
+// as waiting and has one taken, and the next fleet reports from it.
+func TestTheFleetDoesNotWaitForTheInventory(t *testing.T) {
+	m := ordinaryMachine()
+	m.containers = append(m.containers, fakeContainer{
+		id: "aaaaaaaaaaaa0006", name: "nowhere", image: "postgres:16", state: "running",
+		env: []string{"POSTGRES_PASSWORD=" + secretPassword}, entrypoint: []string{"docker-entrypoint.sh"}, cmd: []string{"postgres"},
+	})
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	s.dropInventory()
+	rec := do(t, r, http.MethodGet, "/databases/fleet", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"unreachable":[]`) {
+		t.Fatalf("the first fleet = %d %s, want it answered before the machine is read", rec.Code, rec.Body.String())
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, ok := s.keptInventory(true); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the fleet did not have the machine read behind it")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if rec := do(t, r, http.MethodGet, "/databases/fleet", ""); !strings.Contains(rec.Body.String(), `"container":"nowhere"`) {
+		t.Errorf("the next fleet does not report from the reading taken: %s", rec.Body.String())
 	}
 }
 

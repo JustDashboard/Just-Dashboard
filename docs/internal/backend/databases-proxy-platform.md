@@ -159,7 +159,14 @@ is connected by naming the instance found, not by typing its address again.
   `fingerprint`, `command`, `port`, `process`, `socket`, `unit`, `magic`, `marker`), and `evidence` says
   why in sentences that name variables and never their values. One reading of the machine answers for
   twenty seconds (`dbInventoryFresh`), kept apart for administrators and for everybody else because they
-  are different readings, not one filtered into the other.
+  are different readings, not one filtered into the other. A file says whose it is (`file.holder`): the
+  dashboard's own store, a container's volume, a deployment's or a compose stack's directory, the
+  system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a tool's, or an application's. A tool's is a
+  program's own state — anything under a hidden directory, a browser's or a browser driver's profile
+  (a directory naming Playwright, Puppeteer, Chrome, Chromium, Firefox or Mozilla), or a scratch
+  directory below the top of the tree (`tmp`, `temp`, or a name ending in either) — and the control
+  center folds a tool's and the system's under *Kept by other programs* rather than offering them to
+  open.
 - **Testing and saving a connection typed by hand.** `POST /databases/test` uses the same probe for every
   engine (Redis used to be reported unreachable for having no SQL dialect), and `POST /databases/` takes
   `probe: true` to dial before saving.
@@ -300,7 +307,8 @@ is connected by naming the instance found, not by typing its address again.
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
   what the server answered: reachable, version, flavour, latency, the database's size where the
-  engine reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it
+  engine reports one, its tables/collections/keys, sessions less this dashboard's own (on PostgreSQL
+  every session that connected under `dbx.ApplicationName`, on other engines the asking pool), where it
   runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
   summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
   bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
@@ -317,16 +325,40 @@ is connected by naming the instance found, not by typing its address again.
   and could not connect — a container with no reachable port, a native server waiting for a
   password — read from the inventory's kept reading by the sync's rules (`undetectedServers`),
   without dialling or writing anything: a stopped server, one the operator set aside and one
-  recognised only by its port are left out, as the sync leaves them alone.
+  recognised only by its port are left out, as the sync leaves them alone. That reading is the last
+  one taken, however old (`keptInventory`): the fleet never reads the machine itself, because the
+  Databases page draws nothing until the fleet answers, and reading it again — every container, every
+  process's sockets, the systemd units, and the first walk for files — took the fleet from a fifth of a
+  second to between one and three. A reading that is missing or older than `dbInventoryFresh` is taken
+  again in the background for the next caller; before the first one exists both lists are empty, and
+  the inventory route the page reads beside the fleet is the fuller account of the same servers.
 - **What feeds on what.** `GET /databases/topology` (and `/{id}/consumers` for one connection) joins
   four sources into nodes and edges: `deploy_database_bindings` with the
-  project and environment names, running containers whose environment names the server's
-  address, container name, compose service or `db-N.jd.internal` alias (one concurrent inspect
-  pass, eight at a time), compose-stack siblings and shared user networks (drawn dashed, as a
-  link that could carry), and the engine's own session list with client addresses mapped back to
-  containers by IP, to this host for loopback and bridge-gateway addresses, or to another
-  machine. A binding's word (`connected`, `stale`, `broken`) outranks an observation's. Both are
-  on the read surface; the detected-but-unconnected half is filled only for `system.admin`.
+  project and environment names, running containers whose environment names the server (one
+  concurrent inspect pass, eight at a time), compose-stack siblings and shared user networks (drawn
+  dashed, as a link that could carry), and the engine's own session list with client addresses mapped
+  back to containers by IP, to this host for loopback and bridge-gateway addresses, or to another
+  machine. A container that is a deployment's release (`io.just-dashboard.managed` and
+  `io.just-dashboard.environment-id` on a live environment) is drawn as that deployment — the
+  project, and the environment where it is not production — whether the environment or a session
+  revealed it, never as `jd-e<id>-r<n>`. What "names the server" means is an address book
+  (`topoAddresses`): the `db-N.jd.internal` alias, the address the connection was saved with, the
+  container's name, compose service and own addresses with the engine's port, and — for a server
+  saved at loopback or a container that publishes its port — every address of this machine
+  (`hostAddresses`: loopback, `host.docker.internal`, Docker's default gateway, the hostname, every
+  interface's address) with the published port, because an application rarely reaches a database the
+  way the dashboard does: a deployment holding `postgres://…@<public address>:5435/app` uses the
+  container the dashboard dials at `127.0.0.1:5435`, and was drawn as reading nothing. An address
+  counts only whole (`containsAddress`: `10.0.0.3:5432` is not in `110.0.0.3:54321`), and a host and
+  a port in two variables of their own (`DB_HOST`, `DB_PORT`) count together. The dashboard's own
+  sessions are never a reader: every PostgreSQL connection it opens names it
+  (`application_name=just-dashboard`, added by the dialect's `NormaliseDSN` to a string that names no
+  application of its own), and a session under that name is left out whichever saved connection's
+  pool holds it. Through a published port every client on this machine arrives from the bridge
+  gateway, so by address alone the dashboard was drawn as *This server* reading every database it
+  watched. On other engines the asking pool's own connections are left out as before. A binding's word
+  (`connected`, `stale`, `broken`) outranks an observation's. Both are on the read surface; the
+  detected-but-unconnected half is filled only for `system.admin`.
   Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
   their request, including the fleet's administrator-only discovery. Each request starts fresh; the
   snapshot is never used for access-changing actions.

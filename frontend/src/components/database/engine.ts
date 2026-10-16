@@ -950,8 +950,29 @@ function own<T>(table: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(table, key) ? table[key] : undefined
 }
 
+// Building an engine works out its pages and its capabilities afresh, and a
+// page asks for one for every card, every row found and every node it draws,
+// on every render and every poll. The answer depends on nothing but the
+// question, so each is built once for the catalogue and the capabilities it
+// was asked with, and the same question gets the same object.
+const built = new WeakMap<object, WeakMap<object, Map<string, Engine>>>()
+const NO_CATALOGUE = {}
+const NOTHING_GIVEN = {}
+
 /** The engine for a driver, flavour or engine id, with what the server said about it. */
 export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabilities): Engine {
+  let byGiven = built.get(drivers ?? NO_CATALOGUE)
+  if (!byGiven) built.set(drivers ?? NO_CATALOGUE, (byGiven = new WeakMap()))
+  let byId = byGiven.get(given ?? NOTHING_GIVEN)
+  if (!byId) byGiven.set(given ?? NOTHING_GIVEN, (byId = new Map()))
+  const held = byId.get(id)
+  if (held) return held
+  const engine = buildEngine(id, drivers, given)
+  byId.set(id, engine)
+  return engine
+}
+
+function buildEngine(id: string, drivers?: DbDriverInfo[], given?: DbCapabilities): Engine {
   const key = own(ALIASES, id.toLowerCase()) ?? id.toLowerCase()
   const driver = (Object.keys(DRIVERS) as DbDriver[]).find(
     (d) => d === key || Object.hasOwn(DRIVERS[d].flavors, key),

@@ -8,6 +8,10 @@ import {
   storedBytes,
 } from "@/components/database/fleet/fleet"
 import {
+  lastBackupSummary,
+  lastFleet,
+  lastInventory,
+  lastTopology,
   readBackupSummary,
   readFleet,
   readInventory,
@@ -42,7 +46,14 @@ const WATCHING_MS = 5_000
 export function useFleet(measured?: ReadonlyMap<number, number>) {
   const { engineFor } = useDatabases()
   const [interval, setIntervalMs] = useState(STEADY_MS)
-  const fleet = usePoll(readFleet, interval)
+  // Each read opens on what it said the last time the page was open, so
+  // coming back to the page draws it at once rather than as its skeleton.
+  const [seeds] = useState(() => ({
+    fleet: lastFleet(),
+    summary: lastBackupSummary(),
+    topology: lastTopology(),
+  }))
+  const fleet = usePoll(readFleet, interval, [], { seed: seeds.fleet })
 
   const watching = Boolean(
     fleet.data?.connections.some((entry) => !entry.ok && entry.state !== "broken"),
@@ -51,13 +62,13 @@ export function useFleet(measured?: ReadonlyMap<number, number>) {
   if (wanted !== interval) setIntervalMs(wanted)
 
   const [dumpEvery, setDumpEvery] = useState(60_000)
-  const summary = usePoll(readBackupSummary, dumpEvery)
+  const summary = usePoll(readBackupSummary, dumpEvery, [], { seed: seeds.summary })
   // A dump in flight is read often enough to see it end.
   const dumping = Boolean(summary.data?.connections.some((row) => row.job?.status === "running"))
   const dumpWanted = dumping ? 3_000 : 60_000
   if (dumpWanted !== dumpEvery) setDumpEvery(dumpWanted)
 
-  const topology = usePoll(readTopology, 45_000)
+  const topology = usePoll(readTopology, 45_000, [], { seed: seeds.topology })
 
   const backups = useMemo(
     () => backupReadings(fleet.data, summary.data),
@@ -100,7 +111,11 @@ export type FleetData = ReturnType<typeof useFleet>
  * is what the next read is answered from.
  */
 export function useInventory(enabled: boolean) {
-  const inventory = usePoll(readInventory, 30_000, [], { enabled })
+  const [seed] = useState(lastInventory)
+  const inventory = usePoll(readInventory, 30_000, [], {
+    enabled,
+    seed: enabled ? seed : undefined,
+  })
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<Error>()
   const refresh = inventory.refresh

@@ -38,6 +38,7 @@ import { Wiring } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
+import { fleetStatus, statusTone } from "@/components/database/shell/status"
 import { Segments } from "@/components/deploy/settings/segments"
 import { IconAction } from "@/components/icon-action"
 import {
@@ -86,7 +87,8 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * edge. Then the fleet itself: every saved connection as a card you open,
  * drawn as its engine with its own readings on it, shelved by where it runs —
  * or laid across as a table when there are many to compare. Under it the
- * picture of what the databases feed, and what discovery found on this
+ * picture of what the databases feed — the ones nothing is seen reading named
+ * under it, each a way to its own page — and what discovery found on this
  * machine that is not connected yet.
  *
  * It opened on a "Needs attention" list until the operator asked for it to
@@ -181,11 +183,18 @@ export function ControlCenter() {
     [fleet.data],
   )
 
-  // A database node on the map is its connection: drawn as what answered.
+  // A database node on the map is its connection: drawn as what answered,
+  // with the card's own dot in its corner.
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const entryOf = (node: DbTopoNode) =>
+    node.connId === undefined ? undefined : byId.get(node.connId)
   const engineOfNode = (node: DbTopoNode) => {
-    const entry = node.connId === undefined ? undefined : byId.get(node.connId)
+    const entry = entryOf(node)
     return entry ? engineFor(entry) : engineOf(node.product ?? "")
+  }
+  const stateOfNode = (node: DbTopoNode) => {
+    const entry = entryOf(node)
+    return entry ? statusTone(fleetStatus(entry).state) : undefined
   }
 
   // The page's picture is of what is wired: a database nothing reads is on
@@ -555,11 +564,29 @@ export function ControlCenter() {
         {topology.data ? (
           topology.data.edges.length > 0 ? (
             <>
-              <Wiring topology={topology.data} keep={feeding} engineOf={engineOfNode} compact />
+              <Wiring
+                topology={topology.data}
+                keep={feeding}
+                engineOf={engineOfNode}
+                stateOf={stateOfNode}
+              />
               {unread.length > 0 && (
-                <p className="text-hint text-muted-foreground">
-                  Nothing has been seen reading {unread.map((node) => node.name).join(", ")}.
-                </p>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-hairline pt-4">
+                  <span className="text-hint text-muted-foreground">Nothing seen reading</span>
+                  <ul className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
+                    {unread.map((node) => (
+                      <li key={node.id} className="min-w-0">
+                        <Link
+                          href={node.href ?? DATABASES_MAP_HREF}
+                          className="flex min-w-0 items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring transition-colors hover:text-foreground"
+                        >
+                          <EngineGlyph engine={engineOfNode(node)} className="size-4" />
+                          <span className="truncate">{node.name}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </>
           ) : (
