@@ -23,6 +23,7 @@ import {
   AccountName,
   SecretField,
   SecretShown,
+  SignInPicture,
 } from "@/components/database/ops/access-parts"
 import type {
   MongoRoleRef,
@@ -205,6 +206,19 @@ export function MongoAccess() {
 
   return (
     <SectionFrame section="access">
+      {view === "users" && (
+        <SignInPicture
+          noun="user"
+          accounts={list.map((user) => ({
+            key: `${user.db}.${user.user}`,
+            name: user.user,
+            host: user.db,
+            signsIn: true,
+            own: user.self,
+            admin: user.superuser,
+          }))}
+        />
+      )}
       <Panel plain aria-label="Accounts" ref={frame}>
         {/* The views of the page as a strip on the panel's own hairline, its commands at the end. */}
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-hairline">

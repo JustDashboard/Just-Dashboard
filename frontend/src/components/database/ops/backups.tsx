@@ -1,7 +1,5 @@
 "use client"
 
-import Link from "next/link"
-
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref } from "@/components/database/engine"
 import { CouldNotRead, NotUpdating, staleOf } from "@/components/database/home/blocks"
@@ -24,6 +22,7 @@ import {
   transferKind,
   transferPrefix,
 } from "@/components/database/ops/backups-model"
+import { DumpsPicture } from "@/components/database/ops/backups-picture"
 import { DumpFacts, RestoreDump } from "@/components/database/ops/backups-restore"
 import { TakeDump } from "@/components/database/ops/backups-take"
 import type { DbBackupFile, DbBackups } from "@/components/database/ops/backups-types"
@@ -355,18 +354,7 @@ export function Backups() {
   const schedule = scheduledDump(scheduled.data ?? [], id)
   return (
     <SectionFrame section="backups">
-      <div className="flex flex-wrap items-center gap-3 text-hint text-muted-foreground">
-        {scheduled.data && (
-          <span className="max-w-full min-w-0 break-words">
-            {schedule
-              ? `${schedule.name} · ${schedule.enabled ? (schedule.nextRun ? `Next ${timestamp(schedule.nextRun)}` : "Scheduled") : "Paused"}`
-              : "No scheduled backup job"}
-          </span>
-        )}
-        <Button size="sm" variant="outline" asChild>
-          <Link href={`/backups?database=${id}`}>Manage backup schedule</Link>
-        </Button>
-      </div>
+      <DumpsPicture data={data} schedule={schedule} scheduleRead={Boolean(scheduled.data)} />
 
       {transfer.current && (
         <TransferProgress

@@ -26,6 +26,7 @@ import {
   AccountName,
   SecretField,
   SecretShown,
+  SignInPicture,
 } from "@/components/database/ops/access-parts"
 import type { RedisACL, RedisACLChange, RedisACLUser } from "@/components/database/ops/access-types"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
@@ -38,7 +39,7 @@ import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@
 import { Trash, UserPlus } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Notice } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -125,6 +126,12 @@ export function RedisAccess() {
   }
 
   const beside = width >= BESIDE_FROM
+  const counted = {
+    "": users.length,
+    enabled: users.filter((user) => user.enabled).length,
+    unrestricted: users.filter((user) => user.unrestricted).length,
+    open: users.filter((user) => user.noPassword && user.enabled).length,
+  }
   const dropRequest = (user: RedisACLUser, after?: () => void): ConfirmRequest => ({
     title: "Delete user",
     confirmLabel: "Delete",
@@ -152,6 +159,18 @@ export function RedisAccess() {
 
   return (
     <SectionFrame section="access">
+      {data?.supported && (
+        <SignInPicture
+          noun="user"
+          accounts={users.map((user) => ({
+            key: user.name,
+            name: user.name,
+            signsIn: user.enabled,
+            own: user.self,
+            admin: user.unrestricted,
+          }))}
+        />
+      )}
       <Panel plain aria-label="Users" ref={frame}>
         <PanelHeader
           title="Users"
@@ -183,6 +202,7 @@ export function RedisAccess() {
               onClick={() => select({ show: key || null })}
             >
               {label}
+              {data?.supported && <ChipCount>{counted[key]}</ChipCount>}
             </FilterChip>
           ))}
         </ChipStrip>

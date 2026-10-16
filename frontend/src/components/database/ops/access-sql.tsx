@@ -11,17 +11,19 @@ import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { AccountPanel, dropAccountRequest } from "@/components/database/ops/access-account"
 import {
+  accountCounts,
   accountKey,
   accountTags,
   filterAccounts,
   grantSummary,
   grantsByAccount,
   isOwnAccount,
+  signsIn,
   type AccountShow,
 } from "@/components/database/ops/access-model"
 import { ChangePassword, NewAccount } from "@/components/database/ops/access-new"
 import { useOpenAccount } from "@/components/database/ops/access-panel"
-import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
+import { AccountMark, AccountName, SignInPicture } from "@/components/database/ops/access-parts"
 import type {
   DbGrants,
   DbPrivileges,
@@ -38,7 +40,7 @@ import { Key, Trash, UserPlus } from "@/components/icons"
 import { SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyState, Notice } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -178,9 +180,23 @@ export function SqlAccess() {
 
   const data = roles.data
   const beside = width >= BESIDE_FROM
+  const counts = accountCounts(list)
 
   return (
     <SectionFrame section="access">
+      {data?.supported && (
+        <SignInPicture
+          accounts={list.map((role) => ({
+            key: accountKey(role),
+            name: role.name,
+            host: role.host,
+            sessions: role.connections,
+            signsIn: signsIn(role),
+            own: isOwnAccount(role, conn),
+            admin: role.superuser,
+          }))}
+        />
+      )}
       <Panel plain aria-label="Accounts" ref={frame}>
         <PanelHeader
           title="Accounts"
@@ -207,18 +223,19 @@ export function SqlAccess() {
         <ChipStrip role="group" aria-label="Filter accounts" className="px-1 py-2">
           {(
             [
-              ["", "All accounts"],
-              ["admins", "Administrators"],
-              ["sessions", "Signed in now"],
-              ["blocked", "Cannot sign in"],
+              ["", "All accounts", counts.all],
+              ["admins", "Administrators", counts.admins],
+              ["sessions", "Signed in now", counts.sessions],
+              ["blocked", "Cannot sign in", counts.blocked],
             ] as const
-          ).map(([key, label]) => (
+          ).map(([key, label, count]) => (
             <FilterChip
               key={key}
               selected={show === key}
               onClick={() => select({ show: key || null })}
             >
               {label}
+              {data?.supported && <ChipCount>{count}</ChipCount>}
             </FilterChip>
           ))}
         </ChipStrip>
