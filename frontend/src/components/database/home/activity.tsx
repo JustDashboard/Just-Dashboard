@@ -71,26 +71,7 @@ export const Activity = memo(function Activity({
         actions={
           <>
             {error && samples.length > 0 && <NotUpdating error={error} />}
-            <ToggleGroup
-              type="single"
-              value={String(hours)}
-              // Radix reports "" when the pressed range is pressed again: it stays.
-              onValueChange={(next) => next && onHours(Number(next))}
-              variant="outline"
-              size="sm"
-              aria-label="Activity history range"
-            >
-              {HISTORY_RANGES.map((range) => (
-                <ToggleGroupItem
-                  key={range.hours}
-                  value={String(range.hours)}
-                  aria-label={range.label}
-                  className="px-2.5 text-hint"
-                >
-                  {range.short}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            <HistoryRange hours={hours} onHours={onHours} />
           </>
         }
       />
@@ -118,19 +99,57 @@ export const Activity = memo(function Activity({
   )
 })
 
-/** One view as its own chart, headed by the newest reading of its lines. */
-const ViewChart = memo(function ViewChart({
+/** The recorded window the charts cover, as one row of presses. */
+export function HistoryRange({
+  hours,
+  onHours,
+}: {
+  hours: number
+  onHours: (hours: number) => void
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      value={String(hours)}
+      // Radix reports "" when the pressed range is pressed again: it stays.
+      onValueChange={(next) => next && onHours(Number(next))}
+      variant="outline"
+      size="sm"
+      aria-label="Activity history range"
+    >
+      {HISTORY_RANGES.map((range) => (
+        <ToggleGroupItem
+          key={range.hours}
+          value={String(range.hours)}
+          aria-label={range.label}
+          className="px-2.5 text-hint"
+        >
+          {range.short}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  )
+}
+
+/**
+ * One view as its own chart, headed by the newest reading of its lines. The
+ * Performance Overview draws its charts with it too, so a line reads the
+ * same on both pages.
+ */
+export const ViewChart = memo(function ViewChart({
   view,
   samples,
   events,
   note,
   wide,
+  className,
 }: {
   view: ChartView
   samples: readonly Sample[]
   events?: MetricEvent[]
   note: string
-  wide: boolean
+  wide?: boolean
+  className?: string
 }) {
   const rows = useMemo(
     () => drawnRows(chartRows(samples, view.sources), view.series),
@@ -183,7 +202,11 @@ const ViewChart = memo(function ViewChart({
 
   return (
     // Each chart is found by its name, as the blocks around it are.
-    <div role="group" aria-label={view.label} className={cn("min-w-0", wide && "lg:col-span-2")}>
+    <div
+      role="group"
+      aria-label={view.label}
+      className={cn("min-w-0", wide && "lg:col-span-2", className)}
+    >
       <ChartPanel
         plain
         title={view.label}

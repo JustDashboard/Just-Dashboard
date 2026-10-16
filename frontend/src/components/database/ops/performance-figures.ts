@@ -326,11 +326,18 @@ export const READING_LABELS: Record<FigureFamily, string[]> = {
 
 type Line = Series & { from: Omit<Source, "key"> }
 
-function view(id: string, label: string, unit: ChartUnit, lines: Line[]): ChartView {
+function view(
+  id: string,
+  label: string,
+  unit: ChartUnit,
+  lines: Line[],
+  ceiling?: string,
+): ChartView {
   return {
     id,
     label,
     unit,
+    ceiling,
     series: lines.map(({ key, label: name, color, kind }) =>
       kind ? { key, label: name, color, kind } : { key, label: name, color },
     ),
@@ -345,43 +352,53 @@ function view(id: string, label: string, unit: ChartUnit, lines: Line[]): ChartV
  * that counts no temporary files has no such chart, and a line an engine does
  * not report is left out of a chart it otherwise fills.
  *
+ * Each line takes its measurement's hue (§10), the one the database's home
+ * draws it in: sessions blue, transactions violet, rows read green against
+ * written magenta, the cache the brand's pale line.
+ *
  * Module constants throughout: `ChartPanel` is memoised on its props.
  */
 export const OVERVIEW_CHARTS: ChartView[] = [
-  view("sessions", "Sessions", "count", [
-    {
-      key: "open",
-      label: "Open",
-      color: "var(--chart-1)",
-      kind: "area",
-      from: { gauge: "sessions" },
-    },
-    // Working, not the engine's "active": a session waiting on a lock is the
-    // line under this one, and is not counted in both.
-    {
-      key: "active",
-      label: "Working",
-      color: "var(--chart-5)",
-      from: { gauge: "sessionsWorking" },
-    },
-    {
-      key: "inTransaction",
-      label: "Idle in a transaction",
-      color: "var(--chart-4)",
-      from: { gauge: "sessionsIdleInTransaction" },
-    },
-    {
-      key: "waiting",
-      label: "Waiting on a lock",
-      color: "var(--chart-3)",
-      from: { gauge: "sessionsWaiting" },
-    },
-  ]),
+  view(
+    "sessions",
+    "Sessions",
+    "count",
+    [
+      {
+        key: "open",
+        label: "Open",
+        color: "var(--chart-2)",
+        kind: "area",
+        from: { gauge: "sessions" },
+      },
+      // Working, not the engine's "active": a session waiting on a lock is the
+      // line under this one, and is not counted in both.
+      {
+        key: "active",
+        label: "Working",
+        color: "var(--chart-5)",
+        from: { gauge: "sessionsWorking" },
+      },
+      {
+        key: "inTransaction",
+        label: "Idle in a transaction",
+        color: "var(--chart-4)",
+        from: { gauge: "sessionsIdleInTransaction" },
+      },
+      {
+        key: "waiting",
+        label: "Waiting on a lock",
+        color: "var(--chart-3)",
+        from: { gauge: "sessionsWaiting" },
+      },
+    ],
+    "sessionsMax",
+  ),
   view("transactions", "Transactions", "rate", [
     {
       key: "transactions",
       label: "Transactions",
-      color: "var(--chart-1)",
+      color: "var(--chart-4)",
       kind: "area",
       from: { rate: TRANSACTIONS },
     },
@@ -428,11 +445,11 @@ export const OVERVIEW_CHARTS: ChartView[] = [
     {
       key: "read",
       label: "Read",
-      color: "var(--chart-2)",
+      color: "var(--chart-5)",
       kind: "area",
       from: { rate: "rowsRead" },
     },
-    { key: "written", label: "Written", color: "var(--chart-5)", from: { rate: "rowsWritten" } },
+    { key: "written", label: "Written", color: "var(--chart-3)", from: { rate: "rowsWritten" } },
   ]),
   view("writes", "Rows written by kind", "rate", [
     {
@@ -445,12 +462,13 @@ export const OVERVIEW_CHARTS: ChartView[] = [
     { key: "updated", label: "Updated", color: "var(--chart-4)", from: { rate: "rowsUpdated" } },
     { key: "deleted", label: "Deleted", color: "var(--chart-3)", from: { rate: "rowsDeleted" } },
   ]),
+  // A line rather than an area: a cache that hits 99% of the time filled the
+  // plot to its top rule with one slab, and the dip worth seeing was a notch.
   view("cache", "Cache hit", "percent", [
     {
       key: "hit",
       label: "Hit rate",
-      color: "var(--chart-2)",
-      kind: "area",
+      color: "var(--chart-1)",
       from: { share: ["blocksHit", "blocksRead"] },
     },
   ]),
@@ -551,7 +569,7 @@ export const OVERVIEW_CHARTS: ChartView[] = [
     {
       key: "merges",
       label: "Merges",
-      color: "var(--chart-1)",
+      color: "var(--chart-4)",
       kind: "area",
       from: { rate: "merges" },
     },
@@ -560,7 +578,7 @@ export const OVERVIEW_CHARTS: ChartView[] = [
     {
       key: "compilations",
       label: "Compiled",
-      color: "var(--chart-1)",
+      color: "var(--chart-2)",
       kind: "area",
       from: { rate: "compilations" },
     },

@@ -300,7 +300,8 @@ export function WiringLegend({ className }: { className?: string }) {
   )
 }
 
-function LegendLine({
+/** One line of a legend: how a wire is drawn, and what that says. */
+export function LegendLine({
   kind,
   children,
 }: {
