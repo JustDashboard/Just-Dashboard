@@ -1,7 +1,8 @@
 "use client"
 
+import { joinRecorded } from "@/components/database/home/samples"
 import { SectionError, SectionFrame } from "@/components/database/kit"
-import { redisStats } from "@/components/database/redis/api"
+import { redisRecorded, redisStats } from "@/components/database/redis/api"
 import { ClientsView } from "@/components/database/redis/performance/clients"
 import { CommandsView } from "@/components/database/redis/performance/commands"
 import { MemoryView } from "@/components/database/redis/performance/memory"
@@ -30,14 +31,14 @@ type View = "overview" | "memory" | "slowlog" | "clients" | "commands" | "persis
  * What the server is doing: how busy it is, what its memory holds, who is
  * connected, and what has been slow.
  *
- * Five readings head the page — commands a second, memory against its
- * ceiling, the share of lookups that hit, clients, keys — each with the shape
- * it has had since the page was opened. They come from the server's counters,
- * sampled every few seconds; a rate is the difference between two samples,
- * so the first line of a trend appears with the second sample and nothing
- * here is recorded history.
+ * The Overview charts how busy it is, its memory against its ceiling, its
+ * lookups, clients, network and the keys leaving it, each headed by its
+ * newest reading. They come from the server's counters: the recorder's last
+ * hour of them, every thirty seconds, then the page's own samples every few;
+ * a rate is the difference between two, so the charts open drawn rather than
+ * filling over the first minutes.
  *
- * Under them the page reads six ways: the same samples as charts; a memory
+ * The page reads six ways: those charts; a memory
  * analysis made on request; the slow log; the clients; the commands by the
  * time they have cost; and how the data is kept — on disk and on replicas.
  */
@@ -51,7 +52,13 @@ export function RedisPerformance() {
   if (stats.data && (!newest || stats.data.sampledAtMs > newest.at)) {
     setSamples(addSample(samples, stats.data))
   }
-  const rows = useMemo(() => statRows(samples), [samples])
+  // The recorder's hour is read again each minute, so the stretch between it
+  // and the oldest sample the page still holds stays filled.
+  const recorded = usePoll((signal) => redisRecorded(id, signal), 60_000, [id])
+  const rows = useMemo(
+    () => statRows(joinRecorded(recorded.data ?? [], samples, (sample) => sample.at)),
+    [recorded.data, samples],
+  )
 
   const views: { id: View; label: string }[] = [
     { id: "overview", label: "Overview" },
@@ -129,7 +136,12 @@ export function RedisPerformance() {
           )}
         </div>
         {view === "overview" ? (
-          <OverviewView redis={redis} rows={rows} everyMs={EVERY_MS} />
+          <OverviewView
+            redis={redis}
+            rows={rows}
+            everyMs={EVERY_MS}
+            recorded={(recorded.data?.length ?? 0) > 0}
+          />
         ) : view === "memory" ? (
           <MemoryView redis={redis} />
         ) : view === "slowlog" ? (

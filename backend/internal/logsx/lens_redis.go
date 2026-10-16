@@ -24,9 +24,9 @@ func init() {
 		Events: []string{
 			"startup", "ready", "shutdown", "loading", "saved", "bgsave", "aof",
 			"persistence_failed", "memory_warning", "replication", "security_attack",
-			"client_closed", "crash",
+			"client_closed", "crash", "replication_failed", "full_sync", "aof_slow", "config_warning",
 		},
-		Attrs: []string{"pid", "role"},
+		Attrs: []string{"pid", "role", "duration_ms", "keys", "changes", "client", "cmd", "version"},
 		New:   func() Reader { return &redisReader{} },
 	})
 }
@@ -84,6 +84,9 @@ func (r *redisReader) Read(l *Line) {
 	if h.at != nil {
 		l.Timestamp = h.at
 	}
+	// The pid, the role letter and the level character are the attrs and
+	// the level.
+	l.SetBody(h.msg)
 	switch h.level {
 	case '.', '-':
 		l.SetLevel("debug")
@@ -115,7 +118,59 @@ func redisName(l *Line, msg string) {
 		l.SetLevel("critical")
 	case "persistence_failed":
 		l.SetLevel("error")
+	case "replication_failed":
+		// A replica that cannot reach, trust or follow its primary.
+		l.SetLevel("error")
+	case "full_sync", "aof_slow", "config_warning":
+		// Redis logs a full resync as news, but it copies the whole dataset
+		// and means the backlog was too small or the replica too far behind.
+		l.SetLevel("warn")
 	}
+	redisFigures(l, msg)
+}
+
+// redisFigures reads the figures and addresses out of the messages that carry
+// them.
+func redisFigures(l *Line, msg string) {
+	switch l.Event {
+	case "loading":
+		// "DB loaded from disk: 0.003 seconds", and the same from the AOF.
+		if strings.HasPrefix(msg, "DB loaded from") {
+			if i := strings.LastIndex(msg, ": "); i >= 0 {
+				dbMillis(l, "duration_ms", strings.TrimSuffix(msg[i+2:], " seconds"), 1000)
+			}
+		}
+		dbNumberAttr(l, "keys", dbBetween(msg, "keys loaded: ", ","))
+	case "bgsave":
+		if changes, _, found := strings.Cut(msg, " changes in "); found {
+			dbNumberAttr(l, "changes", changes)
+		}
+	case "full_sync":
+		l.SetAttr("client", redisHost(dbWord(msg, "replica ")))
+	case "client_closed":
+		l.SetAttr("client", redisHost(dbWord(msg, " addr=")))
+		// A client closed before it ran anything has cmd=NULL.
+		if cmd := dbWord(msg, " cmd="); cmd != "NULL" {
+			l.SetAttr("cmd", cmd)
+		}
+	case "":
+		// "Redis version=7.2.4, bits=64, …"; Valkey and KeyDB name themselves.
+		if name, rest, found := strings.Cut(msg, " version="); found && !strings.Contains(name, " ") {
+			version, _, _ := strings.Cut(rest, ",")
+			l.SetAttr("version", version)
+		}
+	}
+}
+
+// redisHost is the address in "10.0.0.5:51234" or "[::1]:6379", or "" when
+// it is not one.
+func redisHost(hostport string) string {
+	if strings.HasPrefix(hostport, "[") {
+		hostport, _, _ = strings.Cut(hostport[1:], "]")
+	} else if i := strings.LastIndexByte(hostport, ':'); i > 0 {
+		hostport = hostport[:i]
+	}
+	return dbIP(hostport)
 }
 
 // redisRole puts Valkey's role words in the vocabulary the legacy letters
@@ -177,6 +232,24 @@ var redisPrefixes = []struct{ text, event string }{
 	{"Fatal error loading the DB", "persistence_failed"},
 	{"Error moving temp DB file", "persistence_failed"},
 	{"Possible SECURITY ATTACK detected", "security_attack"},
+	// These sit in the prefixes, ahead of the broad "master" and "replica"
+	// phrases, which would otherwise call every one of them just replication.
+	{"Error condition on socket for SYNC", "replication_failed"},
+	{"Timeout connecting to the MASTER", "replication_failed"},
+	{"MASTER timeout: no data nor PING received", "replication_failed"},
+	{"Unable to AUTH to MASTER", "replication_failed"},
+	{"MASTER aborted replication with an error", "replication_failed"},
+	{"Master is currently unable to PSYNC", "replication_failed"},
+	// A primary losing a replica is routine — the replica reconnects on its
+	// own — so it is replication news, not a failure.
+	{"Connection with replica", "replication"},
+	{"Full resync requested by replica", "full_sync"},
+	{"Unable to partial resync with replica", "full_sync"},
+	{"Full resync from", "full_sync"},
+	{"Asynchronous AOF fsync is taking too long", "aof_slow"},
+	{"WARNING: The TCP backlog setting", "config_warning"},
+	{"Warning: no config file specified", "config_warning"},
+	{"You requested maxclients of", "config_warning"},
 	{"Client closed connection", "client_closed"},
 	{"Evicting client", "client_closed"},
 	{"Closing client that reached max query buffer", "client_closed"},

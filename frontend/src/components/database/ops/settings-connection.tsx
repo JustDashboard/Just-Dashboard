@@ -473,7 +473,6 @@ function AddressPicture() {
     <SettingPicture
       label="How the dashboard reaches it"
       containerRef={container}
-      grid={false}
       className="py-4"
       lines={
         <>

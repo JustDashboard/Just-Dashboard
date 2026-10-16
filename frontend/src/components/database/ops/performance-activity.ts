@@ -257,6 +257,69 @@ export function stopsFor(
   }
 }
 
+/**
+ * The sessions of one client: everything that connected under one name — an
+ * application's, or its account's where it gave none — as the Overview's
+ * picture draws it, one node per program rather than one per connection, so
+ * a pool of twenty is one line with twenty on it.
+ */
+export type ClientGroup = {
+  key: string
+  /** The name the client gave the server, or its account's. */
+  name: string
+  /** Whether `name` is the application's or, for want of one, the account's. */
+  named: "application" | "account"
+  self: boolean
+  sessions: number
+  counts: Record<DbSessionStatus, number>
+  /** The worst thing one of its sessions is doing, for the wire's tone. */
+  worst?: SessionConcern | "blocked"
+}
+
+const WORST_RANK = { blocked: 0, "long-blocked": 0, "open-transaction": 1, "long-running": 2 }
+
+/**
+ * The connected clients, those with something wrong first, then the busiest:
+ * a session waiting on a lock, one holding a transaction open, one that has
+ * run too long, then by how many are working and how many are connected. The
+ * server's own background workers are not a client. The dashboard's own read
+ * is one, last among its peers, as it is in the list.
+ */
+export function clientGroups(sessions: readonly DbActivity[]): ClientGroup[] {
+  const groups = new Map<string, ClientGroup>()
+  for (const session of sessions) {
+    const status = statusOf(session)
+    if (status === "background") continue
+    const application = session.application?.trim()
+    const name = session.self ? "This dashboard" : application || session.user || "Unnamed"
+    const key = session.self ? "self" : name.toLowerCase()
+    const group = groups.get(key) ?? {
+      key,
+      name,
+      named: application || session.self ? "application" : "account",
+      self: Boolean(session.self),
+      sessions: 0,
+      counts: { active: 0, blocked: 0, idle_in_transaction: 0, idle: 0, background: 0 },
+    }
+    group.sessions += 1
+    group.counts[status] += 1
+    const concern = status === "blocked" ? "blocked" : concernOf(session)
+    if (concern && (!group.worst || WORST_RANK[concern] < WORST_RANK[group.worst])) {
+      group.worst = concern
+    }
+    groups.set(key, group)
+  }
+  const rank = (group: ClientGroup) => (group.worst ? WORST_RANK[group.worst] : 3)
+  return [...groups.values()].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      Number(a.self) - Number(b.self) ||
+      b.counts.active + b.counts.blocked - (a.counts.active + a.counts.blocked) ||
+      b.sessions - a.sessions ||
+      a.name.localeCompare(b.name),
+  )
+}
+
 /** One session in the picture of who waits on whom. */
 export type LockNode = {
   pid: string

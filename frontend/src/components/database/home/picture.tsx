@@ -67,7 +67,7 @@ const SHOWN = 5
  * today, amber past a week, dashed where there is none — and pulses while a
  * dump is being taken.
  *
- * On the page's own ground over the dot grid, as every picture is. Three
+ * On the page's own ground with no dot grid, as every picture is. Three
  * lanes from `lg`; below it the lanes stack, the wires are not drawn, and
  * each node says in words how it is wired.
  */
@@ -158,10 +158,6 @@ export function HomePicture({
         <CardsSkeleton count={2} />
       ) : (
         <div className="relative animate-rise py-4">
-          <div
-            aria-hidden
-            className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0"
-          />
           <div ref={container} className="relative">
             {shownReaders.map(({ node, edge }, index) => {
               const from = refFor(`r:${node.id}`)
@@ -491,12 +487,13 @@ function eyebrowOf(node: DbTopoNode): string {
 }
 
 /** A busier link pulses quicker: three seconds idle, a second and a half at a dozen sessions. */
-function pulseFor(sessions: number): number {
+export function pulseFor(sessions: number): number {
   if (sessions <= 0) return 3
   return Math.max(1.2, 3 - Math.log2(sessions + 1) * 0.5)
 }
 
-function Lane({
+/** One lane of a picture: its name and count over its nodes. Performance's picture draws its lanes with it too. */
+export function Lane({
   title,
   count,
   className,

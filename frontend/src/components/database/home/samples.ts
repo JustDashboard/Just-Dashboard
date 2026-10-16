@@ -350,3 +350,20 @@ export function historySamples<T>(
     return sample ? [{ ...sample, at: snapshot.at, gap: snapshot.gap }] : []
   })
 }
+
+/**
+ * The recorder's readings, then the page's own: a page that samples every few
+ * seconds opens on the window the recorder kept every thirty, and carries on
+ * from it. A recorded reading at or after the page's first is left out — the
+ * page's own is the finer — so the two runs meet once and never overlap.
+ */
+export function joinRecorded<T>(
+  recorded: readonly T[],
+  live: readonly T[],
+  at: (sample: T) => number,
+): T[] {
+  const first = live[0]
+  if (!first) return [...recorded]
+  const from = at(first)
+  return [...recorded.filter((sample) => at(sample) < from), ...live]
+}

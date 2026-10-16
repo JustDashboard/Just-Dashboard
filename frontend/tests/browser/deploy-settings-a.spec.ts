@@ -100,7 +100,6 @@ test.describe("General settings", () => {
     await expect(gitCard.getByText(/deploy automatically\./)).toHaveCount(0)
     // Drawn on the page's own ground, as the GitHub App's picture on
     // Credentials is, rather than in a framed box among the fields.
-    await expect(gitCard.locator(".wire-grid")).toHaveCount(1)
     await expect(gitCard.locator(".rounded-xl.border", { has: picture })).toHaveCount(0)
 
     await gitCard.getByLabel("Include paths").fill("services/api/**")

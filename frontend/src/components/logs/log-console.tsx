@@ -793,7 +793,9 @@ export const LogRow = memo(function LogRow({
             beside,
           )}
         >
-          {formatLogTime(line.timestamp, time, prev)}
+          {/* A record's lines share its head's moment; the time down each of
+              them made a Postgres error with its DETAIL read as three. */}
+          {cont ? null : formatLogTime(line.timestamp, time, prev)}
         </span>
       )}
       {/* The level has a column of its own so a page of lines can be read
@@ -861,10 +863,12 @@ export const LogRow = memo(function LogRow({
           {line.source}
         </span>
       )}
-      {line.stream === "stderr" && (
+      {line.stream === "stderr" && !line.body && !cont && (
         // A mark, not a verdict: plenty of programs — Postgres among them —
         // write everything to stderr, and a red tag on each line said a
-        // failure that was not there.
+        // failure that was not there. A line the lens read has its own
+        // severity, and a record's later lines its head's, so the stream
+        // says nothing about either.
         <span className="shrink-0 text-muted-foreground/70 select-none">stderr</span>
       )}
       {repeat && repeat > 1 && (
@@ -882,6 +886,10 @@ export const LogRow = memo(function LogRow({
           // A file's own timestamp repeats the column beside it on every
           // line, which on syslog was a third of the width.
           skipTime={showTime && Boolean(line.timestamp) && !structured}
+          // Past the prefix the lens read: its pid, user@db and severity are
+          // the columns and the event word beside it. Without the time
+          // column, the line's own time is the only one on screen.
+          body={showTime && !structured ? line.body : undefined}
           hostname={hostname}
           className={cn("min-w-0 text-foreground", flow, stack && !cont && "@max-md:basis-full")}
         />

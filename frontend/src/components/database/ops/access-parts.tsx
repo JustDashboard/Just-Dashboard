@@ -116,7 +116,6 @@ export function SignInPicture({
     <SettingPicture
       label={`Who signs in to ${conn.name}`}
       containerRef={container}
-      grid={false}
       className="pt-2 pb-8"
       lines={drawn.map((account, index) => {
         const mark = marks.get(account.key)

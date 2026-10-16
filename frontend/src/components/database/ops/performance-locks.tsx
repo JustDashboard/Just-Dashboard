@@ -49,6 +49,9 @@ import type {
   DbHeldLock,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { clientOf, type KnownClient } from "@/components/database/clients"
+import { useKnownClients } from "@/components/database/use-known-clients"
+import { ProductGlyph } from "@/components/product-logo"
 
 /**
  * Who is holding whom up.
@@ -88,6 +91,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
   const waits = locks.data?.waits
   const tree = useMemo(() => lockTree(waits ?? []), [waits])
   const listed = activity.data?.supported ? activity.data.sessions : undefined
+  const known = useKnownClients()
   const sessions = useMemo(
     () => new Map((listed ?? []).map((session) => [session.pid, session])),
     [listed],
@@ -126,7 +130,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
                   <ul aria-label="Blocking sessions" className="space-y-5">
                     {tree.map((node) => (
                       <li key={node.pid}>
-                        <LockRow node={node} stops={stops} sessions={sessions} root />
+                        <LockRow node={node} stops={stops} sessions={sessions} known={known} root />
                       </li>
                     ))}
                   </ul>
@@ -161,12 +165,15 @@ function LockRow({
   node,
   stops,
   sessions,
+  known,
   root,
 }: {
   node: LockNode
   stops: Stops
   /** The session list by id, where the page could read it. */
   sessions: ReadonlyMap<string, DbActivity>
+  /** What uses this database, for drawing a session as the deployment it names. */
+  known: ReadonlyMap<string, KnownClient>
   root?: boolean
 }) {
   const waiters = behind(node)
@@ -195,6 +202,7 @@ function LockRow({
     ? SESSION_STATES.find((entry) => entry.id === statusOf(session))?.label.toLowerCase()
     : node.state
   const user = node.user ?? session?.user
+  const product = clientOf(session?.application, known).product
   const late = !root && (node.seconds ?? 0) >= THRESHOLDS.blocked
   const subject = {
     pid: node.pid,
@@ -221,7 +229,10 @@ function LockRow({
                 <span aria-hidden className="text-muted-foreground/60">
                   ·
                 </span>
-                <Named name={session.application} className="text-xs" />
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {product && <ProductGlyph id={product} />}
+                  <Named name={session.application} className="text-xs" />
+                </span>
               </>
             )}
             {/* A waiter's state is the row itself; a blocker's is the news. */}
@@ -304,7 +315,7 @@ function LockRow({
         <ul className="mt-2.5 ml-[2.5px] space-y-3 border-l border-border-strong pl-4">
           {node.waiters.map((waiter) => (
             <li key={`${waiter.pid}:${waiter.wait?.blockingPid}`}>
-              <LockRow node={waiter} stops={stops} sessions={sessions} />
+              <LockRow node={waiter} stops={stops} sessions={sessions} known={known} />
             </li>
           ))}
         </ul>

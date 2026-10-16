@@ -1242,8 +1242,7 @@ function AutomaticDeploymentForm({
  * and its line of detail rise into their new state rather than swapping.
  *
  * On the page's own ground rather than in a frame, as the GitHub App's
- * picture on Credentials is: the dot grid fades out towards its edges, so the
- * picture has a middle and needs no border to read as one thing — a framed
+ * picture on Credentials is: it needs no border to read as one thing — a framed
  * box was the one container left on a page of hairlines.
  *
  * The last decision is a line under the drawing at the size of the rest of
@@ -1291,7 +1290,6 @@ function AutoDeployPicture({
 
   return (
     <div className="relative animate-rise py-6">
-      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={container} className="relative">
         <AnimatedBeam
           containerRef={container}

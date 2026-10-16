@@ -3,6 +3,7 @@ import { keyQuery, prefixQuery } from "@/components/database/redis/bytes"
 import { commandLine } from "@/components/database/redis/command-line"
 import { nodeAt, parseJsonDoc, type JsonNode } from "@/components/database/redis/keys/json-doc"
 import { noteRead } from "@/components/database/redis/own-reads"
+import { recordedSamples } from "@/components/database/redis/performance/samples"
 import type {
   RedisAnalysis,
   RedisBulkRequest,
@@ -58,6 +59,19 @@ export function redisServer(id: number, signal?: AbortSignal) {
 export function redisStats(id: number, signal?: AbortSignal) {
   return get<unknown>(`${at(id)}/stats`, undefined, signal).then(
     (answer) => shaped<RedisStats>(answer, "server", "the server's counters").server,
+  )
+}
+
+/** The recorder's last hour of this server's counters, oldest first: what the charts open on. */
+export function redisRecorded(id: number, signal?: AbortSignal) {
+  return get<unknown>(`${at(id)}/stats/history`, { hours: 1 }, signal).then((answer) =>
+    recordedSamples(
+      shaped<{ samples: { at: number; stats: unknown }[] }>(
+        answer,
+        "samples",
+        "the recorded counters",
+      ).samples ?? [],
+    ),
   )
 }
 

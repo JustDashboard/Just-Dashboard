@@ -415,7 +415,6 @@ function ReachPicture({
     <SettingPicture
       label="Who can reach it"
       containerRef={container}
-      grid={false}
       className="py-4"
       lines={
         <>

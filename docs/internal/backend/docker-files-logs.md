@@ -684,7 +684,14 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   every expression behind a cheap prefix or substring test: the budget is twice the no-lens search, and
   `BenchmarkSearchLens` measures the shipped lenses against it over a million mixed lines (the worst was
   about 1.6× when they landed). Parsing lives only here; the browser reads `event`/`attrs` off the
-  wire and never re-derives them. **Level precedence** is a lens's `SetLevel`
+  wire and never re-derives them. Where a lens read a prefix into the line's time, level and attrs it
+  marks where the message starts (`Line.Body`, `SetBody`, counted in UTF-16 units like the match
+  ranges): Postgres past its pid, `user@db` and severity (a `DETAIL` from its severity word, so it still
+  says what it is), MySQL past its thread, label, code and subsystem, Redis past its pid, role and level
+  character. A lens reading a copy of the message (syslog's envelope, jsonlog) leaves it unset. The
+  database lenses keep a statement's time apart from everything else timed: Postgres's session length is
+  `session_ms` and a lock wait `wait_ms`, so `duration_ms` — the measure Insights ranks as statement time
+  — is statements alone. **Level precedence** is a lens's `SetLevel`
   (the format's own severity token, or a status or crash rule), then a JSON or logfmt level key, then the
   journal's priority, then the word scan — which files, Docker and PM2 get and journal lines never do.
 - **A record is kept or dropped whole.** A Postgres `ERROR` is followed by its `DETAIL` and `STATEMENT`,
@@ -851,8 +858,12 @@ string, number, address, URL, path, method, status, id, failure and success word
 string, so the server's match ranges still intersect them, and `log-text.tsx` colours them from one map
 (design-system §14). In a narrow pane the message moves to a line of its own under the event word and
 the lane rather than starting past the edge. While the time column is on, the line's own leading
-timestamp is not drawn, and neither is a syslog hostname that is this host's. Error and critical rows are
-washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres writes everything there. A
+timestamp is not drawn, and neither is a syslog hostname that is this host's, and a line whose lens
+marked its `body` is drawn from there — the prefix it skips is the columns and the event word beside it;
+a search hit inside the prefix draws the whole line. A record's continuation lines draw no time of their
+own. Error and critical rows are
+washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres writes everything there,
+and it is not drawn on a line the lens read (`body`) or a record's continuation lines. A
 line the server parsed as structured (`message` and `fields` on the wire) is drawn as its message and
 fields in logfmt order, most telling field first — except in a History result, whose match ranges are
 over the raw JSON. A record's continuation lines stay under their head, three inline and the rest behind
@@ -920,7 +931,9 @@ window; it opens instead on what its own window adds up to (`Readings` in `insig
 the errors and the warnings among them (each narrowing to its levels on a press, with its line across
 the window — counted by level, or by the events the lens marks in that tone when the chart is split by
 event), the busiest minute, and the measure's p95 where the lens has one, or else how many distinct
-addresses the lens's first address key saw. A
+addresses the lens's first address key saw. A section that draws no metric cards — a database's Logs —
+passes `insightTiles={false}` through `ServiceLogs`, and its Insights opens on the chart: the level chips,
+the chart's busiest column and the measure's ladder already say what those tiles said. A
 page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
 draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 

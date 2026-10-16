@@ -293,14 +293,10 @@ export function JobPage() {
               aside={<LastRun job={job} />}
             />
 
-            {/* The page's own ground under the dot grid, as the list page's
-                picture stands: the grid gives it a middle without a frame. */}
+            {/* On the page's own ground with no frame and no dot grid, as the
+                list page's picture stands. */}
             {(resources.data || resources.error) && (
               <div className="relative animate-rise py-2 lg:py-4">
-                <div
-                  aria-hidden
-                  className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
-                />
                 <JobMap job={job} resources={resourceList} containers={containers} />
               </div>
             )}

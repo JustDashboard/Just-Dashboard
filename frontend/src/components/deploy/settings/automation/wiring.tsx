@@ -35,7 +35,7 @@ type Ref = RefObject<HTMLDivElement | null>
  * of it — the production release and, where a webhook asks for them, the
  * pull-request previews — on the other.
  *
- * On the page's own ground over the dot grid (`SettingPicture`), in the
+ * On the page's own ground (`SettingPicture`), in the
  * wiring vocabulary the Credentials, Notifications and General pictures
  * already speak: a pulse travels along a line while that sender is on, the
  * line stands still while it is paused or deploys only by hand, and a dashed

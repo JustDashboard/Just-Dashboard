@@ -174,7 +174,6 @@ export function DumpsPicture({
     <SettingPicture
       label={`Where the dumps of ${conn.name} go`}
       containerRef={container}
-      grid={false}
       className="pt-2 pb-8"
       lines={
         <>

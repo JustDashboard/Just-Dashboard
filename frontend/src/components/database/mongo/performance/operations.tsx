@@ -34,6 +34,9 @@ import { runningWords } from "@/components/database/mongo/performance/samples"
 import type { MongoOperation } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { ReadError } from "@/components/database/redis/read-error"
+import { DbClientMark } from "@/components/database/client-mark"
+import { clientOf } from "@/components/database/clients"
+import { useKnownClients } from "@/components/database/use-known-clients"
 
 /** How long an operation runs before its time is a reading worth a hue. */
 const LONG_SECONDS = 10
@@ -70,6 +73,7 @@ export function OperationsView({
     const work = clientWork(read)
     return { shown: work.shown, leftOut: leftOutWords(work.heartbeats, work.internal) }
   }, [read, all])
+  const known = useKnownClients()
   const arrived = useArrivals((rows ?? []).map((row, index) => row.opId || `idle:${index}`))
 
   if (operations.error && !rows) {
@@ -180,15 +184,26 @@ export function OperationsView({
                     >
                       {operation.active ? runningWords(operation.secondsRunning) : "—"}
                     </TableCell>
-                    <TableCell className="max-w-56">
-                      {who ? (
-                        <p className="truncate font-medium" style={{ color: nameHue(who) }}>
-                          {who}
-                        </p>
-                      ) : null}
-                      <p className="truncate font-mono text-hint text-muted-foreground">
-                        {operation.client || (who ? "" : "the server itself")}
-                      </p>
+                    <TableCell className="max-w-64">
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <DbClientMark
+                          product={
+                            who || operation.client
+                              ? clientOf(operation.appName, known).product
+                              : "mongodb"
+                          }
+                        />
+                        <span className="min-w-0">
+                          {who ? (
+                            <p className="truncate font-medium" style={{ color: nameHue(who) }}>
+                              {who}
+                            </p>
+                          ) : null}
+                          <p className="truncate font-mono text-hint text-muted-foreground">
+                            {operation.client || (who ? "" : "the server itself")}
+                          </p>
+                        </span>
+                      </span>
                     </TableCell>
                     <TableCell className="max-w-48 truncate font-mono text-muted-foreground max-lg:hidden">
                       {operation.planSummary || "—"}

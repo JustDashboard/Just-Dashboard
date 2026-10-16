@@ -188,7 +188,6 @@ export function AccessPicture({
 
   return (
     <div ref={container} className="relative w-full py-4">
-      <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
       {wide ? (
         <div className="relative grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.45fr)_auto_minmax(3rem,0.45fr)_minmax(0,1fr)] items-center pb-8">
           <div role="group" aria-label="Signed in" className="flex flex-col items-end gap-6">

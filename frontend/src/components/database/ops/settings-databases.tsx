@@ -337,7 +337,6 @@ function ServerPicture({
     <SettingPicture
       label="What the server holds"
       containerRef={container}
-      grid={false}
       className="py-2"
       lines={shown.map(({ database, current, saved }, index) => {
         const mark = marks.get(database.name)

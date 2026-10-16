@@ -88,7 +88,7 @@ taking a frame:
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
   edge to read as one thing — the settings pages' four were framed until 0.7.1 and now stand
-  unframed over `wire-grid`, as below, each inside its section and drawn through
+  unframed on the page's own ground, as below, each inside its section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`: General's
   push to a deployment, Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -108,10 +108,11 @@ taking a frame:
   `WireMark` stands on the same rounded square whatever its tone, a thing's own glyph on the
   `logo` tone, and the only circle left in a picture is the dashed ring of a thing not added yet
   (`WirePlaceholder`). The Databases map, Configuration's request path, a site's route map and the
-  rollback dialog's picture took the page's own ground over `wire-grid` with the rest in 0.7.1,
-  the map giving up the frame it kept as the last picture with one; the Databases map and the
-  control center's picture of what the databases feed gave up the dot grid in 0.7.5, at the
-  operator's request, and stand on the page's ground alone. The rollback dialog holds a
+  rollback dialog's picture took the page's own ground with the rest in 0.7.1, the map giving up
+  the frame it kept as the last picture with one. Until 0.7.5 every picture stood over a dot grid
+  that faded out towards its edges (`wire-grid`); the Databases pictures gave it up first and then,
+  at the operator's request, every other picture did, and the class is gone: a picture stands on
+  the page's ground alone. The rollback dialog holds a
   small one of its own — your domains wired
   to the live release by a still line and to the release you are going back to by a dotted one,
   which is the line that carries once Roll back is pressed. The same vocabulary
@@ -123,10 +124,9 @@ taking a frame:
   Notifications — the projects on the left, this server in the middle, a mark per channel on the
   right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
   accounts that installed it, the App and this server, with its setup path under it — stand on the
-  page's own ground over `wire-grid`, as does the map a project's Runtime opens on (its domains,
+  page's own ground, as does the map a project's Runtime opens on (its domains,
   the containers answering them, and the volumes, folders and databases those keep, in three lanes
-  with `shape="s"` wires, `deploy/runtime-map.tsx`) — the dot grid that fades out towards its edges, which gives a
-  picture a middle where a border gave it an outline. General's automatic deployment (the
+  with `shape="s"` wires, `deploy/runtime-map.tsx`). General's automatic deployment (the
   repository, the watch with when it last looked, the deploys, and the last check's decision on
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
   one box on a page of hairlines, and the decision's sentence had sat in the section head's status
@@ -170,7 +170,7 @@ taking a frame:
   `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
   as `FormSection aside`s, each head over its fields — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
-  a picture of where the server's data goes, on the page's own ground over `wire-grid` (what it
+  a picture of where the server's data goes, on the page's own ground (what it
   has by kind, wired through this server to every directory and bucket a job writes to), an
   attention list of the jobs that failed or went quiet, the jobs as destination cards (a
   `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
@@ -532,8 +532,8 @@ Extensions (a key–value server's *Modules*), Databases and Danger zone, each
 listed only where the engine has it and the danger zone only for a role that may destroy. Every page
 is one centred column of `SettingSection`s under the page's one save bar, and the labels and the
 protection switch are one `SettingForm` over two sections, saved there rather than by a button of
-their own. Three of them open on a `SettingPicture` on the page's ground, without the dot grid, as
-the section's other pictures stand: General draws the address as the way the dashboard reaches it
+their own. Three of them open on a `SettingPicture` on the page's ground, as the section's other
+pictures stand: General draws the address as the way the dashboard reaches it
 (this server, the account it signs in as, the server as its product, the database it opens), Network
 who can reach the port (this machine's programs and *Anywhere*, through the container as Docker's
 whale, to the server; amber while it is published on every interface, dashed while nothing outside
@@ -1429,8 +1429,8 @@ the game can say — the address a player types, the edition, how full it is —
 game nor its name again.
 
 **The Security section draws what it watches.** All eight pages use the reading register, and
-since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground over
-`wire-grid`, in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
+since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground,
+in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
 speak, with the line as the state (dashed where a layer is missing, red where one is off, amber
 where it works but should not be relied on, moving where it carries). The overview's
 (`perimeter.tsx`) is the two ways onto the machine — the internet's through the firewall, fail2ban
@@ -2491,7 +2491,7 @@ The passes, in order. Each one is a diff you can review on its own.
    control center's smaller `compact` version went), the two lanes centred on each other with a wide
    empty lane between them, no lane headings — each node's eyebrow says what it is — and whether a
    database answers or a reader runs as the dot in its mark's corner, as on Configuration's services.
-   Neither stands over `wire-grid` any more. The lanes are ordered for the wires (`wiredOrder`):
+   The lanes are ordered for the wires (`wiredOrder`):
    databases that feed something first, each reader across from the mean of the databases that feed
    it. The control center's picture is of what is wired, and the databases nothing is seen reading
    are a line of their engine marks and names under it, each a link to the database, where a
@@ -2714,8 +2714,8 @@ the database, and three columns of 12px label-and-value pairs that ran into each
 identity line and no tiles (the Databases rule above); what changed, block by block
 (`components/database/home/`):
 
-- **How it is used** (`picture.tsx`) is the Runtime map's three lanes on the page's own ground over
-  `wire-grid`: what reads the database on the left (the consumers route the cards listed, drawn with
+- **How it is used** (`picture.tsx`) is the Runtime map's three lanes on the page's own ground:
+  what reads the database on the left (the consumers route the cards listed, drawn with
   the fleet map's `ConsumerMark`), the database in the middle as its engine with its sessions and
   size, and on the right what it holds — a SQL engine's schemas summed from its table sizes
   (`holdings.ts`, unit-tested), a key–value store's numbered databases, a document store's
@@ -2745,6 +2745,39 @@ identity line and no tiles (the Databases rule above); what changed, block by bl
 - **The reference blocks** — Runs as, Reachable from, Backups — and the file's facts are `FactRow`s
   (`blocks.tsx`): the name on the left at the body's size, the value beside it, a hairline under each,
   as a project's Runtime lists what a container may use.
+
+**A database's Performance took the home's shape in 0.7.5**, at the operator's request — "more
+alive, more real logos and colouring" — because beside the new home it read as the grey page of the
+two: the Overview drew the same activity in the brand's near-white with no reading in any head, the
+cache hit as one slab, and four figures of the dashboard's own pool under it; Redis and MongoDB
+opened on empty plots that said a rate would appear in six seconds, though the recorder had kept the
+last week; sessions, clients and operations were names in a column. It keeps its view strip (the
+Databases rule above); what changed, view by view:
+
+- **Right now** (`ops/performance-picture.tsx`) heads the SQL Overview: the session list grouped
+  by the name each client gave the server (`clientGroups`, unit-tested), each drawn as its program
+  (`database/clients.ts`, `DbClientMark`) — a deployment or container the consumers route found as
+  the product it runs, otherwise what the name says (`psql`, `pg_dump`, Grafana, Metabase, a JDBC or
+  Node driver), the dashboard's own connection as its J carrying the pool's words that the four
+  figures said — wired to the server and on to the four things a session can be doing, each counted
+  and a way into Sessions narrowed to it. A client's wire pulses while one of its sessions runs, red
+  while one waits on a lock, amber while one holds a transaction or runs too long; a state's wire is
+  dashed while nothing is in it. It moves with the five-second session poll.
+- **Activity** is the home's: each chart through `ViewChart` with its newest reading in the head
+  (sessions against the server's ceiling), every line in its measurement's hue, the cache a line,
+  and the range presses (`HistoryRange`) over all of them — the Overview had no range before.
+- **Redis and MongoDB** open on the recorder's last hour (`joinRecorded`, `recordedSamples`,
+  `recordedServers`, unit-tested) and carry on with the page's three-second samples; each chart is
+  headed by its readings (`ChartReadings`, `SeriesReading`), memory, the cache and connections with
+  a meter against their ceiling. MongoDB's latency is not recorded, so that one chart starts with the
+  page and its caption says so.
+- **Logos where a client is named**: SQL sessions, Redis clients (by name, else the library the
+  client reported) and MongoDB operations each lead with `DbClientMark`; the lock queue sets the
+  bare logo beside each session's application.
+- **Statements** take their verb's hue, as the home's ranking does.
+- **Replication** (`ops/replication-picture.tsx`) replaced its three figures with the picture of
+  where the data goes: the server it follows, this one by its role, the replicas streaming from it,
+  and the slots holding its log — a slot with no reader dashed amber, the one reading to act on.
 
 **The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
 held the source's name, its facts, an outlined Export box and the view tabs, the box and the
@@ -2843,7 +2876,7 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   Ten marks arrived for it (WireGuard, AdGuard, Pi-hole, CrowdSec, Headscale, Mullvad, Quad9,
   Unbound, OpenVPN, ZeroTier), each lifted to the L 0.72 rung where its own colour vanished on the
   ground (`public/logos/NOTICE`).
-- **Pictures whose wires are traffic.** Six pictures stand unframed over `wire-grid` in the
+- **Pictures whose wires are traffic.** Six pictures stand unframed on the page's own ground in the
   deployment section's vocabulary: the Overview's topology (`network/topology.tsx`: the outside —
   the internet through the uplink, the tailnet, each tunnel — this server with its firewall and
   gateway as facts, and the inside — each Docker network with its containers' products, each bridge
@@ -2927,7 +2960,7 @@ already says it); what it is using (`container-readings.tsx`: the Overview's fou
 `LiveFigure` gliding to Docker's frame every second with its last hour as a `TileTrend` keyed by its
 series colour, memory as a `Meter` against a limit where it has one); what is wrong with it; a
 picture of how it is reached and what it keeps (`container-picture.tsx`, the runtime map's three
-lanes over `wire-grid`: each published port as where it is reached from and each network as the
+lanes: each published port as where it is reached from and each network as the
 name it is reached by, the container as its product, each volume, folder and tmpfs it mounts — the
 line amber where a port answers around the firewall, red where Docker's socket is mounted, dashed
 where a thing does not outlive it, pulsing while it moves traffic); the containers it runs beside

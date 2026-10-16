@@ -135,12 +135,12 @@ func TestLensSyslogReachesTheServersItNames(t *testing.T) {
 		sysWant{
 			text:  "2026-09-27T10:00:00.000100+00:00 web-1 postgres[1234]: [5-1] 2026-09-27 10:00:00.123 UTC [1234] LOG:  checkpoint starting: time",
 			event: "checkpoint", level: "info", at: "2026-09-27T10:00:00.0001Z", lens: "postgres",
-			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "LOG"},
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "LOG", "reason": "time"},
 		},
 		sysWant{
 			text:  `2026-09-27T10:00:00.000200+00:00 web-1 postgres[1234]: [6-1] 2026-09-27 10:00:00.200 UTC [1234] postgres@shop ERROR:  relation "orders" does not exist at character 15`,
 			event: "error", level: "error", at: "2026-09-27T10:00:00.0002Z", lens: "postgres",
-			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "ERROR", "code": "42P01", "user": "postgres", "db": "shop"},
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "ERROR", "code": "42P01", "error_class": "syntax or access", "user": "postgres", "db": "shop"},
 		},
 		sysWant{
 			text:  "2026-09-27T10:00:00.000300+00:00 web-1 postgres[1234]: [7-1] 2026-09-27 10:00:00.200 UTC [1234] postgres@shop STATEMENT:  select * from orders",
@@ -150,7 +150,7 @@ func TestLensSyslogReachesTheServersItNames(t *testing.T) {
 		sysWant{
 			text:  `2026-09-27T10:00:00.000400+00:00 web-1 postgres[1234]: [8-1] FATAL:  password authentication failed for user "bob"`,
 			event: "auth_failed", level: "error", at: "2026-09-27T10:00:00.0004Z", lens: "postgres",
-			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "FATAL", "code": "28P01", "user": "bob"},
+			attrs: map[string]string{"program": "postgres", "pid": "1234", "severity": "FATAL", "code": "28P01", "error_class": "auth", "user": "bob"},
 		},
 		sysWant{
 			text:  "2026-09-27T10:00:01.000000+00:00 web-1 mariadbd[999]: 2026-09-27 10:00:01 0 [Note] mariadbd: ready for connections.",
@@ -213,7 +213,7 @@ func TestLensSyslogReachesTheServersItNames(t *testing.T) {
 	}
 	sysCheck(t, got, []sysWant{
 		{text: "pg error", event: "error", level: "error", lens: "postgres",
-			attrs: with(pg, "severity", "ERROR", "code", "42P01", "user", "postgres", "db", "shop")},
+			attrs: with(pg, "severity", "ERROR", "code", "42P01", "error_class", "syntax or access", "user", "postgres", "db", "shop")},
 		{text: "pg statement", level: "error", cont: true, lens: "postgres", attrs: pg},
 		{text: "mariadb denied", event: "auth_failed", level: "warn", lens: "mysql",
 			attrs: with(maria, "thread", "7", "user", "root", "client", "172.18.0.1")},

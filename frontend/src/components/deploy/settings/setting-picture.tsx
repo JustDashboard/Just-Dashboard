@@ -8,9 +8,8 @@ import { cn } from "@/lib/utils"
  * things and the lines between them, in the wiring vocabulary the Credentials,
  * Notifications and overview pictures already speak (`deploy/wire.tsx`).
  *
- * On the page's own ground over the dot grid, as General's picture and the
- * GitHub App's on Credentials are: the grid fades out towards its edges, so
- * the picture has a middle and needs no border to read as one thing. It was
+ * On the page's own ground with no dot grid, as General's picture and the
+ * GitHub App's on Credentials are: it needs no border to read as one thing. It was
  * framed on the card's ground, which left the one box on each of these pages
  * of hairlines.
  *
@@ -32,7 +31,6 @@ export function SettingPicture({
   middle,
   end,
   startLabel,
-  grid = true,
   className,
 }: {
   /** What the picture shows, as the list's accessible name. */
@@ -46,17 +44,10 @@ export function SettingPicture({
   /** A `WireNode align="start"`. */
   end: React.ReactNode
   startLabel?: React.ReactNode
-  /**
-   * The dot grid under it. The Databases section's pictures stand on the
-   * page's ground alone (0.7.5, at the operator's request), its settings'
-   * among them.
-   */
-  grid?: boolean
   className?: string
 }) {
   return (
     <div className={cn("relative animate-rise py-6", className)}>
-      {grid && <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />}
       <div ref={containerRef} className="relative">
         {lines}
         <ol

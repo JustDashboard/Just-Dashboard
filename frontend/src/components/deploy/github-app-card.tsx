@@ -722,12 +722,10 @@ export function GitHubAppPanel({
 
         {stage && data && (
           // On the page's own ground rather than in a frame, as the picture
-          // on Notifications is: the dot grid a wiring picture is drawn on
-          // fades out towards its edges, so the picture has a middle and
-          // needs no border to read as one thing.
+          // on Notifications is: a wiring picture needs no border to read as
+          // one thing.
           <div className="animate-rise">
             <div className="relative py-6 lg:py-10">
-              <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
               <Picture stage={stage} data={data} admin={admin} credentials={credentials} />
             </div>
 

@@ -7,6 +7,7 @@ import {
   gauge,
   heldSeconds,
   heldShare,
+  joinRecorded,
   lastRate,
   mongoSample,
   pushSample,
@@ -257,5 +258,27 @@ describe("each engine's answer as a sample", () => {
     const sample = mongoSample({ server: { timestamp: 1, opcounters: {} } })
     expect(sample.gauges.cachePercent).toBeUndefined()
     expect(sample.gauges.cacheBytes).toBeUndefined()
+  })
+})
+
+describe("the recorder's window, then the page's own samples", () => {
+  const at = (sample) => sample.at
+  test("the recorded readings come first, and none at or after the page's first", () => {
+    const recorded = [{ at: 0 }, { at: 30 }, { at: 60 }, { at: 90 }]
+    const live = [
+      { at: 60, live: true },
+      { at: 63, live: true },
+    ]
+    expect(joinRecorded(recorded, live, at)).toEqual([
+      { at: 0 },
+      { at: 30 },
+      { at: 60, live: true },
+      { at: 63, live: true },
+    ])
+  })
+
+  test("either run alone is drawn as it is", () => {
+    expect(joinRecorded([{ at: 1 }], [], at)).toEqual([{ at: 1 }])
+    expect(joinRecorded([], [{ at: 2 }], at)).toEqual([{ at: 2 }])
   })
 })
