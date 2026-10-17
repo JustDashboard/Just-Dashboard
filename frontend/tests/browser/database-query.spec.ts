@@ -2546,7 +2546,7 @@ test("What if? proposes indexes for the plan, tries one without creating it and 
   expect(advice.whatIf.at(-1)?.columns).toEqual(["total_cents"])
 
   // Another candidate puts its own columns in the field.
-  await candidates.nth(1).check()
+  await dialog.getByText("public.orders (customer_id)").click()
   await expect(dialog.getByLabel("Columns")).toHaveValue("customer_id")
   await expect(dialog.getByRole("region", { name: "With the index" })).toHaveCount(0)
 })
