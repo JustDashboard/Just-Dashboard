@@ -16,7 +16,7 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   TOTP setup, enrollment confirmation and verification share a separate account-keyed `loginLim`
   bucket; changing IP or switching between these routes does not reset the second-factor budget.
 - **Capabilities, not roles** (`auth/roles.go`): `read`, `service.control`, `file.write`, `terminal`,
-  `destructive`, `system.admin`, held by `admin`/`limited`/`readonly`. Gate with
+  `destructive`, `system.admin`, `metrics.read`, held by `admin`/`limited`/`readonly`. Gate with
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.
   `httpx.RequireSession` additionally blocks API tokens from human-only routes (password change,
   minting tokens, account management).
