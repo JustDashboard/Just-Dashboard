@@ -100,6 +100,8 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /activity/kill":    staysOpen,
 	"POST /maintenance":      byContent,
 	"POST /statements/reset": isRefused,
+	// The library list a server loads at start is one of its parameters.
+	"POST /statements/preload": isRefused,
 	// Accounts, databases and extensions on the server.
 	"POST /server/roles":                          isRefused,
 	"PUT /server/roles/{name}":                    isRefused,

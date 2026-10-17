@@ -460,6 +460,12 @@ func TestLiveAPIOpsPostgres(t *testing.T) {
 			t.Errorf("reset: %s", body)
 		}
 		mustStatus(t, r, http.MethodGet, base+"/statements?sort=longest", "", http.StatusBadRequest)
+		// A server that loads the module already is told nothing: the list
+		// is not stored again, and no restart is asked for.
+		if body := mustStatus(t, r, http.MethodPost, base+"/statements/preload", `{}`, http.StatusOK); !strings.Contains(body, `"statements":[]`) ||
+			!strings.Contains(body, `"restartRequired":false`) {
+			t.Errorf("preload of a server that loads the module: %s", body)
+		}
 	})
 
 	t.Run("cancel", func(t *testing.T) {
