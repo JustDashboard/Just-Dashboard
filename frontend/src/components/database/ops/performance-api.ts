@@ -13,6 +13,9 @@ import type {
   DbMaintenanceRequest,
   DbMaintenanceResult,
   DbReplication,
+  DbStatementHistory,
+  DbStatementHistoryDetail,
+  DbStatementHistorySort,
   DbStatementSort,
   DbStatements,
   DbTableStats,
@@ -130,6 +133,32 @@ export const readStatements = (
   read<DbStatements>(
     `${base(id)}/statements`,
     (answer) => Array.isArray(answer.statements),
+    query satisfies Query,
+    signal,
+  )
+
+/** What each statement cost over a recorded window. Read from the dashboard's own store: the server is not asked. */
+export const readStatementHistory = (
+  id: number,
+  query: { hours: number; sort: DbStatementHistorySort; limit: number },
+  signal?: AbortSignal,
+) =>
+  read<DbStatementHistory>(
+    `${base(id)}/statements/history`,
+    (answer) => Array.isArray(answer.statements) && Array.isArray(answer.buckets),
+    query satisfies Query,
+    signal,
+  )
+
+export const readStatementHistoryOf = (
+  id: number,
+  statement: string,
+  query: { hours: number },
+  signal?: AbortSignal,
+) =>
+  read<DbStatementHistoryDetail>(
+    `${base(id)}/statements/history/${encodeURIComponent(statement)}`,
+    (answer) => Array.isArray(answer.points) && record(answer.statement),
     query satisfies Query,
     signal,
   )

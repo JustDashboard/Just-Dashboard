@@ -124,6 +124,44 @@ CREATE TABLE IF NOT EXISTS db_metric_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_db_metric_samples_at ON db_metric_samples(at);
 
+-- Statement history: what each statement added between two readings of the
+-- statement list, taken every five minutes and kept for seven days, tied to
+-- the exact saved target as the activity history is. An interval is one
+-- reading's whole, with the time of every statement the engine counted; a
+-- sample is one statement's part of it, for the fifty that took the most.
+-- A shape is the statement's text as the statement list shows it, every value
+-- replaced, and never one execution of it. New tables are additive.
+CREATE TABLE IF NOT EXISTS db_statement_intervals (
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  identity      TEXT NOT NULL,
+  at            INTEGER NOT NULL,
+  seconds       INTEGER NOT NULL,
+  total_ms      REAL NOT NULL,
+  reset         INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (connection_id, identity, at)
+);
+CREATE INDEX IF NOT EXISTS idx_db_statement_intervals_at ON db_statement_intervals(at);
+CREATE TABLE IF NOT EXISTS db_statement_shapes (
+  id            INTEGER PRIMARY KEY,
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  identity      TEXT NOT NULL,
+  statement     TEXT NOT NULL,
+  query         TEXT NOT NULL,
+  seen_at       INTEGER NOT NULL,
+  UNIQUE (connection_id, identity, statement)
+);
+CREATE TABLE IF NOT EXISTS db_statement_samples (
+  shape_id  INTEGER NOT NULL REFERENCES db_statement_shapes(id) ON DELETE CASCADE,
+  at        INTEGER NOT NULL,
+  calls     INTEGER NOT NULL,
+  total_ms  REAL NOT NULL,
+  returned  INTEGER NOT NULL,
+  examined  INTEGER,
+  durations TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (shape_id, at)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_db_statement_samples_at ON db_statement_samples(at);
+
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
 -- connection it runs against carries the secret. A NULL connection_id would be
