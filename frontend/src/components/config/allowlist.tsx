@@ -60,7 +60,7 @@ export function Allowlist({
     >
       <RowList aria-label="Allowed networks">
         {entries.map((entry) => {
-          const kind = kindOf(entry)
+          const kind = cidrKind(entry)
           return (
             <Row
               key={entry}
@@ -109,7 +109,7 @@ export function Allowlist({
   )
 }
 
-function CidrText({ cidr }: { cidr: string }) {
+export function CidrText({ cidr }: { cidr: string }) {
   const [address, prefix] = cidr.split("/")
   return (
     <span className="numeric font-mono">
@@ -120,7 +120,12 @@ function CidrText({ cidr }: { cidr: string }) {
 }
 
 /** Where a range's addresses are, as `networkOf` reads its first one. */
-function kindOf(cidr: string): { label: string; product?: string; glyph: Icon; warning?: boolean } {
+export function cidrKind(cidr: string): {
+  label: string
+  product?: string
+  glyph: Icon
+  warning?: boolean
+} {
   const [address, prefix] = cidr.split("/")
   if (prefix === "0") return { label: "every address there is", glyph: Globe, warning: true }
   const network = networkOf(address)

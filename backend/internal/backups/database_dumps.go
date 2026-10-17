@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // A backup job may name saved database connections. Each run asks the
@@ -162,6 +164,46 @@ func (m *Manifest) CoversDatabase(connectionID int64) bool {
 		}
 	}
 	return false
+}
+
+// LastDatabaseDumps is when a backup job last backed up each saved connection
+// it has dumped: the start of the newest successful run whose archive holds
+// that connection's native dump, by the test a restore applies. The runs are
+// what count rather than the jobs' current lists, so a connection taken out of
+// a job keeps the backups that still hold it, and one just added has none
+// until a run has taken it.
+func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, error) {
+	// Newest first, so the first run found holding a connection is its
+	// answer; a run that dumped no database is not read at all.
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT started_at, manifest_json FROM backup_runs
+		 WHERE status = ? AND artifact != '' AND instr(manifest_json, '"databaseDumps"') > 0
+		 ORDER BY started_at DESC, id DESC`, string(StatusSuccess))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var (
+			started int64
+			raw     string
+		)
+		if err := rows.Scan(&started, &raw); err != nil {
+			return nil, err
+		}
+		var manifest Manifest
+		// A manifest that cannot be read vouches for nothing in its archive.
+		if json.Unmarshal([]byte(raw), &manifest) != nil {
+			continue
+		}
+		for _, dump := range manifest.DatabaseDumps {
+			if _, found := out[dump.ConnectionID]; !found && manifest.CoversDatabase(dump.ConnectionID) {
+				out[dump.ConnectionID] = time.Unix(started, 0).UTC()
+			}
+		}
+	}
+	return out, rows.Err()
 }
 
 // VerifyDatabaseCoverage confirms the archive really holds the dump entries

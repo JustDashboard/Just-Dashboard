@@ -208,8 +208,10 @@ database connections (`database_dumps`): each run asks the Databases owner for a
 one (`dbx.Dump`: pg_dump, mysqldump, mongodump, or the built-in driver dump, which for Redis is gzipped
 JSON Lines of each key's `DUMP` payload and not an RDB file) into `database-NNNN/`
 inside the archive and records connection, engine, method, file, digest and size in the manifest; a
-failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, ordinary
-confirmation) extracts one recorded dump bounded by its manifest size,
+failed dump fails the run. The Databases fleet and a connection's summary read those manifests back
+(`Store.LastDatabaseDumps`): the start of the newest successful run whose manifest covers a
+connection's dump is when a job last backed it up. `POST /backups/runs/{runID}/restore-database`
+(destructive, ordinary confirmation) extracts one recorded dump bounded by its manifest size,
 verifies its digest and restores it through `dbx.Restore` into the connection or a named drill
 database. Other sources retain ordinary filesystem capture. See
 [`../deployments/backup-coverage.md`](../deployments/backup-coverage.md).

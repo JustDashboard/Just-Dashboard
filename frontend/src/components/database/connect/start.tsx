@@ -10,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid, EngineCard } from "@/components/choice-card"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
-import { Disclosure, Field, FieldRow, OptionList, OptionRow } from "@/components/form"
+import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -443,6 +443,14 @@ export function DatabaseCreation({
                   </FieldRow>
                 </Disclosure>
                 <OptionList>
+                  {template.autoExplain && (
+                    <OptionRow
+                      title="Log the plan of every statement that takes longer than a second"
+                      hint="auto_explain · each step's actual rows, without per-step timing"
+                      checked={draft.autoExplain}
+                      onCheckedChange={(autoExplain) => set({ autoExplain })}
+                    />
+                  )}
                   <OptionRow
                     // Amber only while it is on: the risk is the choice, not the option.
                     tone={draft.shared ? "warning" : "default"}
@@ -451,6 +459,12 @@ export function DatabaseCreation({
                     onCheckedChange={(shared) => set({ shared })}
                   />
                 </OptionList>
+                {template.statements && (
+                  <FormNote>
+                    It counts its statements from the first start: pg_stat_statements is loaded and
+                    created in the new database, so Performance ranks them at once.
+                  </FormNote>
+                )}
               </fieldset>
             </FlowPanelBody>
           )}

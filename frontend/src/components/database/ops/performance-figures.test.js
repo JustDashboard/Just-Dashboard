@@ -405,6 +405,24 @@ describe("a statement that is a shape", () => {
     ).toEqual(["@p1", ":2"])
   })
 
+  test("a PostgreSQL shape asks for the extension's markers and for each ? beside them", () => {
+    // pg_stat_statements writes $n where it took a constant out; a literal it
+    // left is a ? by the time the list has it. Each is a value of its own.
+    const slots = shapeSlots("SELECT id FROM orders WHERE customer_id = $1 ORDER BY ?")
+    expect(slots.map((slot) => [slot.token, slot.key, slot.before])).toEqual([
+      ["$1", "$1", "customer_id ="],
+      ["?", "?1", "ORDER BY"],
+    ])
+    expect(
+      fillShape("SELECT id FROM orders WHERE customer_id = $1 ORDER BY ?", { $1: "42", "?1": "1" }),
+    ).toBe("SELECT id FROM orders WHERE customer_id = 42 ORDER BY 1")
+    // A statement the extension kept as it was sent is a shape with no plan.
+    for (const utility of ["CREATE ROLE app_reader WITH LOGIN PASSWORD ?", "SET work_mem = ?"]) {
+      expect(hasPlaceholder(utility)).toBe(true)
+      expect(planFor(utility)).toBe("none")
+    }
+  })
+
   test("is a statement again once values stand where the placeholders were", () => {
     const shape = "SELECT * FROM t WHERE a = $1 AND b = $2 AND c = $1"
     expect(fillShape(shape, { $1: " 42 ", $2: "'paid'" })).toBe(

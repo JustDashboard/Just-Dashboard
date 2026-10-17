@@ -505,6 +505,8 @@ export const TEMPLATES = [
     port: 5432,
     defaultUser: "jd",
     database: true,
+    statements: true,
+    autoExplain: true,
   },
   {
     engine: "timescaledb",
@@ -517,6 +519,8 @@ export const TEMPLATES = [
     port: 5432,
     defaultUser: "jd",
     database: true,
+    statements: true,
+    autoExplain: true,
   },
   {
     engine: "mariadb",

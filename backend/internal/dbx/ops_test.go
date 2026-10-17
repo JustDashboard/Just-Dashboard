@@ -796,7 +796,8 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 	}
 	want := map[Driver]map[string]bool{
 		DriverPostgres: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
-			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
+			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
+			"statementsSetup"),
 		DriverMySQL: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
 			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
 		DriverSQLite: on("stats", "tableStats", "indexStats", "maintenance", "settings", "settingsWrite",

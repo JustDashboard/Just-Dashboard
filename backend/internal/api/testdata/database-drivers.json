@@ -3,6 +3,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -142,6 +150,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": true,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -175,6 +184,7 @@
       "sqliteFile": false,
       "statements": true,
       "statementsReset": true,
+      "statementsSetup": true,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -236,6 +246,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -375,6 +393,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": true,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -408,6 +427,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": true,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -425,6 +445,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -564,6 +592,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": true,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -597,6 +626,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": true,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -614,6 +644,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -747,6 +783,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -780,6 +817,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": false,
           "streams": false,
           "tableStats": false,
@@ -797,6 +835,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -936,6 +982,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -969,6 +1016,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -993,6 +1041,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -1123,6 +1179,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -1156,6 +1213,7 @@
       "sqliteFile": false,
       "statements": true,
       "statementsReset": true,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -1218,6 +1276,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1348,6 +1414,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -1381,6 +1448,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -1398,6 +1466,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1530,6 +1606,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -1563,6 +1640,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -1580,6 +1658,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1710,6 +1796,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -1743,6 +1830,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": true,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -1760,6 +1848,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1885,6 +1979,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -1918,6 +2013,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": false,
           "streams": false,
           "tableStats": false,
@@ -1942,6 +2038,10 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -2068,6 +2168,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": false,
@@ -2101,6 +2202,7 @@
       "sqliteFile": true,
       "statements": false,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -2146,6 +2248,10 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2272,6 +2378,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -2305,6 +2412,7 @@
           "sqliteFile": true,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -2329,6 +2437,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -2462,6 +2577,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": false,
@@ -2495,6 +2611,7 @@
       "sqliteFile": false,
       "statements": true,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -2554,6 +2671,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2687,6 +2811,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -2720,6 +2845,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -2737,6 +2863,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2870,6 +3003,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -2903,6 +3037,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -2927,6 +3062,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -3039,6 +3181,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -3072,6 +3215,7 @@
       "sqliteFile": false,
       "statements": true,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -3130,6 +3274,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -3242,6 +3393,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -3275,6 +3427,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -3299,6 +3452,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -3427,6 +3587,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": false,
@@ -3460,6 +3621,7 @@
       "sqliteFile": false,
       "statements": true,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": true,
@@ -3513,6 +3675,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -3641,6 +3810,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -3674,6 +3844,7 @@
           "sqliteFile": false,
           "statements": true,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": true,
@@ -3698,6 +3869,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": true,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -3777,6 +3956,7 @@
       "orm": false,
       "ormTargets": [],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": true,
       "provision": true,
@@ -3810,6 +3990,7 @@
       "sqliteFile": false,
       "statements": false,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": false,
       "tableStats": false,
@@ -3828,6 +4009,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": true,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -3907,6 +4096,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": true,
           "provision": true,
@@ -3940,6 +4130,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": false,
@@ -3957,6 +4148,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": true,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -4036,6 +4233,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -4069,6 +4267,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": false,
           "tableStats": false,
@@ -4093,6 +4292,14 @@
     "capabilities": {
       "aclRules": true,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": true,
       "bulkKeys": true,
       "cancel": false,
@@ -4164,6 +4371,7 @@
       "orm": false,
       "ormTargets": [],
       "persistence": true,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": true,
@@ -4197,6 +4405,7 @@
       "sqliteFile": false,
       "statements": false,
       "statementsReset": false,
+      "statementsSetup": false,
       "stats": true,
       "streams": true,
       "tableStats": false,
@@ -4215,6 +4424,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4286,6 +4503,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4319,6 +4537,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": true,
           "tableStats": false,
@@ -4336,6 +4555,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4407,6 +4634,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4440,6 +4668,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": true,
           "tableStats": false,
@@ -4457,6 +4686,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4528,6 +4765,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4561,6 +4799,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": true,
           "tableStats": false,
@@ -4578,6 +4817,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": true,
           "cancel": false,
@@ -4649,6 +4896,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4682,6 +4930,7 @@
           "sqliteFile": false,
           "statements": false,
           "statementsReset": false,
+          "statementsSetup": false,
           "stats": true,
           "streams": true,
           "tableStats": false,
