@@ -74,7 +74,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
 - **SQL statements.** `POST /databases/{id}/query`, `…/script` and an analysed `…/explain` classify
   their SQL by the rules of the connection's own engine (`dbx.ParseScript`, which gives every
   statement its `Risk`) and ask for what the verdict requires (`authoriseSQL`); a script is judged by
-  its worst statement, and a statement the lexer cannot read with certainty is destructive.
+  its worst statement, and a statement the lexer cannot read with certainty is destructive. Where a
+  statement ends is the engine's reading too — a stored program's body or a block is one statement,
+  cut at its client's separators (`DELIMITER`, `GO`, a `/` line) — and one that holds statements of
+  its own is at least destructive whatever word leads it.
   `POST …/export/query` takes only a statement that classifies as a read.
 - **Rows.** `POST …/changes` classifies nothing: its handler counts the operations the set holds and
   asks for `destructive`, and spends `destrLim`, when one of them is a delete. A dry run, which
