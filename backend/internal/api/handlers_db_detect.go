@@ -1198,11 +1198,52 @@ type provisionOption struct {
 	// initial database can be named.
 	DefaultUser string `json:"defaultUser"`
 	Database    bool   `json:"database"`
+	// DefaultLimits is what the form fills in when the operator limits it,
+	// and MinMemoryMB the smallest memory limit its first start survives.
+	DefaultLimits provisionLimits `json:"defaultLimits"`
+	MinMemoryMB   int64           `json:"minMemoryMb"`
 }
 
 type provisionVersionOption struct {
 	Version string `json:"version"`
 	Image   string `json:"image"`
+}
+
+// provisionLimits is what a new server's container may use: memory in MiB
+// and processors in cores, zero for no limit.
+type provisionLimits struct {
+	MemoryMB int64   `json:"memoryMb"`
+	CPUs     float64 `json:"cpus"`
+}
+
+// defaultProvisionLimits is what the form offers once the operator chooses to
+// limit a new server: room for the engine's own defaults (128 MiB of shared
+// buffers or of InnoDB's pool) and a working set beside them, a key–value
+// server's data, and ClickHouse's appetite for memory per query. A request
+// that names no limit still gets none, which is Docker's default and what a
+// server made before limits were offered has.
+func defaultProvisionLimits(t provisionTemplate) provisionLimits {
+	switch t.driver {
+	case dbx.DriverRedis:
+		return provisionLimits{MemoryMB: 512, CPUs: 1}
+	case dbx.DriverClickHouse:
+		return provisionLimits{MemoryMB: 2048, CPUs: 2}
+	}
+	return provisionLimits{MemoryMB: 1024, CPUs: 1}
+}
+
+// provisionMinMemoryMB is the smallest memory limit a template's first start
+// survives. MySQL's entrypoint loads the time zone tables into a temporary
+// server before it makes the account, and under 512 MiB the kernel stops it
+// part way: the restart that follows finds a data directory and skips
+// initialising it, so the server runs with no account the dashboard can
+// sign in with. The others start under 448 MiB, which the live limits test
+// holds them to, and a smaller limit is the operator's to choose.
+func provisionMinMemoryMB(t provisionTemplate) int64 {
+	if t.flavor == dbx.FlavorMySQL {
+		return 512
+	}
+	return dockerMinMemoryMB
 }
 
 func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request) error {
@@ -1217,6 +1258,7 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 		option := provisionOption{
 			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver), Flavor: t.flavor,
 			Versions: []provisionVersionOption{}, Port: t.port, DefaultUser: t.user, Database: t.database,
+			DefaultLimits: defaultProvisionLimits(t), MinMemoryMB: provisionMinMemoryMB(t),
 		}
 		for _, v := range t.versions {
 			option.Versions = append(option.Versions, provisionVersionOption{Version: v.id, Image: v.image})
@@ -1245,6 +1287,9 @@ type provisionRequest struct {
 	// sent back to it.
 	User     string `json:"user"`
 	Password string `json:"password"`
+	// MemoryMB and CPUs limit what the container may use; zero, or left
+	// out, is no limit.
+	provisionLimits
 }
 
 // provisionBinding turns the requested exposure into the host address the
@@ -1350,6 +1395,12 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if problem := dbLimitsProblem(req.MemoryMB, req.CPUs, s.hostCapacity(r.Context())); problem != "" {
+		return httpx.BadRequest("%s", problem)
+	}
+	if least := provisionMinMemoryMB(tmpl); req.MemoryMB > 0 && req.MemoryMB < least {
+		return httpx.BadRequest("%s needs a memory limit of at least %d MiB to initialise its data on the first start", tmpl.label, least)
+	}
 	if s.modules.docker == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",
 			"this host has no Docker socket, so a server cannot be started")
@@ -1413,6 +1464,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		Mounts: []dockerx.MountSpec{
 			{Type: "volume", Source: volume, Target: tmpl.dataPath},
 		},
+		Limits: dockerx.ResourceLimits{MemoryMB: req.MemoryMB, CPUs: req.CPUs},
 	}
 	if tmpl.bootstrap != "" {
 		spec.Command = []string{"sh", "-c", tmpl.bootstrap}
@@ -1432,6 +1484,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	detail := map[string]any{
 		"engine": req.Engine, "image": version.image, "version": version.id, "port": port,
 		"exposure": exposure, "user": user, "passwordSupplied": req.Password != "",
+		"memoryMb": req.MemoryMB, "cpus": req.CPUs,
 	}
 	// The container is up before the engine is, but the firewall rule can go
 	// in now: nothing answers on the port until the engine does, and the
@@ -1456,7 +1509,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		"container": name, "engine": req.Engine, "driver": tmpl.driver, "flavor": tmpl.flavor,
 		"version": version.id, "image": version.image,
 		"host": "127.0.0.1", "port": port, "user": user, "database": database,
-		"exposure": exposure, "firewall": firewall,
+		"exposure": exposure, "firewall": firewall, "memoryMb": req.MemoryMB, "cpus": req.CPUs,
 	}
 	if ferr != nil {
 		resp["firewallError"] = ferr.Error()

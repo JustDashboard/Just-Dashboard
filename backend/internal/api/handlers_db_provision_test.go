@@ -22,6 +22,8 @@ type provisionCreated struct {
 			HostIP   string `json:"HostIp"`
 			HostPort string `json:"HostPort"`
 		} `json:"PortBindings"`
+		Memory   int64 `json:"Memory"`
+		NanoCpus int64 `json:"NanoCpus"`
 	} `json:"HostConfig"`
 }
 
@@ -37,6 +39,8 @@ func provisionNameEngine(t *testing.T, s *Server, containers, volumes map[string
 		switch {
 		case path == "/_ping":
 			w.Header().Set("API-Version", "1.47")
+		case path == "/info":
+			_ = json.NewEncoder(w).Encode(map[string]any{"NCPU": 4, "MemTotal": int64(4 << 30)})
 		case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/json"):
 			name := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
 			if !containers[name] {
@@ -171,6 +175,11 @@ func TestProvisionOptionsListEveryTemplateWithItsVersions(t *testing.T) {
 		Port           int    `json:"port"`
 		DefaultUser    string `json:"defaultUser"`
 		Database       bool   `json:"database"`
+		DefaultLimits  struct {
+			MemoryMB int64   `json:"memoryMb"`
+			CPUs     float64 `json:"cpus"`
+		} `json:"defaultLimits"`
+		MinMemoryMB int64 `json:"minMemoryMb"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &options); err != nil {
 		t.Fatal(err)
@@ -210,6 +219,12 @@ func TestProvisionOptionsListEveryTemplateWithItsVersions(t *testing.T) {
 		}
 		if (o.DefaultUser == "") != (tmpl.driver == "redis") {
 			t.Errorf("%s: default user %q; only the password-only engines have none", o.Engine, o.DefaultUser)
+		}
+		// What the form fills in when the operator limits a server is a
+		// limit the engine starts in, offered for every template.
+		if o.DefaultLimits.MemoryMB < 512 || o.DefaultLimits.CPUs < 1 || o.MinMemoryMB < dockerMinMemoryMB ||
+			o.DefaultLimits.MemoryMB < o.MinMemoryMB {
+			t.Errorf("%s: limits offered %+v, at least %d MiB", o.Engine, o.DefaultLimits, o.MinMemoryMB)
 		}
 	}
 	for engine := range provisionTemplates {
@@ -346,5 +361,45 @@ func TestProvisionBootstrapsCarryNoRequestText(t *testing.T) {
 	const redis = `set -eu; umask 077; conf=/tmp/jd-redis-server.conf; rm -f "$conf"; printf 'requirepass %s\n' "$REDIS_PASSWORD" > "$conf"; chown redis:redis "$conf"; exec docker-entrypoint.sh redis-server "$conf"`
 	if provisionTemplates["redis"].bootstrap != redis {
 		t.Errorf("redis bootstrap = %q", provisionTemplates["redis"].bootstrap)
+	}
+}
+
+// A new server is started with the limits the request named, held to the
+// machine before anything is pulled, and with none where it named none.
+func TestProvisionStartsTheContainerWithTheLimitsAsked(t *testing.T) {
+	s, router := dbTestRouter(t)
+	created := provisionNameEngine(t, s, map[string]bool{}, map[string]bool{})
+
+	rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"postgres","name":"jd-capped","memoryMb":1024,"cpus":1.5}`)
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"memoryMb":1024`) {
+		t.Fatalf("provision = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"redis","name":"jd-open"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("provision = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(*created) != 2 {
+		t.Fatalf("%d containers were created", len(*created))
+	}
+	if hc := (*created)[0].HostConfig; hc.Memory != 1024<<20 || hc.NanoCpus != 1_500_000_000 {
+		t.Errorf("the limited server was created with %d bytes and %d nano-processors", hc.Memory, hc.NanoCpus)
+	}
+	if hc := (*created)[1].HostConfig; hc.Memory != 0 || hc.NanoCpus != 0 {
+		t.Errorf("a server with no limit asked for was created with %d bytes and %d nano-processors", hc.Memory, hc.NanoCpus)
+	}
+
+	for body, want := range map[string]string{
+		`{"engine":"postgres","memoryMb":5000}`: "4096 MiB of memory",
+		`{"engine":"postgres","cpus":6}`:        "4 processors",
+		`{"engine":"postgres","memoryMb":2}`:    "at least 6 MiB",
+		`{"engine":"postgres","cpus":-1}`:       "cannot be negative",
+		`{"engine":"mysql","memoryMb":448}`:     "MySQL needs a memory limit of at least 512 MiB",
+	} {
+		rec := do(t, router, http.MethodPost, "/databases/provision", body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("provision %s = %d %s, want 400 saying %q", body, rec.Code, strings.TrimSpace(rec.Body.String()), want)
+		}
+	}
+	if len(*created) != 2 {
+		t.Errorf("a refused limit created a container: %d", len(*created))
 	}
 }
