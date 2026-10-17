@@ -287,6 +287,10 @@ to the contribution terms above, including the additional licence grant to the p
   generate credentials, require setup, have no application login, or remain unavailable.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
+  Encrypted archives in a bucket take an S3-compatible service you started yourself, named by
+  `JD_TEST_S3_ENDPOINT` and its keys: `go test ./internal/backups -run TestLiveEncryptedArchiveRoundTripsThroughObjectStorage -count=1 -v`;
+  a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
+  `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
@@ -441,7 +445,7 @@ likely to be somebody's data as a fixture.
 | --- | --- | --- |
 | `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
 | `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
-| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts, encrypted backups |
 | `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop |
 | `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
@@ -455,6 +459,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
 | `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
 | `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
+| `JD_TEST_S3_ENDPOINT`, `JD_TEST_S3_ACCESS_KEY`, `JD_TEST_S3_SECRET_KEY` | an S3-compatible service (MinIO, versitygw) and keys that may create buckets; the test makes one named `jdt-backup-encryption-…` and empties and removes it | `TestLiveEncryptedArchiveRoundTripsThroughObjectStorage` |
 
 Some tests reach past a database to the machine and run only when asked:
 

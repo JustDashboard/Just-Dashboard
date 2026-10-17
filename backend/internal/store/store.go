@@ -234,6 +234,7 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   retention_days INTEGER NOT NULL DEFAULT 0,
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
+  encrypt     INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
 );
 
@@ -1269,6 +1270,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"backup_jobs", "revision", "INTEGER NOT NULL DEFAULT 1"},
+	// Backup jobs learned to encrypt their archives. A job that predates the
+	// setting keeps writing what it always wrote until somebody turns it on.
+	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's

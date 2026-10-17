@@ -174,7 +174,8 @@ as actor `cli`. See [terminal tools](../operations/terminal-tools.md) for comman
 privilege boundary.
 
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
-strings, deploy env, backup credentials.
+strings, deploy env, backup credentials, and the backup key encrypted archives are sealed to
+([archive encryption](../backend/git-backups-users.md#archive-encryption)).
 
 An account has two names. `username` is the sign-in key and the actor every audit entry and
 deployment record names: trimmed, lower-cased, one word, unique. `display_name` is what the account
