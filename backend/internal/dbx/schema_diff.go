@@ -189,7 +189,7 @@ type routineDiff struct {
 // name taken away, so the same table in two schemas is not different for being
 // in them.
 func DiffSchemas(from, to *SchemaSnapshot) *SchemaDiff {
-	mask := schemaMasks(from.Schema, to.Schema)
+	mask := schemaMasks(from.Schema, to.Schema, from.Driver == DriverMySQL)
 	diff := &SchemaDiff{}
 	// A kind of object unread on either side is not compared at all: its
 	// absence from one snapshot is the reading's, not the schema's.
@@ -333,14 +333,15 @@ func routineText(s string) string { return strings.Join(strings.Fields(s), " ") 
 // schemaMask removes the schema's own name from a piece of definition text so
 // two schemas can be compared by what is in them.
 type schemaMask struct {
-	from, to string
+	from, to  string
+	backslash bool
 }
 
-func schemaMasks(from, to string) schemaMask {
+func schemaMasks(from, to string, backslash bool) schemaMask {
 	if from == to {
 		return schemaMask{}
 	}
-	return schemaMask{from: from, to: to}
+	return schemaMask{from: from, to: to, backslash: backslash}
 }
 
 // text returns s with the name of the schema it came from taken out. side is
@@ -353,27 +354,7 @@ func (m schemaMask) text(s string, toSide bool) string {
 	if name == "" || s == "" {
 		return s
 	}
-	return stripSchemaName(s, name)
-}
-
-// stripSchemaName deletes `name.`, in the spellings the engines print it in:
-// double-quoted, backtick-quoted, bracketed and bare. A bare name only counts
-// at a word boundary: `x_public.` is not `public.`.
-func stripSchemaName(s, name string) string {
-	for _, qualifier := range []string{`"` + name + `".`, "`" + name + "`.", "[" + name + "]."} {
-		s = strings.ReplaceAll(s, qualifier, "")
-	}
-	bare := name + "."
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if strings.HasPrefix(s[i:], bare) && (i == 0 || !isIdentByte(s[i-1])) {
-			i += len(bare)
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
+	return stripSchemaName(s, name, m.backslash)
 }
 
 func isIdentByte(c byte) bool {

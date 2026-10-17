@@ -37,35 +37,6 @@ const side = (id: number, name: string, schema: string) => ({
   schema,
 })
 
-const SCRIPT = `-- Create enum type tier
-CREATE TYPE "public"."tier" AS ENUM ('free', 'team');
-
--- Create table payments
-CREATE TABLE "public"."payments" (
-  "id" bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
-  "order_id" bigint NOT NULL,
-  "amount" numeric(12,2) NOT NULL,
-  CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
-);
-
--- Change column email of users
-ALTER TABLE "public"."users" ALTER COLUMN "email" TYPE varchar(120), ALTER COLUMN "email" SET NOT NULL;
-
--- Drop column legacy_flag from users
--- DESTRUCTIVE: this removes data or definitions that cannot be restored from this script
-ALTER TABLE "public"."users" DROP COLUMN "legacy_flag";
-
--- NEEDS YOUR ATTENTION: Change enum type mood
--- Labels cannot be removed or reordered in place.
-
--- Drop table audit_old
--- DESTRUCTIVE: this removes data or definitions that cannot be restored from this script
-DROP TABLE "public"."audit_old";
-
--- Add foreign key payments_order_id_fkey to payments
-ALTER TABLE "public"."payments" ADD CONSTRAINT "payments_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders" ("id");
-`
-
 const ANSWER = {
   from: side(1, "shop", "public"),
   to: side(3, "shop-staging", "staging"),
@@ -166,6 +137,24 @@ const ANSWER = {
       note: "",
     },
     {
+      title: "Create table payments",
+      statements: [
+        'CREATE TABLE "public"."payments" (\n  "id" bigint GENERATED ALWAYS AS IDENTITY NOT NULL,\n  "order_id" bigint NOT NULL,\n  "amount" numeric(12,2) NOT NULL,\n  CONSTRAINT "payments_pkey" PRIMARY KEY ("id")\n)',
+      ],
+      destructive: false,
+      manual: false,
+      note: "",
+    },
+    {
+      title: "Change column email of users",
+      statements: [
+        'ALTER TABLE "public"."users" ALTER COLUMN "email" TYPE varchar(120), ALTER COLUMN "email" SET NOT NULL',
+      ],
+      destructive: true,
+      manual: false,
+      note: "The values are converted to the new type; a value that does not convert stops the statement.",
+    },
+    {
       title: "Drop column legacy_flag from users",
       statements: ['ALTER TABLE "public"."users" DROP COLUMN "legacy_flag"'],
       destructive: true,
@@ -186,8 +175,16 @@ const ANSWER = {
       manual: false,
       note: "",
     },
+    {
+      title: "Add foreign key payments_order_id_fkey to payments",
+      statements: [
+        'ALTER TABLE "public"."payments" ADD CONSTRAINT "payments_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders" ("id")',
+      ],
+      destructive: false,
+      manual: false,
+      note: "",
+    },
   ],
-  script: SCRIPT,
   notes: [],
 }
 
@@ -287,17 +284,17 @@ test("the migration is steps that mark what destroys and what is left to the rea
   await page.getByRole("button", { name: "Compare", exact: true }).click()
 
   const migration = page.getByRole("region", { name: "Migration" })
-  await expect(migration.getByText("4 steps · 2 destructive · 1 for you to do")).toBeVisible()
+  await expect(migration.getByText("7 steps · 3 destructive · 1 for you to do")).toBeVisible()
   await expect(migration.getByText("This script removes things")).toBeVisible()
   await expect(migration.getByText("Some changes are left to you")).toBeVisible()
 
   await migration.getByRole("tab", { name: "Steps" }).click()
   const steps = migration.getByRole("list", { name: "Steps" })
-  await expect(steps.getByRole("listitem")).toHaveCount(4)
-  await expect(steps.getByRole("listitem").nth(1)).toContainText("Destructive")
-  await expect(steps.getByRole("listitem").nth(1)).toContainText('DROP COLUMN "legacy_flag";')
-  await expect(steps.getByRole("listitem").nth(2)).toContainText("For you")
-  await expect(steps.getByRole("listitem").nth(2)).toContainText("Labels cannot be removed")
+  await expect(steps.getByRole("listitem")).toHaveCount(7)
+  await expect(steps.getByRole("listitem").nth(3)).toContainText("Destructive")
+  await expect(steps.getByRole("listitem").nth(3)).toContainText('DROP COLUMN "legacy_flag";')
+  await expect(steps.getByRole("listitem").nth(4)).toContainText("For you")
+  await expect(steps.getByRole("listitem").nth(4)).toContainText("Labels cannot be removed")
 })
 
 test("the script is opened in Query on this connection, or saved as a file", async ({ page }) => {
@@ -319,7 +316,19 @@ test("the script is opened in Query on this connection, or saved as a file", asy
 
 test("a script too long for an address is copied or saved, and says so", async ({ page }) => {
   await mockCompare(page, {
-    answer: { ...ANSWER, script: `${SCRIPT}\n${"-- padding\n".repeat(900)}` },
+    answer: {
+      ...ANSWER,
+      steps: [
+        ...ANSWER.steps,
+        {
+          title: "A long one",
+          statements: ["-- padding\n".repeat(900) + "SELECT 1"],
+          destructive: false,
+          manual: false,
+          note: "",
+        },
+      ],
+    },
   })
   await page.goto(OPEN)
   await page.getByRole("button", { name: "Compare", exact: true }).click()
@@ -330,7 +339,7 @@ test("a script too long for an address is copied or saved, and says so", async (
 })
 
 test("schemas that match say so", async ({ page }) => {
-  await mockCompare(page, { answer: { ...ANSWER, objects: [], steps: [], script: "" } })
+  await mockCompare(page, { answer: { ...ANSWER, objects: [], steps: [] } })
   await page.goto(OPEN)
   await page.getByRole("button", { name: "Compare", exact: true }).click()
   await expect(page.getByText("The schemas match")).toBeVisible()
@@ -481,7 +490,7 @@ test("the pages, for the record @shots", async ({ page }) => {
   await page.screenshot({ path: `${out}/removed-only-1440.png` })
 
   const matching = await page.context().newPage()
-  await mockCompare(matching, { answer: { ...ANSWER, objects: [], steps: [], script: "" } })
+  await mockCompare(matching, { answer: { ...ANSWER, objects: [], steps: [] } })
   await matching.setViewportSize({ width: 1440, height: 900 })
   await matching.goto(OPEN)
   await matching.getByRole("button", { name: "Compare", exact: true }).click()

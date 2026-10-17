@@ -141,7 +141,7 @@ func TestTheSchemasOwnNameIsNotADifference(t *testing.T) {
 		t.Fatalf("the same schema under two names differs: %+v", diff.Objects)
 	}
 	// A bare name goes at a word boundary only.
-	if got := stripSchemaName("x_alpha.t alpha.t `alpha`.t", "alpha"); got != "x_alpha.t t t" {
+	if got := stripSchemaName("x_alpha.t alpha.t `alpha`.t", "alpha", false); got != "x_alpha.t t t" {
 		t.Errorf("stripSchemaName = %q", got)
 	}
 }
@@ -420,9 +420,11 @@ func TestADefinerIsNotCarriedToAnotherServer(t *testing.T) {
 
 func TestACheckConditionComesOutOfItsClause(t *testing.T) {
 	for in, want := range map[string]string{
-		"CHECK ((age >= 0))":          "(age >= 0)",
+		"CHECK ((age >= 0))":          "age >= 0",
 		"CHECK (price > 0)":           "price > 0",
 		"check   (a = 1 AND (b = 2))": "a = 1 AND (b = 2)",
+		// Parentheses that do not enclose the whole are not a pair to strip.
+		"CHECK (a > 0) AND (b > 0)": "(a > 0) AND (b > 0)",
 	} {
 		if got := checkExpression(in); got != want {
 			t.Errorf("checkExpression(%q) = %q, want %q", in, got, want)
@@ -457,7 +459,7 @@ func TestRebasingNamesTheSchemaBeingChanged(t *testing.T) {
 		{"[alpha].[t]", "[beta].[t]"},
 		{`x_alpha.t`, `x_alpha.t`},
 	} {
-		if got := rebaseSchemaName(c.in, "alpha", "beta"); got != c.want {
+		if got := rebaseSchemaName(c.in, "alpha", "beta", false); got != c.want {
 			t.Errorf("rebase(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}

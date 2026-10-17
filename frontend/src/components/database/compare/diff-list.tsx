@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { GroupRule } from "@/components/flow"
@@ -106,9 +106,14 @@ function ObjectRow({
   to: CompareSide
 }) {
   const phrase = partsLine(object.parts)
+  // What is inside is drawn once the row has been opened: lining a definition
+  // up against the other side costs a matrix of its lines, and a comparison
+  // can list hundreds of objects that nobody opens.
+  const [opened, setOpened] = useState(false)
   return (
     <Disclosure
       quiet
+      onOpenChange={(open) => open && setOpened(true)}
       summary={
         <span className="flex min-w-0 flex-1 items-baseline gap-3">
           <Tag tone={CHANGE_TONE[object.change]} className="w-16 shrink-0">
@@ -123,7 +128,7 @@ function ObjectRow({
         </span>
       }
     >
-      <PartsTable object={object} from={from} to={to} />
+      {opened && <PartsTable object={object} from={from} to={to} />}
     </Disclosure>
   )
 }

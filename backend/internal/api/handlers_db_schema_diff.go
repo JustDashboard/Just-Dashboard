@@ -36,10 +36,9 @@ type schemaDiffResponse struct {
 	To   schemaDiffSide `json:"to"`
 	// Objects is what differs, and empty when the two schemas are alike.
 	Objects []dbx.ObjectDiff `json:"objects"`
-	// Steps is the migration in the order it has to run, and Script the same
-	// as one text.
-	Steps  []dbx.MigrationStep `json:"steps"`
-	Script string              `json:"script"`
+	// Steps is the migration in the order it has to run. The page writes the
+	// script from them, so the statements travel once.
+	Steps []dbx.MigrationStep `json:"steps"`
 	// Notes say what the comparison did not look at or could not be sure of.
 	Notes []string `json:"notes"`
 }
@@ -113,7 +112,7 @@ func (s *Server) handleDBSchemaDiff(w http.ResponseWriter, r *http.Request) erro
 	httpx.JSON(w, http.StatusOK, schemaDiffResponse{
 		From:    schemaDiffSide{ID: id, Name: fromConn.Name, Driver: fromConn.Driver, Flavor: fromFlavor, FlavorLabel: dbx.FlavorLabel(fromFlavor), Schema: from.Schema},
 		To:      schemaDiffSide{ID: toID, Name: toConn.Name, Driver: toConn.Driver, Flavor: toFlavor, FlavorLabel: dbx.FlavorLabel(toFlavor), Schema: to.Schema},
-		Objects: nonNil(diff.Objects), Steps: nonNil(migration.Steps), Script: migration.Script(), Notes: nonNil(notes),
+		Objects: nonNil(diff.Objects), Steps: nonNil(migration.Steps), Notes: nonNil(notes),
 	})
 	return nil
 }

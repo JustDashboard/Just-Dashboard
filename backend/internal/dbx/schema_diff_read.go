@@ -9,10 +9,14 @@ import (
 	"strings"
 )
 
-// MaxDiffTables bounds one side of a comparison. A table costs several
-// catalogue reads, so a schema past this is refused by name instead of keeping
-// a request open for minutes.
+// MaxDiffTables bounds the tables of one side of a comparison. A table costs
+// several catalogue reads, so a schema past this is refused by name instead of
+// keeping a request open for minutes.
 const MaxDiffTables = 400
+
+// MaxDiffObjects bounds everything else a side holds, tables included, since
+// every view, routine and sequence is a definition read and sent.
+const MaxDiffObjects = 1500
 
 // ErrSchemaTooLarge is returned for a schema with more tables than a
 // comparison reads.
@@ -65,6 +69,19 @@ func ReadSchemaSnapshot(ctx context.Context, db *sql.DB, driver Driver, flavor, 
 		return nil, fmt.Errorf("%w: %s has %d tables and a comparison reads up to %d",
 			ErrSchemaTooLarge, schemaLabel(catalog.Schema), len(own), MaxDiffTables)
 	}
+	total := len(own)
+	for _, group := range []string{GroupViews, GroupMaterializedViews, GroupSequences, GroupFunctions, GroupProcedures} {
+		total += len(catalog.Objects[group])
+	}
+	for _, t := range catalog.Objects[GroupTypes] {
+		if t.Kind == KindEnum {
+			total++
+		}
+	}
+	if total > MaxDiffObjects {
+		return nil, fmt.Errorf("%w: %s holds %d objects and a comparison reads up to %d",
+			ErrSchemaTooLarge, schemaLabel(catalog.Schema), total, MaxDiffObjects)
+	}
 	for _, t := range own {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -81,7 +98,7 @@ func ReadSchemaSnapshot(ctx context.Context, db *sql.DB, driver Driver, flavor, 
 		if err != nil {
 			return "", err
 		}
-		return stripDefiner(driver, def.Definition), nil
+		return usableDefinition(driver, ref.Name, def)
 	}
 	// A group the catalogue reads but whose definitions cannot be had is
 	// unread too: a name with no text is nothing to compare.
@@ -143,6 +160,23 @@ func ReadSchemaSnapshot(ctx context.Context, db *sql.DB, driver Driver, flavor, 
 		}
 	}
 	return snap, nil
+}
+
+// usableDefinition is an object's text if the server gave it. A server that
+// will not — no privilege to see it, an encrypted module, a NULL where the
+// text should be — answers with nothing or with a note; read as an empty text,
+// every such object would differ from its twin and be dropped and made again
+// with nothing.
+func usableDefinition(driver Driver, name string, def *ObjectDefinition) (string, error) {
+	text := strings.TrimSpace(stripDefiner(driver, def.Definition))
+	if text == "" || def.Note != "" {
+		reason := strings.TrimRight(strings.TrimSpace(def.Note), ".")
+		if reason == "" {
+			reason = "the server gave no definition"
+		}
+		return "", fmt.Errorf("%s: %s", oneLine(name), oneLine(reason))
+	}
+	return text, nil
 }
 
 // catalogHas reports whether the engine's catalogue has the group at all.

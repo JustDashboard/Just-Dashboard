@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -47,6 +48,20 @@ func schemaDiffSecond(t *testing.T, s *Server, name string) (id int64, db *sql.D
 	return id, db
 }
 
+// stepsOf reads the migration's steps out of an answer.
+func stepsOf(t *testing.T, body map[string]any) []dbx.MigrationStep {
+	t.Helper()
+	raw, err := json.Marshal(body["steps"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var steps []dbx.MigrationStep
+	if err := json.Unmarshal(raw, &steps); err != nil {
+		t.Fatal(err)
+	}
+	return steps
+}
+
 func schemaDiffGet(t *testing.T, router http.Handler, id, to int64, extra string) (*http.Response, map[string]any) {
 	t.Helper()
 	rec, body := schemaSend(t, router, http.MethodGet, pathf("/databases/%d/schema-diff", id)+"?to="+strconv.FormatInt(to, 10)+extra, "")
@@ -85,7 +100,10 @@ func TestSchemaDiffComparesTwoConnectionsAndChangesNeither(t *testing.T) {
 			t.Errorf("%s = %q among %v", key, seen[key], seen)
 		}
 	}
-	script, _ := body["script"].(string)
+	if _, sent := body["script"]; sent {
+		t.Error("the script is sent as well as the steps it is written from")
+	}
+	script := (&dbx.Migration{Steps: stepsOf(t, body)}).Script()
 	for _, want := range []string{
 		"-- Create table refunds\nCREATE TABLE refunds",
 		"-- Add column note to orders\nALTER TABLE \"orders\" ADD COLUMN \"note\" TEXT;",
@@ -146,8 +164,8 @@ func TestSchemaDiffOfTwoLikeSchemasIsEmpty(t *testing.T) {
 	if objects, _ := body["objects"].([]any); len(objects) != 0 {
 		t.Errorf("one schema differs from itself: %v", objects)
 	}
-	if steps, _ := body["steps"].([]any); len(steps) != 0 || body["script"] != "" {
-		t.Errorf("a migration for nothing: %v %q", steps, body["script"])
+	if steps, _ := body["steps"].([]any); len(steps) != 0 {
+		t.Errorf("a migration for nothing: %v", steps)
 	}
 }
 

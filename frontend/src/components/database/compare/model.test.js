@@ -9,6 +9,7 @@ import {
   readComparison,
   readSideId,
   scriptFilename,
+  scriptOf,
   stepCounts,
   stepsLine,
   summaryLine,
@@ -69,6 +70,11 @@ describe("an answer is read whatever came back", () => {
     })
     expect(read.steps[0]).toMatchObject({ destructive: false, manual: false, note: "" })
     expect(read.steps[1]).toMatchObject({ destructive: true, statements: [] })
+    // The script is written from the steps, not taken from the answer.
+    expect(read.script).toBe(scriptOf(read.steps))
+    expect(read.script).toContain(
+      "-- Add column email to users\nALTER TABLE users ADD COLUMN email text;\n",
+    )
   })
 })
 
@@ -231,5 +237,54 @@ describe("handing the script to Query", () => {
   test("what the address makes longer is counted", () => {
     // Every quote and bracket becomes three characters of the address.
     expect(canHandToQuery('"("'.repeat(1000))).toBe(false)
+  })
+})
+
+describe("the script is written from the steps", () => {
+  // The same steps as the server's own test of Migration.Script writes out.
+  test("as the server writes it", () => {
+    const steps = [
+      {
+        title: "Create table a",
+        statements: ["CREATE TABLE a (id int);"],
+        destructive: false,
+        manual: false,
+        note: "",
+      },
+      {
+        title: "Drop table b",
+        statements: ["DROP TABLE b"],
+        destructive: true,
+        manual: false,
+        note: "",
+      },
+      {
+        title: "Change sequence s",
+        statements: [],
+        destructive: false,
+        manual: true,
+        note: "First line\nSecond line",
+      },
+    ]
+    expect(scriptOf(steps)).toBe(
+      "-- Create table a\nCREATE TABLE a (id int);\n\n" +
+        "-- Drop table b\n-- DESTRUCTIVE: this removes data or definitions that cannot be restored from this script\nDROP TABLE b;\n\n" +
+        "-- NEEDS YOUR ATTENTION: Change sequence s\n-- First line\n-- Second line\n",
+    )
+    expect(scriptOf([])).toBe("")
+  })
+
+  test("a name with a line break in it stays in its comment", () => {
+    const script = scriptOf([
+      {
+        title: "Add label x\nDROP TABLE customers; -- to mood",
+        statements: [],
+        destructive: false,
+        manual: true,
+        note: "a\r\nDROP TABLE y;\u2028DROP TABLE z;",
+      },
+    ])
+    expect(script.split("\n").filter((line) => line !== "" && !line.startsWith("--"))).toEqual([])
+    expect(script).not.toMatch(/\u2028/)
   })
 })

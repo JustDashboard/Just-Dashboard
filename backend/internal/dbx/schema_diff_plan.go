@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // MigrationStep is one change the migration makes, with the statements that
@@ -39,16 +40,17 @@ func (m *Migration) Script() string {
 			b.WriteString("\n")
 		}
 		if step.Manual {
-			b.WriteString("-- NEEDS YOUR ATTENTION: " + step.Title + "\n")
+			b.WriteString(commentLine("NEEDS YOUR ATTENTION: " + step.Title))
 		} else {
-			b.WriteString("-- " + step.Title + "\n")
+			b.WriteString(commentLine(step.Title))
 		}
 		if step.Destructive {
 			b.WriteString("-- DESTRUCTIVE: this removes data or definitions that cannot be restored from this script\n")
 		}
-		for _, line := range strings.Split(step.Note, "\n") {
+		note := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(step.Note)
+		for _, line := range strings.Split(note, "\n") {
 			if strings.TrimSpace(line) != "" {
-				b.WriteString("-- " + strings.TrimSpace(line) + "\n")
+				b.WriteString(commentLine(line))
 			}
 		}
 		for _, stmt := range step.Statements {
@@ -56,6 +58,22 @@ func (m *Migration) Script() string {
 		}
 	}
 	return b.String()
+}
+
+// commentLine is text as one line of comment. A title or a note holds names
+// the databases chose — an enum label, a column, a routine's signature — and a
+// name with a line break in it would otherwise end the comment and start a
+// statement of its own.
+func commentLine(text string) string { return "-- " + oneLine(text) + "\n" }
+
+// oneLine replaces every control character and line separator with a space.
+func oneLine(text string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, text))
 }
 
 // Counts reports how many steps there are, how many are destructive and how
@@ -108,20 +126,29 @@ func (p *migrationPlanner) plan() {
 			removedTables[t.name] = true
 		}
 	}
+	views := p.viewMoves()
+	cycled := p.cycledForeignKeys()
 
+	if p.driver == DriverPostgres && p.hasRoutineWork() {
+		// A function's body is read when it is made, and the order below makes
+		// them after what they read; this is for the body that reads what a
+		// later step makes.
+		p.step("Do not read function bodies while the migration runs", false, "SET check_function_bodies = off")
+	}
 	p.enums()
 	p.sequences(ChangeAdded)
-	p.routines(ChangeAdded, ChangeChanged)
+	p.routines(routinesEarly)
 
 	// Everything that depends on a table or a column goes before the change
 	// that would break it: views first, then the keys and indexes that hold
 	// the old shape in place.
-	p.dropViews()
+	p.dropViews(views)
 	for _, t := range d.tables {
 		if t.change == ChangeChanged {
 			p.dropForeignKeys(t)
 		}
 	}
+	p.dropCycledForeignKeys(cycled)
 	p.dropCrossTableForeignKeys(removedTables)
 	for _, t := range d.tables {
 		if t.change == ChangeChanged {
@@ -165,22 +192,99 @@ func (p *migrationPlanner) plan() {
 			}
 		}
 	}
+	p.addCycledForeignKeys(cycled)
 	p.ownSequences()
-	p.createViews()
-	p.routines(ChangeRemoved)
+	p.routines(routinesLate)
+	p.createViews(views)
+	p.removedRoutines()
 	p.sequences(ChangeRemoved, ChangeChanged)
 	p.removedEnums()
+}
+
+// cycledForeignKey is a foreign key that did not change and is dropped and
+// added again anyway, because it uses a column whose type changes.
+type cycledForeignKey struct {
+	table string
+	key   ForeignKey
+}
+
+// cycledForeignKeys finds the unchanged keys on, or pointing at, a column that
+// changes type. MySQL and SQL Server refuse the change while such a key stands;
+// Postgres converts the key with the column.
+func (p *migrationPlanner) cycledForeignKeys() []cycledForeignKey {
+	if p.driver != DriverMySQL && p.driver != DriverMSSQL {
+		return nil
+	}
+	retyped := map[string][]string{}
+	for _, t := range p.diff.tables {
+		if t.change == ChangeChanged {
+			if cols := retypedColumns(t); len(cols) > 0 {
+				retyped[t.name] = cols
+			}
+		}
+	}
+	if len(retyped) == 0 {
+		return nil
+	}
+	inDiff := map[string]bool{}
+	for _, t := range p.diff.tables {
+		for _, f := range t.foreign {
+			if f.from != nil {
+				inDiff[settledKey(PartForeignKey, t.name, f.from.Name)] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(p.from.Tables))
+	for name := range p.from.Tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []cycledForeignKey
+	for _, name := range names {
+		if _, gone := p.to.Tables[name]; !gone {
+			continue
+		}
+		for _, fk := range p.from.Tables[name].ForeignKeys {
+			if inDiff[settledKey(PartForeignKey, name, fk.Name)] {
+				continue
+			}
+			if anyIn(fk.Columns, retyped[name]) || (fk.RefSchema == "" || fk.RefSchema == p.schema) && anyIn(fk.RefColumns, retyped[fk.RefTable]) {
+				out = append(out, cycledForeignKey{name, fk})
+			}
+		}
+	}
+	return out
+}
+
+func anyIn(list, among []string) bool {
+	return slices.ContainsFunc(list, func(s string) bool { return slices.Contains(among, s) })
+}
+
+func (p *migrationPlanner) dropCycledForeignKeys(keys []cycledForeignKey) {
+	for _, c := range keys {
+		plan, err := PlanDropForeignKey(p.driver, p.schema, c.table, c.key.Name)
+		p.planned("Drop foreign key "+c.key.Name+" on "+c.table, false, plan, err)
+		if err == nil {
+			p.steps[len(p.steps)-1].Note = "It uses a column whose type changes, so it is added again after."
+		}
+	}
+}
+
+func (p *migrationPlanner) addCycledForeignKeys(keys []cycledForeignKey) {
+	for _, c := range keys {
+		p.addForeignKeys(c.table, []ForeignKey{c.key})
+	}
 }
 
 // --- bookkeeping -------------------------------------------------------------
 
 func (p *migrationPlanner) step(title string, destructive bool, statements ...string) {
-	p.steps = append(p.steps, MigrationStep{Title: title, Statements: statements, Destructive: destructive})
+	p.steps = append(p.steps, MigrationStep{Title: oneLine(title), Statements: statements, Destructive: destructive})
 }
 
 // manual records a change the generator cannot write for this engine.
 func (p *migrationPlanner) manual(title string, destructive bool, note string) {
-	p.steps = append(p.steps, MigrationStep{Title: title, Destructive: destructive, Manual: true, Note: note})
+	p.steps = append(p.steps, MigrationStep{Title: oneLine(title), Destructive: destructive, Manual: true, Note: note})
 }
 
 // planned adds a generator's plan as a step, or the reason it could not be
@@ -190,23 +294,33 @@ func (p *migrationPlanner) planned(title string, destructive bool, plan *DDLPlan
 		p.manual(title, destructive, err.Error())
 		return
 	}
-	step := MigrationStep{Title: title, Statements: plan.Statements, Destructive: destructive}
+	step := MigrationStep{Title: oneLine(title), Statements: plan.Statements, Destructive: destructive}
 	if len(plan.Unvouched) > 0 {
 		step.Note = "Calls " + strings.Join(plan.Unvouched, ", ") + ", which the query editor will ask you to confirm."
 	}
 	p.steps = append(p.steps, step)
 }
 
-func (p *migrationPlanner) rel(name string) string {
+// rel names an object of the "from" schema as a statement writes it. A name
+// the engine's quoting refuses is an error, never the bare name: a statement
+// built on it would mean something other than what it was asked to.
+func (p *migrationPlanner) rel(name string) (string, error) {
 	d, err := DialectFor(p.driver)
 	if err != nil {
-		return name
+		return "", err
 	}
-	rel, err := ddlRel(d, p.schema, name)
+	return ddlRel(d, p.schema, name)
+}
+
+// relOr is rel, with the step handed to the operator when the name will not
+// quote.
+func (p *migrationPlanner) relOr(title string, destructive bool, name string) (string, bool) {
+	rel, err := p.rel(name)
 	if err != nil {
-		return name
+		p.manual(title, destructive, err.Error())
+		return "", false
 	}
-	return rel
+	return rel, true
 }
 
 // rebase writes text taken from the "to" schema as it reads in the "from" one,
@@ -215,32 +329,7 @@ func (p *migrationPlanner) rebase(s string) string {
 	if p.schema == p.toSchema || s == "" || p.toSchema == "" {
 		return s
 	}
-	return rebaseSchemaName(s, p.toSchema, p.schema)
-}
-
-// rebaseSchemaName replaces `old.` with `new.` in the spellings the engines
-// print a qualified name in.
-func rebaseSchemaName(s, old, new string) string {
-	pairs := [][2]string{
-		{`"` + old + `".`, `"` + new + `".`},
-		{"`" + old + "`.", "`" + new + "`."},
-		{"[" + old + "].", "[" + new + "]."},
-	}
-	for _, pair := range pairs {
-		s = strings.ReplaceAll(s, pair[0], pair[1])
-	}
-	bare := old + "."
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if strings.HasPrefix(s[i:], bare) && (i == 0 || !isIdentByte(s[i-1])) {
-			b.WriteString(new + ".")
-			i += len(bare)
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
+	return rebaseSchemaName(s, p.toSchema, p.schema, p.driver == DriverMySQL)
 }
 
 func (p *migrationPlanner) refSchema(fk ForeignKey) string {
@@ -299,8 +388,10 @@ func (p *migrationPlanner) removedEnums() {
 		if e.change != ChangeRemoved {
 			continue
 		}
-		rel := p.rel(e.name)
-		p.step("Drop enum type "+e.name, true, "DROP TYPE "+rel)
+		title := "Drop enum type " + e.name
+		if rel, ok := p.relOr(title, true, e.name); ok {
+			p.step(title, true, "DROP TYPE "+rel)
+		}
 	}
 }
 
@@ -326,7 +417,10 @@ func (p *migrationPlanner) sequences(changes ...string) {
 			if p.ownerRemoved(s.from.Owner) {
 				continue
 			}
-			p.step("Drop sequence "+s.name, true, "DROP SEQUENCE "+p.rel(s.name))
+			title := "Drop sequence " + s.name
+			if rel, ok := p.relOr(title, true, s.name); ok {
+				p.step(title, true, "DROP SEQUENCE "+rel)
+			}
 		}
 	}
 }
@@ -376,8 +470,12 @@ func (p *migrationPlanner) ownSequences() {
 		if err != nil {
 			continue
 		}
-		p.step("Make "+table+"."+column+" the owner of sequence "+s.name, false,
-			"ALTER SEQUENCE "+p.rel(s.name)+" OWNED BY "+p.rel(table)+"."+col)
+		title := "Make " + table + "." + column + " the owner of sequence " + s.name
+		seq, ok := p.relOr(title, false, s.name)
+		owner, okOwner := p.relOr(title, false, table)
+		if ok && okOwner {
+			p.step(title, false, "ALTER SEQUENCE "+seq+" OWNED BY "+owner+"."+col)
+		}
 	}
 }
 
@@ -395,40 +493,164 @@ func stripDefiner(driver Driver, text string) string {
 	return definerClause.ReplaceAllString(text, "")
 }
 
-func (p *migrationPlanner) routines(changes ...string) {
+// routinePhase says when in the migration a routine is made.
+type routinePhase int
+
+const (
+	// routinesEarly are the ones a default, a check, a generated column or an
+	// index predicate calls: they must exist before the table is made.
+	routinesEarly routinePhase = iota
+	// routinesLate are the rest. The engine reads a routine's body when it is
+	// made — Postgres checks a SQL function's against its tables, SQL Server
+	// its columns — so they wait for the tables and columns they read.
+	routinesLate
+)
+
+// earlyRoutines names the routines the "to" tables call outside a routine.
+func (p *migrationPlanner) earlyRoutines() map[string]bool {
+	var corpus strings.Builder
+	for _, t := range p.to.Tables {
+		for _, c := range t.Columns {
+			corpus.WriteString(" " + c.Default + " " + c.Generated)
+		}
+		for _, c := range t.Constraints {
+			corpus.WriteString(" " + c.Definition)
+		}
+		for _, ix := range t.Indexes {
+			corpus.WriteString(" " + ix.Predicate + " " + strings.Join(ix.Columns, " "))
+		}
+	}
+	text := strings.ToLower(corpus.String())
+	early := map[string]bool{}
+	for key, r := range p.to.Routines {
+		if mentions(text, strings.ToLower(r.Name)) {
+			early[key] = true
+		}
+	}
+	return early
+}
+
+func routineKeyOf(r SnapshotRoutine) string { return routineKey(r.Kind, r.Name, r.Signature) }
+
+// hasRoutineWork reports whether the migration makes or replaces a routine.
+func (p *migrationPlanner) hasRoutineWork() bool {
 	for _, r := range p.diff.routines {
-		if !slices.Contains(changes, r.change) {
+		if r.change != ChangeRemoved {
+			return true
+		}
+	}
+	return false
+}
+
+// routines makes and replaces the routines that are due in the phase.
+func (p *migrationPlanner) routines(phase routinePhase) {
+	early := p.earlyRoutines()
+	for _, r := range p.diff.routines {
+		if r.change == ChangeRemoved || early[routineKeyOf(*r.to)] != (phase == routinesEarly) {
 			continue
 		}
-		switch r.change {
-		case ChangeAdded:
-			p.step("Create "+r.to.Kind+" "+routineLabel(*r.to), false, p.routineDefinition(*r.to))
-		case ChangeChanged:
-			title := "Replace " + r.to.Kind + " " + routineLabel(*r.to)
-			definition := p.routineDefinition(*r.to)
-			if p.driver == DriverPostgres && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(definition)), "CREATE OR REPLACE") {
-				p.step(title, false, definition)
-				continue
+		label := r.to.Kind + " " + routineLabel(*r.to)
+		definition := p.routineDefinition(*r.to)
+		switch {
+		case r.change == ChangeAdded:
+			p.dropReplaced(*r.to)
+			p.step("Create "+label, false, definition)
+		case p.driver == DriverMSSQL:
+			p.step("Replace "+label, false, createOrAlter(definition))
+		case p.driver == DriverPostgres && p.canReplaceInPlace(*r.from, *r.to):
+			p.step("Replace "+label, false, definition)
+		default:
+			// The engine cannot replace it in place — MySQL has no such
+			// statement, and Postgres refuses to change a return type.
+			if drop, ok := p.dropRoutine("Replace "+label, *r.from); ok {
+				p.step("Replace "+label, true, drop, definition)
 			}
-			if p.driver == DriverMSSQL {
-				p.step(title, false, createOrAlter(definition))
-				continue
-			}
-			p.step(title, true, p.dropRoutine(*r.from), definition)
-		case ChangeRemoved:
-			p.step("Drop "+r.from.Kind+" "+routineLabel(*r.from), true, p.dropRoutine(*r.from))
 		}
 	}
 }
 
-var mysqlRoutineHead = regexp.MustCompile("(?i)^(\\s*CREATE\\s+(?:FUNCTION|PROCEDURE)\\s+)(`(?:[^`]|``)+`)")
+var (
+	returnsClause   = regexp.MustCompile(`(?mi)^\s*RETURNS\s+(.+)$`)
+	replaceableHead = regexp.MustCompile(`(?i)^\s*CREATE\s+OR\s+REPLACE\b`)
+)
 
-// routineDefinition is a routine's text written for the "from" schema. MySQL's
-// own text names the routine without its schema, and run elsewhere would make
-// it in whichever database the session has chosen, if any.
+// canReplaceInPlace reports whether CREATE OR REPLACE can turn the routine into
+// the other: it is written that way, and the return type is the same.
+func (p *migrationPlanner) canReplaceInPlace(from, to SnapshotRoutine) bool {
+	if !replaceableHead.MatchString(to.Definition) {
+		return false
+	}
+	returns := func(r SnapshotRoutine, rebase bool) string {
+		text := r.Definition
+		if rebase {
+			text = p.rebase(text)
+		}
+		m := returnsClause.FindStringSubmatch(text)
+		if m == nil {
+			return ""
+		}
+		return strings.ToLower(strings.Join(strings.Fields(m[1]), " "))
+	}
+	return returns(from, false) == returns(to, true)
+}
+
+// dropReplaced drops, ahead of a routine that is made, the one of the same name
+// that is going away: Postgres cannot rename a parameter of a routine by
+// replacing it, and a routine with new parameter names is a new routine to the
+// diff and the old one an old one.
+func (p *migrationPlanner) dropReplaced(r SnapshotRoutine) {
+	for _, old := range p.diff.routines {
+		if old.change != ChangeRemoved || old.from.Kind != r.Kind || old.from.Name != r.Name {
+			continue
+		}
+		key := "routine\x00" + routineKeyOf(*old.from)
+		if p.settled[key] {
+			continue
+		}
+		p.settled[key] = true
+		title := "Drop " + old.from.Kind + " " + routineLabel(*old.from)
+		if stmt, ok := p.dropRoutine(title, *old.from); ok {
+			p.step(title, true, stmt)
+		}
+	}
+}
+
+func (p *migrationPlanner) removedRoutines() {
+	for _, r := range p.diff.routines {
+		if r.change != ChangeRemoved || p.settled["routine\x00"+routineKeyOf(*r.from)] {
+			continue
+		}
+		title := "Drop " + r.from.Kind + " " + routineLabel(*r.from)
+		if stmt, ok := p.dropRoutine(title, *r.from); ok {
+			p.step(title, true, stmt)
+		}
+	}
+}
+
+var (
+	// qualifiableHead is the head of a routine or view whose name carries no
+	// schema: SQL Server writes a module as it was typed, and MySQL writes a
+	// routine's name alone. Run in another schema, or in none, it would make
+	// the object where the session happens to be.
+	mysqlHead = regexp.MustCompile("(?is)^(\\s*CREATE\\s+(?:ALGORITHM\\s*=\\s*\\w+\\s+)?(?:SQL\\s+SECURITY\\s+\\w+\\s+)?(?:FUNCTION|PROCEDURE|VIEW)\\s+)(`(?:[^`]|``)+`)(\\s|\\(|$)")
+	mssqlHead = regexp.MustCompile(`(?is)^(\s*CREATE\s+(?:OR\s+ALTER\s+)?(?:FUNCTION|PROCEDURE|PROC|VIEW)\s+)(\[[^\]]+\]|[A-Za-z_@#][\w@#$]*)(\s|\(|$)`)
+)
+
+// routineDefinition is a routine's text written for the "from" schema.
 func (p *migrationPlanner) routineDefinition(r SnapshotRoutine) string {
-	text := p.rebase(r.Definition)
-	if p.driver != DriverMySQL {
+	return p.routineDefinitionText(r.Definition)
+}
+
+// qualifiedHead names the object a CREATE statement makes in the "from"
+// schema, where its text names it without one.
+func (p *migrationPlanner) qualifiedHead(text string) string {
+	var head *regexp.Regexp
+	switch p.driver {
+	case DriverMySQL:
+		head = mysqlHead
+	case DriverMSSQL:
+		head = mssqlHead
+	default:
 		return text
 	}
 	d, err := DialectFor(p.driver)
@@ -439,69 +661,189 @@ func (p *migrationPlanner) routineDefinition(r SnapshotRoutine) string {
 	if err != nil {
 		return text
 	}
-	return mysqlRoutineHead.ReplaceAllString(text, "${1}"+schema+".${2}")
+	return head.ReplaceAllString(text, "${1}"+schema+".${2}${3}")
 }
 
-var createRoutine = regexp.MustCompile(`(?i)^\s*CREATE\s+(FUNCTION|PROCEDURE|PROC)\b`)
+var createRoutine = regexp.MustCompile(`(?is)^((?:\s|--[^\n]*\n|/\*.*?\*/)*)(CREATE)(\s+)(FUNCTION|PROCEDURE|PROC|VIEW)\b`)
 
 // createOrAlter turns SQL Server's CREATE FUNCTION into the form that replaces
-// one that exists.
+// one that exists, however the statement is cased and whatever comments lead it.
 func createOrAlter(definition string) string {
-	return createRoutine.ReplaceAllStringFunc(definition, func(m string) string {
-		return strings.Replace(strings.Replace(m, "CREATE", "CREATE OR ALTER", 1), "create", "create or alter", 1)
-	})
+	m := createRoutine.FindStringSubmatchIndex(definition)
+	if m == nil {
+		return definition
+	}
+	// m[5] is the end of the CREATE keyword.
+	keyword := "OR ALTER"
+	if word := definition[m[4]:m[5]]; strings.ToLower(word) == word {
+		keyword = "or alter"
+	}
+	return definition[:m[5]] + " " + keyword + definition[m[5]:]
 }
 
-func (p *migrationPlanner) dropRoutine(r SnapshotRoutine) string {
+// dropRoutine writes the statement that removes a routine, or hands the step
+// over when its name will not quote.
+func (p *migrationPlanner) dropRoutine(title string, r SnapshotRoutine) (string, bool) {
 	word := "FUNCTION"
 	if r.Kind == DiffProcedure {
 		word = "PROCEDURE"
 	}
-	stmt := "DROP " + word + " " + p.rel(r.Name)
+	rel, ok := p.relOr(title, true, r.Name)
+	if !ok {
+		return "", false
+	}
+	stmt := "DROP " + word + " " + rel
 	if p.driver == DriverPostgres {
+		// The signature is the server's own text of the parameters, written
+		// into the statement as it is: one with a line break in it is not.
+		if strings.ContainsFunc(r.Signature, func(c rune) bool { return unicode.IsControl(c) }) {
+			p.manual(title, true, "The routine's parameters contain a control character, so no statement is written for it. Drop it from the Query tab.")
+			return "", false
+		}
 		stmt += "(" + r.Signature + ")"
 	}
-	return stmt
+	return stmt, true
 }
 
 // --- views -------------------------------------------------------------------
 
-// dropViews removes the views that went away or changed, the ones that read
-// other views first. A changed view is dropped and made again after the tables
-// have their new shape, because most engines cannot replace a view whose
-// columns changed.
-func (p *migrationPlanner) dropViews() {
-	var drop []viewDiff
+// viewMove is a view the migration drops, makes, or both. A view that did not
+// change is moved too when it reads one that is dropped or a table whose
+// column changes type or goes: the engine refuses the change while the view is
+// there, and the view is made again after it with the text it has.
+type viewMove struct {
+	name     string
+	from, to *SnapshotView
+	// reads is why an unchanged view is moved, and empty for a changed one.
+	reads string
+}
+
+// viewMoves lists every view the migration touches.
+func (p *migrationPlanner) viewMoves() []viewMove {
+	var moves []viewMove
+	dropped := map[string]bool{}
 	for _, v := range p.diff.views {
-		if v.change != ChangeAdded {
-			drop = append(drop, v)
+		moves = append(moves, viewMove{name: v.name, from: v.from, to: v.to})
+		if v.from != nil {
+			dropped[v.name] = true
 		}
 	}
-	for _, v := range orderViews(drop, func(v viewDiff) (string, string) { return v.name, v.from.Definition }, false) {
-		materialized := v.from.Materialized
-		plan, err := PlanDropView(p.driver, p.schema, v.name, materialized)
+	touched := p.touchedTables()
+	names := make([]string, 0, len(p.from.Views))
+	for name := range p.from.Views {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for grew := true; grew; {
+		grew = false
+		for _, name := range names {
+			if dropped[name] {
+				continue
+			}
+			to, kept := p.to.Views[name]
+			if !kept {
+				continue
+			}
+			view := p.from.Views[name]
+			text := strings.ToLower(view.Definition)
+			reads := ""
+			for _, other := range names {
+				if dropped[other] && mentions(text, strings.ToLower(other)) {
+					reads = other
+					break
+				}
+			}
+			if reads == "" {
+				for _, table := range touched {
+					if mentions(text, strings.ToLower(table)) {
+						reads = table
+						break
+					}
+				}
+			}
+			if reads != "" {
+				moves = append(moves, viewMove{name: name, from: &view, to: &to, reads: reads})
+				dropped[name] = true
+				grew = true
+			}
+		}
+	}
+	return moves
+}
+
+// touchedTables names the tables that lose a column or change one's type, or
+// go altogether.
+func (p *migrationPlanner) touchedTables() []string {
+	var out []string
+	for _, t := range p.diff.tables {
+		if t.change == ChangeRemoved || len(retypedColumns(t)) > 0 || slices.ContainsFunc(t.columns, func(c columnDiff) bool { return c.Change == ChangeRemoved }) {
+			out = append(out, t.name)
+		}
+	}
+	return out
+}
+
+// retypedColumns are the columns of a table whose type is not the same after.
+func retypedColumns(t tableDiff) []string {
+	var out []string
+	for _, c := range t.columns {
+		if c.Change == ChangeChanged && c.from != nil && c.to != nil && !sameType(c.from.Type, c.to.Type) {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+func sameType(a, b string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+	return norm(a) == norm(b)
+}
+
+// dropViews removes the views that went away or changed, and the ones that
+// read what does, those that read other views first. They are made again after
+// the tables have their new shape, because most engines cannot replace a view
+// whose columns changed.
+func (p *migrationPlanner) dropViews(moves []viewMove) {
+	var drop []viewMove
+	for _, m := range moves {
+		if m.from != nil {
+			drop = append(drop, m)
+		}
+	}
+	for _, m := range orderViews(drop, func(m viewMove) (string, string) { return m.name, m.from.Definition }, false) {
 		word := "view"
-		if materialized {
+		if m.from.Materialized {
 			word = "materialized view"
 		}
-		p.planned("Drop "+word+" "+v.name, true, plan, err)
+		title := "Drop " + word + " " + m.name
+		plan, err := PlanDropView(p.driver, p.schema, m.name, m.from.Materialized)
+		p.planned(title, m.reads == "", plan, err)
+		if m.reads != "" && err == nil {
+			p.steps[len(p.steps)-1].Note = "It reads " + m.reads + ", which changes, so it is made again after."
+		}
 	}
 }
 
-func (p *migrationPlanner) createViews() {
-	var create []viewDiff
-	for _, v := range p.diff.views {
-		if v.change != ChangeRemoved {
-			create = append(create, v)
+func (p *migrationPlanner) createViews(moves []viewMove) {
+	var create []viewMove
+	for _, m := range moves {
+		if m.to != nil {
+			create = append(create, m)
 		}
 	}
-	for _, v := range orderViews(create, func(v viewDiff) (string, string) { return v.name, v.to.Definition }, true) {
+	for _, m := range orderViews(create, func(m viewMove) (string, string) { return m.name, m.to.Definition }, true) {
 		word := "view"
-		if v.to.Materialized {
+		if m.to.Materialized {
 			word = "materialized view"
 		}
-		p.step("Create "+word+" "+v.name, false, p.rebase(v.to.Definition))
+		p.step("Create "+word+" "+m.name, false, p.routineDefinitionText(m.to.Definition))
 	}
+}
+
+// routineDefinitionText is a definition read from the "to" schema, written for
+// the "from" one.
+func (p *migrationPlanner) routineDefinitionText(text string) string {
+	return p.qualifiedHead(p.rebase(text))
 }
 
 // orderViews sorts views so each comes after the ones it reads (to create) or
@@ -597,7 +939,7 @@ func (p *migrationPlanner) createTable(t tableDiff) {
 		p.manual(title, false, err.Error())
 		return
 	}
-	step := MigrationStep{Title: title, Statements: []string{statement}}
+	step := MigrationStep{Title: oneLine(title), Statements: []string{statement}}
 	if comments := p.createTableComments(t.to); len(comments) > 0 {
 		step.Statements = append(step.Statements, comments...)
 	}
@@ -623,6 +965,23 @@ func (p *migrationPlanner) createTableStatement(t *TableDetail) (string, error) 
 		return strings.TrimRight(strings.TrimSpace(t.CreateSQL), ";"), nil
 	case DriverMySQL:
 		return p.mysqlCreateTable(d, t)
+	}
+	// renderCreateTable writes a name the engine will not quote as it is, which
+	// is a table that means something else. Refuse it here instead.
+	names := append([]string{t.Name}, t.PrimaryKey...)
+	for _, c := range t.Columns {
+		names = append(names, c.Name)
+	}
+	for _, c := range t.Constraints {
+		names = append(names, c.Name)
+	}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, err := d.QuoteIdent(name); err != nil {
+			return "", fmt.Errorf("the name %q cannot be written as an identifier: %v", oneLine(name), err)
+		}
 	}
 	copied := *t
 	copied.Columns = make([]Column, len(t.Columns))
@@ -698,7 +1057,11 @@ func (p *migrationPlanner) createTableComments(t *TableDetail) []string {
 	if err != nil {
 		return nil
 	}
-	return commentStatements(d, p.rel(t.Name), t)
+	rel, err := p.rel(t.Name)
+	if err != nil {
+		return nil
+	}
+	return commentStatements(d, rel, t)
 }
 
 func (p *migrationPlanner) dropTables() {
@@ -780,7 +1143,7 @@ func (p *migrationPlanner) dropCrossTableForeignKeys(removed map[string]bool) {
 	for _, t := range ordered {
 		for _, fk := range t.ForeignKeys {
 			ref, ok := position[fk.RefTable]
-			if !ok || !removed[fk.RefTable] || ref > position[t.Name] {
+			if !ok || !removed[fk.RefTable] || ref >= position[t.Name] {
 				continue
 			}
 			// This table is dropped after the one it references: the pair is a cycle.
@@ -848,7 +1211,9 @@ func (p *migrationPlanner) dropPrimaryKey(t tableDiff) {
 		return
 	}
 	if p.driver == DriverMySQL {
-		p.step(title, true, "ALTER TABLE "+p.rel(t.name)+" DROP PRIMARY KEY")
+		if rel, ok := p.relOr(title, true, t.name); ok {
+			p.step(title, true, "ALTER TABLE "+rel+" DROP PRIMARY KEY")
+		}
 		return
 	}
 	name := primaryKeyName(t.from)
@@ -862,7 +1227,9 @@ func (p *migrationPlanner) dropPrimaryKey(t tableDiff) {
 		p.manual(title, true, err.Error())
 		return
 	}
-	p.step(title, true, "ALTER TABLE "+p.rel(t.name)+" DROP CONSTRAINT "+q)
+	if rel, ok := p.relOr(title, true, t.name); ok {
+		p.step(title, true, "ALTER TABLE "+rel+" DROP CONSTRAINT "+q)
+	}
 }
 
 func primaryKeyName(t *TableDetail) string {
@@ -891,7 +1258,9 @@ func (p *migrationPlanner) addKeysAndIndexes(t tableDiff) {
 			if cerr != nil {
 				p.manual(title, false, cerr.Error())
 			} else {
-				p.step(title, false, "ALTER TABLE "+p.rel(t.name)+" ADD PRIMARY KEY ("+cols+")")
+				if rel, ok := p.relOr(title, false, t.name); ok {
+					p.step(title, false, "ALTER TABLE "+rel+" ADD PRIMARY KEY ("+cols+")")
+				}
 			}
 		}
 	}
@@ -930,10 +1299,7 @@ func checkExpression(definition string) string {
 	if len(text) >= 5 && strings.EqualFold(text[:5], "CHECK") {
 		text = strings.TrimSpace(text[5:])
 	}
-	if strings.HasPrefix(text, "(") && strings.HasSuffix(text, ")") {
-		return text[1 : len(text)-1]
-	}
-	return text
+	return unwrapParens(text)
 }
 
 func (p *migrationPlanner) createIndexes(table string, indexes []Index) {
@@ -1104,7 +1470,7 @@ func (p *migrationPlanner) alterColumn(table string, from, to Column) {
 		p.manual(title, retypes, err.Error())
 		return
 	}
-	step := MigrationStep{Title: title, Statements: plan.Statements, Destructive: retypes}
+	step := MigrationStep{Title: oneLine(title), Statements: plan.Statements, Destructive: retypes}
 	if retypes {
 		step.Note = "The values are converted to the new type; a value that does not convert stops the statement."
 	}

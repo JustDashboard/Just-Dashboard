@@ -47,6 +47,7 @@ export interface Comparison {
   to: CompareSide
   objects: DiffObject[]
   steps: MigrationStep[]
+  /** The steps written as one script. The server sends the steps only. */
   script: string
   notes: string[]
 }
@@ -79,20 +80,48 @@ export function readComparison(answer: unknown): Comparison {
         to: p.to ?? "",
       })),
     }))
+  const steps = (Array.isArray(given.steps) ? given.steps : []).map((s) => ({
+    title: s.title ?? "",
+    statements: Array.isArray(s.statements) ? s.statements : [],
+    destructive: s.destructive === true,
+    manual: s.manual === true,
+    note: s.note ?? "",
+  }))
   return {
     from: side(given.from),
     to: side(given.to),
     objects,
-    steps: (Array.isArray(given.steps) ? given.steps : []).map((s) => ({
-      title: s.title ?? "",
-      statements: Array.isArray(s.statements) ? s.statements : [],
-      destructive: s.destructive === true,
-      manual: s.manual === true,
-      note: s.note ?? "",
-    })),
-    script: typeof given.script === "string" ? given.script : "",
+    steps,
+    script: scriptOf(steps),
     notes: Array.isArray(given.notes) ? given.notes : [],
   }
+}
+
+/** Text as one line of comment: a line break in a name must not end the comment. */
+// eslint-disable-next-line no-control-regex
+const LINE_BREAKS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
+const comment = (text: string) => `-- ${text.replace(LINE_BREAKS, " ").trim()}\n`
+
+/**
+ * The migration as one text to copy: a comment for each step, the destructive
+ * ones marked, and each statement ended by a semicolon. It is the server's
+ * `Migration.Script`, written here so the statements are not sent twice.
+ */
+export function scriptOf(steps: readonly MigrationStep[]): string {
+  return steps
+    .map((step) => {
+      let text = comment(step.manual ? `NEEDS YOUR ATTENTION: ${step.title}` : step.title)
+      if (step.destructive) {
+        text +=
+          "-- DESTRUCTIVE: this removes data or definitions that cannot be restored from this script\n"
+      }
+      for (const line of step.note.replace(/\r\n?/g, "\n").split("\n")) {
+        if (line.trim() !== "") text += comment(line)
+      }
+      for (const statement of step.statements) text += `${statement.trim().replace(/;+$/, "")};\n`
+      return text
+    })
+    .join("\n")
 }
 
 /** The kinds in the order the page lists them, with the heading each is listed under. */
