@@ -199,7 +199,16 @@ func mysqlProgramsDB(t *testing.T, e workbenchEngine, db *sql.DB) *sql.DB {
 		t.Fatal(err)
 	}
 	cfg.DBName = app.DBName
-	return liveSQL(t, DriverMySQL, "JD_TEST_MYSQL8_ADMIN_DSN", cfg.FormatDSN())
+	d, err := DialectFor(DriverMySQL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	programs, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(cfg.FormatDSN()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { programs.Close() })
+	return programs
 }
 
 func liveSQLServerBodies(t *testing.T, db *sql.DB) {
