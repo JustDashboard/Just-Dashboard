@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // TestLivePooler runs the whole pooler against a PostgreSQL container and a
@@ -487,8 +489,24 @@ func TestLivePooler(t *testing.T) {
 		if change, err := s.ensurePooler(ctx, nil, target, after, dsn, "", false); err != nil || change.Recreated {
 			t.Fatalf("running it again moved it: %+v %v", change, err)
 		}
+		spec, _ = s.modules.docker.SpecOf(ctx, after.ContainerID)
 		if ip, _ := poolerBinding(spec); ip != "127.0.0.2" {
 			t.Fatalf("pooler is on %s", ip)
+		}
+		// Beside a database open to anywhere it is still made on loopback: the
+		// database's binding is never copied, and only the access switch widens it.
+		if err := s.modules.docker.RemoveContainer(ctx, after.Container, true, false); err != nil {
+			t.Fatal(err)
+		}
+		public := *target.server.binding
+		public.IP = "0.0.0.0"
+		exposed := &poolerTarget{server: &dbServer{container: target.server.container, port: target.server.port, binding: &public}, detail: target.detail}
+		if change, err := s.ensurePooler(ctx, nil, exposed, after, dsn, "", false); err != nil || change.Bind != poolerLoopback {
+			t.Fatalf("a pooler made beside a public database: %+v %v", change, err)
+		}
+		spec, _ = s.modules.docker.SpecOf(ctx, after.ContainerID)
+		if ip, _ := poolerBinding(spec); ip != poolerLoopback {
+			t.Fatalf("a pooler made beside a public database is on %s, want loopback", ip)
 		}
 		if err := s.modules.docker.RemoveContainer(ctx, after.Container, true, false); err != nil {
 			t.Fatal(err)
@@ -573,6 +591,39 @@ func TestLivePooler(t *testing.T) {
 		}
 		if r := do(t, router, http.MethodGet, base+"/url?pooled=1", ""); r.Code != http.StatusConflict {
 			t.Errorf("a pooled string without a pooler: HTTP %d", r.Code)
+		}
+	})
+
+	t.Run("dropping the database takes auth_query's role off the server", func(t *testing.T) {
+		direct := openDirect()
+		if _, err := direct.Exec(`CREATE DATABASE jdt_pgbouncer_dropped`); err != nil {
+			t.Fatal(err)
+		}
+		defer direct.Exec(`DROP DATABASE IF EXISTS jdt_pgbouncer_dropped`)
+		_, dsn, _ := s.dbConnRow(ctx, conn.ID)
+		sealed, _ := s.Sealer.Seal(dbx.DSNForDatabase(dbx.DriverPostgres, dsn, "jdt_pgbouncer_dropped"))
+		inserted, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('jdt_pgbouncer_dropped', 'postgres', ?, 0)`, sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dropped, _ := inserted.LastInsertId()
+		defer s.Store.DB.Exec(`DELETE FROM db_connections WHERE id = ?`, dropped)
+		if rec := do(t, router, http.MethodPut, pathf("/databases/%d/pooler", dropped), auth); rec.Code != http.StatusCreated {
+			t.Fatalf("enable on the database to drop: HTTP %d %s", rec.Code, rec.Body)
+		}
+		req := httptest.NewRequest(http.MethodDelete, pathf("/databases/%d/database", dropped), strings.NewReader(`{"database":"jdt_pgbouncer_dropped"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(httpx.ConfirmHeader, "jdt_pgbouncer_dropped")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"connectionRemoved":true`) {
+			t.Fatalf("drop: HTTP %d %s", rec.Code, rec.Body)
+		}
+		if password, _ := poolRole(direct); password != "" {
+			t.Error("the role auth_query made outlived the database it was made for")
+		}
+		if _, err := s.modules.docker.Inspect(ctx, name+"-pgbouncer"); err == nil {
+			t.Error("the pooler container outlived its database")
 		}
 	})
 

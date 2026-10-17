@@ -778,6 +778,11 @@ func (s *Server) forgetPooler(ctx context.Context, rec *poolerRecord, conn *dbCo
 // a connection being forgotten, on a connection of its own since the saved one
 // has gone. A protected connection's database is not written to; the account
 // and function are left there, and the entry says so.
+//
+// The function is the connection's database's but the role is the server's, so
+// a database that was dropped took the function with it and left the role:
+// that is removed from the server's admin database, where PostgreSQL refuses
+// it while anything in another database still depends on it.
 func (s *Server) forgetPoolerAuth(ctx context.Context, conn *dbConnection, dsn string) string {
 	const left = "auth_query's role and function left in the database"
 	switch {
@@ -788,15 +793,18 @@ func (s *Server) forgetPoolerAuth(ctx context.Context, conn *dbConnection, dsn s
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	db, err := sql.Open("pgx", dsn)
-	if err == nil {
-		defer db.Close()
-		err = dbx.RemovePoolerAuth(ctx, db)
+	var err error
+	for _, target := range []string{dsn, dbx.DSNForDatabase(conn.Driver, dsn, "postgres")} {
+		var db *sql.DB
+		if db, err = sql.Open("pgx", target); err == nil {
+			err = dbx.RemovePoolerAuth(ctx, db)
+			db.Close()
+		}
+		if err == nil {
+			return "auth_query's role and function removed from the database"
+		}
 	}
-	if err != nil {
-		return left + ": " + connectError(dsn, err)
-	}
-	return "auth_query's role and function removed from the database"
+	return left + ": " + connectError(dsn, err)
 }
 
 // followPoolerExposure moves a connection's pooler to the address the access

@@ -319,7 +319,9 @@ is connected by naming the instance found, not by typing its address again.
     names that is already there is refused (`409 pooler_auth_taken`), and so is a connection that does not
     sign in as a superuser. Whatever fails after they are made removes them, and so does leaving the mode,
     turning the pooler off, and forgetting the connection (best effort, reported in the audit entry, and not
-    for a protected connection). Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
+    for a protected connection). Dropping the connection's database takes the function with it and leaves
+    the role, which is the server's: that is removed from the admin database, where PostgreSQL refuses it
+    while anything elsewhere still depends on it. Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
     the dashboard reads the console and which can only `SHOW`.
   - *Kept in step.* `db_poolers` keeps a digest of the files last written (`config_sha`). `poolerKeeper`
     compares it with the files the connection's current credentials make every twenty seconds and writes
