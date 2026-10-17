@@ -1204,7 +1204,9 @@ type dbConnSummary struct {
 	Exposure dbExposure `json:"exposure"`
 	Managed  bool       `json:"managed"`
 	// Consumers is how many deployment environments are bound to it.
-	Consumers  int        `json:"consumers"`
+	Consumers int `json:"consumers"`
+	// LastBackup is when it was last backed up from here, by hand or by a
+	// backup job (lastBackup); nil for never.
 	LastBackup *time.Time `json:"lastBackup,omitempty"`
 	// Capabilities is the feature reading for this driver and flavour, the
 	// same object the driver catalogue serves.
@@ -1244,7 +1246,8 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	}
 	_ = s.Store.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM deploy_database_bindings WHERE connection_id = ?`, id).Scan(&out.Consumers)
-	out.LastBackup = s.newestDump(conn.Name)
+	jobDumps, _ := s.modules.backupStore.LastDatabaseDumps(ctx)
+	out.LastBackup = s.lastBackup(conn, jobDumps)
 	if conn.Broken {
 		out.Error = conn.BrokenReason
 		out.Power = dbPower{Reason: dbPowerBrokenReason}

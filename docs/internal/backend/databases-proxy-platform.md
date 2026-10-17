@@ -311,7 +311,8 @@ is connected by naming the instance found, not by typing its address again.
   every session that connected under `dbx.ApplicationName`, on other engines the asking pool), where it
   runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
   summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
-  bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
+  bound to it, and when it was last backed up (`lastBackup`, below under *The dumps on disk*). Each
+  entry also carries the summary's own `power`
   (which of start, stop and restart the power route would take now, or the reason for none),
   `managed` (whether the access route can change the port's reach) and `inFlight`, read off the
   placement the entry already needed — no second look at the machine and no dial — so a card
@@ -1428,17 +1429,23 @@ the detail of each classifier is below, with the surface it guards.
   (`resolveRestoreSource`), by name or by the path the listing reports, and through `files.Resolve` only
   for a file elsewhere; it used to hold every dump to the roots, so narrowing them stopped the dashboard
   restoring what it could still download.
-- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
-  newest first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there
-  to dump again) removes one, contained against that directory exactly as the download is. The fleet
-  reads the same listing for "last backup", and `GET /databases/backups/summary` is every connection's
-  newest dump in one read that dials nothing. What a dump holds — the options it was taken with, the
-  tool and version that wrote it, how long it took, a note, who asked — is in a small file beside it
-  (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed. Beside it rather
-  than in a table because the directory is what gets copied off the machine. A file with no
-  description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
-  (`service.control`) streams a dump made elsewhere into the directory through the scoped
-  `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory newest
+  first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there to dump
+  again) removes one, contained against that directory exactly as the download is. The fleet and a
+  connection's summary say when it was last backed up (`lastBackup`) from the same listing and from the
+  backup jobs: the later of the newest dump here and the start of the newest successful job run whose
+  archive holds the connection's native dump (`backups.Store.LastDatabaseDumps`, by the `CoversDatabase`
+  test a restore applies, read once per fleet request). The listing alone called a database a nightly
+  job protects never backed up. `GET /databases/backups/summary` is every connection's newest dump in
+  the directory in one read that dials nothing, polled every few seconds while a dump runs, so the
+  control center takes the later of its answer and the fleet's. What a dump holds — the options it was
+  taken with, the tool and version that wrote it, how long it took, a note, who asked — is in a small
+  file beside it (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed.
+  Beside it rather than in a table because the directory is what gets copied off the machine. A file
+  with no description is listed with what its first bytes say it is.
+  `POST /databases/{id}/backups/upload` (`service.control`) streams a dump made elsewhere into the
+  directory through the scoped `files.Service`, under a validated name, capped by
+  `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
   A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
   one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
   process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
