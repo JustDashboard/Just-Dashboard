@@ -528,8 +528,9 @@ sticky strip of anchors, and the section a reader most often came for — the da
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
 own, listed under a *Settings* group in the database's rail the way a project's are
 (`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Parameters,
-Extensions (a key–value server's *Modules*) and Danger zone, each
-listed only where the engine has it and the danger zone only for a role that may destroy. What else
+Extensions (a key–value server's *Modules*), Version and Danger zone, each
+listed only where the engine has it, Version only for an administrator and the danger zone only for a
+role that may destroy. What else
 the server holds is not among them: it changes nothing about the connection, and Home's *Databases on
 this server* already lists it with Connect and New database, so the old `#databases` anchor opens Home. Every page
 is one centred column of `SettingSection`s under the page's one save bar, and the labels and the
