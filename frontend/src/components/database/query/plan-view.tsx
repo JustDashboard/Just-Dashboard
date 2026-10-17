@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { IndexAdvice } from "@/components/database/query/index-advice"
 import { StatementLine } from "@/components/database/query/messages"
 import {
   planFromRows,
@@ -49,6 +50,7 @@ export function PlanView({
   onExplain,
   canAnalyze,
   why,
+  onOpenStatement,
 }: {
   explained: Explained | undefined
   /** Asks for the plan of the statement under the cursor. */
@@ -57,6 +59,8 @@ export function PlanView({
   canAnalyze: boolean
   /** Why there is no statement to explain, when there is none. */
   why?: string
+  /** Opens a statement in the editor, for the index tools that write one. */
+  onOpenStatement?: (sql: string, title?: string) => void
 }) {
   const answer = explained?.answer
   const plan = useMemo<Plan | null>(() => {
@@ -92,6 +96,7 @@ export function PlanView({
                     Explain and measure
                   </Button>
                 )}
+                <IndexAdvice onOpenStatement={onOpenStatement} />
               </div>
             )
           }
@@ -134,6 +139,7 @@ export function PlanView({
               Copy
             </Button>
           )}
+          <IndexAdvice sql={explained.sql} onOpenStatement={onOpenStatement} />
         </>
       )}
     </div>

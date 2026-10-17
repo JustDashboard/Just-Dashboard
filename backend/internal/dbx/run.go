@@ -292,7 +292,22 @@ func (s *session) run(ctx context.Context, q queryer, st *SQLStatement, maxRows 
 		// statement would be somebody else's.
 		s.dirty = true
 	}
+	if checker, ok := s.dialect.(compileChecker); ok && err == nil && st.program != nil {
+		if err := checker.compileErrors(ctx, q, st.program); err != nil {
+			return nil, err
+		}
+	}
 	return res, err
+}
+
+// compileChecker is implemented by an engine that keeps a stored program it
+// could not compile and calls the CREATE a success: Oracle stores the program
+// marked invalid, and its driver passes the success on. The errors are asked
+// for on the same connection straight after, so the statement fails with the
+// compiler's words, as the engine's own client shows them, instead of the
+// program failing later wherever it is first called.
+type compileChecker interface {
+	compileErrors(ctx context.Context, q queryer, program *storedProgram) error
 }
 
 // read runs fn inside the engine's read-only scope. fn receives what to run

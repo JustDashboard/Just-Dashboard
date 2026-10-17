@@ -13,11 +13,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { EngineMark } from "@/components/database/kit"
 import {
   redisDelete,
+  redisFieldExpire,
+  redisFieldPersist,
   redisMembers,
   redisRawUrl,
-  redisRun,
   redisWrite,
-  replyCodes,
 } from "@/components/database/redis/api"
 import {
   boxSafe,
@@ -65,9 +65,9 @@ type Draft = {
  * with its own beginning.
  *
  * Where the server gives a field an expiry of its own, each row states its
- * field's and is where it is changed. There is no route for it, so the change
- * is the server's own command, sent through the console's route: classified,
- * capability-checked and audited as a line typed there would be.
+ * field's and is where it is changed, through the field's own expiry routes:
+ * like the key's, they refuse a moment that has passed, which would remove
+ * the field rather than time it.
  */
 export function HashEditor({ redis, name, meta, epoch, onChanged, confirm }: KeyEditorProps) {
   const { target, db, engine, canWrite, canDestroy } = redis
@@ -158,26 +158,23 @@ export function HashEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
       ),
     }))
 
-  /** One field's expiry, set: the server answers a code for the field it was asked about. */
+  /** One field's expiry, set: the route answers what is left of it. */
   const expireField = async (row: RedisRow, when: TtlWhen) => {
     const field = row.field ?? ""
-    const [code] = replyCodes(
+    const answer = await redisFieldExpire(
+      target,
       "seconds" in when
-        ? await redisRun(target, "HEXPIRE", [name, when.seconds, "FIELDS", 1, field])
-        : await redisRun(target, "HPEXPIREAT", [name, when.at, "FIELDS", 1, field]),
+        ? { key: name, field, ttl: when.seconds }
+        : { key: name, field, at: when.at },
     )
-    if (code === -2) throw new Error("The field is not in the hash any more.")
-    if (code !== 1) throw new Error("The server did not set the expiry.")
-    const pttl = "seconds" in when ? when.seconds * 1000 : when.at - Date.now()
+    const pttl = answer.fields[0]?.pttl ?? -2
+    if (pttl === -2) throw new Error("The field is not in the hash any more.")
     setTtl(row, Math.ceil(pttl / 1000))
     return pttl
   }
 
   const persistField = async (row: RedisRow) => {
-    const [code] = replyCodes(
-      await redisRun(target, "HPERSIST", [name, "FIELDS", 1, row.field ?? ""]),
-    )
-    if (code === -2) throw new Error("The field is not in the hash any more.")
+    await redisFieldPersist(target, { key: name, field: row.field ?? "" })
     setTtl(row, -1)
   }
 

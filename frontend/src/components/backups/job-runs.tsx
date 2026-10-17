@@ -1,9 +1,10 @@
 "use client"
 
 import { bytes, calendarDate, clockMinute, plural } from "@/lib/format"
-import type { BackupManifest, BackupRun } from "@/lib/types"
+import type { BackupArchiveEncryption, BackupManifest, BackupRun } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { FolderOpen } from "@/components/icons"
+import { FolderOpen, LockClosed } from "@/components/icons"
+import { Detail, DetailList } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -40,6 +41,7 @@ export function RunRail({
     <ol aria-label="Runs" className="min-w-0 space-y-0.5">
       {runs.map((run) => {
         const selected = run.id === selectedId
+        const encrypted = Boolean(run.manifest?.encryption)
         return (
           <li key={run.id} className="min-w-0">
             <button
@@ -47,7 +49,7 @@ export function RunRail({
               data-workspace-item={`run:${run.id}`}
               data-workspace-name={`Run ${run.id}`}
               aria-current={selected || undefined}
-              aria-label={`Run ${run.id}, ${run.status}, ${calendarDate(run.startedAt)} ${clockMinute(run.startedAt)}`}
+              aria-label={`Run ${run.id}, ${run.status}, ${calendarDate(run.startedAt)} ${clockMinute(run.startedAt)}${encrypted ? ", encrypted" : ""}`}
               onClick={() => onSelect(run)}
               className={cn(
                 "flex w-full min-w-0 flex-col gap-1.5 rounded-lg px-3 py-2 text-left focus-ring-inset transition-colors",
@@ -65,6 +67,11 @@ export function RunRail({
                     {clockMinute(run.startedAt)}
                   </span>
                 </span>
+                {/* A lock where the archive needs the key to be opened anywhere
+                    but here: what a copy of it is worth is decided by that. */}
+                {encrypted && (
+                  <LockClosed aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+                )}
                 <span className="numeric shrink-0 text-hint text-muted-foreground">
                   {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
                 </span>
@@ -184,6 +191,34 @@ export function RunContents({ manifest }: { manifest: BackupManifest }) {
           Paused while it archived: <span className="text-foreground">{paused.join(", ")}</span>
         </p>
       )}
+    </section>
+  )
+}
+
+/**
+ * How a run's archive was sealed, from its manifest: the key by its public
+ * half — the line an exported key file prints as "public key", so the file
+ * that opens it can be found — and the digest of the archive inside, which is
+ * what a copy decrypted away from the dashboard is checked against.
+ */
+export function RunEncryption({ encryption }: { encryption: BackupArchiveEncryption }) {
+  return (
+    <section aria-label="Encryption" className="min-w-0 space-y-2">
+      <p className="eyebrow">Encryption</p>
+      <p className="text-body">
+        Sealed with this server&apos;s backup key before it left the server. Restores, checks and
+        downloads here decrypt it; anywhere else, the exported key and{" "}
+        <code className="font-mono text-xs">age --decrypt</code> open it.
+      </p>
+      <DetailList>
+        <Detail label="Public key" className="font-mono break-all">
+          {encryption.recipient}
+        </Detail>
+        <Detail label="Archive inside" className="font-mono break-all">
+          {encryption.plaintextDigest} ·{" "}
+          <span className="numeric">{bytes(encryption.plaintextBytes)}</span>
+        </Detail>
+      </DetailList>
     </section>
   )
 }
