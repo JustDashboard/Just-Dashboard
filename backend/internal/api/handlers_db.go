@@ -133,6 +133,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		s.mountDatabaseConnectionRoutes(r)
 		s.mountDatabaseWorkbenchRoutes(r)
 		s.mountDatabaseSchemaRoutes(r)
+		s.mountDatabaseRLSRoutes(r)
 		s.mountDatabaseOpsRoutes(r)
 		s.mountDatabaseTransferRoutes(r)
 		r.Group(func(r chi.Router) {

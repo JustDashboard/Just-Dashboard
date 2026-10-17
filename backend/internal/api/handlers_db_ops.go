@@ -699,11 +699,17 @@ func (s *Server) handleDBGrants(w http.ResponseWriter, r *http.Request) error {
 }
 
 type privilegeRequest struct {
-	Host       string   `json:"host"`
-	Level      string   `json:"level"`
-	Database   string   `json:"database"`
-	Schema     string   `json:"schema"`
-	Table      string   `json:"table"`
+	Host     string `json:"host"`
+	Level    string `json:"level"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Table    string `json:"table"`
+	// Routine names a function at the function level, and Arguments the types
+	// it takes as the catalogue lists them: absent, the function is named by
+	// its name alone. Columns are the columns of Table at the column level.
+	Routine    string   `json:"routine"`
+	Arguments  *string  `json:"arguments"`
+	Columns    []string `json:"columns"`
 	Privileges []string `json:"privileges"`
 	// MemberOf is the role to grant, at the role level.
 	MemberOf    string `json:"memberOf"`
@@ -748,6 +754,7 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	change := dbx.PrivilegeChange{
 		Role: httpx.URLParam(r, "name"), Host: strings.TrimSpace(req.Host), Level: strings.TrimSpace(req.Level),
 		Database: strings.TrimSpace(req.Database), Schema: strings.TrimSpace(req.Schema), Table: strings.TrimSpace(req.Table),
+		Routine: strings.TrimSpace(req.Routine), Arguments: req.Arguments, Columns: req.Columns,
 		Privileges: req.Privileges, MemberOf: strings.TrimSpace(req.MemberOf),
 		GrantOption: req.GrantOption, Future: req.Future, Revoke: revoke,
 	}
@@ -781,10 +788,16 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	}
 	detail := map[string]any{"role": change.Role, "level": change.Level, "driver": conn.Driver}
 	for key, value := range map[string]string{"host": change.Host, "database": change.Database,
-		"schema": change.Schema, "table": change.Table, "memberOf": change.MemberOf} {
+		"schema": change.Schema, "table": change.Table, "routine": change.Routine, "memberOf": change.MemberOf} {
 		if value != "" {
 			detail[key] = value
 		}
+	}
+	if change.Arguments != nil {
+		detail["arguments"] = *change.Arguments
+	}
+	if len(change.Columns) > 0 {
+		detail["columns"] = change.Columns
 	}
 	if len(change.Privileges) > 0 {
 		detail["privileges"] = change.Privileges

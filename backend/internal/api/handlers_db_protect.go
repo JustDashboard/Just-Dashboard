@@ -109,6 +109,7 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/query", protectedStatements},
 	{http.MethodPost, "/script", protectedStatements},
 	{http.MethodPost, "/export/query", protectedExportQuery},
+	{http.MethodPost, "/rls/test", protectedRoleTest},
 	{http.MethodPost, "/changes", protectedChanges},
 	{http.MethodPost, "/maintenance", protectedMaintenance},
 	{http.MethodPost, "/redis/command", protectedRedis(redisCommandWrites)},
@@ -477,6 +478,24 @@ func protectedExportQuery(driver dbx.Driver, body []byte) error {
 		return protectedRefusal("this connection is protected, and the request carries no statement to check")
 	}
 	if why := protectedStatementRefusal(driver, req.SQL); why != "" {
+		return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
+	}
+	return nil
+}
+
+// protectedRoleTest allows a test of what a role sees when the statement it
+// runs is a read. The test runs in a read-only transaction it never commits;
+// that is the second line, and this is the first, asked of the same field by
+// the same classifier as the query runner.
+func protectedRoleTest(driver dbx.Driver, body []byte) error {
+	var req roleTestRequest
+	if err := protectedBody(body, &req, false); err != nil {
+		return protectedUnreadable()
+	}
+	if strings.TrimSpace(req.Query) == "" {
+		return protectedRefusal("this connection is protected, and the request carries no statement to check")
+	}
+	if why := protectedStatementRefusal(driver, req.Query); why != "" {
 		return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
 	}
 	return nil
