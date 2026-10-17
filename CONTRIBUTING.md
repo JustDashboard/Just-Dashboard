@@ -332,6 +332,13 @@ to the contribution terms above, including the additional licence grant to the p
   These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
+- Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a
+  deployment reaches it) also run
+  `JD_POOLER_LIVE=1 go test ./internal/api -run TestLivePooler -count=1 -v` on a Docker host. It starts a
+  PostgreSQL container and, through the routes, a PgBouncer beside it, signs in through the pooler in both
+  authentication modes, reads its statistics, changes a setting and a password, follows the database's
+  power, reaches it from a probe container on a deployment network, then removes it and forgets the
+  connection, and removes its own containers, volumes and networks.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
@@ -391,7 +398,11 @@ to the contribution terms above, including the additional licence grant to the p
   install in the world reads to find out whether it is behind. If your change
   is worth a release, add the entry there and run `scripts/release.sh <version>`;
   it bumps the version everywhere it appears and regenerates the markdown. The
-  Go test run fails if the two ever disagree, in either direction.
+  Go test run fails if the changelog's newest release and the version ever
+  disagree, in either direction. It does not compare the markdown's entries, so a
+  note added after the version was bumped reaches `CHANGELOG.md` only when
+  `scripts/release.sh` runs again with the version the branch already carries,
+  which rewrites nothing else.
 - Match the surrounding code. Comments explain *why*, not *what*.
 
 ## Security issues
@@ -469,9 +480,11 @@ Some tests reach past a database to the machine and run only when asked:
 | `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
 | `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
+| `JD_TEST_STATEMENTS_CONTAINER=<name>` | starts PostgreSQL servers of its own, one at a time, as `<name>-postgres`, `-pgvector`, `-postgis`, `-timescaledb` and `-setup` with a `-data` volume each: every PostgreSQL template counting its statements from its first start (`TestLiveTemplatesCountStatementsFromTheFirstStart`), and the preload, restart and extension on a server that never loaded the module (`TestLiveStatementsSetupKeepsTheLibrariesAServerLoads`); it removes each container and volume when its part is done |
+| `JD_TEST_PRELOAD_POSTGRES_DSN` | a PostgreSQL in a container of its own, with `preload` in its name and nothing on its command line about the libraries it loads, signed in to as a superuser: the test adds libraries to `shared_preload_libraries`, restarts it through the power route, creates the extensions and puts it back as it was (`TestLivePreloadRestartAndCreate`); pg_cron is used where the image has it |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
 
-The ones that need Docker (the inventory, provisioning and power tests) read
+The ones that need Docker (the inventory, provisioning, power, preload and statements tests) read
 `JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
 
 ### Fixtures
@@ -531,8 +544,9 @@ Each area of the section has its own browser spec over one mocked server
 (`frontend/tests/browser/database-fixture.ts`, which answers with the driver
 catalogue above, and `database-fleet-fixture.ts` for a machine with and without
 Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
-`database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
-`database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-fleet-backups.spec.ts`, `database-home.spec.ts`, `database-data.spec.ts`,
+`database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
+the editor), `database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs

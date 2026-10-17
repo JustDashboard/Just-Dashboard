@@ -200,6 +200,18 @@ export type RedisStreamPending = {
   done: boolean
 }
 
+/** What an expiry on hash fields left: milliseconds, -1 none, -2 the field is gone. */
+export type RedisFieldExpiry = { field: RedisBytes; pttl: number }
+
+export type RedisStreamClaimed = {
+  claimed: string[]
+  /** Entries that were pending and are no longer in the stream. */
+  deleted: string[]
+  /** Continues an automatic claim while `done` is false. */
+  cursor: string
+  done: boolean
+}
+
 export type RedisCommandClass = "read" | "write" | "dangerous" | "blocked"
 
 export type RedisVerdict = {
@@ -294,6 +306,8 @@ export type RedisFeatures = {
   pubsub: boolean
   functions: boolean
   aof: boolean
+  /** XAUTOCLAIM: whatever a group left pending long enough, claimed without naming it. */
+  streamAutoClaim: boolean
 }
 
 export type RedisKeyspace = { db: number; keys: number; expires: number; avgTtlMs: number }

@@ -541,7 +541,7 @@ func (s *Service) PersistenceStatus(ctx context.Context) Persistence {
 	if err == nil {
 		p.Made = len(sp.Links) + len(sp.Addresses) + len(sp.Routes) + len(sp.Rules) +
 			len(sp.Namespaces) + len(sp.Shaping) + len(sp.Forwards) + len(sp.NAT) +
-			len(sp.Limits) + len(sp.Blocklists) + len(sp.Sysctls) + len(sp.EgressGroups)
+			len(sp.Limits) + len(sp.Blocklists) + len(sp.PortAllowlists) + len(sp.Sysctls) + len(sp.EgressGroups)
 	}
 	if !has("systemctl") {
 		p.Unit = "unsupported"
@@ -563,5 +563,5 @@ func (s *Service) PersistenceStatus(ctx context.Context) Persistence {
 // table, enabled or not: a disabled entry is still rendered, as a comment
 // nft has to parse.
 func gatewayHolds(sp *Spec) bool {
-	return len(sp.Forwards)+len(sp.NAT)+len(sp.Limits)+len(sp.Blocklists) > 0
+	return len(sp.Forwards)+len(sp.NAT)+len(sp.Limits)+len(sp.Blocklists)+len(sp.PortAllowlists) > 0
 }

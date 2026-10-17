@@ -184,6 +184,8 @@ export type DatabaseMock = {
   logSources?: unknown
   /** What `GET /databases/{id}/querylog` answers. */
   queryLog?: unknown
+  /** What `GET /databases/alerts` answers; no rule at all when absent. */
+  alerts?: unknown
   /** The lines `GET /logs/search` answers with, for every question. */
   logLines?: { text: string; level?: string; timestamp?: string; [key: string]: unknown }[]
 }
@@ -257,6 +259,12 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
     }
     if (path === "/databases/") return json(route, list())
     if (path === "/databases/drivers") return json(route, DRIVERS)
+    if (path === "/databases/alerts") {
+      return json(
+        route,
+        options.alerts ?? { rules: [], subjects: [], events: [], everySeconds: 30 },
+      )
+    }
     if (path === "/databases/fleet") {
       return json(route, {
         connections: list().map((conn) => fleetEntry(conn, options.fleet?.[conn.id])),
@@ -289,7 +297,10 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
         exposure: "local",
         port: Number(conn.port),
         publicAddresses: ["203.0.113.7"],
-        firewall: { active: true, open: false, editable: true },
+        firewall: { active: true, open: false, allowed: [], editable: true },
+        allow: [],
+        gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+        addresses: [],
       })
     }
     if (rest === "/url") {
@@ -344,6 +355,7 @@ export const DATABASE_SURFACES = [
   "/databases/1/logs",
   "/databases/1/access",
   "/databases/1/backups",
+  "/databases/1/alerts",
   "/databases/1/settings",
   "/databases/4",
   "/databases/4/data",

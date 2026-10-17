@@ -549,6 +549,17 @@ func (e unknownActionError) Error() string { return "unknown container action: "
 
 func errUnknownAction(a LifecycleAction) error { return unknownActionError(a) }
 
+// Signal sends a signal to a container's main process. A server that rereads
+// its configuration on SIGHUP, as PgBouncer does, takes a changed file without
+// the restart that would drop every connection through it.
+func (c *Client) Signal(ctx context.Context, id, signal string) error {
+	cli, err := c.api()
+	if err != nil {
+		return err
+	}
+	return cli.ContainerKill(ctx, id, signal)
+}
+
 func (c *Client) RemoveContainer(ctx context.Context, id string, force, removeVolumes bool) error {
 	cli, err := c.api()
 	if err != nil {
