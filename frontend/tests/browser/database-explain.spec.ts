@@ -302,11 +302,17 @@ test("a measured plan says where the time went and which estimates were far off"
   await expect(tree(page).locator('[data-plan-step="0"]')).toContainText("0.3 ms")
 
   // Slowest first, out of the tree; and back.
-  expect(await steps(page)).toEqual(["0", "0.0", "0.0.0", "0.0.0.0", "0.0.0.1", "0.0.0.1.0"])
+  await expect
+    .poll(() => steps(page))
+    .toEqual(["0", "0.0", "0.0.0", "0.0.0.0", "0.0.0.1", "0.0.0.1.0"])
   await results(page).getByRole("radio", { name: "Slowest first" }).click()
-  expect(await steps(page)).toEqual(["0.0.0.0", "0.0.0", "0.0", "0.0.0.1.0", "0.0.0.1", "0"])
+  await expect
+    .poll(() => steps(page))
+    .toEqual(["0.0.0.0", "0.0.0", "0.0", "0.0.0.1.0", "0.0.0.1", "0"])
   await results(page).getByRole("radio", { name: "Plan order" }).click()
-  expect(await steps(page)).toEqual(["0", "0.0", "0.0.0", "0.0.0.0", "0.0.0.1", "0.0.0.1.0"])
+  await expect
+    .poll(() => steps(page))
+    .toEqual(["0", "0.0", "0.0.0", "0.0.0.0", "0.0.0.1", "0.0.0.1.0"])
 
   // A step opens on its condition, then its time in words beside what is under it.
   await tree(page)
@@ -412,7 +418,7 @@ test("at a phone's width a measured plan keeps its figures and does not scroll s
   expect(await sideways(page)).toBe(false)
 
   await results(page).getByRole("radio", { name: "Slowest first" }).click()
-  expect((await steps(page))[0]).toBe("0.0.0.0")
+  await expect.poll(async () => (await steps(page))[0]).toBe("0.0.0.0")
   await tree(page)
     .getByRole("button", { name: /Seq Scan\s*orders o/ })
     .click()
