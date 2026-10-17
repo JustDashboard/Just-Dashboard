@@ -1041,7 +1041,14 @@ stays editable on a protected connection.
   `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
   (`GrantNeedsDatabase`) through a pool opened for that one request; a password is the one value
   no engine binds in `CREATE ROLE`/`CREATE USER`, so it is refused if it carries a control
-  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
+  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`). On
+  PostgreSQL a create or an alter that carries one runs with `pg_stat_statements.track_utility` off
+  for its transaction (`SET LOCAL`, `pgExecRole`) where the connection's account is a superuser, the
+  account that may change the setting, so the extension keeps no copy of the statement for its readers
+  (a member of `pg_read_all_stats`, a monitoring role's usual grant, reads every account's); for any
+  other account it is recorded as sent and the statement list shapes it. It is not sent as a SCRAM secret hashed here, which the server would store
+  as given: a password check the server runs on a new password (`passwordcheck`, `credcheck`) cannot
+  judge a hash, and `credcheck` refuses one.
   Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
   `database.connection.sibling`, `database.extension.create/update/drop/preload`.
   - *What else the server holds.* `GET /databases/{id}/schemas` (read surface) is the list the

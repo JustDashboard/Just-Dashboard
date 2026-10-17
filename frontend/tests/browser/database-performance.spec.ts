@@ -1393,6 +1393,237 @@ test("resetting the statistics is confirmed as the whole server's", async ({ pag
   await expect.poll(() => ops.sent.map((sent) => sent.request)).toEqual(["POST 1/statements/reset"])
 })
 
+// ---- a PostgreSQL server's statements, as shapes ------------------------------
+
+const SHAPES_TOTAL_MS = 842_000
+const shaped = (
+  id: string,
+  query: string,
+  totalMs: number,
+  calls: number,
+  extra: Record<string, unknown> = {},
+) =>
+  statement(id, query, totalMs / SHAPES_TOTAL_MS, {
+    totalMs,
+    calls,
+    meanMs: totalMs / calls,
+    maxMs: calls === 1 ? totalMs : (totalMs / calls) * 6,
+    rows: 0,
+    hitRatio: -1,
+    ...extra,
+  })
+
+/**
+ * What the list holds of a PostgreSQL server's statements: the extension's
+ * `$n` where it took a value out of a statement it planned, and a `?` wherever
+ * the backend took one out of a statement the extension keeps as it was sent
+ * — a role's password, a setting, a comment.
+ */
+const PG_SHAPES = {
+  ...STATEMENTS,
+  totalMs: SHAPES_TOTAL_MS,
+  statements: [
+    shaped(
+      "p1",
+      "SELECT id, total\n  FROM orders\n WHERE customer_id = $1\n ORDER BY ?",
+      438_000,
+      18_400,
+      {
+        rows: 220_800,
+        hitRatio: 0.97,
+      },
+    ),
+    shaped("p2", "UPDATE carts SET total = $1, updated_at = now() WHERE id = $2", 227_000, 6_120, {
+      rows: 6_120,
+      hitRatio: 0.99,
+    }),
+    shaped("p5", "SET statement_timeout = ?", 101_000, 24_800),
+    shaped("p4", "ALTER ROLE app_reader IN DATABASE shop_main SET search_path = ?, ?", 42_000, 3),
+    shaped(
+      "p3",
+      "CREATE ROLE app_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD ?",
+      25_000,
+      1,
+    ),
+    shaped("p6", "COMMENT ON TABLE orders IS ?", 9_000, 1),
+  ],
+}
+
+const shapeRow = (page: Page, text: RegExp) =>
+  region(page, "Statements").getByRole("row", { name: text })
+
+/** What the engine plans the first of those, with its values put back, as. */
+const ORDERS_PLAN = {
+  result: {
+    columns: ["QUERY PLAN"],
+    rows: [
+      ["Sort  (cost=48.21..48.29 rows=31 width=16)"],
+      ["  Sort Key: total"],
+      [
+        "  ->  Index Scan using orders_customer_id_idx on orders  (cost=0.29..47.44 rows=31 width=16)",
+      ],
+      ["        Index Cond: (customer_id = 42)"],
+    ],
+  },
+  format: "text",
+  analyzed: false,
+  rolledBack: false,
+}
+
+/**
+ * The statement's panel once it has slid in and its editor holds the text.
+ * Caught on the way in, the panel stood half off the window's edge with an
+ * empty editor in it.
+ */
+async function openedStatement(page: Page, text: string) {
+  const panel = dialog(page)
+  await expect(panel.locator("[data-slot=code-view]")).toContainText(text, { timeout: 15_000 })
+  await panel.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((animation) => animation.finished))
+  })
+  await expect(panel).toBeInViewport({ ratio: 1 })
+  return panel
+}
+
+test("a PostgreSQL statement is listed as its shape, with a ? where a password or a setting was", async ({
+  page,
+}) => {
+  const ops = await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("NOCREATEROLE PASSWORD ?")
+  await expect(shapeRow(page, /SET statement_timeout/)).toContainText("SET statement_timeout = ?")
+  await expect(region(page, "Statements")).toContainText(
+    "every value in it is replaced before it leaves the server",
+  )
+
+  // A statement the extension kept whole is still a shape, and has no plan.
+  await shapeRow(page, /CREATE ROLE app_reader/).click()
+  const panel = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(panel).toContainText("The statement, as a shape")
+  await expect(panel).toContainText("Only a statement that reads or changes rows has a plan")
+  // The editor's own input is a textbox too; what counts is that no value is asked for.
+  await expect(panel.getByRole("textbox", { name: /^The value for/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+
+  // One that was planned asks for the extension's $1 and for the ? beside it.
+  await shapeRow(page, /SELECT id, total/).click()
+  await openedStatement(page, "customer_id = $1")
+  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
+  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
+  await panel.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
+  expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
+    query: "SELECT id, total\n  FROM orders\n WHERE customer_id = 42\n ORDER BY 2",
+    format: "text",
+  })
+})
+
+test("an account that may only read is shown the shapes and offered nothing that runs one", async ({
+  page,
+}) => {
+  await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
+  await expect(page.getByRole("button", { name: "Reset statistics" })).toHaveCount(0)
+  await shapeRow(page, /ALTER ROLE app_reader/).click()
+  const panel = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(panel).toContainText("The statement, as a shape")
+  await expect(panel.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+})
+
+test("a PostgreSQL list with nothing counted yet says so", async ({ page }) => {
+  await mockOps(page, {
+    answers: { "GET 1/statements": { ...PG_SHAPES, totalMs: 0, statements: [] } },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(
+    page.getByText("No statement has been counted yet. The list fills as they run."),
+  ).toBeVisible()
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(0)
+})
+
+test("a PostgreSQL list that cannot be read says why, and can be asked for again", async ({
+  page,
+}) => {
+  let refused = true
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements": () =>
+        refused ? failing("pq: permission denied for view pg_stat_statements") : PG_SHAPES,
+    },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(page.getByText("Could not read the statements")).toBeVisible()
+  await expect(page.getByText(/permission denied for view pg_stat_statements/)).toBeVisible()
+  refused = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
+})
+
+test("the shapes keep to a phone's width, with a statement open over them", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await keepsTheRules(page, "a PostgreSQL server's statements at a phone's width")
+  await visit(page, "/databases/1/performance?view=statements&statement=p3")
+  await expect(dialog(page)).toContainText("The statement, as a shape")
+  await keepsTheRules(page, "a statement's shape open at a phone's width", true)
+})
+
+test("a PostgreSQL server's statements as shapes, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
+  const shots = process.env.JD_SHOTS
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await page.screenshot({ path: `${shots}/statements-shapes-1440.png` })
+
+  await shapeRow(page, /CREATE ROLE app_reader/).click()
+  const password = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(password).toContainText("Only a statement that reads or changes rows has a plan")
+  await page.screenshot({ path: `${shots}/statement-password-1440.png` })
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+
+  await shapeRow(page, /SELECT id, total/).click()
+  const panel = await openedStatement(page, "customer_id = $1")
+  await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
+  await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
+  await panel.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
+  await page.screenshot({ path: `${shots}/statement-planned-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
+  await visit(page, "/databases/1/performance?view=statements&statement=p4")
+  const viewer = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(viewer).toContainText("The statement, as a shape")
+  await page.screenshot({ path: `${shots}/statements-viewer-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, {
+    answers: { "GET 1/statements": { ...PG_SHAPES, totalMs: 0, statements: [] } },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(page.getByText("No statement has been counted yet.", { exact: false })).toBeVisible()
+  await page.screenshot({ path: `${shots}/statements-empty-1440.png` })
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await visit(page, "/databases/1/performance?view=statements")
+  await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
+  await page.screenshot({ path: `${shots}/statements-shapes-390.png` })
+})
+
 test("a view that could not be read says so and is tried again; one that stops updating keeps what it had", async ({
   page,
 }) => {
