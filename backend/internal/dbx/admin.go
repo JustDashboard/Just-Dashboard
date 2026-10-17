@@ -485,8 +485,7 @@ func (d postgresDialect) CreateRole(ctx context.Context, db *sql.DB, spec RoleSp
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "CREATE ROLE "+name+" WITH "+options)
-	return err
+	return pgExecRole(ctx, db, "CREATE ROLE "+name+" WITH "+options, spec.Password != "")
 }
 
 func (d postgresDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) error {
@@ -503,8 +502,46 @@ func (d postgresDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpe
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "ALTER ROLE "+name+" WITH "+options)
-	return err
+	return pgExecRole(ctx, db, "ALTER ROLE "+name+" WITH "+options, spec.SetPassword && spec.Password != "")
+}
+
+// pgExecRole runs a CREATE or ALTER ROLE. One that carries a password runs
+// with pg_stat_statements.track_utility off for its transaction, where this
+// account may turn it off: the extension keeps a utility statement as it was
+// sent, so the password would otherwise sit in clear in the server's statement
+// statistics, for every reader of pg_stat_statements — a monitoring role
+// among them, since pg_read_all_stats reads every account's statements. Only
+// a superuser may change the setting (from 15 also a role granted SET on it,
+// which is not looked for); for anybody else the statement is recorded as
+// before, and the Statements list shapes it like any other.
+//
+// The password is not sent hashed instead, though the server would store a
+// SCRAM secret it was given: a password check the server runs on a new
+// password (passwordcheck, credcheck) cannot judge a hash, and credcheck
+// refuses one, so hashing here would quietly set aside the operator's policy.
+func pgExecRole(ctx context.Context, db *sql.DB, stmt string, password bool) error {
+	var untracked bool
+	if password {
+		_ = db.QueryRowContext(ctx, `
+		  SELECT EXISTS (SELECT 1 FROM pg_settings WHERE name = 'pg_stat_statements.track_utility' AND setting = 'on')
+		     AND (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)`).Scan(&untracked)
+	}
+	if !untracked {
+		_, err := db.ExecContext(ctx, stmt)
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL pg_stat_statements.track_utility = off`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DropRole removes a role, taking back first what it was granted in this
