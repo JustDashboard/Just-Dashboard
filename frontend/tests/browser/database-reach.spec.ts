@@ -404,6 +404,19 @@ test("at a phone's width the list and its picture fit without scrolling sideways
   ).toBe(true)
 })
 
+/**
+ * Clears what a shot should not be of: the toast a change left up, which lies
+ * over the foot of the section, and the focus ring a click leaves on a card,
+ * which reads as a second selection.
+ */
+async function settle(page: Page) {
+  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
+    await close.click({ force: true }).catch(() => undefined)
+  }
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+}
+
 test("the reach states, for the record @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to take the screenshots")
   const shots = process.env.JD_SHOTS
@@ -424,6 +437,9 @@ test("the reach states, for the record @shots", async ({ page }) => {
   }
   await add.fill("office.example")
   await expect(editor(page)).toContainText("Not an address or a network")
+  await editor(page)
+    .getByRole("button", { name: "Allow only these addresses" })
+    .scrollIntoViewIfNeeded()
   await page.screenshot({ path: `${shots}/reach-list-draft-1440.png`, fullPage: true })
   await add.fill("")
 
@@ -432,12 +448,14 @@ test("the reach states, for the record @shots", async ({ page }) => {
   await page.screenshot({ path: `${shots}/reach-list-review-1440.png` })
   await dialog(page).getByRole("button", { name: "Allow these addresses" }).click()
   await expect(reach(page)).toContainText("1,284 attempts so far")
+  await settle(page)
   await page.screenshot({ path: `${shots}/reach-listed-1440.png`, fullPage: true })
 
   await choices(page)
     .getByRole("button", { name: /One address of this machine/ })
     .click()
   await expect(picker(page)).toBeVisible()
+  await settle(page)
   await page.screenshot({ path: `${shots}/reach-one-address-1440.png`, fullPage: true })
 
   await page.setViewportSize({ width: 390, height: 844 })
