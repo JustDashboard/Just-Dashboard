@@ -34,11 +34,12 @@ const LIMITS = ROW_LIMITS.map((limit) => ({
 export function standingWords(standing: Standing): string {
   if (!standing.target) return ""
   if (standing.target.scope === "selection") return "Selection"
+  const [first, last] = standing.lines ?? [0, 0]
   if (standing.of > 1) {
-    const [first, last] = standing.lines ?? [0, 0]
     return `Statement ${standing.at} of ${standing.of}${last > first ? `, lines ${first}–${last}` : ""}`
   }
-  return ""
+  // A body that runs on is worth its reach even when it is the only statement.
+  return standing.runsOn && last > first ? `Lines ${first}–${last}` : ""
 }
 
 /**
