@@ -58,6 +58,15 @@ func TestLiveDatabaseAlertObservations(t *testing.T) {
 			}
 			pass, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
+			// A fixture that is named and stopped skips, as every live test
+			// does; one that answers here must answer the recorder too.
+			conn, dsn, err := s.openDBConn(rec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.dialConnection(pass, conn, dsn); err != nil {
+				t.Skipf("%s unreachable: %v", c.envs[0], err)
+			}
 			obs := s.recordDatabaseMetric(pass, rec, rules)
 			if !obs.Answered || obs.Error != "" || obs.Unread != "" {
 				t.Fatalf("the server did not answer the recorder: %+v", obs)
