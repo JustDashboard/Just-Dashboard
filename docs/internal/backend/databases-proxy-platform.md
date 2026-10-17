@@ -931,11 +931,19 @@ stays editable on a protected connection.
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
   `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
-  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
-  never one execution: the list is on the read surface and a literal is somebody's e-mail address.
-  PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
-  and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
-  leaves the package. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  with the grant the account lacks (`reason`). The rule is that the text is a statement's shape, never
+  one execution: the list is on the read surface and a literal is somebody's e-mail address. MySQL and
+  MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to (`normalizeQuery`), and for SQL
+  Server and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the
+  text leaves the package. PostgreSQL's text is returned as `pg_stat_statements` keeps it, and the
+  extension replaces constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`,
+  `MERGE`). A utility statement — `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a
+  column `DEFAULT`, a `DO` body — is kept as it was sent while `pg_stat_statements.track_utility` is on,
+  its default, and reaches the list with its literals, a role's password included. That falls short of
+  the rule and is recorded as an open finding in
+  [verification findings](../reference/verification-findings.md#postgresql-statement-statistics-keep-utility-literals);
+  it is not an exception to it.
+- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
@@ -1070,7 +1078,11 @@ stays editable on a protected connection.
   shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
-  `/activity` and `/statements`, it returns statement text with its literals at read capability.
+  `/activity`, and unlike `/statements`, it returns each statement as the server recorded it, literals
+  included, at read capability — a Redis entry is the command with every argument, a value it set
+  among them; only `fp` is a shape. It sits at `read` beside the log routes, which hand back lines as
+  the log holds them
+  ([request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries)).
 
 ### Redis
 
