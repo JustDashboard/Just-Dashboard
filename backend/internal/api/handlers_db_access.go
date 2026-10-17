@@ -606,6 +606,8 @@ type dbAccessOutcome struct {
 	Firewall      string
 	FirewallError string
 	FirewallSteps []netsec.PlanStep
+	// Pooler is what followPoolerExposure did to the database's pooler, if it has one.
+	Pooler map[string]any
 }
 
 // applyDBAccess runs a plan in the order accessSteps chose. A list that
@@ -638,6 +640,10 @@ func (s *Server) applyDBAccess(ctx context.Context, r *http.Request, p *dbAccess
 		s.modules.dbs.Close(p.conn.ID)
 		s.dbConns.stale(p.conn.ID)
 	}
+	// A pooler leaves loopback by the public switch and by nothing else, and
+	// comes back to it by that switch, so it is asked whether or not the
+	// database itself had to move.
+	out.Pooler = s.followPoolerExposure(ctx, r, p.conn, p.dsn, poolerBindFor(p.to.Exposure))
 	known := append(append([]string{}, p.from.Allow...), p.to.Allow...)
 	word, steps, err := s.reconcileDBFirewall(ctx, r, p.port, p.to, known)
 	out.Firewall, out.FirewallSteps = word, steps
@@ -751,6 +757,9 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 	if out.Firewall != "" {
 		detail["firewall"] = out.Firewall
 	}
+	if out.Pooler != nil {
+		detail["pooler"] = out.Pooler
+	}
 	if p.kept {
 		detail["allowBefore"] = p.from.Allow
 	}
@@ -786,6 +795,9 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 	access := s.describeDBAccess(ctx, p.conn, p.dsn)
 	access.Client = s.dbAccessClient(r)
 	resp := map[string]any{"access": access, "firewall": out.Firewall, "gateway": out.Gateway}
+	if out.Pooler != nil {
+		resp["pooler"] = out.Pooler
+	}
 	if out.FirewallError != "" {
 		resp["firewallError"] = out.FirewallError
 	}
@@ -1007,4 +1019,13 @@ func publicConnectionURL(driver dbx.Driver, dsn string, info *dbx.ConnInfo, addr
 	// applicationConnectionURL joins host and port itself, bracketing an
 	// IPv6 literal on the way.
 	return applicationConnectionURL(driver, dsn, info, address, info.Port)
+}
+
+// poolerBindFor is the host address a pooler is published on for an exposure:
+// every interface only where the database is open to anywhere.
+func poolerBindFor(exposure dbExposure) string {
+	if exposure == exposurePublic {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
 }

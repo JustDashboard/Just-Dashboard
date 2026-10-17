@@ -25,18 +25,27 @@ export type Concern = {
   reason: string
 }
 
-/** What the fleet's reading of a database says about its dumps. */
+/** What the fleet's reading of a database says about its backups. */
 export type BackupReading = {
-  /** When the newest dump was taken; undefined when there is none. */
+  /** When it was last backed up, by hand or by a backup job; undefined for never. */
   newest: string | undefined
   /** A dump, restore or copy is running against it now. */
   running: boolean
 }
 
+/** The later of two instants, either of which may be missing. */
+function later(a: string | undefined, b: string | undefined): string | undefined {
+  if (!a || !b) return a ?? b
+  return Date.parse(b) > Date.parse(a) ? b : a
+}
+
 /**
- * The newest dump of each connection. The summary is the dump directories'
- * own listing and wins; where it could not be read the fleet's `lastBackup`
- * still says when the newest one was written.
+ * When each connection was last backed up. The fleet's `lastBackup` counts
+ * the backup jobs' runs as well as the dump directory; the summary is the
+ * directories' own listing, read every few seconds while a dump runs, so it
+ * learns of a new dump first. The later of the two is the answer: were the
+ * summary to win, a database a nightly job protects would be as old as the
+ * last dump somebody took by hand.
  */
 export function backupReadings(
   fleet: DbFleet | undefined,
@@ -48,7 +57,7 @@ export function backupReadings(
   }
   for (const row of summary?.connections ?? []) {
     out.set(row.id, {
-      newest: row.newest?.takenAt ?? out.get(row.id)?.newest,
+      newest: later(row.newest?.takenAt, out.get(row.id)?.newest),
       running: row.job?.status === "running",
     })
   }

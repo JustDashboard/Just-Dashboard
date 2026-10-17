@@ -1875,6 +1875,7 @@ export type DbCapabilityFlag =
   | "comments"
   | "indexes"
   | "extensions"
+  | "pooler" // a PgBouncer can be run in front of the server
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
   | "sessions" // sessions, Redis clients, MongoDB operations
@@ -1891,6 +1892,7 @@ export type DbCapabilityFlag =
   | "privileges" // role detail, grants, grant and revoke
   | "statements"
   | "statementsReset"
+  | "statementsSetup" // POST /statements/preload: the library loaded at start, then a restart
   | "queryLog"
   | "clickhouseViews" // parts, merges, mutations, running queries
   | "sqliteFile"
@@ -4895,6 +4897,8 @@ export type DeploymentDatabaseLink = {
   database: string
   network: string
   hostname: string
+  /** The connection has a pooler, so `${{database.N.pooled}}` resolves. */
+  pooler?: boolean
   status: "pending" | "connected" | "stale" | "unavailable"
   detail?: string
   checkedAt?: string
@@ -5941,6 +5945,94 @@ export type DbAccessRequest =
   | { exposure: "private"; address: string }
   | { exposure: "allowlist"; allow: string[] }
 
+export type DbPoolMode = "transaction" | "session"
+export type DbPoolerAuth = "userlist" | "auth_query"
+
+/** What an operator chooses about a pooler (`PUT /databases/{id}/pooler`). */
+export type DbPoolerSettings = {
+  poolMode: DbPoolMode
+  poolSize: number
+  maxClientConn: number
+  authMode: DbPoolerAuth
+}
+
+/**
+ * A connection's pooler, as GET /databases/{id}/pooler reads it. `available`
+ * is whether one can be turned on, with `reason` when not; a connection that
+ * has one is always available. `state` is the container's own word, or
+ * `missing` when its container is gone. `inSync` is whether the files it holds
+ * were made from the connection's current password.
+ */
+export type DbPooler = {
+  available: boolean
+  reason?: string
+  enabled: boolean
+  settings: DbPoolerSettings
+  defaults: DbPoolerSettings
+  limits: { poolSize: number; maxClientConn: number }
+  state?: string
+  container?: string
+  image: string
+  network?: string
+  exposure?: "local" | "public" | "private"
+  port?: number
+  linkedHost: string
+  linkedPort: number
+  reference: string
+  inSync: boolean
+  createdAt?: string
+}
+
+/** What PUT /databases/{id}/pooler did, and the reading afterwards. */
+export type DbPoolerChange = {
+  pooler: DbPooler
+  warnings: string[]
+  /** opened, closed, already, none, inactive, read-only or failed. */
+  firewall?: string
+  firewallError?: string
+}
+
+/** One row of PgBouncer's SHOW POOLS. */
+export type DbPoolerPool = {
+  database: string
+  user: string
+  poolMode: string
+  clActive: number
+  clWaiting: number
+  svActive: number
+  svIdle: number
+  svUsed: number
+  svTested: number
+  svLogin: number
+  maxWaitSec: number
+}
+
+/** One row of SHOW STATS: totals since it started, averages over its last period; microseconds and bytes. */
+export type DbPoolerStat = {
+  database: string
+  totalXactCount: number
+  totalQueryCount: number
+  totalReceived: number
+  totalSent: number
+  totalXactTime: number
+  totalQueryTime: number
+  totalWaitTime: number
+  avgXactCount: number
+  avgQueryCount: number
+  avgRecv: number
+  avgSent: number
+  avgXactTime: number
+  avgQueryTime: number
+  avgWaitTime: number
+}
+
+export type DbPoolerStats = {
+  version: string
+  pools: DbPoolerPool[]
+  stats: DbPoolerStat[]
+  at: string
+}
+
 /** What PUT /databases/{id}/access did, and the reading afterwards. */
 export type DbAccessChange = {
   access: DbAccess
@@ -5950,6 +6042,22 @@ export type DbAccessChange = {
   /** kept, released, restored, unchanged or failed. */
   gateway: string
   gatewayError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
 }
 
 /** One end of a change to where a server is reachable from. */
@@ -5968,6 +6076,22 @@ export type DbAccessPreview = {
   steps: { kind: "gateway" | "recreate" | "firewall"; description: string; lines?: string[] }[]
   firewall: string
   firewallError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
 }
 
 /**
@@ -6101,6 +6225,10 @@ export type DbFleetEntry = DbConnection & {
   unit?: string
   exposure: DbAccess["exposure"] | "unknown"
   consumers: number
+  /**
+   * When it was last backed up from here: its newest dump, or the newest
+   * backup job run that dumped it, whichever is later. Absent for never.
+   */
   lastBackup?: string
 }
 

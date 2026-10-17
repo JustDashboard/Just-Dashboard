@@ -128,6 +128,7 @@ type moduleSet struct {
 	deploySchedule   *deploy.AutomationScheduler
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
+	poolers          *poolerKeeper
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
 	// deployExecutor is the normalized release path, kept for the tailnet
@@ -276,6 +277,7 @@ func (s *Server) initModules() {
 	s.modules.deployer = deploy.NewDeployer(s.modules.deployStore, s.Log)
 	s.modules.deployRuns = deploy.NewOrchestrationStore(s.Store)
 	s.modules.deployDatabases = &deploymentDatabaseNetworks{server: s}
+	s.modules.poolers = &poolerKeeper{server: s}
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)

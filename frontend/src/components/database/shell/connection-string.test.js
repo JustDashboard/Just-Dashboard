@@ -7,6 +7,7 @@ import {
   connectTargets,
   holdsSecret,
   maskedParts,
+  pooledTargets,
   revealedParts,
 } from "./connection-string"
 
@@ -197,5 +198,54 @@ describe("the shapes it is offered in", () => {
     const cli = connectSnippet(mysql, maskedParts(m, mysql, targets(m)[0]), "cli")
     expect(cli).toBe("mysql --host=127.0.0.1 --port=3306 --user=app --password blog")
     expect(holdsSecret(cli)).toBe(false)
+  })
+})
+
+function pooler(overrides = {}) {
+  return {
+    enabled: true,
+    port: 6433,
+    exposure: "local",
+    linkedHost: "db-7-pool.jd.internal",
+    linkedPort: 6432,
+    ...overrides,
+  }
+}
+
+describe("where a database is connected from, through its pooler", () => {
+  test("the pooler has its own port on this server and its own name on the network", () => {
+    const [host, container, anywhere] = pooledTargets(conn(), pooler(), access())
+    expect([host.id, host.host, host.port]).toEqual(["host", "127.0.0.1", "6433"])
+    expect([container.id, container.host, container.port]).toEqual([
+      "container",
+      "db-7-pool.jd.internal",
+      "6432",
+    ])
+    // On this server only until the access switch opens the database to anywhere.
+    expect(anywhere.unavailable).toContain("Opening the database to anywhere")
+  })
+
+  test("a pooler published on every interface has a string for another machine", () => {
+    const anywhere = pooledTargets(
+      conn(),
+      pooler({ exposure: "public" }),
+      access({ exposure: "public" }),
+    )[2]
+    expect([anywhere.host, anywhere.port]).toEqual(["203.0.113.7", "6433"])
+    expect(anywhere.unavailable).toBeUndefined()
+  })
+
+  test("a pooler with no published port has none on this server", () => {
+    expect(pooledTargets(conn(), pooler({ port: undefined }), access())[0].unavailable).toContain(
+      "not published",
+    )
+  })
+
+  test("the masked string keeps the account and database and changes only the address", () => {
+    const c = conn()
+    const [host] = pooledTargets(c, pooler(), access())
+    expect(maskedParts(c, engineFor(c), host).url).toBe(
+      `postgres://app:${MASK}@127.0.0.1:6433/shop_main?sslmode=disable`,
+    )
   })
 })

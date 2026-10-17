@@ -335,28 +335,24 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	target := r.URL.Query().Get("target")
-	switch target {
-	case "", "host":
-	case "container":
-		ctx, cancel := timeoutCtx(r, 15*time.Second)
-		defer cancel()
-		dsn, err = s.databaseApplicationURL(ctx, conn, dsn)
-		if err != nil {
-			return err
-		}
-	case "public":
-		// The same string with this machine's public address where loopback
-		// was: what gets pasted on a laptop. A connection that already names
-		// another machine is handed back as it is — that address is the one
-		// everybody else uses too.
-		ctx, cancel := timeoutCtx(r, 15*time.Second)
-		defer cancel()
-		dsn, err = s.publicDatabaseURL(ctx, conn, dsn)
-		if err != nil {
-			return err
-		}
-	default:
+	pooled := r.URL.Query().Get("pooled")
+	if pooled != "" && pooled != "1" {
+		return httpx.BadRequest("pooled must be 1")
+	}
+	if target != "" && target != "host" && target != "container" && target != "public" {
 		return httpx.BadRequest("target must be host, container or public")
+	}
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	if pooled == "1" {
+		// The same three places, through the pooler instead of straight to the
+		// database: only the address differs.
+		dsn, err = s.poolerConnectionURL(ctx, conn, dsn, target)
+	} else {
+		dsn, err = s.directConnectionURL(ctx, conn, dsn, target)
+	}
+	if err != nil {
+		return err
 	}
 	// A consumer that parses JDBC, ADO.NET or Rails' mysql2:// form gets the
 	// same connection in that shape, and Rails' further databases on the same
@@ -377,10 +373,16 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	// through with nothing to annotate: the SetAudit that used to stand here
 	// recorded nothing, and "deliberate and recorded" was half true.
 	s.recordRead(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target, "format": format}, nil)
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format, "pooled": pooled == "1"}, nil)
 	reference := ""
 	if target == "container" {
-		reference = fmt.Sprintf("${{database.%d}}", conn.ID)
+		// A pooled string is a different reference: it resolves to the pooler's
+		// name on the environment's network, not the database's.
+		ref := strconv.FormatInt(conn.ID, 10)
+		if pooled == "1" {
+			ref += ".pooled"
+		}
+		reference = fmt.Sprintf("${{database.%s}}", ref)
 		if format != "" && format != "url" || database != "" {
 			suffix := format
 			if suffix == "" {
@@ -389,13 +391,28 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 			if database != "" {
 				suffix += "." + database
 			}
-			reference = fmt.Sprintf("${{database.%d.%s}}", conn.ID, suffix)
+			reference = fmt.Sprintf("${{database.%s.%s}}", ref, suffix)
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"id": conn.ID, "name": conn.Name, "driver": conn.Driver, "url": dsn, "reference": reference,
 	})
 	return nil
+}
+
+// directConnectionURL is the saved string for the place a program will run.
+func (s *Server) directConnectionURL(ctx context.Context, conn *dbConnection, dsn, target string) (string, error) {
+	switch target {
+	case "container":
+		return s.databaseApplicationURL(ctx, conn, dsn)
+	case "public":
+		// The same string with this machine's public address where loopback
+		// was: what gets pasted on a laptop. A connection that already names
+		// another machine is handed back as it is — that address is the one
+		// everybody else uses too.
+		return s.publicDatabaseURL(ctx, conn, dsn)
+	}
+	return dsn, nil
 }
 
 // databaseURLFormatRE is the closed set of connection shapes the URL route

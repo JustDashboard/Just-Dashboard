@@ -173,6 +173,32 @@ describe("the dump readings", () => {
     expect(readings.get(3)).toEqual({ newest: undefined, running: true })
     expect(backupReadings(undefined, undefined).size).toBe(0)
   })
+
+  test("a backup job's run newer than every dump is the last backup, and a dump since then wins", () => {
+    // The fleet's date counts the backup jobs' runs; the summary lists only the
+    // dump directory, and hears of a dump taken since the fleet was read first.
+    const fleet = {
+      connections: [
+        entry({ id: 1, lastBackup: "2026-09-25T03:00:00Z" }),
+        entry({ id: 2, lastBackup: "2026-09-25T03:00:00Z" }),
+        entry({ id: 3, lastBackup: "2026-09-25T03:00:00Z" }),
+      ],
+    }
+    const dump = (id, takenAt) => ({ id, name: "x", count: 1, totalSize: 9, newest: { takenAt } })
+    const readings = backupReadings(fleet, {
+      connections: [
+        dump(1, "2026-09-15T00:00:00Z"),
+        dump(2, "2026-09-25T11:30:00Z"),
+        { id: 3, name: "x", count: 0, totalSize: 0, newest: null },
+      ],
+    })
+    expect(readings.get(1)?.newest).toBe("2026-09-25T03:00:00Z")
+    expect(readings.get(2)?.newest).toBe("2026-09-25T11:30:00Z")
+    expect(readings.get(3)?.newest).toBe("2026-09-25T03:00:00Z")
+    // Read against the clock, a job that ran last night is not a week-old dump.
+    const concerns = fleetConcerns(fleet.connections[0], { backup: readings.get(1), now: NOW })
+    expect(kinds(concerns)).not.toContain("stale-backup")
+  })
 })
 
 describe("the order of the cards", () => {

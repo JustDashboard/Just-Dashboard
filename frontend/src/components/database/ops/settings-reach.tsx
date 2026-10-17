@@ -3,7 +3,7 @@
 import { useId, useRef, useState } from "react"
 import Link from "next/link"
 import { Cross, Globe, Router, Servers, Shield, Warning } from "@/components/icons"
-import { post, put } from "@/lib/api"
+import { get, post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type {
   DbAccess,
@@ -11,6 +11,7 @@ import type {
   DbAccessPreview,
   DbAccessRequest,
   DbHostAddress,
+  DbPooler,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -89,6 +90,16 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
     { enabled: admin },
   )
 
+  // A connection pooler is published where the database is told to be, by this
+  // same switch, so the confirmation says so.
+  const pooler = usePoll(
+    (signal) => get<DbPooler>(`/databases/${id}/pooler`, undefined, signal),
+    0,
+    [id],
+    { enabled: admin && engine.can("pooler") },
+  )
+  const pooled = pooler.data?.enabled ? pooler.data : undefined
+
   const data = access.data
   const exposure = data?.exposure ?? summary?.exposure ?? "unknown"
   const words = EXPOSURE[exposure] ?? EXPOSURE.unknown
@@ -130,6 +141,14 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
         ]
           .filter(Boolean)
           .join(" ")
+        if (answer.pooler?.error) {
+          notify.warning(
+            answer.pooler.removed
+              ? `The connection pooler could not follow ${conn.name} and was removed`
+              : `The connection pooler did not follow ${conn.name}`,
+            { description: answer.pooler.error },
+          )
+        }
         if (answer.gatewayError || answer.firewallError) {
           notify.warning(`${conn.name} changed, and not everything followed`, {
             description: [answer.gatewayError, answer.firewallError].filter(Boolean).join(" "),
@@ -176,6 +195,13 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
                   }`}{" "}
               Anything that can reach this machine can then try the password.
             </p>
+            {pooled && (
+              <p>
+                {pooled.container} (PgBouncer) is published with it, on port{" "}
+                {pooled.port ?? "its own"}
+                {firewall?.active && firewall.editable ? ", with a rule of its own" : ""}.
+              </p>
+            )}
             <p>
               {recreates
                 ? "The data is kept. Every open session is dropped while the container is replaced."
@@ -190,6 +216,9 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
               {listed ? " and the gateway's list" : ""}. Anything that reaches it from another
               machine stops reaching it.
             </p>
+            {pooled && pooled.exposure !== "local" && (
+              <p>{pooled.container} (PgBouncer) is brought back to this machine with it.</p>
+            )}
             <p>The data is kept. Every open session is dropped while the container is replaced.</p>
           </>
         ),
