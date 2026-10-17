@@ -5129,7 +5129,7 @@ export type ApiToken = {
   prefix: string
   role: Role
   /** The one capability the key is limited to; empty for an ordinary key. */
-  scope: "" | "metrics.read"
+  scope?: "" | "metrics.read"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
