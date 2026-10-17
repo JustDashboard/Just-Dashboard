@@ -2,7 +2,13 @@ package dbx
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/pbkdf2"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -21,13 +27,13 @@ import (
 // console. The container, its network and its lifecycle are the API's.
 
 const (
-	// PoolerImage is pinned by version: a pooler that changes under the
-	// operator when a tag moves is a surprise in the one process every
-	// application connection goes through. The image's own entrypoint is
+	// PoolerImage is pinned by version and by digest of the multi-platform
+	// index: a pooler that changes under the operator when a tag moves is a
+	// surprise in the one process every application connection goes through. The image's own entrypoint is
 	// bypassed (it writes a configuration from environment variables, which
 	// would put the password where `docker inspect` shows it), so only the
 	// binary and its user are relied on.
-	PoolerImage = "edoburu/pgbouncer:v1.25.2-p0"
+	PoolerImage = "edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340"
 	// PoolerListenPort is where PgBouncer listens inside its container. The
 	// host port that publishes it is chosen at creation.
 	PoolerListenPort = 6432
@@ -215,27 +221,29 @@ func (c PoolerConfig) Userlist() (string, error) {
 }
 
 // PoolerAuthStatements is what auth_query mode leaves in the database, in the
-// order it is run (the names are constants of this package, so none is quoted): an account that can log in and nothing else, and a
-// function, owned by the connection's own (super)user, that returns one
-// account's stored password hash to that account alone.
+// order it is run (the names are constants of this package, so none is
+// quoted): an account that can log in and nothing else, and a function, owned
+// by the connection's own superuser, that returns one account's stored
+// password hash to that account alone.
 //
-// The function exists because PgBouncer cannot be allowed to read pg_shadow
+// The function exists because PgBouncer cannot be allowed to read pg_authid
 // itself without being a superuser, and a superuser the pooler signs in as is
-// exactly what this avoids. exists says whether the login role is already
-// there, which decides between creating and altering it.
-func PoolerAuthStatements(exists bool, password string) []string {
-	verb := "CREATE"
-	if exists {
-		verb = "ALTER"
-	}
+// exactly what this avoids. It answers for any account that may log in,
+// superusers included: signing in through the pooler takes the same password
+// as signing in directly, so it admits nobody the server does not, and PgBouncer
+// itself would refuse an account whose password has expired the way the server
+// does (a NULL hash). The account is sent as a SCRAM verifier, so the password
+// never reaches the server's logs or statement statistics.
+func PoolerAuthStatements(verifier string) []string {
 	role, schema := PoolerAuthRole, PoolerAuthSchema
 	fn := schema + ".get_auth(text)"
 	return []string{
-		verb + " ROLE " + role + " WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD " + passwordLiteral(DriverPostgres, password),
-		"CREATE SCHEMA IF NOT EXISTS " + schema,
-		"CREATE OR REPLACE FUNCTION " + schema + ".get_auth(p_usename text) RETURNS TABLE(usename name, passwd text) " +
+		"CREATE ROLE " + role + " WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD " + passwordLiteral(DriverPostgres, verifier),
+		"CREATE SCHEMA " + schema,
+		"CREATE FUNCTION " + schema + ".get_auth(p_usename text) RETURNS TABLE(usename name, passwd text) " +
 			"LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS " +
-			"$$ SELECT s.usename, s.passwd::text FROM pg_catalog.pg_shadow s WHERE s.usename = p_usename $$",
+			"$$ SELECT a.rolname::name, CASE WHEN a.rolvaliduntil < now() THEN NULL ELSE a.rolpassword END " +
+			"FROM pg_catalog.pg_authid a WHERE a.rolname = p_usename AND a.rolcanlogin $$",
 		"REVOKE ALL ON FUNCTION " + fn + " FROM PUBLIC",
 		"GRANT USAGE ON SCHEMA " + schema + " TO " + role,
 		"GRANT EXECUTE ON FUNCTION " + fn + " TO " + role,
@@ -249,6 +257,97 @@ func PoolerAuthRemoval() []string {
 		"DROP SCHEMA IF EXISTS " + PoolerAuthSchema,
 		"DROP ROLE IF EXISTS " + PoolerAuthRole,
 	}
+}
+
+var (
+	// ErrPoolerNotSuperuser: the function reads password hashes, which takes a
+	// superuser to own it.
+	ErrPoolerNotSuperuser = errors.New("auth_query reads other accounts' password hashes through a function only a superuser can own, and this connection does not sign in as one; use the userlist")
+	// ErrPoolerAuthTaken: a role or schema of the name is already in the
+	// database, and nothing here made it.
+	ErrPoolerAuthTaken = errors.New("the database already has a role or schema named " + PoolerAuthRole + " that this dashboard did not make; drop it, or use the userlist")
+)
+
+// SetUpPoolerAuth leaves auth_query mode's role and function in the database in
+// one transaction, so a refusal or a failure leaves nothing behind. It never
+// alters a role or a schema that is already there: whatever has the name is
+// somebody's, possibly another pooler's, and its password is not this call's to
+// change. password is the plain password of the role (the userlist needs it);
+// the server is sent a verifier of it.
+func SetUpPoolerAuth(ctx context.Context, db *sql.DB, password string) error {
+	verifier, err := ScramVerifier(password)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var superuser, role, schema bool
+	if err := tx.QueryRowContext(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&superuser); err != nil {
+		return err
+	}
+	if !superuser {
+		return ErrPoolerNotSuperuser
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT
+		EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1),
+		EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $2)`, PoolerAuthRole, PoolerAuthSchema).Scan(&role, &schema); err != nil {
+		return err
+	}
+	if role || schema {
+		return ErrPoolerAuthTaken
+	}
+	for _, statement := range PoolerAuthStatements(verifier) {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// RemovePoolerAuth takes auth_query mode's objects out in one transaction.
+func RemovePoolerAuth(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, statement := range PoolerAuthRemoval() {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ScramVerifier is a password as PostgreSQL stores a SCRAM-SHA-256 secret
+// (RFC 5802, the form pg_authid.rolpassword holds), which CREATE ROLE takes in
+// place of the password.
+func ScramVerifier(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	return scramVerifier(password, salt, 4096)
+}
+
+func scramVerifier(password string, salt []byte, iterations int) (string, error) {
+	salted, err := pbkdf2.Key(sha256.New, password, salt, iterations, sha256.Size)
+	if err != nil {
+		return "", err
+	}
+	mac := func(key []byte, message string) []byte {
+		h := hmac.New(sha256.New, key)
+		h.Write([]byte(message))
+		return h.Sum(nil)
+	}
+	stored := sha256.Sum256(mac(salted, "Client Key"))
+	return fmt.Sprintf("SCRAM-SHA-256$%d:%s$%s:%s", iterations,
+		base64.StdEncoding.EncodeToString(salt),
+		base64.StdEncoding.EncodeToString(stored[:]),
+		base64.StdEncoding.EncodeToString(mac(salted, "Server Key"))), nil
 }
 
 // --- the admin console --------------------------------------------------------

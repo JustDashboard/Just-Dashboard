@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -353,6 +355,9 @@ func TestAPoolerIsBoundWhereItsDatabaseIsAndFoundByItsConfiguration(t *testing.T
 		out.Ports[0].ContainerPort != dbx.PoolerListenPort || out.Networks[0] != "jd-pool-4" || out.RestartPolicy != "unless-stopped" {
 		t.Errorf("spec = %+v", out)
 	}
+	if !slices.Equal(out.CapDrop, []string{"ALL"}) || out.Limits.MemoryMB != poolerMemoryMB {
+		t.Errorf("the pooler keeps capabilities or has no memory limit: %+v", out)
+	}
 	if strings.Contains(string(raw), "PASSWORD") || len(out.Env) != 0 {
 		t.Error("the pooler is given its credentials in its environment, where `docker inspect` shows them")
 	}
@@ -360,10 +365,210 @@ func TestAPoolerIsBoundWhereItsDatabaseIsAndFoundByItsConfiguration(t *testing.T
 
 // poolerSpecFields is the part of the container spec the test reads.
 type poolerSpecFields struct {
-	Image         string                `json:"image"`
-	Entrypoint    []string              `json:"entrypoint"`
-	Env           []dockerx.EnvVar      `json:"env"`
-	Ports         []dockerx.PortMapping `json:"ports"`
-	Networks      []string              `json:"networks"`
-	RestartPolicy string                `json:"restartPolicy"`
+	Image         string                 `json:"image"`
+	Entrypoint    []string               `json:"entrypoint"`
+	Env           []dockerx.EnvVar       `json:"env"`
+	Ports         []dockerx.PortMapping  `json:"ports"`
+	Networks      []string               `json:"networks"`
+	RestartPolicy string                 `json:"restartPolicy"`
+	CapDrop       []string               `json:"capDrop"`
+	Limits        dockerx.ResourceLimits `json:"limits"`
+}
+
+// A pooler is made on loopback, kept where it is by everything that merely runs
+// it, and moved only when the access switch names an address.
+func TestAPoolerIsPublishedOnLoopbackUnlessTheSwitchSaysOtherwise(t *testing.T) {
+	for _, tc := range []struct{ current, requested, want string }{
+		{"", "", "127.0.0.1"},
+		{"127.0.0.1", "", "127.0.0.1"},
+		{"0.0.0.0", "", "0.0.0.0"},
+		{"", "0.0.0.0", "0.0.0.0"},
+		{"0.0.0.0", "127.0.0.1", "127.0.0.1"},
+		{"127.0.0.1", "0.0.0.0", "0.0.0.0"},
+	} {
+		if got := poolerPublishAddress(tc.current, tc.requested); got != tc.want {
+			t.Errorf("poolerPublishAddress(%q, %q) = %q, want %q", tc.current, tc.requested, got, tc.want)
+		}
+	}
+}
+
+// Turning one on for a second connection to a database container that has a
+// pooler is refused before the database or Docker is written to: the dial of
+// the saved string here would fail, and so would any Docker write.
+func TestASecondPoolerOnTheSameContainerIsRefusedBeforeAnythingIsWritten(t *testing.T) {
+	h, _, _, _ := pooledHarness(t)
+	router := h.as(auth.RoleAdmin)
+	second := h.add("pg-second", dbx.DriverPostgres, savedDSN(t, h, 1))
+	calls := len(h.engine.did())
+	for _, mode := range []string{"userlist", "auth_query"} {
+		rec := do(t, router, http.MethodPut, pathf("/databases/%d/pooler", second),
+			`{"poolMode":"transaction","poolSize":5,"maxClientConn":50,"authMode":"`+mode+`"}`)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "pooler_exists") || !strings.Contains(rec.Body.String(), "pg") {
+			t.Errorf("%s: a second pooler on the container = %d %s", mode, rec.Code, rec.Body)
+		}
+	}
+	if after := h.engine.did()[calls:]; len(after) != 0 {
+		t.Errorf("Docker was written to: %v", after)
+	}
+	if rec, _ := h.s.poolerRecord(t.Context(), second); rec != nil {
+		t.Error("a record was kept for the refused pooler")
+	}
+}
+
+// The access switch fails closed. A move to loopback that cannot be made
+// removes the pooler instead of leaving it published, and says so; a move to
+// anywhere that cannot be made leaves it where it was.
+func TestAPoolerThatCannotBeMovedToLoopbackIsRemovedNotLeftPublished(t *testing.T) {
+	h, id, pooler, _ := pooledHarness(t)
+	pooler.hostIP = "0.0.0.0"
+	conn, dsn, err := h.s.dbConnRow(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The test engine serves no networks, so no move can be made.
+	out := h.s.followPoolerExposure(t.Context(), nil, conn, dsn, "127.0.0.1")
+	if out == nil || out["error"] == nil || out["removed"] != true {
+		t.Fatalf("outcome = %v, want an error and the container removed", out)
+	}
+	if !slices.Contains(h.engine.did(), "remove pg-pgbouncer") {
+		t.Errorf("Docker was asked %v, want the published pooler removed", h.engine.did())
+	}
+	if out["firewall"] == nil {
+		t.Errorf("the rule its port was opened with was not looked for: %v", out)
+	}
+}
+
+func TestAPoolerThatCannotBeMovedToAnywhereStaysWhereItWas(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	conn, dsn, _ := h.s.dbConnRow(t.Context(), id)
+	out := h.s.followPoolerExposure(t.Context(), nil, conn, dsn, "0.0.0.0")
+	if out == nil || out["error"] == nil || out["removed"] != nil {
+		t.Fatalf("outcome = %v, want an error and nothing removed", out)
+	}
+	if slices.Contains(h.engine.did(), "remove pg-pgbouncer") {
+		t.Error("a pooler that was on loopback was removed because it could not be widened")
+	}
+}
+
+func TestAPoolerAlreadyWhereTheSwitchAsksIsLeftAlone(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	conn, dsn, _ := h.s.dbConnRow(t.Context(), id)
+	if out := h.s.followPoolerExposure(t.Context(), nil, conn, dsn, "127.0.0.1"); out != nil {
+		t.Errorf("a pooler already on loopback was touched: %v", out)
+	}
+	if calls := h.engine.did(); len(calls) != 0 {
+		t.Errorf("Docker was asked %v", calls)
+	}
+}
+
+// The keeper updates a record it saw; it does not bring back one that went.
+func TestTheKeeperDoesNotResurrectARemovedPooler(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	sealed, _ := h.s.Sealer.Seal(strings.Replace(savedDSN(t, h, id), ":pw@", ":changed@", 1))
+	if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.s.Store.DB.Exec(`DELETE FROM db_poolers WHERE connection_id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.syncPooler(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ := h.s.poolerRecord(t.Context(), id); rec != nil {
+		t.Error("the keeper wrote a removed pooler's record back")
+	}
+}
+
+func TestOnePoolerIsChangedAtATime(t *testing.T) {
+	h := newConnHarness(t)
+	unlock := h.s.lockPooler(7)
+	if _, free := h.s.tryLockPooler(7); free {
+		t.Fatal("the keeper took a pooler that a request holds")
+	}
+	if release, free := h.s.tryLockPooler(8); !free {
+		t.Fatal("another connection's pooler was held")
+	} else {
+		release()
+	}
+	unlock()
+	release, free := h.s.tryLockPooler(7)
+	if !free {
+		t.Fatal("the pooler was not released")
+	}
+	release()
+}
+
+// Forgetting a connection says what became of everything the pooler made, and
+// does not write to a protected connection's database.
+func TestForgettingAPoolerReportsWhatItLeavesInTheDatabase(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	rec, _ := h.s.poolerRecord(t.Context(), id)
+	rec.Settings.AuthMode = dbx.PoolerAuthQuery
+	rec.HostPort = 6433
+	conn, dsn, _ := h.s.dbConnRow(t.Context(), id)
+
+	conn.ReadOnly = true
+	if said := h.s.forgetPooler(t.Context(), rec, conn, dsn); !strings.Contains(said, "removed pg-pgbouncer") ||
+		!strings.Contains(said, "left in the database (the connection is protected)") {
+		t.Errorf("protected: %q", said)
+	}
+	conn.ReadOnly = false
+	if said := h.s.forgetPooler(t.Context(), rec, conn, dsn); !strings.Contains(said, "left in the database:") {
+		t.Errorf("a database that does not answer: %q", said)
+	}
+	if said := h.s.forgetPooler(t.Context(), rec, nil, ""); !strings.Contains(said, "could not be read") {
+		t.Errorf("a connection that could not be read: %q", said)
+	}
+	if strings.Contains(h.s.forgetPooler(t.Context(), rec, conn, dsn), "pw@") {
+		t.Error("the report quotes the connection string")
+	}
+}
+
+// A network that is not this pooler's is never disconnected from or removed.
+func TestAForeignNetworkOfThePoolersNameIsNotRemoved(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	var removed, disconnected atomic.Bool
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := dockerAPIVersion.ReplaceAllString(r.URL.Path, "")
+		switch {
+		case strings.HasPrefix(path, "/networks/") && strings.HasSuffix(path, "/disconnect"):
+			disconnected.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasPrefix(path, "/networks/") && r.Method == http.MethodDelete:
+			removed.Store(true)
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasPrefix(path, "/networks/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"Name": poolerNetworkName(id), "Id": "net1", "Driver": "bridge",
+				"Labels": map[string]string{"owner": "somebody else"}})
+		default:
+			h.engine.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(engine.Close)
+	original := h.s.modules.docker
+	h.s.modules.docker = dockerx.New(engine.URL)
+	t.Cleanup(func() { _ = h.s.modules.docker.Close(); h.s.modules.docker = original })
+
+	rec, _ := h.s.poolerRecord(t.Context(), id)
+	if err := h.s.removePoolerResources(t.Context(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if removed.Load() || disconnected.Load() {
+		t.Errorf("a network that is not the pooler's was touched (disconnected %v, removed %v)", disconnected.Load(), removed.Load())
+	}
+	if !slices.Contains(h.engine.did(), "remove pg-pgbouncer") {
+		t.Error("the pooler's own container was not removed")
+	}
+}
+
+func TestStatisticsNeedDockerAndSayWhenThereIsNone(t *testing.T) {
+	h, id, _, _ := pooledHarness(t)
+	original := h.s.modules.docker
+	h.s.modules.docker = nil
+	defer func() { h.s.modules.docker = original }()
+	rec := do(t, h.as(auth.RoleReadOnly), http.MethodGet, pathf("/databases/%d/pooler/stats", id), "")
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "docker_unavailable") {
+		t.Errorf("statistics with no Docker = %d %s", rec.Code, rec.Body)
+	}
 }

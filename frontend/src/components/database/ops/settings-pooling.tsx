@@ -113,6 +113,10 @@ function PoolerSection({
   const { id, conn, engine, status } = useDatabase()
   const { can } = useAuth()
   const admin = can("system.admin")
+  // A protected connection refuses every change to its pooler (one mode of it
+  // writes to the database), for every role: the controls are not drawn.
+  const locked = Boolean(conn.readOnly)
+  const editable = admin && !locked
   const field = useId()
   const [edits, setEdits] = useState<Partial<PoolingDraft>>({})
   const [saving, setSaving] = useState(false)
@@ -210,7 +214,13 @@ function PoolerSection({
   )
 
   const fields = (
-    <PoolerFields field={field} draft={draft} problems={problems} editable={admin} onChange={set} />
+    <PoolerFields
+      field={field}
+      draft={draft}
+      problems={problems}
+      editable={editable}
+      onChange={set}
+    />
   )
 
   if (!pooler.enabled && !pooler.available) {
@@ -230,7 +240,7 @@ function PoolerSection({
         title="Connection pooler"
         state={state}
         actions={
-          admin && (
+          editable && (
             <Button
               size="sm"
               variant="outline"
@@ -257,7 +267,8 @@ function PoolerSection({
             It was not turned on. {refusal}
           </FormNote>
         )}
-        {!admin && <FormNote>Turning it on is an administrator&rsquo;s to do.</FormNote>}
+        {locked && <ProtectedNotice />}
+        {!locked && !admin && <FormNote>Turning it on is an administrator&rsquo;s to do.</FormNote>}
       </SettingSection>
     )
   }
@@ -270,7 +281,7 @@ function PoolerSection({
       changes={changes}
       saving={saving}
       invalid={invalid}
-      canEdit={admin}
+      canEdit={editable}
       applies="immediately"
       onDiscard={() => {
         setEdits({})
@@ -288,7 +299,7 @@ function PoolerSection({
         state={state}
         status={settingStatus({ dirty: changes > 0, refused: changes > 0 && Boolean(refusal) })}
         actions={
-          admin &&
+          editable &&
           can("destructive") && (
             <Button size="sm" variant="outline" onClick={turnOff}>
               <Trash />
@@ -301,7 +312,7 @@ function PoolerSection({
         {pooler.state === "missing" && (
           <Notice tone="warning" title="The pooler's container is gone">
             Something removed {pooler.container}.
-            {admin && (
+            {editable && (
               <Button
                 size="xs"
                 variant="outline"
@@ -319,7 +330,7 @@ function PoolerSection({
           <Notice tone="warning" title="The pooler holds an old password">
             The connection&rsquo;s password has changed since the pooler was given it. It is written
             again within a minute.
-            {admin && (
+            {editable && (
               <Button
                 size="xs"
                 variant="outline"
@@ -334,16 +345,27 @@ function PoolerSection({
           </Notice>
         )}
         {fields}
-        {admin && !can("destructive") && (
+        {editable && !can("destructive") && (
           <FormNote>
             Turning it off drops the connections through it, which your role may not do.
           </FormNote>
         )}
-        {!admin && (
+        {locked && <ProtectedNotice />}
+        {!locked && !admin && (
           <FormNote>Changing the pooler or turning it off is an administrator&rsquo;s.</FormNote>
         )}
       </SettingSection>
     </SettingForm>
+  )
+}
+
+function ProtectedNotice() {
+  return (
+    <Notice tone="default" title="This connection is protected">
+      The dashboard refuses every change to a protected connection, and a pooler is one: turning it
+      on, changing it and turning it off wait until the protection is taken off under General. The
+      figures below are still read.
+    </Notice>
   )
 }
 
@@ -536,7 +558,7 @@ function AddressesSection({ pooler }: { pooler: DbPooler }) {
       state={
         pooler.exposure === "public" ? (
           <span className="flex">
-            <Status verdict="warning" label="Published like its database" />
+            <Status verdict="warning" label="Published to anywhere" />
           </span>
         ) : undefined
       }
@@ -552,8 +574,8 @@ function AddressesSection({ pooler }: { pooler: DbPooler }) {
         options. <span className="font-medium text-foreground">Connect</span> at the top of the page
         shows either, with the password.{" "}
         {pooler.exposure === "public"
-          ? "The pooler is published on every interface because its database is; restrict the database under Network and the pooler follows."
-          : "It is published where its database is, which is this server only; change that under Network and the pooler follows."}
+          ? "The pooler is published on every interface, because the database was opened to anywhere under Network; restricting it there brings the pooler back to this server."
+          : "The pooler is published on this server only. Opening the database to anywhere under Network moves the pooler with it; nothing else does."}
       </FormNote>
     </SettingSection>
   )

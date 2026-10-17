@@ -161,6 +161,9 @@ func (s *Server) handleDBPoolerStats(w http.ResponseWriter, r *http.Request) err
 	if rec == nil {
 		return httpx.Err(http.StatusConflict, "no_pooler", "this database has no connection pooler")
 	}
+	if s.modules.docker == nil {
+		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable", "this host has no Docker socket")
+	}
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
 	detail, err := s.modules.docker.Inspect(ctx, rec.Container)
@@ -216,6 +219,8 @@ func (s *Server) handleDBPoolerPut(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
+	unlock := s.lockPooler(id)
+	defer unlock()
 	rec, err := s.poolerRecord(ctx, id)
 	if err != nil {
 		return err
@@ -239,6 +244,11 @@ func (s *Server) handleDBPoolerPut(w http.ResponseWriter, r *http.Request) error
 		previousAuth = rec.Settings.AuthMode
 	}
 	rec.Settings = settings
+	// Everything that could collide with another pooler is checked before the
+	// database or Docker is written to.
+	if err := s.poolerSlotFree(ctx, rec, target); err != nil {
+		return err
+	}
 	detail := map[string]any{
 		"container": rec.Container, "image": dbx.PoolerImage, "database": target.server.container.Name,
 		"poolMode": settings.PoolMode, "poolSize": settings.PoolSize, "maxClientConn": settings.MaxClientConn,
@@ -249,18 +259,29 @@ func (s *Server) handleDBPoolerPut(w http.ResponseWriter, r *http.Request) error
 		action = "database.pooler.enable"
 	}
 
-	if settings.AuthMode == dbx.PoolerAuthQuery {
+	// auth_query's role and function are made when the mode is entered, never
+	// altered once there; and whatever fails after they are made takes them
+	// out again, since no record would ever say they were there.
+	authMade := false
+	if settings.AuthMode == dbx.PoolerAuthQuery && previousAuth != dbx.PoolerAuthQuery {
 		if err := s.setupPoolerAuth(ctx, conn, dsn, rec.Secrets.Auth); err != nil {
 			detail["error"] = err.Error()
 			httpx.SetAudit(r, action, conn.Name, detail)
 			return err
 		}
+		authMade = true
 	}
-	change, err := s.ensurePooler(ctx, r, target, rec, dsn, !created && previousAuth != settings.AuthMode)
+	// A pooler is made, or kept, on loopback: only the access switch moves it.
+	change, err := s.ensurePooler(ctx, r, target, rec, dsn, "", !created && previousAuth != settings.AuthMode)
 	if err != nil {
 		if created {
 			// Nothing was recorded, so nothing would ever remove what was made.
 			_ = s.removePoolerResources(ctx, rec)
+		}
+		if authMade {
+			if cerr := s.removePoolerAuth(ctx, conn, dsn); cerr != nil {
+				detail["authLeft"] = cerr.Error()
+			}
 		}
 		detail["error"] = err.Error()
 		httpx.SetAudit(r, action, conn.Name, detail)
@@ -274,7 +295,7 @@ func (s *Server) handleDBPoolerPut(w http.ResponseWriter, r *http.Request) error
 		}
 	}
 	detail["port"], detail["recreated"], detail["reloaded"], detail["restarted"] = rec.HostPort, change.Recreated, change.Reloaded, change.Restarted
-	detail["exposure"] = exposureOfBinding(target.bindIP)
+	detail["exposure"] = exposureOfBinding(change.Bind)
 	if change.Firewall != "" {
 		detail["firewall"] = change.Firewall
 	}
@@ -325,6 +346,8 @@ func (s *Server) handleDBPoolerDelete(w http.ResponseWriter, r *http.Request) er
 	}
 	ctx, cancel := timeoutCtx(r, 2*time.Minute)
 	defer cancel()
+	unlock := s.lockPooler(id)
+	defer unlock()
 	rec, err := s.poolerRecord(ctx, id)
 	if err != nil {
 		return err

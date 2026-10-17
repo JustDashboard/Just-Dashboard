@@ -293,7 +293,7 @@ is connected by naming the instance found, not by typing its address again.
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
   preferred) in place of loopback, for pasting on another machine.
 - **A connection pooler is the database's, and goes where it goes.** `PUT /databases/{id}/pooler`
-  runs PgBouncer (`edoburu/pgbouncer`, pinned by version in `dbx.PoolerImage`) in a container
+  runs PgBouncer (`edoburu/pgbouncer`, pinned by version and digest in `dbx.PoolerImage`, run with every capability dropped and a 256 MiB limit) in a container
   `<database container>-pgbouncer`, on a private bridge `jd-pool-<id>` it shares with the database, which it
   reaches by the container's name (`api/database_pooler.go`, `api/handlers_db_pooler.go`, `dbx/pooler.go`).
   It is offered where the capability table says `pooler`: PostgreSQL and TimescaleDB, not CockroachDB or
@@ -304,31 +304,46 @@ is connected by naming the instance found, not by typing its address again.
   - *Two files, no secret in the environment.* `pgbouncer.ini` and `userlist.txt` are rendered by `dbx` from
     the settings and the connection's credentials, copied into the container before it starts, and
     reread by `SIGHUP` (`dockerx.Signal`) so a changed setting or password does not drop a client. The
+    userlist is mode 0600 and owned by the PgBouncer account (uid 70); the configuration holds no password. The
     image's own entrypoint, which writes its configuration from environment variables, is bypassed for that
     reason. Only a change of `authMode` restarts it: PgBouncer keeps the accounts it loaded from the userlist
     through a reload and then asks them the wrong way. `userlist` authenticates the connection's own account
     from its password, written as it is because PgBouncer must log in to the database as it. `auth_query`
-    adds, in the connection's database, an account `jd_pgbouncer` that can only call one `SECURITY
-    DEFINER` function `jd_pgbouncer.get_auth`, owned by the connection's superuser, and removes both when
-    the mode is left or the pooler turned off; it is refused for a connection that does not sign in as a
-    superuser. Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
+    adds, in the connection's database and in one transaction, an account `jd_pgbouncer` that can only
+    call one `SECURITY DEFINER` function `jd_pgbouncer.get_auth` (search path `pg_catalog`, revoked from
+    `PUBLIC`), owned by the connection's superuser. The account is created from a SCRAM verifier computed in
+    Go, so its password is in neither the server's log nor its statement statistics. The function reads
+    `pg_authid`, answers only for accounts that may log in, returns no hash for one whose password has
+    expired, and answers for superusers too: signing in through the pooler takes the same password as signing
+    in directly. It is made when the mode is entered and never altered after: a role or schema of those
+    names that is already there is refused (`409 pooler_auth_taken`), and so is a connection that does not
+    sign in as a superuser. Whatever fails after they are made removes them, and so does leaving the mode,
+    turning the pooler off, and forgetting the connection (best effort, reported in the audit entry, and not
+    for a protected connection). Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
     the dashboard reads the console and which can only `SHOW`.
   - *Kept in step.* `db_poolers` keeps a digest of the files last written (`config_sha`). `poolerKeeper`
     compares it with the files the connection's current credentials make every twenty seconds and writes
     them again when they differ, which covers a password changed through the adopt that re-seals it, an
     edit of the connection and an account reset alike; `GET …/pooler` reports `inSync`.
-  - *Where it is published.* On the host address its database is bound to: loopback unless the access
-    switch has opened the database (or a private address was chosen on the Docker page). The same
-    `PUT …/access` that recreates the database recreates the pooler with it, opens or closes the
-    firewall for the pooler's port by the same comment-marked rule, and records both in
-    `database.access.change`. Nothing else makes it public. Its name is `db-<id>-pool.jd.internal`, joined
+  - *Where it is published.* On loopback, always, when it is made or made again and whatever the
+    database's exposure is. Only `PUT …/access` moves it: whenever that route is called, the pooler is
+    brought to the address it names (every interface or loopback), whether or not the database itself had
+    to move, the firewall rule for its port is opened or closed by the same comment-marked rule, and both
+    are recorded in `database.access.change` and returned as `pooler`. That is the one road by which it
+    leaves loopback, so it fails closed: a move to loopback that cannot be made removes the container and
+    closes the rule, and the reply says so (`removed`); one to anywhere that cannot be made leaves the
+    pooler where it was. `PUT …/pooler` keeps whatever address the container has and never widens it.
+    One request at a time changes a connection's pooler (`lockPooler`), the keeper included.
+    A database container has one pooler: a second connection to it, or a container or network of the name that
+    is not this connection's, is refused (`409`) before the database or Docker is written to. Its name is `db-<id>-pool.jd.internal`, joined
     to a linked environment's network by the same binding pass that joins the database
     (`attachPooler` in `deployment_database_network.go`), and `${{database.<id>.pooled}}` — with the same
     shape suffixes as the plain reference — resolves to that name and port 6432 (or to the loopback port
     for a host-network workload).
   - *Lifecycle.* `POST /power` start and stop carry the pooler with the database (`pooler` in the reply and
     the audit entry); a restart leaves it, since PgBouncer reconnects by itself. Forgetting the connection,
-    dropping its container and `DELETE …/pooler` remove the container and the network and keep the database.
+    dropping its container and `DELETE …/pooler` remove the container, the network (only if it carries the
+    connection's mark) and the firewall rule, and keep the database.
     On a protected connection every change to the pooler is refused: one mode writes to the database.
   - `GET …/pooler/stats` answers `SHOW VERSION`, `SHOW POOLS` and `SHOW STATS` from the console on the
     published port (`dbx.ReadPooler`); the `pgbouncer` pseudo-database is left out. `GET /{id}/url?pooled=1`

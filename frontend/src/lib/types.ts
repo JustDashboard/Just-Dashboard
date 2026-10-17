@@ -5993,6 +5993,22 @@ export type DbAccessChange = {
   /** opened, closed, already, none, inactive, read-only or failed. */
   firewall: string
   firewallError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
 }
 
 /**

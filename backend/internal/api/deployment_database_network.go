@@ -27,6 +27,9 @@ type deploymentDatabaseNetworks struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+	// poolerFaults is why a pooler could not be joined to an environment's
+	// network, by environment and connection, while it cannot.
+	poolerFaults map[[2]int64]string
 }
 
 type deploymentDatabaseNetwork struct {
@@ -83,9 +86,14 @@ func (o *deploymentDatabaseNetworks) NetworksForRuntime(ctx context.Context, env
 	if err != nil {
 		return nil, err
 	}
+	pooled := pooledDatabaseIDs(variables)
 	for _, id := range ids {
 		if err := o.bind(ctx, network, id); err != nil {
 			return nil, err
+		}
+		// A variable that reads the pooler has nothing to connect to without it.
+		if fault := o.poolerFaults[[2]int64{environmentID, id}]; pooled[id] && fault != "" {
+			return nil, errors.New("the connection pooler could not be joined to the environment's network: " + fault)
 		}
 	}
 	return []string{network.Name}, nil
@@ -177,10 +185,9 @@ func (o *deploymentDatabaseNetworks) bind(ctx context.Context, network deploymen
 		o.markUnavailable(ctx, network.EnvironmentID, connectionID, err)
 		return err
 	}
-	if err := o.attachPooler(ctx, network, connectionID); err != nil {
-		o.markUnavailable(ctx, network.EnvironmentID, connectionID, err)
-		return err
-	}
+	// The pooler is the database's extra, not its binding: one that cannot be
+	// joined is recorded on its own, and ${{database.N}} keeps working.
+	o.notePooler(ctx, network.EnvironmentID, connectionID, o.attachPooler(ctx, network, connectionID))
 	_, err = s.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET container_id=?,container_name=?,status='connected',detail='',checked_at=? WHERE environment_id=? AND connection_id=?`, detail.ID, strings.TrimPrefix(detail.Name, "/"), time.Now().UTC().Unix(), network.EnvironmentID, connectionID)
 	return err
 }
@@ -356,9 +363,48 @@ func (o *deploymentDatabaseNetworks) attachPooler(ctx context.Context, network d
 			return errors.New("the pooler alias is already used by another container")
 		}
 	}
-	err = docker.ConnectNetwork(ctx, network.Name, detail.ID, aliases)
-	o.record(ctx, "deploy.database.pooler.attach", network.EnvironmentID, connectionID, detail.ID, err)
-	return err
+	if err := docker.ConnectNetwork(ctx, network.Name, detail.ID, aliases); err != nil {
+		return err
+	}
+	o.record(ctx, "deploy.database.pooler.attach", network.EnvironmentID, connectionID, detail.ID, nil)
+	return nil
+}
+
+// notePooler keeps the outcome of joining a pooler to an environment's network,
+// and puts a failure on the audit trail once per distinct cause: the pass that
+// repairs bindings runs every few seconds, and a pooler that stays unjoinable
+// would otherwise write a line each time. Called under the adapter's lock.
+func (o *deploymentDatabaseNetworks) notePooler(ctx context.Context, environmentID, connectionID int64, cause error) {
+	key := [2]int64{environmentID, connectionID}
+	if cause == nil {
+		delete(o.poolerFaults, key)
+		return
+	}
+	if o.poolerFaults == nil {
+		o.poolerFaults = map[[2]int64]string{}
+	}
+	if o.poolerFaults[key] == cause.Error() {
+		return
+	}
+	o.poolerFaults[key] = cause.Error()
+	o.record(ctx, "deploy.database.pooler.attach", environmentID, connectionID, "", cause)
+}
+
+// pooledDatabaseIDs are the connections whose pooler a set of variables reads,
+// by the hostnames in them.
+func pooledDatabaseIDs(variables map[string]string) map[int64]bool {
+	ids := map[int64]bool{}
+	for _, value := range variables {
+		u, err := url.Parse(value)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), "-pool.jd.internal"), 10, 64); err == nil && id > 0 && host == poolerDNSName(id) {
+			ids[id] = true
+		}
+	}
+	return ids
 }
 
 // markUnavailable records why a binding could not be repaired, beside the

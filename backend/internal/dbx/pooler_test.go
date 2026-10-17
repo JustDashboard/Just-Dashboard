@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -136,18 +137,18 @@ func TestThePoolerConfigurationRefusesWhatWouldInjectASetting(t *testing.T) {
 	}
 }
 
-func TestTheAuthQueryStatementsCreateOrAlterTheRoleAndNeverGrantMoreThanTheFunction(t *testing.T) {
-	create := PoolerAuthStatements(false, "pw'x")
-	if !strings.HasPrefix(create[0], "CREATE ROLE jd_pgbouncer WITH LOGIN NOSUPERUSER") ||
-		!strings.HasSuffix(create[0], "PASSWORD 'pw''x'") {
-		t.Errorf("first statement = %s", create[0])
+func TestTheAuthQueryStatementsSendAVerifierAndNeverGrantMoreThanTheFunction(t *testing.T) {
+	statements := PoolerAuthStatements("SCRAM-SHA-256$4096:c2FsdA==$c3RvcmVk:c2VydmVy")
+	if !strings.HasPrefix(statements[0], "CREATE ROLE jd_pgbouncer WITH LOGIN NOSUPERUSER") ||
+		!strings.HasSuffix(statements[0], "PASSWORD 'SCRAM-SHA-256$4096:c2FsdA==$c3RvcmVk:c2VydmVy'") {
+		t.Errorf("first statement = %s", statements[0])
 	}
-	if alter := PoolerAuthStatements(true, "pw"); !strings.HasPrefix(alter[0], "ALTER ROLE jd_pgbouncer WITH LOGIN") {
-		t.Errorf("an existing role is created again: %s", alter[0])
-	}
-	all := strings.Join(create, "\n")
+	all := strings.Join(statements, "\n")
 	for _, want := range []string{
+		"CREATE SCHEMA jd_pgbouncer\n",
 		"SECURITY DEFINER SET search_path = pg_catalog",
+		"FROM pg_catalog.pg_authid a WHERE a.rolname = p_usename AND a.rolcanlogin",
+		"CASE WHEN a.rolvaliduntil < now() THEN NULL ELSE a.rolpassword END",
 		"REVOKE ALL ON FUNCTION jd_pgbouncer.get_auth(text) FROM PUBLIC",
 		"GRANT EXECUTE ON FUNCTION jd_pgbouncer.get_auth(text) TO jd_pgbouncer",
 	} {
@@ -155,14 +156,45 @@ func TestTheAuthQueryStatementsCreateOrAlterTheRoleAndNeverGrantMoreThanTheFunct
 			t.Errorf("the statements lack %q:\n%s", want, all)
 		}
 	}
-	if strings.Contains(strings.ToUpper(all), "GRANT ALL") {
-		t.Errorf("the role is given more than the function:\n%s", all)
+	for _, never := range []string{"GRANT ALL", "IF NOT EXISTS", "OR REPLACE", "ALTER ROLE"} {
+		if strings.Contains(strings.ToUpper(all), never) {
+			t.Errorf("the statements contain %q, which could change what is not theirs:\n%s", never, all)
+		}
 	}
 	removal := strings.Join(PoolerAuthRemoval(), "\n")
 	for _, want := range []string{"DROP FUNCTION IF EXISTS jd_pgbouncer.get_auth(text)", "DROP SCHEMA IF EXISTS jd_pgbouncer", "DROP ROLE IF EXISTS jd_pgbouncer"} {
 		if !strings.Contains(removal, want) {
 			t.Errorf("the removal lacks %q:\n%s", want, removal)
 		}
+	}
+}
+
+func TestAScramVerifierIsInPostgresFormAndSaltedEachTime(t *testing.T) {
+	shape := regexp.MustCompile(`^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$`)
+	first, err := ScramVerifier("a-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := ScramVerifier("a-password")
+	if !shape.MatchString(first) || first == second {
+		t.Errorf("verifiers %q and %q", first, second)
+	}
+	if strings.Contains(first, "a-password") {
+		t.Error("the verifier holds the password")
+	}
+	// The same salt and password always make the same secret; another password does not.
+	salt := []byte("0123456789abcdef")
+	one, _ := scramVerifier("pencil", salt, 4096)
+	again, _ := scramVerifier("pencil", salt, 4096)
+	other, _ := scramVerifier("pen", salt, 4096)
+	if one != again || one == other {
+		t.Errorf("%q %q %q", one, again, other)
+	}
+}
+
+func TestThePoolerImageIsPinnedByVersionAndDigest(t *testing.T) {
+	if !regexp.MustCompile(`^[a-z0-9/_-]+:v\d+\.\d+\.\d+-p\d+@sha256:[0-9a-f]{64}$`).MatchString(PoolerImage) {
+		t.Errorf("image = %s", PoolerImage)
 	}
 }
 

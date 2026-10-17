@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
@@ -158,9 +159,6 @@ func poolerFiles(rec *poolerRecord, dsn string) (ini, userlist, sha string, err 
 type poolerTarget struct {
 	server *dbServer
 	detail *dockerx.ContainerDetail
-	// bindIP is the host address the pooler is published on: wherever the
-	// database is.
-	bindIP string
 }
 
 // poolerSupported reports whether the engine behind a connection is one a
@@ -208,34 +206,48 @@ func (s *Server) poolerTarget(ctx context.Context, conn *dbConnection, dsn strin
 	if detail.NetworkMode == "host" || detail.NetworkMode == "none" || strings.HasPrefix(detail.NetworkMode, "container:") {
 		return nil, httpx.BadRequest("%s is not on a bridge network, so a pooler cannot reach it", server.container.Name)
 	}
-	bindIP := "127.0.0.1"
-	switch exposureOf(server) {
-	case exposurePublic:
-		bindIP = "0.0.0.0"
-	case exposurePrivate:
-		bindIP = server.binding.IP
-	}
-	return &poolerTarget{server: server, detail: detail, bindIP: bindIP}, nil
+	return &poolerTarget{server: server, detail: detail}, nil
 }
 
 // poolerChange says what ensurePooler did, for the audit entry and the reply.
 type poolerChange struct {
 	Created, Recreated, Reloaded, Restarted bool
-	Firewall                                string
-	FirewallErr                             error
+	// Bind is the host address the pooler is published on afterwards.
+	Bind        string
+	Firewall    string
+	FirewallErr error
+}
+
+// poolerLoopback is where a pooler is published unless the access switch has
+// said otherwise.
+const poolerLoopback = "127.0.0.1"
+
+// poolerPublishAddress is the host address a pooler is published on. Only the
+// access switch names one (requested); anything else keeps the address the
+// container already has, and a container being made, or made again, is on
+// loopback. Opening the database to anywhere is the operator's audited act,
+// and nothing that merely runs the pooler may make it theirs.
+func poolerPublishAddress(current, requested string) string {
+	switch {
+	case requested != "":
+		return requested
+	case current != "":
+		return current
+	}
+	return poolerLoopback
 }
 
 // ensurePooler makes the machine match the record: the network exists and the
-// database is on it, the container exists and is published where the
-// database is, and holds the current files. It is the whole of creating a
-// pooler and of changing one, and running it again changes nothing.
+// database is on it, the container exists and is published on bind (see
+// poolerPublishAddress), and holds the current files. It is the whole of
+// creating a pooler and of changing one, and running it again changes nothing.
 //
-// A container whose binding differs from the database's is replaced rather
+// A container whose binding differs from bind is replaced rather
 // than edited, since Docker cannot move a published port. A changed setting or
 // password is a reload, which keeps the clients; only a change of how clients
 // authenticate (restart) is a restart, because PgBouncer keeps the accounts it
 // loaded from the userlist through a reload and then asks them the wrong way.
-func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTarget, rec *poolerRecord, dsn string, restart bool) (poolerChange, error) {
+func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTarget, rec *poolerRecord, dsn, bind string, restart bool) (poolerChange, error) {
 	var change poolerChange
 	docker := s.modules.docker
 	rec.ServerName, rec.ServerPort = strings.TrimPrefix(t.detail.Name, "/"), t.server.port
@@ -261,27 +273,30 @@ func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTar
 		return change, httpx.Err(http.StatusConflict, "container_exists",
 			fmt.Sprintf("a container named %s already exists and is not this database's pooler; remove or rename it first", rec.Container))
 	}
+	current := ""
 	if existing != nil {
 		spec, err := docker.SpecOf(ctx, existing.ID)
 		if err != nil {
 			return change, s.dockerErr(err)
 		}
-		if ip, _ := poolerBinding(spec); ip != t.bindIP {
-			if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil {
-				return change, s.dockerErr(err)
-			}
-			existing, change.Recreated = nil, true
+		current, _ = poolerBinding(spec)
+	}
+	change.Bind = poolerPublishAddress(current, bind)
+	if existing != nil && current != change.Bind {
+		if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil {
+			return change, s.dockerErr(err)
 		}
+		existing, change.Recreated = nil, true
 	}
 	databaseUp := t.detail.State == "running"
 	if existing == nil {
 		port := rec.HostPort
-		if port == 0 || portalloc.Available(t.bindIP, "tcp", port) != nil {
-			if port, err = freeHostPort(poolerPreferredPort, t.bindIP); err != nil {
+		if port == 0 || portalloc.Available(change.Bind, "tcp", port) != nil {
+			if port, err = freeHostPort(poolerPreferredPort, change.Bind); err != nil {
 				return change, httpx.BadRequest("%v", err)
 			}
 		}
-		created, err := docker.Create(ctx, poolerSpec(rec, port, t.bindIP), nil)
+		created, err := docker.Create(ctx, poolerSpec(rec, port, change.Bind), nil)
 		if err != nil {
 			return change, httpx.BadRequest("could not start the pooler: %v", err)
 		}
@@ -316,7 +331,7 @@ func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTar
 	if err := s.savePoolerRecord(ctx, rec); err != nil {
 		return change, err
 	}
-	if public := t.bindIP == "0.0.0.0"; r != nil && (public || change.Recreated) {
+	if public := change.Bind == "0.0.0.0"; r != nil && (public || change.Recreated) {
 		change.Firewall, change.FirewallErr = s.setDBFirewall(ctx, r, rec.HostPort, public)
 	}
 	return change, nil
@@ -337,17 +352,27 @@ func poolerSpec(rec *poolerRecord, hostPort int, bindIP string) dockerx.Containe
 		Networks:      []string{rec.Network},
 		Labels:        []dockerx.LabelSpec{{Name: poolerLabel, Value: strconv.FormatInt(rec.ConnectionID, 10)}},
 		Logging:       dockerx.CappedLogging(),
+		// PgBouncer listens above 1024 as an unprivileged account and opens
+		// sockets: it needs no capability, and a pooler with a thousand
+		// clients is a few tens of megabytes.
+		CapDrop: []string{"ALL"},
+		Limits:  dockerx.ResourceLimits{MemoryMB: poolerMemoryMB},
 	}
 }
 
-// writePoolerFiles puts the two files where PgBouncer reads them. They are
-// owned by root and readable by the account PgBouncer runs as, which only
-// needs to read them.
+const poolerMemoryMB = 256
+
+// poolerUID is the account the image runs PgBouncer as (postgres, 70).
+const poolerUID = 70
+
+// writePoolerFiles puts the two files where PgBouncer reads them. The
+// configuration holds no secret and is root's; the userlist holds passwords and
+// is the PgBouncer account's alone, mode 0600.
 func writePoolerFiles(ctx context.Context, docker *dockerx.Client, id, ini, userlist string) error {
 	if err := docker.WriteContainerFile(ctx, id, dbx.PoolerConfigPath, []byte(ini), 0o644); err != nil {
 		return err
 	}
-	return docker.WriteContainerFile(ctx, id, dbx.PoolerUserlistPath, []byte(userlist), 0o644)
+	return docker.WriteContainerFileOwned(ctx, id, dbx.PoolerUserlistPath, []byte(userlist), 0o600, poolerUID, poolerUID)
 }
 
 // poolerBinding is where a pooler container's PgBouncer port is published,
@@ -398,25 +423,46 @@ func (s *Server) ensurePoolerNetwork(ctx context.Context, rec *poolerRecord) err
 	return nil
 }
 
+// removePoolerContainer removes the pooler's container, and only a container
+// that carries this connection's mark: the name is the dashboard's choice, and
+// a container of somebody else's may have it. Absent is not an error.
+func (s *Server) removePoolerContainer(ctx context.Context, rec *poolerRecord) error {
+	docker := s.modules.docker
+	existing, err := docker.Inspect(ctx, rec.Container)
+	switch {
+	case errdefs.IsNotFound(err):
+		return nil
+	case err != nil:
+		return err
+	case existing.Labels[poolerLabel] != strconv.FormatInt(rec.ConnectionID, 10):
+		return nil
+	}
+	if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil && !errdefs.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
 // removePoolerResources takes the container and the network away, leaving the
 // database and its data alone. A thing that is already gone is not an error:
-// this is how a pooler is removed and how a half-made one is cleaned up.
+// this is how a pooler is removed and how a half-made one is cleaned up. A
+// network that does not carry this connection's mark is never touched.
 func (s *Server) removePoolerResources(ctx context.Context, rec *poolerRecord) error {
 	docker := s.modules.docker
 	if docker == nil {
 		return nil
 	}
-	// Only a container that carries this connection's mark: the name is the
-	// dashboard's choice, and a container of somebody else's may have it.
-	existing, err := docker.Inspect(ctx, rec.Container)
+	if err := s.removePoolerContainer(ctx, rec); err != nil {
+		return err
+	}
+	observed, err := docker.InspectNetwork(ctx, rec.Network)
 	switch {
 	case errdefs.IsNotFound(err):
+		return nil
 	case err != nil:
 		return err
-	case existing.Labels[poolerLabel] == strconv.FormatInt(rec.ConnectionID, 10):
-		if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil && !errdefs.IsNotFound(err) {
-			return err
-		}
+	case observed.Labels[poolerLabel] != strconv.FormatInt(rec.ConnectionID, 10):
+		return nil
 	}
 	if rec.ServerName != "" {
 		// The database stays on after the network goes.
@@ -428,6 +474,25 @@ func (s *Server) removePoolerResources(ctx context.Context, rec *poolerRecord) e
 		return err
 	}
 	return nil
+}
+
+// lockPooler serialises the things that change one connection's pooler: the
+// request that turns it on, changes or removes it, the access switch that moves
+// it, and the keeper that rewrites its files. Without it the keeper's write
+// could land on a pooler that had just been changed or removed.
+func (s *Server) lockPooler(id int64) (unlock func()) {
+	held, _ := s.dbConns.poolerLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := held.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// tryLockPooler is lockPooler for a caller that would rather skip than wait:
+// the keeper, which has the next pooler to see to.
+func (s *Server) tryLockPooler(id int64) (unlock func(), ok bool) {
+	held, _ := s.dbConns.poolerLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := held.(*sync.Mutex)
+	return mu.Unlock, mu.TryLock()
 }
 
 // followPoolerPower starts or stops the pooler with its database and says
@@ -454,31 +519,24 @@ func (s *Server) followPoolerPower(ctx context.Context, id int64, action dockerx
 	return "stopped"
 }
 
-// setupPoolerAuth leaves auth_query mode's role and function in the database.
-// The function reads password hashes, which takes a superuser to own it, so a
-// connection that signs in as anything else is told so before anything is
-// created.
+// setupPoolerAuth leaves auth_query mode's role and function in the database,
+// in one transaction, and refuses to alter whatever of the name is already
+// there (dbx.SetUpPoolerAuth).
 func (s *Server) setupPoolerAuth(ctx context.Context, conn *dbConnection, dsn, password string) error {
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
 		return connectFailed(dsn, err)
 	}
-	var superuser, exists bool
-	if err := pool.QueryRowContext(ctx, `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&superuser); err != nil {
-		return queryFailed(err)
+	switch err := dbx.SetUpPoolerAuth(ctx, pool, password); {
+	case err == nil:
+		return nil
+	case errors.Is(err, dbx.ErrPoolerNotSuperuser):
+		return httpx.BadRequest("%v", err)
+	case errors.Is(err, dbx.ErrPoolerAuthTaken):
+		return httpx.Err(http.StatusConflict, "pooler_auth_taken", err.Error())
+	default:
+		return httpx.Err(http.StatusBadGateway, "pooler_auth_failed", connectError(dsn, err))
 	}
-	if !superuser {
-		return httpx.BadRequest("auth_query reads other accounts' password hashes through a function only a superuser can own, and this connection does not sign in as one; use the userlist")
-	}
-	if err := pool.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, dbx.PoolerAuthRole).Scan(&exists); err != nil {
-		return queryFailed(err)
-	}
-	for _, statement := range dbx.PoolerAuthStatements(exists, password) {
-		if _, err := pool.ExecContext(ctx, statement); err != nil {
-			return httpx.Err(http.StatusBadGateway, "pooler_auth_failed", connectError(dsn, err))
-		}
-	}
-	return nil
 }
 
 // removePoolerAuth takes auth_query mode's objects out of the database again.
@@ -487,10 +545,35 @@ func (s *Server) removePoolerAuth(ctx context.Context, conn *dbConnection, dsn s
 	if err != nil {
 		return err
 	}
-	for _, statement := range dbx.PoolerAuthRemoval() {
-		if _, err := pool.ExecContext(ctx, statement); err != nil {
-			return err
-		}
+	return dbx.RemovePoolerAuth(ctx, pool)
+}
+
+// poolerSlotFree refuses, before anything is written to the database or to
+// Docker, a pooler that would collide with another one: a second connection to
+// the same database container (the account auth_query leaves is the server's,
+// so it is one pooler's), or a container of the name that is not this
+// connection's.
+func (s *Server) poolerSlotFree(ctx context.Context, rec *poolerRecord, t *poolerTarget) error {
+	var other string
+	err := s.Store.DB.QueryRowContext(ctx, `SELECT c.name FROM db_poolers p JOIN db_connections c ON c.id = p.connection_id
+		WHERE p.connection_id <> ? AND (p.container_name = ? OR p.server_name = ?) LIMIT 1`,
+		rec.ConnectionID, rec.Container, strings.TrimPrefix(t.detail.Name, "/")).Scan(&other)
+	switch {
+	case err == nil:
+		return httpx.Err(http.StatusConflict, "pooler_exists",
+			fmt.Sprintf("the connection %s already has a pooler on %s; a database container has one", other, t.server.container.Name))
+	case !errors.Is(err, sql.ErrNoRows):
+		return httpx.Internal(err)
+	}
+	existing, err := s.modules.docker.Inspect(ctx, rec.Container)
+	switch {
+	case errdefs.IsNotFound(err):
+		return nil
+	case err != nil:
+		return s.dockerErr(err)
+	case existing.Labels[poolerLabel] != strconv.FormatInt(rec.ConnectionID, 10):
+		return httpx.Err(http.StatusConflict, "container_exists",
+			fmt.Sprintf("a container named %s already exists and is not this database's pooler; remove or rename it first", rec.Container))
 	}
 	return nil
 }
@@ -617,6 +700,11 @@ func (k *poolerKeeper) Reconcile(ctx context.Context) {
 // syncPooler writes a pooler's files again if the credentials they were made
 // from have changed, and asks PgBouncer to reread them.
 func (s *Server) syncPooler(ctx context.Context, id int64) error {
+	unlock, free := s.tryLockPooler(id)
+	if !free {
+		return nil
+	}
+	defer unlock()
 	rec, err := s.poolerRecord(ctx, id)
 	if err != nil || rec == nil || s.modules.docker == nil {
 		return err
@@ -644,8 +732,9 @@ func (s *Server) syncPooler(ctx context.Context, id int64) error {
 			return err
 		}
 	}
-	rec.ContainerID, rec.ConfigSHA, rec.UpdatedAt = existing.ID, sha, time.Now().UTC()
-	if err := s.savePoolerRecord(ctx, rec); err != nil {
+	// An update, never an insert: a pooler removed while this ran stays removed.
+	if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_poolers SET container_id=?, config_sha=?, updated_at=? WHERE connection_id=?`,
+		existing.ID, sha, time.Now().UTC().Unix(), id); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(map[string]any{"connectionId": id, "container": rec.Container, "reason": "the connection's credentials changed"})
@@ -654,45 +743,115 @@ func (s *Server) syncPooler(ctx context.Context, id int64) error {
 }
 
 // forgetPooler removes a forgotten connection's pooler and says what became of
-// it, for the audit entry. The row has already gone with the connection; a
-// container that could not be removed is reported and left, never an error
+// it, for the audit entry. The row has already gone with the connection, and
+// so has the pool its credentials were reached through; the container, its
+// network, the firewall rule for its port and (when the server can be reached
+// and the connection was not protected) auth_query's role and function are
+// removed best-effort, and each outcome is reported. Nothing here is an error
 // that would undo forgetting.
-func (s *Server) forgetPooler(ctx context.Context, rec *poolerRecord) string {
+func (s *Server) forgetPooler(ctx context.Context, rec *poolerRecord, conn *dbConnection, dsn string) string {
 	if rec == nil {
 		return ""
 	}
+	unlock := s.lockPooler(rec.ConnectionID)
+	defer unlock()
+	var said []string
 	if err := s.removePoolerResources(ctx, rec); err != nil {
-		return "left in place: " + err.Error()
+		said = append(said, "left in place: "+err.Error())
+	} else {
+		said = append(said, "removed "+rec.Container)
 	}
-	return "removed " + rec.Container
+	if rec.HostPort > 0 {
+		if firewall, err := s.setDBFirewall(ctx, nil, rec.HostPort, false); err != nil {
+			said = append(said, "firewall rule for port "+strconv.Itoa(rec.HostPort)+" left: "+err.Error())
+		} else if firewall == "closed" {
+			said = append(said, "firewall rule for port "+strconv.Itoa(rec.HostPort)+" closed")
+		}
+	}
+	if rec.Settings.AuthMode == dbx.PoolerAuthQuery {
+		said = append(said, s.forgetPoolerAuth(ctx, conn, dsn))
+	}
+	return strings.Join(said, "; ")
 }
 
-// followPoolerExposure moves a connection's pooler to where its database has
-// just been published, and reports what that did for the audit entry of the
-// access switch. Nil for a connection with no pooler. A failure is reported
-// and not returned: the database has already been moved, and the pooler's own
-// page offers to rebuild it.
-func (s *Server) followPoolerExposure(ctx context.Context, r *http.Request, conn *dbConnection, dsn string) map[string]any {
+// forgetPoolerAuth takes auth_query's role and function out of the database of
+// a connection being forgotten, on a connection of its own since the saved one
+// has gone. A protected connection's database is not written to; the account
+// and function are left there, and the entry says so.
+func (s *Server) forgetPoolerAuth(ctx context.Context, conn *dbConnection, dsn string) string {
+	const left = "auth_query's role and function left in the database"
+	switch {
+	case conn == nil:
+		return left + " (the connection could not be read)"
+	case conn.ReadOnly:
+		return left + " (the connection is protected)"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	db, err := sql.Open("pgx", dsn)
+	if err == nil {
+		defer db.Close()
+		err = dbx.RemovePoolerAuth(ctx, db)
+	}
+	if err != nil {
+		return left + ": " + connectError(dsn, err)
+	}
+	return "auth_query's role and function removed from the database"
+}
+
+// followPoolerExposure moves a connection's pooler to the address the access
+// switch has just been asked for (bind: loopback or every interface), and
+// reports what that did for the audit entry and the reply of the switch. Nil
+// for a connection with no pooler, or one already there.
+//
+// This is the only road by which a pooler leaves loopback, so it fails closed:
+// when the request is for loopback and the pooler cannot be moved, its container
+// is removed and its firewall rule closed rather than left published, and the
+// outcome says so. A failure to widen leaves the pooler where it was.
+func (s *Server) followPoolerExposure(ctx context.Context, r *http.Request, conn *dbConnection, dsn, bind string) map[string]any {
+	unlock := s.lockPooler(conn.ID)
+	defer unlock()
 	rec, err := s.poolerRecord(ctx, conn.ID)
-	if err != nil || rec == nil {
+	if err != nil || rec == nil || s.modules.docker == nil {
+		return nil
+	}
+	if spec, err := s.modules.docker.SpecOf(ctx, rec.Container); err == nil {
+		if ip, _ := poolerBinding(spec); ip == bind {
+			return nil
+		}
+	} else if errdefs.IsNotFound(err) {
+		// Nothing is published.
 		return nil
 	}
 	out := map[string]any{"container": rec.Container}
 	target, err := s.poolerTarget(ctx, conn, dsn)
 	if err == nil {
 		var change poolerChange
-		if change, err = s.ensurePooler(ctx, r, target, rec, dsn, false); err == nil {
-			out["port"], out["recreated"], out["exposure"] = rec.HostPort, change.Recreated, exposureOfBinding(target.bindIP)
+		if change, err = s.ensurePooler(ctx, r, target, rec, dsn, bind, false); err == nil {
+			out["port"], out["recreated"], out["exposure"] = rec.HostPort, change.Recreated, exposureOfBinding(change.Bind)
 			if change.Firewall != "" {
 				out["firewall"] = change.Firewall
 			}
 			if change.FirewallErr != nil {
 				out["firewallError"] = change.FirewallErr.Error()
 			}
+			return out
 		}
 	}
-	if err != nil {
-		out["error"] = err.Error()
+	out["error"] = err.Error()
+	if bind == poolerLoopback {
+		if cerr := s.removePoolerContainer(ctx, rec); cerr != nil {
+			out["closeError"] = cerr.Error()
+		} else {
+			out["removed"] = true
+		}
+		if rec.HostPort > 0 {
+			firewall, ferr := s.setDBFirewall(ctx, r, rec.HostPort, false)
+			out["firewall"] = firewall
+			if ferr != nil {
+				out["firewallError"] = ferr.Error()
+			}
+		}
 	}
 	return out
 }

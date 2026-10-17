@@ -87,6 +87,9 @@ type dbConnState struct {
 	// each connection, or has just carried out and is waiting to see the
 	// effect of: what the summary and the fleet report as in flight.
 	power sync.Map
+	// poolerLocks holds one mutex per connection that has a pooler: what
+	// changes the pooler takes while it does (lockPooler).
+	poolerLocks sync.Map
 	// probe reads the machine's sockets and units. Nil is the machine itself;
 	// a test hands in one of its own.
 	probe *dbHostProbe
@@ -242,6 +245,13 @@ func (f forgottenConnection) audited(detail map[string]any) map[string]any {
 func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (forgottenConnection, error) {
 	origin := s.connectionOrigin(ctx, id)
 	pooler, _ := s.poolerRecord(ctx, id)
+	var poolerConn *dbConnection
+	var poolerDSN string
+	if pooler != nil {
+		// The saved string is read now: auth_query's role is removed with it
+		// once the row, and the string with it, has gone.
+		poolerConn, poolerDSN, _ = s.dbConnRow(ctx, id)
+	}
 	result, err := s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
 	if err != nil {
@@ -255,7 +265,7 @@ func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (
 	return forgottenConnection{
 		removed: true, origin: origin,
 		ignored: s.afterConnectionForgotten(ctx, id, origin, actor),
-		pooler:  s.forgetPooler(ctx, pooler),
+		pooler:  s.forgetPooler(ctx, pooler, poolerConn, poolerDSN),
 	}, nil
 }
 

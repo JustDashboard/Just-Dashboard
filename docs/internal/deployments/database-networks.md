@@ -22,7 +22,9 @@ A PostgreSQL connection that has a [connection pooler](../backend/databases-prox
 `${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host
 `db-5-pool.jd.internal` and port 6432. The pooler joins the environment's network in the same pass that joins
 the database, under that name, and the pooled reference fails with a sentence of its own when the connection
-has no pooler. Relinking a variable never carries `.pooled` over to another database.
+has no pooler. A pooler that cannot be joined to the environment's network (its name is held by another
+container, say) is recorded once on the audit trail as `deploy.database.pooler.attach` and does not stop
+`${{database.5}}` from binding; a variable that reads the pooled name is refused instead. Relinking a variable never carries `.pooled` over to another database.
 
 Creation stages entered variables in the draft's encrypted environment column before preflight and
 commits them with the initial project transaction. A required connection can therefore be satisfied by

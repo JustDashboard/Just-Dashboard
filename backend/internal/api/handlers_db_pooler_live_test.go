@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,86 @@ func TestLivePooler(t *testing.T) {
 		t.Fatalf("timed out waiting for %s", what)
 	}
 
+	// The docker CLI, for what the API does not do: a foreign network and a
+	// container of the test's own, and reading a file's owner. Everything it
+	// touches is named jdt-pgbouncer-… and labelled as the test's.
+	cli := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	poolRole := func(db *sql.DB) (password string, schemas int) {
+		t.Helper()
+		_ = db.QueryRow(`SELECT COALESCE((SELECT rolpassword FROM pg_authid WHERE rolname = 'jd_pgbouncer'), '')`).Scan(&password)
+		_ = db.QueryRow(`SELECT count(*) FROM pg_namespace WHERE nspname = 'jd_pgbouncer'`).Scan(&schemas)
+		return password, schemas
+	}
+	openDirect := func() *sql.DB {
+		t.Helper()
+		_, dsn, err := s.dbConnRow(ctx, conn.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		return db
+	}
+	auth := `{"poolMode":"transaction","poolSize":5,"maxClientConn":60,"authMode":"auth_query"}`
+	userlist := `{"poolMode":"transaction","poolSize":5,"maxClientConn":60,"authMode":"userlist"}`
+
+	t.Run("a failed auth_query turn-on leaves nothing in the database and no foreign network removed", func(t *testing.T) {
+		direct := openDirect()
+		// A network of the name that is nobody's pooler: the turn-on fails after
+		// the role and function were made, and must take them out again.
+		cli("network", "create", "--label", "jdt-owner=pgbouncer", poolerNetworkName(conn.ID))
+		t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", poolerNetworkName(conn.ID)).Run() })
+		if code, _ := put(auth); code != http.StatusConflict {
+			t.Fatalf("a turn-on over a foreign network = HTTP %d, want 409", code)
+		}
+		if password, schemas := poolRole(direct); password != "" || schemas != 0 {
+			t.Errorf("the failed turn-on left the role (%v) or the schema (%d) behind", password != "", schemas)
+		}
+		if got := cli("network", "ls", "--filter", "name="+poolerNetworkName(conn.ID), "--format", "{{.Name}}"); got != poolerNetworkName(conn.ID) {
+			t.Errorf("the foreign network was removed: %q", got)
+		}
+		if rec, _ := s.poolerRecord(ctx, conn.ID); rec != nil {
+			t.Error("a record was kept for a pooler that was never made")
+		}
+		cli("network", "rm", poolerNetworkName(conn.ID))
+	})
+
+	t.Run("auth_query alters nothing that is already in the database", func(t *testing.T) {
+		direct := openDirect()
+		if _, err := direct.Exec(`CREATE SCHEMA jd_pgbouncer`); err != nil {
+			t.Fatal(err)
+		}
+		if code, _ := put(auth); code != http.StatusConflict {
+			t.Errorf("a turn-on over a schema of the name = HTTP %d, want 409", code)
+		}
+		if _, err := direct.Exec(`DROP SCHEMA jd_pgbouncer`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := direct.Exec(`CREATE ROLE jd_pgbouncer LOGIN PASSWORD 'somebody-elses'`); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := poolRole(direct)
+		if code, _ := put(auth); code != http.StatusConflict {
+			t.Errorf("a turn-on over a role of the name = HTTP %d, want 409", code)
+		}
+		if after, schemas := poolRole(direct); after != before || schemas != 0 {
+			t.Errorf("the role's password or the schemas changed: %v", schemas)
+		}
+		if _, err := direct.Exec(`DROP ROLE jd_pgbouncer`); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	// Nothing to begin with, and the engine is offered one.
 	var before poolerView
 	_ = json.Unmarshal(do(t, router, http.MethodGet, base+"/pooler", "").Body.Bytes(), &before)
@@ -159,6 +240,18 @@ func TestLivePooler(t *testing.T) {
 		waitFor(t, "a sign-in through the pooler", func() bool { who, err := whoAmI(host); return err == nil && who == "app" })
 		if got := pooledURL("container"); !strings.Contains(got, fmt.Sprintf("@db-%d-pool.jd.internal:6432/", conn.ID)) {
 			t.Errorf("pooled container URL = %s", got)
+		}
+		// The userlist holds passwords: the PgBouncer account's, and nobody else's.
+		if listing := strings.Fields(cli("exec", view.Container, "ls", "-ln", dbx.PoolerUserlistPath)); len(listing) < 4 ||
+			listing[0] != "-rw-------" || listing[2] != "70" || listing[3] != "70" {
+			t.Errorf("userlist.txt is %q, want mode 0600 owned by 70:70", listing)
+		}
+		// PgBouncer runs without a capability and inside a memory limit.
+		if got := cli("inspect", "--format", "{{.HostConfig.CapDrop}} {{.HostConfig.Memory}}", view.Container); got != "[ALL] 268435456" {
+			t.Errorf("hardening = %q", got)
+		}
+		if view.Exposure != exposureLocal {
+			t.Errorf("a new pooler is %s, want local", view.Exposure)
 		}
 		if rec := do(t, router, http.MethodGet, base+"/url?pooled=1&target=public", ""); rec.Code != http.StatusBadRequest {
 			t.Errorf("a pooler on loopback was handed out for anywhere: HTTP %d", rec.Code)
@@ -293,9 +386,41 @@ func TestLivePooler(t *testing.T) {
 		if _, err := whoAmI(other.String()); err == nil {
 			t.Fatal("an account outside the userlist signed in")
 		}
-		code, view := put(`{"poolMode":"transaction","poolSize":5,"maxClientConn":60,"authMode":"auth_query"}`)
+		code, view := put(auth)
 		if code != http.StatusOK || view.Settings.AuthMode != "auth_query" {
 			t.Fatalf("switch: HTTP %d %+v", code, view)
+		}
+		// The role is sent as a verifier, and an account the server would turn
+		// away is turned away by the pooler too.
+		var stored string
+		if err := direct.QueryRow(`SELECT rolpassword FROM pg_authid WHERE rolname = 'jd_pgbouncer'`).Scan(&stored); err != nil || !strings.HasPrefix(stored, "SCRAM-SHA-256$") {
+			t.Errorf("jd_pgbouncer is stored as %q (%v)", stored, err)
+		}
+		if _, err := direct.Exec(`CREATE ROLE jdt_pgbouncer_expired LOGIN PASSWORD 'expired-pw' VALID UNTIL '2000-01-01'`); err != nil {
+			t.Fatal(err)
+		}
+		defer direct.Exec(`DROP ROLE IF EXISTS jdt_pgbouncer_expired`)
+		expired, _ := url.Parse(pooledURL("host"))
+		expired.User = url.UserPassword("jdt_pgbouncer_expired", "expired-pw")
+		time.Sleep(time.Second)
+		if who, err := whoAmI(expired.String()); err == nil {
+			t.Errorf("an account whose password expired signed in through the pooler as %s", who)
+		}
+		// A second connection to the same container does not get to alter the
+		// first pooler's account.
+		sealed, _ := s.Sealer.Seal(func() string { _, dsn, _ := s.dbConnRow(ctx, conn.ID); return dsn }())
+		second, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('jdt_pgbouncer_second', 'postgres', ?, 0)`, sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondID, _ := second.LastInsertId()
+		defer s.Store.DB.Exec(`DELETE FROM db_connections WHERE id = ?`, secondID)
+		kept, _ := poolRole(direct)
+		if rec := do(t, router, http.MethodPut, pathf("/databases/%d/pooler", secondID), auth); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "pooler_exists") {
+			t.Errorf("a second pooler on the container = HTTP %d %s", rec.Code, rec.Body)
+		}
+		if after, _ := poolRole(direct); after != kept {
+			t.Error("a refused second pooler changed the first one's password")
 		}
 		waitFor(t, "the other account through auth_query", func() bool {
 			who, err := whoAmI(other.String())
@@ -349,8 +474,7 @@ func TestLivePooler(t *testing.T) {
 		}
 		rec, _ := s.poolerRecord(ctx, conn.ID)
 		oldID := rec.ContainerID
-		target.bindIP = "127.0.0.2"
-		change, err := s.ensurePooler(ctx, nil, target, rec, dsn, false)
+		change, err := s.ensurePooler(ctx, nil, target, rec, dsn, "127.0.0.2", false)
 		if err != nil || !change.Recreated {
 			t.Fatalf("a changed binding: %+v %v", change, err)
 		}
@@ -359,9 +483,23 @@ func TestLivePooler(t *testing.T) {
 		if ip, _ := poolerBinding(spec); ip != "127.0.0.2" || after.ContainerID == oldID {
 			t.Fatalf("pooler bound to %s, container replaced = %v", ip, after.ContainerID != oldID)
 		}
-		target.bindIP = "127.0.0.1"
-		if _, err := s.ensurePooler(ctx, nil, target, after, dsn, false); err != nil {
+		// A pooler that is only run keeps where it is, and one made again is on loopback.
+		if change, err := s.ensurePooler(ctx, nil, target, after, dsn, "", false); err != nil || change.Recreated {
+			t.Fatalf("running it again moved it: %+v %v", change, err)
+		}
+		if ip, _ := poolerBinding(spec); ip != "127.0.0.2" {
+			t.Fatalf("pooler is on %s", ip)
+		}
+		if err := s.modules.docker.RemoveContainer(ctx, after.Container, true, false); err != nil {
 			t.Fatal(err)
+		}
+		if code, view := put(userlist); code != http.StatusOK || view.Exposure != exposureLocal {
+			t.Fatalf("rebuilt: HTTP %d %+v", code, view)
+		}
+		rebuilt, _ := s.poolerRecord(ctx, conn.ID)
+		spec, _ = s.modules.docker.SpecOf(ctx, rebuilt.ContainerID)
+		if ip, _ := poolerBinding(spec); ip != "127.0.0.1" {
+			t.Fatalf("a pooler made again is on %s, want loopback", ip)
 		}
 	})
 
@@ -391,6 +529,25 @@ func TestLivePooler(t *testing.T) {
 		if d, _ := s.modules.docker.Inspect(ctx, probe); d.ExitCode != 0 {
 			logs, _ := s.modules.docker.CompletedCommandOutput(ctx, probe)
 			t.Fatalf("psql through %s exited %d: %s", info.Host, d.ExitCode, logs)
+		}
+		// A pooler that cannot be joined to the network is a fault of its own:
+		// the database's reference keeps working, and the pooled one says why not.
+		rec, _ := s.poolerRecord(ctx, conn.ID)
+		cli("network", "disconnect", networks[0], rec.Container)
+		cli("run", "-d", "--name", "jdt-pgbouncer-blocker", "--label", "jdt-owner=pgbouncer", "--memory", "64m",
+			"--network", networks[0], "--network-alias", poolerDNSName(conn.ID), "--entrypoint", "sleep", "postgres:17-alpine", "300")
+		t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", "-v", "jdt-pgbouncer-blocker").Run() })
+		plain := strings.Replace(application, poolerDNSName(conn.ID)+":6432", databaseDNSName(conn.ID)+":5432", 1)
+		if _, err := s.modules.deployDatabases.NetworksForRuntime(ctx, environmentID, deploy.RuntimePlanConfig{}, map[string]string{"DATABASE_URL": plain}); err != nil {
+			t.Errorf("a pooler that cannot be joined broke the database's own reference: %v", err)
+		}
+		if _, err := s.modules.deployDatabases.NetworksForRuntime(ctx, environmentID, deploy.RuntimePlanConfig{}, map[string]string{"DATABASE_URL": application}); err == nil ||
+			!strings.Contains(err.Error(), "pooler could not be joined") {
+			t.Errorf("the pooled reference with no pooler on the network = %v", err)
+		}
+		cli("rm", "-f", "-v", "jdt-pgbouncer-blocker")
+		if _, err := s.modules.deployDatabases.NetworksForRuntime(ctx, environmentID, deploy.RuntimePlanConfig{}, map[string]string{"DATABASE_URL": application}); err != nil {
+			t.Errorf("the pooled reference once the alias is free: %v", err)
 		}
 		if err := s.modules.deployDatabases.RemoveRuntimeNetworks(ctx, environmentID); err != nil {
 			t.Fatalf("the environment's network could not be removed with the pooler on it: %v", err)

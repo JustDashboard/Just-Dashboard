@@ -255,8 +255,9 @@ test("a running pooler lists where it is reached and reads its pools and statist
   await expect(list).toContainText("127.0.0.1:6433")
   await expect(list).toContainText("db-1-pool.jd.internal:6432")
   await expect(list).toContainText("${{database.1.pooled}}")
+  await expect(addresses).toContainText("The pooler is published on this server only")
   await expect(addresses).toContainText(
-    "published where its database is, which is this server only",
+    "Opening the database to anywhere under Network moves the pooler with it",
   )
 
   const activity = section(page, "activity")
@@ -392,14 +393,45 @@ test("a password changed since the pooler was given it is said, with a way to wr
   await expect.poll(() => server.sent[0]?.method).toBe("PUT")
 })
 
-test("a pooler published like its database says so beside its addresses", async ({ page }) => {
+test("a pooler the access switch published says so beside its addresses", async ({ page }) => {
   await mockPooling(page, { pooler: { ...ON, exposure: "public" } })
   await visit(page, PAGE)
   const addresses = section(page, "addresses")
-  await expect(addresses).toContainText("Published like its database")
+  await expect(addresses).toContainText("Published to anywhere")
   await expect(addresses).toContainText("This server and anywhere")
   await expect(addresses).toContainText(
-    "restrict the database under Network and the pooler follows",
+    "restricting it there brings the pooler back to this server",
+  )
+})
+
+test("a protected connection shows its pooler and offers no way to change it", async ({ page }) => {
+  const server = await mockPooling(page, { pooler: ON, rows: { 1: { readOnly: true } } })
+  await visit(page, PAGE)
+  const pooler = section(page, "pooler")
+  await expect(pooler).toContainText("This connection is protected")
+  await expect(pooler).toContainText("the protection is taken off under General")
+  await expect(pooler).toContainText("Running")
+  await expect(pooler.getByRole("button")).toHaveCount(0)
+  await expect(pooler.getByRole("radio")).toHaveCount(0)
+  await expect(pooler.getByRole("textbox")).toHaveCount(0)
+  await expect(section(page, "activity")).toContainText("15 active, 2 waiting")
+  expect(server.sent).toEqual([])
+})
+
+test("a protected connection with no pooler offers no Turn on", async ({ page }) => {
+  await mockPooling(page, { rows: { 1: { readOnly: true } } })
+  await visit(page, PAGE)
+  const pooler = section(page, "pooler")
+  await expect(pooler).toContainText("This connection is protected")
+  await expect(pooler.getByRole("button", { name: "Turn on" })).toHaveCount(0)
+})
+
+test("opening the database to anywhere says the pooler goes with it", async ({ page }) => {
+  await mockPooling(page, { pooler: ON })
+  await visit(page, "/databases/1/settings/network")
+  await page.getByRole("button", { name: /Anywhere/ }).click()
+  await expect(dialog(page)).toContainText(
+    "shop-db-pgbouncer (PgBouncer) is published with it, on port 6433",
   )
 })
 
