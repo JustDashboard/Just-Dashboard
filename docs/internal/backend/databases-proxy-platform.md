@@ -568,6 +568,27 @@ SQL Server resets SHOWPLAN using a bounded cancellation-independent context, inc
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
 the pool.
 
+The Query page's Plan draws the answer as one tree, read in the browser
+(`components/database/query/plan.ts`, the printed forms in `plan-text.ts`, both unit-tested):
+PostgreSQL's JSON, MySQL's `query_block` and 8.3's measured JSON, MariaDB's `r_` measurements, SQL
+Server's SHOWPLAN rows and SQLite's query plan, and three plans that arrive only as text — Oracle's
+DBMS_XPLAN table (its conditions under the step they name, its notes under the statement), MySQL's
+measured tree as an older MySQL prints it when the JSON form is refused, and ClickHouse's indented
+steps. Any other print stays the engine's text. A step carries what its format has and nothing it
+does not: cost, with the step's own share as its bar; rows; and in a measured plan its own time and
+the time of it with everything under it, as one bar of two inks against the plan's total, with the
+steps orderable slowest first. A measured step whose rows came out ten times more or fewer than
+planned says so under its name — `est 12 · actual 48,210 (×4,000)`, both over the whole run.
+Whether they are that far apart is decided a loop at a time with each side at least one row,
+because PostgreSQL never plans under one row a loop and before 18 rounds what came to whole rows,
+and fewer rows than planned is not said beneath a step that stops reading early (a limit, a merge
+join's inputs, the inner input of a nested semi- or anti-join), since the planner plans a run to
+its end. A MariaDB table's rows are those its condition kept (`rows × filtered` against
+`r_rows × r_filtered`, what it read a fact beside them), so a misjudged condition shows where
+comparing the rows read never would. These are statements of what the plan says, run on request,
+not findings. `TestLivePlansAreTheShapesTheTreeReads` asks every live engine for the shapes these
+readers rely on, so a server that changes one fails there rather than quietly drawing text.
+
 What a run leaves behind is the dashboard's own: `GET …/history` is the connection's last hundred
 statements with their risk, duration, row counts and the engine's error text (`db_query_history`), and
 a saved query

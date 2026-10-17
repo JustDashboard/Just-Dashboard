@@ -913,6 +913,12 @@ rather than assembling its own recharts tree — adding a measurement should mea
   tile's trend band then collapses rather than leave a gap. With a fixed `max` a flat line sits at
   its level and says so. Its colour is a series colour, never a status one: a failing share is
   `--chart-3`, because `--destructive` on a line says the line itself is an error (§3).
+- **A part of a tree is one bar of two inks.** A measured plan step's time on the Query page
+  (`query/plan-view.tsx`) is drawn against the whole plan's: the step's own share in the time
+  series' colour and, behind it at a third of that ink, the share of the step with everything under
+  it. One bar says what the step took and what its branch took, and only the solid inks down the
+  plan add up to the whole. The figure beside it is the step's own, which is what "slowest first"
+  orders by.
 
 ## 11. Motion says one of four things
 
