@@ -345,6 +345,17 @@ test("encrypted backups, for the pull request @shots", async ({ page }) => {
   await panel.evaluate((el) => el.scrollIntoView({ block: "center" }))
   await shot("backup-key-1440.png")
 
+  // The phone's shot comes before the export, which is what it shows: the
+  // key with no copy off the server yet.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(panel).toContainText("not exported yet")
+  await panel.evaluate((el) => el.scrollIntoView({ block: "center" }))
+  await shot("backup-key-390.png")
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.reload()
+  await expect(panel).toContainText("not exported yet")
+
   await panel.getByRole("button", { name: "Export key…" }).click()
   const dialog = page.getByRole("dialog", { name: "Export the backup key" })
   await expect(dialog).toContainText(RECIPIENT)
@@ -360,6 +371,17 @@ test("encrypted backups, for the pull request @shots", async ({ page }) => {
   await page.goto("/backups/2")
   const sealed = page.getByRole("region", { name: "Encryption" })
   await expect(sealed).toContainText(RECIPIENT)
+  const inspector = page.getByRole("region", { name: "Run 100" })
+  await inspector.evaluate((el) =>
+    el.closest(".overflow-y-auto")?.parentElement?.scrollIntoView({ block: "center" }),
+  )
+  await inspector.getByRole("button", { name: "More actions for run 100" }).click()
+  const menu = page.getByRole("menu")
+  await expect(menu.getByRole("menuitem", { name: "Download decrypted archive" })).toBeVisible()
+  await settled(menu)
+  await shot("download-decrypted-1440.png")
+  await page.keyboard.press("Escape")
+  await expect(menu).toHaveCount(0)
   // The rail and the run it shows are one frame with a scroll of its own:
   // the frame stands whole in the window and only the inspector scrolls.
   await sealed.evaluate((el) => {
@@ -377,11 +399,4 @@ test("encrypted backups, for the pull request @shots", async ({ page }) => {
   await option.scrollIntoViewIfNeeded()
   await settled(edit)
   await shot("job-form-encrypt-1440.png")
-  await page.keyboard.press("Escape")
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto("/backups")
-  await expect(keyPanel(page)).toContainText("not exported yet")
-  await keyPanel(page).evaluate((el) => el.scrollIntoView({ block: "center" }))
-  await shot("backup-key-390.png")
 })
