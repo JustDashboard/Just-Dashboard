@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "security",
+          "text": "Oracle and SQL Server statement lists no longer show what comments said or the literals after one",
+          "detail": "Oracle keeps a statement's text with its line breaks turned into spaces, so a -- comment hid everything after it from the literal masker and the rest of the statement was shown as it was run. Comments are now dropped from the text of Oracle and SQL Server statements, optimizer hints are kept with their literals replaced, and SQL Server's nested comments are read the way it reads them."
         }
       ]
     },
