@@ -17,8 +17,10 @@ import (
 
 // A backup job may name saved database connections. Each run asks the
 // Databases owner for a native dump of every one of them (pg_dump, mysqldump,
-// mongodump, a Redis RDB, or the built-in driver dump) and stores the files in
-// the archive next to the filesystem sources. A dump is a transaction boundary
+// mongodump, or the dashboard's built-in dump) and stores the files in the
+// archive next to the filesystem sources. A Redis dump is always the built-in
+// one: gzipped JSON Lines of each key's DUMP payload, which the dashboard
+// restores and redis-server does not load — it is not an RDB file. A dump is a transaction boundary
 // the engine chose; a filesystem copy of a running database is not, which is
 // why the deployment gate prefers this evidence for a linked database.
 

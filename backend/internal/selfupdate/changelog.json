@@ -110,6 +110,18 @@
           "kind": "added",
           "text": "Run stored procedures, triggers and PL/SQL blocks from the query editor",
           "detail": "The editor and the server now end a statement where its engine does: MySQL and MariaDB scripts with DELIMITER, or a procedure as SHOW CREATE prints it; SQLite triggers; SQL Server batches separated by GO, with GO 3 running a batch three times; Oracle PL/SQL blocks, procedures and packages ended by a / line; and PostgreSQL functions with BEGIN ATOMIC bodies. Running the statement under the cursor sends the whole body, the strip says which lines it covers and warns when a block runs on to the end of the text, Format leaves separators and bodies as written, and an Oracle procedure that does not compile fails with the compiler's errors. A statement with a body is never treated as a read, so a protected connection refuses it."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Claim a stream's idle pending entries in one step",
+          "detail": "Databases → Keys → a stream's consumer groups hands everything pending longer than a number of minutes to one consumer, a hundred entries a press, on servers with XAUTOCLAIM. A single entry's claim and a hash field's expiry now go through their own routes rather than the console's."
+        },
+        {
+          "kind": "fixed",
+          "text": "Describe the Redis backup as what it is",
+          "detail": "A Redis dump is the dashboard's own gzipped JSON Lines of each key's DUMP payload, which only the dashboard restores. The backup job form and the documentation no longer call it a snapshot or an RDB file."
         }
       ]
     },

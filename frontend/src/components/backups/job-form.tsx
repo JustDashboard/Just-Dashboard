@@ -573,8 +573,9 @@ export function JobDialog({
             <legend className="text-body font-medium">Database dumps</legend>
             <FormNote>
               Each saved connection is dumped with its engine&apos;s own tool — pg_dump, mysqldump,
-              mongodump, a Redis snapshot — or the built-in dump, and stored in the archive. A
-              deployment linked to the database accepts this as its backup coverage.
+              mongodump — or the dashboard&apos;s built-in dump, and stored in the archive. Redis is
+              always the built-in one: its keys as JSON Lines that the dashboard restores, not an
+              RDB file. A deployment linked to the database accepts this as its backup coverage.
             </FormNote>
             {connections.error && <ErrorState error={connections.error} />}
             {(connections.data?.length ?? 0) === 0 &&

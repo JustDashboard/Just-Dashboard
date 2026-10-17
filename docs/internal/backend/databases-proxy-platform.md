@@ -1500,13 +1500,18 @@ is the surface itself.
     none of the fields is there, and `400 unsupported` on a server that keeps none. Both are
     `service.control`, refused on a protected connection, and audited as
     `database.redis.field.expire` / `.persist` with the key and how many fields — a field's name is
-    data and is not recorded.
+    data and is not recorded. A hash row's expiry on the key browser is set and removed through
+    them; it used to send `HEXPIRE` and `HPERSIST` down the console's route.
   - *Claiming.* `POST /keys/stream/claim {key, group, consumer, ids, minIdleMs?}` hands a group's
     pending entries to one of its consumers (`XCLAIM … JUSTID`), and with `auto: true` whatever has
     been pending for `minIdleMs`, a page at a time by `cursor` and `count` (`XAUTOCLAIM`,
     `features.streamAutoClaim`; `400 unsupported` without it). Only ids travel, in both
     directions. `service.control`, as the console classes both commands; refused on a protected
-    connection; audited as `database.redis.stream.claim`.
+    connection; audited as `database.redis.stream.claim`. A group's pending list claims through it:
+    *Claim…* hands one entry over, and *Claim idle entries…*, drawn only where the server has
+    `XAUTOCLAIM`, hands whatever has been pending past a number of minutes to one consumer, a
+    hundred a press, saying how many moved and whether more remain. The page used to send `XCLAIM`
+    down the console's route.
   - *A whole member.* `GET /keys/raw` also streams one member of a set or a sorted set. A member
     has no name but itself and the reader holds only its start, so it is asked for by that:
     `member` (or `memberB64`) is how it begins and `bytes` its size, both as the page reported
@@ -1700,7 +1705,9 @@ the detail of each classifier is below, with the surface it guards.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
   learn a backup was never possible. `dump_sql.go` writes SQL over the open connection; `dump_nosql.go`
-  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A native
+  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A Redis
+  dump is always this one — a header line, then each key's `DUMP` payload — and not an RDB file: only the
+  dashboard restores it, and the Backups form and every description of it say so. A native
   tool that *fails* falls through to the built-in rather than to an error; one that was *stopped* does
   not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
   is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
