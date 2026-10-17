@@ -57,6 +57,11 @@
           "detail": "Databases → Backups shows how many databases were backed up today, this week, over a week ago or never on one bar, over a single line per database with the age of its newest dump. Proxy → Sites → Certificates counts valid, due for renewal and expired the same way, over a line per site with its days left."
         },
         {
+          "kind": "added",
+          "text": "Keep each database's statement statistics over time",
+          "detail": "Databases → Performance → Statement history lists what each statement cost over the last hour, six hours, day or week, with its time drawn across the window, and orders the list by its share of the time, calls, mean time, p95, rows or rows examined. A statement opens on charts of its time, calls, time per call and rows. The dashboard reads the statement list every five minutes, including while the page is closed, and keeps what each statement added for seven days. ClickHouse and MySQL 8 give p50, p95 and p99 from their own run times; PostgreSQL, MariaDB, SQL Server and Oracle keep no distribution, and the page says what each figure is made from. Only a statement's shape is kept, as the Statements view shows it, never one execution of it."
+        },
+        {
           "kind": "fixed",
           "text": "Count a backup job's run as a database's last backup",
           "detail": "The Databases cards, table and Backups band, and the last dump a database's delete confirmation names, take the later of its newest dump and the newest successful backup job run that dumped it, so a database a nightly job protects is no longer shown as never backed up or a week old."

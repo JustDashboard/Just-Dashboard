@@ -368,6 +368,7 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 		httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"error": err.Error()})
 		return httpx.BadRequest("%v", err)
 	}
+	s.dbStatements.noteReset(conn.ID)
 	httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"statement": statement})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "statement": statement})
 	return nil

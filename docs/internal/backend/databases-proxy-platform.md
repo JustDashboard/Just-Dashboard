@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 120
-  flags (107 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 119
+  flags (106 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -1161,6 +1161,48 @@ stays editable on a protected connection.
   [alerts](#alerts-told-when-a-server-or-its-backups-go-wrong), which have it read a server's disk
   and replication as well only while a rule watches that server for them.
 
+- **Statement history** (`api/database_statements.go`, `dbx/statements_history.go`) is recorded
+  beside the activity recorder, started and stopped with it, on a clock of its own: every five
+  minutes, with two workers, a 30-second deadline per connection and four minutes for the pass.
+  Each saved server whose engine has `statementHistory` — every engine with `statements`, so
+  PostgreSQL, MySQL, MariaDB and Percona, ClickHouse, SQL Server and Oracle, and not CockroachDB or
+  TiDB — is read through `dbx.TakeStatementSnapshot`, which is `TopStatements` at its fullest (200
+  statements by total time): the statement list's own read. So the text kept of a statement is the
+  shape `/statements` shows any role, by whatever rule that read holds the engine to, and there is no
+  other read of statement text for the history to keep. The reads a snapshot adds select ids and
+  numbers only: MySQL's `SUM_ROWS_EXAMINED` and, on MySQL 8, `events_statements_histogram_by_digest`;
+  ClickHouse's runs between two snapshots. An interval is the difference between two snapshots'
+  running totals (`dbx.StatementsBetween`). A statement new to the list is left out of its first
+  interval, since its totals may have run up long before; one whose totals went down had its entry
+  made again, and everything it has ran since; and the counters starting again —
+  `pg_stat_statements_info.stats_reset` moving, or this dashboard's own `POST /statements/reset`,
+  which MySQL has no other way to tell (`noteReset`) — makes every total one of what ran after.
+  ClickHouse keeps runs rather than totals: its snapshot is the runs that finished between where the
+  last one ended and fifteen seconds before the server's own now, since the query log is written in
+  batches, so a run is counted once and none is lost at the seam. The first reading after the
+  dashboard starts, and one taken more than fifteen minutes after the last, only marks where the next
+  interval starts. An interval keeps its whole in `db_statement_intervals` — the time of every
+  statement the engine counted, and whether the counters were reset — and the 50 statements that
+  took the most time in it in `db_statement_samples`: calls, time, rows returned, rows examined where
+  the engine counts them, and a histogram of run times where it keeps one. Each statement's shape is
+  in `db_statement_shapes`, and every reading writes the list's text again, so a statement still
+  listed is kept as the list shows it now. Seven days are kept and pruned on every pass; the history
+  is tied to the exact saved target, as the activity history is, and forgetting the connection
+  cascades. Percentiles are read from merged histograms — MySQL's own buckets, about 5% wide, and for
+  ClickHouse buckets cut from each run's whole milliseconds, one a millisecond up to 20 ms and a
+  sixteenth of a doubling above — as the upper edge of the bucket the quantile falls in, so never
+  under the true figure. PostgreSQL, MariaDB, SQL Server and Oracle keep no distribution and have
+  none; a mean there is the time added divided by the calls added.
+  `GET /{id}/statements/history?hours=&sort=&limit=` (read; no dial) answers the window — how many
+  readings, how much of it they cover, the time of everything counted, the resets, the recorder's
+  newest reading of the server since this process started and when the next is due — and its
+  statements by `total`, `mean`, `calls`, `rows`, `rowsRead` or `p95` (a statement without the
+  figure last), `limit` 50 up to 200, each with its share of the window and its time in each of about
+  24 buckets, `null` where nothing was recorded. `GET /{id}/statements/history/{statement}?hours=` is
+  one statement's figures and about 168 points for its charts, and 404 for a statement never
+  recorded. Hours are 1–168, as `/stats/history` takes them. Neither is audited. The page is
+  Performance → Statement history.
+
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
   stop one; it includes our own connections marked `self`, because hiding them made an idle server report
@@ -2126,7 +2168,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the eleven it calls): 244 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the eleven it calls): 246 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -2216,7 +2258,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
 
-**Rows and statements** (22)
+**Rows and statements** (24)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2302,6 +2344,8 @@ and `protectReadOnlyConnections`.
 | `PUT` | `/databases/{id}/settings` | `system.admin` | — | `database.setting.set`, `.reset` | refused |
 | `GET` | `/databases/{id}/sqlite/file` | read | — | — | — |
 | `GET` | `/databases/{id}/statements` | read | — | — | — |
+| `GET` | `/databases/{id}/statements/history` | read | — | — | — |
+| `GET` | `/databases/{id}/statements/history/{statement}` | read | — | — | — |
 | `POST` | `/databases/{id}/statements/preload` | `system.admin` | — | `database.statements.preload` | refused |
 | `POST` | `/databases/{id}/statements/reset` | `destructive` | yes | `database.statements.reset` | refused |
 | `GET` | `/databases/{id}/tablestats` | read | — | — | — |

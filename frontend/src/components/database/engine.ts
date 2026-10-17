@@ -269,6 +269,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   privileges: false,
   statements: false,
   statementsReset: false,
+  statementHistory: false,
   statementsSetup: false,
   queryLog: false,
   clickhouseViews: false,

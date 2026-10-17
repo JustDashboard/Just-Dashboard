@@ -282,6 +282,8 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 		"pubsub":          {"redis": "/redis/pubsub"},
 		"collections":     {"mongodb": "/mongo/collections"},
 		"profiler":        {"mongodb": "/mongo/profiler"},
+		// Read from the dashboard's own store, whatever the engine says.
+		"statementHistory": {"sql": "/statements/history"},
 	}
 	for _, c := range []struct {
 		driver dbx.Driver

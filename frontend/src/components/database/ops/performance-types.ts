@@ -383,6 +383,91 @@ export type DbStatements = {
   enable?: DbStatementsEnable
 }
 
+// ---- GET /{id}/statements/history ------------------------------------------
+
+export type DbStatementHistorySort = "total" | "mean" | "calls" | "rows" | "rowsRead" | "p95"
+
+/** How the recorder's newest reading of the server went, since the dashboard started. */
+export type DbStatementReading = {
+  at: string
+  supported: boolean
+  /** What stood in the way, where nothing could be read. */
+  reason?: string
+}
+
+/** What is known of a recorded window, beside the statements in it. */
+export type DbStatementHistoryFacts = {
+  supported: boolean
+  reason?: string
+  hours: number
+  everySeconds: number
+  retentionHours: number
+  /** How many statements one reading keeps: the ones that took the most time in it. */
+  keptPerInterval: number
+  /** The width of one point of a trend or a chart. */
+  bucketSeconds: number
+  from: string
+  until: string
+  /** Readings differenced in the window, and how much of it they cover. */
+  intervals: number
+  recordedSeconds: number
+  firstAt?: string
+  /** The time of every statement counted in the window, the ones not kept included. */
+  totalMs: number
+  /** Whether the engine counts the rows it read, and keeps run times to take percentiles from. */
+  rowsRead: boolean
+  percentiles: boolean
+  /** Readings across which the counters started again. */
+  resets: string[]
+  reading?: DbStatementReading
+  nextAt?: string
+}
+
+export type DbStatementHistoryEntry = {
+  id: string
+  /** A shape, as the statement list shows it. */
+  query: string
+  calls: number
+  totalMs: number
+  meanMs: number
+  rows: number
+  rowsRead?: number
+  p50Ms?: number
+  p95Ms?: number
+  p99Ms?: number
+  /** Of all the statement time counted in the window, 0..1. */
+  share: number
+  /** The time it took in each bucket; null where nothing was recorded. */
+  trend?: (number | null)[]
+}
+
+export type DbStatementHistory = DbStatementHistoryFacts & {
+  sort: DbStatementHistorySort
+  /** Where each point of a trend ends, in milliseconds. */
+  buckets: number[]
+  statements: DbStatementHistoryEntry[]
+}
+
+export type DbStatementHistoryPoint = {
+  /** Where the point's bucket ends, in milliseconds. */
+  at: number
+  /** False where no reading falls in the bucket: a gap, not a quiet spell. */
+  recorded: boolean
+  calls: number
+  totalMs: number
+  meanMs?: number
+  rows: number
+  rowsRead?: number
+  p50Ms?: number
+  p95Ms?: number
+  p99Ms?: number
+}
+
+export type DbStatementHistoryDetail = DbStatementHistoryFacts & {
+  statement: DbStatementHistoryEntry
+  points: DbStatementHistoryPoint[]
+}
+
 // ---- POST /{id}/explain ----------------------------------------------------
 
 export type DbPlanResult = {

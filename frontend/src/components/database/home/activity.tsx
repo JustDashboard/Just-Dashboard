@@ -103,9 +103,12 @@ export const Activity = memo(function Activity({
 export function HistoryRange({
   hours,
   onHours,
+  label = "Activity history range",
 }: {
   hours: number
   onHours: (hours: number) => void
+  /** What the window is of, for a screen reader. */
+  label?: string
 }) {
   return (
     <ToggleGroup
@@ -115,7 +118,7 @@ export function HistoryRange({
       onValueChange={(next) => next && onHours(Number(next))}
       variant="outline"
       size="sm"
-      aria-label="Activity history range"
+      aria-label={label}
     >
       {HISTORY_RANGES.map((range) => (
         <ToggleGroupItem

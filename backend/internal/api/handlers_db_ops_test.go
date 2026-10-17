@@ -159,6 +159,7 @@ func TestOpsReadRoutesAnswerAViewer(t *testing.T) {
 		{"/sqlite/file", `"pageSize"`},
 		{"/server/privileges", `"supported":false`},
 		{"/statements?sort=calls&limit=5", `"sort":"calls"`},
+		{"/statements/history?hours=24", `"supported":false`},
 		{"/activity", `"supported":false`},
 	} {
 		rec := h.viewer.do(http.MethodGet, h.base+c.path, "", nil)

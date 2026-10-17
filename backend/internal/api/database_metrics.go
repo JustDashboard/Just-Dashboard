@@ -81,12 +81,14 @@ func (s *Server) startDatabaseMetrics(ctx context.Context) {
 			}
 		}
 	}()
+	s.startStatementHistory(ctx)
 }
 
 func (s *Server) stopDatabaseMetrics() {
 	if s.dbMetricsStop != nil {
 		s.dbMetricsStop()
 		<-s.dbMetricsDone
+		<-s.dbStatements.done
 	}
 }
 

@@ -890,6 +890,11 @@ rather than assembling its own recharts tree — adding a measurement should mea
   along the axis — furthest from the line the reader is following — and two overlapping areas mix
   into a third colour belonging to neither series. Stacked series keep a solid fill: there the block
   *is* the quantity.
+- **A column of charts read against each other takes one gutter.** The y-axis gutter fits its labels,
+  which puts a chart's plot wherever its widest label ends; `axisWidth` on `ChartPanel` fixes it
+  instead, so the four charts of a statement's history (Performance → Statement history) start their
+  plots on one line. Fitted there, inside the sheet, the gutter came out narrower than its labels and
+  clipped them.
 - A chart's `height` is a **floor**, not a fixed size. Panels in a row stretch to the tallest of
   them, and a fixed plot puts the surplus between the chart and its legend as a band of nothing.
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so

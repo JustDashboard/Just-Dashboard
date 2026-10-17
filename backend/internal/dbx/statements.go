@@ -475,19 +475,22 @@ func (postgresDialect) ResetStatements(ctx context.Context, db *sql.DB) (string,
 
 // --- MySQL / MariaDB ---------------------------------------------------------
 
+// mysqlStatementsScope is the digests that are this database's: the ones run
+// in it, and the ones run with no database chosen.
+const mysqlStatementsScope = `(SCHEMA_NAME IS NULL OR SCHEMA_NAME = DATABASE() OR DATABASE() IS NULL)`
+
 func (mysqlDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsOptions) (*StatementsReport, error) {
 	order := map[string]string{
 		StatementsByTotal: "SUM_TIMER_WAIT", StatementsByMean: "AVG_TIMER_WAIT", StatementsByCalls: "COUNT_STAR",
 		StatementsByRows: "SUM_ROWS_SENT", StatementsByMax: "MAX_TIMER_WAIT",
 	}[opts.Sort]
-	const scope = `(SCHEMA_NAME IS NULL OR SCHEMA_NAME = DATABASE() OR DATABASE() IS NULL)`
 	rows, err := db.QueryContext(ctx, `
 	  SELECT COALESCE(DIGEST, ''), COALESCE(LEFT(DIGEST_TEXT, 1000), ''), COUNT_STAR,
 	         SUM_TIMER_WAIT / 1e9, AVG_TIMER_WAIT / 1e9, MAX_TIMER_WAIT / 1e9, SUM_ROWS_SENT,
 	         (SELECT COALESCE(SUM(SUM_TIMER_WAIT), 0) / 1e9
-	          FROM performance_schema.events_statements_summary_by_digest WHERE `+scope+`)
+	          FROM performance_schema.events_statements_summary_by_digest WHERE `+mysqlStatementsScope+`)
 	  FROM performance_schema.events_statements_summary_by_digest
-	  WHERE `+scope+`
+	  WHERE `+mysqlStatementsScope+`
 	  ORDER BY `+order+` DESC LIMIT ?`, opts.Limit)
 	if err != nil {
 		return &StatementsReport{Statements: []Statement{}, Reason: err.Error()}, nil
@@ -534,6 +537,11 @@ func (mysqlDialect) ResetStatements(ctx context.Context, db *sql.DB) (string, er
 // workload and bounded enough to read on every poll.
 const clickhouseStatementsWindow = "1 DAY"
 
+// clickhouseStatementsScope is the runs that are this database's statements:
+// finished, run in it, and not this package's own reads of the log.
+const clickhouseStatementsScope = `type = 'QueryFinish' AND current_database = currentDatabase()
+	      AND query NOT LIKE '%system.query_log%'`
+
 // Statements sums the query log by normalised shape. There is nothing to
 // reset: the log is the server's record, and its retention is the server's
 // own setting. The text shown is the shape too — normalizeQuery puts a ? where
@@ -543,8 +551,7 @@ func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts Statem
 		StatementsByTotal: "total", StatementsByMean: "mean", StatementsByCalls: "calls",
 		StatementsByRows: "result_rows", StatementsByMax: "longest",
 	}[opts.Sort]
-	const scope = `type = 'QueryFinish' AND event_time > now() - INTERVAL ` + clickhouseStatementsWindow + `
-	      AND current_database = currentDatabase() AND query NOT LIKE '%system.query_log%'`
+	const scope = clickhouseStatementsScope + ` AND event_time > now() - INTERVAL ` + clickhouseStatementsWindow
 	rows, err := db.QueryContext(ctx, `
 	  SELECT toString(normalized_query_hash), substring(normalizeQuery(any(query)), 1, 1000), toInt64(count()) AS calls,
 	         toFloat64(sum(query_duration_ms)) AS total, toFloat64(avg(query_duration_ms)) AS mean,
