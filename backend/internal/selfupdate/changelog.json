@@ -61,6 +61,16 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Claim a stream's idle pending entries in one step",
+          "detail": "Databases → Keys → a stream's consumer groups hands everything pending longer than a number of minutes to one consumer, a hundred entries a press, on servers with XAUTOCLAIM. A single entry's claim and a hash field's expiry now go through their own routes rather than the console's."
+        },
+        {
+          "kind": "fixed",
+          "text": "Describe the Redis backup as what it is",
+          "detail": "A Redis dump is the dashboard's own gzipped JSON Lines of each key's DUMP payload, which only the dashboard restores. The backup job form and the documentation no longer call it a snapshot or an RDB file."
         }
       ]
     },
