@@ -38,26 +38,28 @@ stored paths under current roots as well. Git's parallel resolver remains a desi
 
 ## PostgreSQL statement statistics keep utility literals
 
-Found on 2026-10-17, after the audit above. The Databases reference holds the statement statistics
+Found on 2026-10-17. The Databases reference holds the statement statistics
 (`GET /databases/{id}/statements`, read capability) to a statement's shape, never one execution. On
-PostgreSQL the text is `pg_stat_statements.query` as the extension keeps it, and the extension
-replaces constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`).
-Utility statements are kept as they were sent while `pg_stat_statements.track_utility` is on, which is
-its default. Checked against PostgreSQL 17.11: `CREATE ROLE … PASSWORD '…'` and
-`ALTER ROLE … PASSWORD '…'` were listed with the password in clear, as were a `SET` value, a `COMMENT`,
-a column `DEFAULT` and a `DO` body, while the `SELECT`, `INSERT` and `UPDATE` run beside them read
-`$1`. The dashboard's own role form sends a new password that way (`dbx.passwordLiteral`), so on a
-server that loads the extension an account that may only read can be shown a password an
-administrator set from the dashboard. The Performance page's Statements panel tells its reader the
-same rule ("the server replaces every value before it leaves").
+PostgreSQL the text was `pg_stat_statements.query` as the extension keeps it, and the extension replaces
+constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`); utility
+statements are kept as they were sent while `pg_stat_statements.track_utility` is on, its default.
+Checked against PostgreSQL 17.11: `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE … PASSWORD '…'` were
+listed with the password in clear, as were a `SET` value (a bare word as well as a quoted one), a
+`COMMENT`, a column `DEFAULT` and a `DO` body. The dashboard's own role form sends a new password that
+way (`dbx.passwordLiteral`), so an account that may only read could be shown a password an
+administrator set from the dashboard.
 
-The other engines held the rule in the same check: MySQL 8.4's digest text and ClickHouse 25.8's
-`normalizeQuery` replaced every literal, and `dbx.statementShape` does so for SQL Server and Oracle
-(`TestStatementShapeDropsLiteralsAndNothingElse`); MariaDB 11.4 ships with `performance_schema` off and
-lists nothing. The code is unchanged. Closing the gap — shaping PostgreSQL's text here as well, by a
-pass that keeps the `$n` markers the Statements panel asks values for (`dbx.statementShape` reads `$1`
-as SQL Server's money literal), or leaving utility statements out of the list — is a decision still
-to be made, and until then the rule stands as the contract.
+That finding is closed. PostgreSQL's text is shaped before it leaves `dbx` by `pgStatementShape`, which
+reads it by PostgreSQL's own lexical rules, replaces every literal with `?`, keeps the extension's `$n`
+markers, and masks a role's password and a setting's value however they are written; a plain string is
+read both with and without backslash escapes, since the text does not record whether
+`standard_conforming_strings` was on ([Databases reference](../backend/databases-proxy-platform.md),
+*Statement statistics*). The role form also keeps its statement out of `pg_stat_statements` where the
+account may turn `track_utility` off for the transaction, which a superuser may. `TestPostgresStatementShapeDropsEveryLiteralAndKeepsTheMarkers` holds
+the rule over a table of statements; `TestLivePostgresStatementsShowAShapeAndNoValue` and
+`TestLiveAPIPostgresStatementsShowAViewerNoPassword` hold it on a server, the second as a viewer reads
+the list. `/activity` and `/querylog` still return statement text with its literals at read capability,
+as documented; that is their contract, not this finding.
 
 ## Verified inventory drift corrected in this documentation change
 

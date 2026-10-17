@@ -1013,18 +1013,27 @@ stays editable on a protected connection.
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
   `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
-  with the grant the account lacks (`reason`). The rule is that the text is a statement's shape, never
-  one execution: the list is on the read surface and a literal is somebody's e-mail address. MySQL and
-  MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to (`normalizeQuery`), and for SQL
-  Server and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the
-  text leaves the package. PostgreSQL's text is returned as `pg_stat_statements` keeps it, and the
-  extension replaces constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`,
-  `MERGE`). A utility statement — `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a
-  column `DEFAULT`, a `DO` body — is kept as it was sent while `pg_stat_statements.track_utility` is on,
-  its default, and reaches the list with its literals, a role's password included. That falls short of
-  the rule and is recorded as an open finding in
-  [verification findings](../reference/verification-findings.md#postgresql-statement-statistics-keep-utility-literals);
-  it is not an exception to it.
+  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
+  never one execution: the list is on the read surface and a literal is somebody's e-mail address, or in
+  a `CREATE ROLE` a password. MySQL and MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to
+  (`normalizeQuery`), and for SQL Server and Oracle `dbx.statementShape` replaces every string and number
+  literal with `?` before the text leaves the package. PostgreSQL's text is shaped in the package as
+  well, by `pgStatementShape` (`dbx/statements_shape.go`): `pg_stat_statements` writes `$n` over the
+  constants of the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) and keeps every
+  utility statement as it was sent while `pg_stat_statements.track_utility` is on, its default —
+  `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a column `DEFAULT`, a `DO` body. The
+  pass reads the text by PostgreSQL's own lexical rules (dollar quoting; `E''`, `U&''`, `N''`, `B''` and
+  `X''` strings; block comments that nest; numbers in every base 16 takes, underscores included), keeps
+  the `$n` markers the Statements panel asks a value for, and replaces every literal with `?`. That is
+  every literal, not every value the extension missed: a type's modifiers and an `ORDER BY` position read
+  `?` too. In a statement the extension keeps as it came, two values that need no quotes are masked
+  however they are written, a bare word included: whatever follows a role's `PASSWORD` (`CREATE`/`ALTER`
+  `ROLE`, `USER`, `GROUP`, a user mapping), and a setting's value after `SET … TO`/`=` (`SET`, `ALTER
+  ROLE`/`DATABASE`/`SYSTEM … SET`, a function's `SET` clause). Whether a backslash escapes in a plain
+  `'…'` string depends on `standard_conforming_strings` in the session that sent it, which the text does
+  not record, so the text is read both ways and what is a literal in either reading is masked: the wrong
+  reading can only hide more. Comments and quoted names are kept. `/activity` and `/querylog` are not
+  shaped: they return what the server recorded, as below.
 - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
@@ -1219,11 +1228,7 @@ stays editable on a protected connection.
   shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
-  `/activity`, and unlike `/statements`, it returns each statement as the server recorded it, literals
-  included, at read capability — a Redis entry is the command with every argument, a value it set
-  among them; only `fp` is a shape. It sits at `read` beside the log routes, which hand back lines as
-  the log holds them
-  ([request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries)).
+  `/activity`, and unlike `/statements`, it returns statement text with its literals at read capability.
 
 ### Redis
 
