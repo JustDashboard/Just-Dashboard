@@ -387,7 +387,11 @@ to the contribution terms above, including the additional licence grant to the p
   install in the world reads to find out whether it is behind. If your change
   is worth a release, add the entry there and run `scripts/release.sh <version>`;
   it bumps the version everywhere it appears and regenerates the markdown. The
-  Go test run fails if the two ever disagree, in either direction.
+  Go test run fails if the changelog's newest release and the version ever
+  disagree, in either direction. It does not compare the markdown's entries, so a
+  note added after the version was bumped reaches `CHANGELOG.md` only when
+  `scripts/release.sh` runs again with the version the branch already carries,
+  which rewrites nothing else.
 - Match the surrounding code. Comments explain *why*, not *what*.
 
 ## Security issues

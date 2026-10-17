@@ -4254,6 +4254,17 @@ version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit i
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
 
+A note added to a release whose version is already bumped — every change merged into an open patch
+branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not
+in `CHANGELOG.md` until the markdown is generated again. Nothing fails meanwhile:
+`TestRootChangelogMentionsThisRelease` checks only that the release has a section there, not what the
+section says. Run `scripts/release.sh` with the version the branch already carries (`0.7.5` on
+`patch/0.7.5`): the version files are rewritten with the values they hold, so the only file that
+changes is `CHANGELOG.md`. Its first step alone does the same without the tests:
+`cd backend && go run ./scripts/gen-changelog.go -expect 0.7.5 -out ../CHANGELOG.md`, which refuses
+unless the changelog's newest release is the version named. Do it last before the branch is merged into
+`main`, because the GitHub release takes its notes from that section.
+
 A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
 `main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
 a push to `main`, reads `latest` from the changelog, and when that push changed it and no release
