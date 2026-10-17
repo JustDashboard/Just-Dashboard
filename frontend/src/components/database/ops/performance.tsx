@@ -210,6 +210,7 @@ function Answering() {
             error={stats.error}
             hours={stats.hours}
             onHours={stats.setHours}
+            retentionHours={stats.retentionHours}
             activity={engine.can("sessions") && !analytic ? activity : undefined}
           />
         ) : view === "file" ? (

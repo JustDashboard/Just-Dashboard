@@ -14,7 +14,13 @@ import type {
 } from "@/lib/network-traffic"
 
 export type Capability =
-  "read" | "service.control" | "file.write" | "terminal" | "destructive" | "system.admin"
+  | "read"
+  | "service.control"
+  | "file.write"
+  | "terminal"
+  | "destructive"
+  | "system.admin"
+  | "metrics.read"
 
 export type Role = "admin" | "limited" | "readonly"
 
@@ -5122,10 +5128,28 @@ export type ApiToken = {
   name: string
   prefix: string
   role: Role
+  /** The one capability the key is limited to; empty for an ordinary key. */
+  scope: "" | "metrics.read"
   createdAt: string
   expiresAt?: string
   lastUsedAt?: string
   revoked: boolean
+}
+
+/** How the recorded database activity is kept and where it is scraped from. */
+export type DbMetricsExport = {
+  retentionDays: number
+  options: { days: number; estimatedBytes: number | null }[]
+  /** Servers the recorder has saved a reading of in the last day. */
+  connections: number
+  samples: number
+  storedBytes: number | null
+  everySeconds: number
+  /** Days kept whole; older samples are thinned. */
+  rawDays: number
+  coarseMinutes: number
+  /** Path of the scrape endpoint on this dashboard. */
+  endpoint: string
 }
 
 export type SessionInfo = {

@@ -13,9 +13,29 @@ export const HISTORY_RANGES = [
   { hours: 6, label: "6 hours", short: "6h" },
   { hours: 24, label: "24 hours", short: "24h" },
   { hours: 168, label: "7 days", short: "7d" },
+  { hours: 336, label: "14 days", short: "14d" },
+  { hours: 720, label: "30 days", short: "30d" },
+  { hours: 2160, label: "90 days", short: "90d" },
 ] as const
 
-export type StatsHistory<T> = { samples: { at: number; stats: T; gap: boolean }[] }
+/** What the recorder keeps until an operator has chosen longer. */
+export const DEFAULT_RETENTION_HOURS = 168
+
+export type StatsHistory<T> = {
+  samples: { at: number; stats: T; gap: boolean }[]
+  retentionHours: number
+}
+
+/** The ranges the recorded history can answer: none reaches past what is kept. */
+export function rangesWithin(retentionHours: number) {
+  return HISTORY_RANGES.filter((range) => range.hours <= retentionHours)
+}
+
+/** The days the recorder keeps its readings, as the footnotes say it. */
+export function keptFor(retentionHours: number) {
+  const days = Math.round(retentionHours / 24)
+  return `${days} ${days === 1 ? "day" : "days"}`
+}
 
 /** Read history independently of the live snapshot so an offline server
  * still has recorded activity. Failed refreshes retain the previous run. */
@@ -52,6 +72,7 @@ export function useSamples<T>(
   return {
     answer: live.data,
     samples,
+    retentionHours: history.data?.retentionHours ?? DEFAULT_RETENTION_HOURS,
     hours,
     setHours,
     loading: history.loading,

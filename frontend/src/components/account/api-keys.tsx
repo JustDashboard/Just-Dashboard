@@ -124,6 +124,9 @@ function KeyRow({
   verbs: Verb[]
 }) {
   const usage = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
+  // A key narrowed to one job says the job, where the role beneath it would
+  // read as the key being able to do everything that role can.
+  const can = token.scope === "metrics.read" ? "metrics only" : token.role
   return (
     <Row
       className="group"
@@ -149,7 +152,7 @@ function KeyRow({
             <span className="hidden shrink-0 sm:inline">made {calendarDate(token.createdAt)}</span>
           </span>
           <span className="block md:hidden">
-            <span style={{ color: ROLE_HUE[token.role] }}>{token.role}</span> · {usage}
+            <span style={{ color: ROLE_HUE[token.role] }}>{can}</span> · {usage}
           </span>
         </>
       }
@@ -162,7 +165,7 @@ function KeyRow({
             {usage}
           </span>
           <Tag className="hidden md:inline-flex" style={{ color: ROLE_HUE[token.role] }}>
-            {token.role}
+            {can}
           </Tag>
           <span title={token.expiresAt ? new Date(token.expiresAt).toLocaleString() : undefined}>
             {keyStatus(token, now)}

@@ -109,6 +109,7 @@ export function KeyValueHome() {
       <Activity
         hours={stats.hours}
         onHours={stats.setHours}
+        retentionHours={stats.retentionHours}
         views={REDIS_VIEWS}
         samples={samples}
         loading={loading}
