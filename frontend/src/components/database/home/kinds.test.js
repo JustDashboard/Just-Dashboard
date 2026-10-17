@@ -46,7 +46,7 @@ describe("the hues a home tells kinds apart with", () => {
       "DO ?",
       "CALL archive_orders($1)",
     ]) {
-      expect(statementVerb(statement)?.color).toBe("var(--tag-slate)")
+      expect(statementVerb(statement)?.color).toBe("var(--tag-amber)")
     }
   })
 
