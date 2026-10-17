@@ -61,6 +61,16 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Scrape database metrics with Prometheus",
+          "detail": "Databases → Metrics export gives the address of a Prometheus endpoint that serves the recorded activity of every database, one set of series per connection labelled with its driver, name and id, with a scrape config to copy. It answers only to an API key, and a key can be made there that is limited to reading these metrics and nothing else."
+        },
+        {
+          "kind": "changed",
+          "text": "Keep database activity for 7, 14, 30 or 90 days",
+          "detail": "Databases → Metrics export chooses how long the recorded activity is kept, with the space each window takes. Readings older than a week are thinned to the last of every five minutes so a long window stays small, and the activity charts offer the longer ranges. Choosing a shorter window deletes the history outside it."
         }
       ]
     },

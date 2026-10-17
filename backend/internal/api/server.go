@@ -92,6 +92,9 @@ type Server struct {
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
+	// dbMetricThinnedAt is when the history past its raw window was last
+	// thinned; only the recorder's pass reads or writes it.
+	dbMetricThinnedAt time.Time
 
 	modules moduleSet
 }
