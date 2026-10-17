@@ -94,6 +94,10 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /ddl/comment":       previewOnly,
 	"POST /ddl/enum":          previewOnly,
 	"POST /ddl/enum/value":    previewOnly,
+	"POST /ddl/routine":       previewOnly,
+	"DELETE /ddl/routine":     previewOnly,
+	"POST /ddl/trigger":       previewOnly,
+	"DELETE /ddl/trigger":     previewOnly,
 	// Watching a server: stopping work in flight stays possible, and a
 	// consistency check; everything that changes the server does not.
 	"POST /activity/cancel":  staysOpen,

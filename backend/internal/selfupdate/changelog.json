@@ -8,6 +8,11 @@
       "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
       "changes": [
         {
+          "kind": "added",
+          "text": "Create, edit and drop functions, procedures and triggers from the schema browser",
+          "detail": "Databases \u2192 Schema opens a function, procedure or trigger with Edit and Drop, and the schema offers New function, New procedure and New trigger (a table's Triggers reading has its own). The form has the fields the engine has a word for, the body in the editor and the exact statement under it, sent as one statement, so a MySQL BEGIN \u2026 END block, an Oracle PL/SQL block or a SQLite trigger needs no delimiter. PostgreSQL, MySQL, MariaDB, SQL Server and Oracle take all three; SQLite takes triggers. An edit uses CREATE OR REPLACE or CREATE OR ALTER where the engine has one and otherwise drops and creates in one transaction, or puts the old definition back if the new one is refused; Oracle's result is checked for compile errors. A program whose text holds something the form cannot state is shown with the reason and left to the Query tab. Writing one asks for the destructive capability, as the Query tab does for the same CREATE."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."

@@ -3,12 +3,14 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	mssql "github.com/microsoft/go-mssqldb"
@@ -44,6 +46,28 @@ type DDLPlan struct {
 	// name. A plan with any is one the caller has to be allowed to run as the
 	// arbitrary SQL it is.
 	Unvouched []string `json:"-"`
+	// Note says, in a sentence, how a change that is more than its statements
+	// is carried out: a replacement that is a DROP and a CREATE in one
+	// transaction, or one that is checked afterwards and undone.
+	Note string `json:"note,omitempty"`
+	// atomic runs the statements in one transaction, for the engines whose DDL
+	// takes part in one.
+	atomic bool
+	// after checks the result once the statements have run; an error from it
+	// undoes the change as a failed statement would.
+	after func(ctx context.Context, conn *sql.Conn) error
+	// guard is the index of the first statement that changes the object being
+	// replaced: a failure of an earlier one changed nothing, and putting the
+	// old definition back over an object that was never touched would be the
+	// change. A failure of a later one is undone.
+	guard int
+	// discard drops the connection when the plan has run: it carried a SET.
+	discard bool
+	// signature, when set, names the saved routine once the plan has run.
+	signature func(ctx context.Context, db *sql.DB) string
+	// undo are the statements that put things back when a later one fails, on
+	// the engines that commit each statement as it runs.
+	undo []string
 	// before is what a dialect needs done ahead of the statements. It runs
 	// only when the plan is executed, so planning a change to show it never
 	// touches the database.
@@ -59,6 +83,15 @@ func (p *DDLPlan) vouching(calls ...[]string) *DDLPlan {
 		p.Unvouched = append(p.Unvouched, list...)
 	}
 	return p
+}
+
+// Signature is what the catalogue calls the routine this plan saved, or empty
+// where the engine has no signatures or the routine cannot be found.
+func (p *DDLPlan) Signature(ctx context.Context, db *sql.DB) string {
+	if p == nil || p.signature == nil {
+		return ""
+	}
+	return p.signature(ctx, db)
 }
 
 // String is the plan as one text, for showing and for the audit entry.
@@ -81,6 +114,9 @@ func (p *DDLPlan) Exec(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
+	if p.atomic || p.after != nil || len(p.undo) > 0 || p.discard {
+		return p.execGuarded(ctx, db)
+	}
 	if len(p.Statements) == 1 {
 		_, err := db.ExecContext(ctx, p.Statements[0])
 		return engineRefusal(err)
@@ -96,6 +132,84 @@ func (p *DDLPlan) Exec(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// execGuarded runs a plan whose failure has to leave the old definition in
+// place: inside one transaction where the engine has transactional DDL, and
+// otherwise by running the undo statements.
+func (p *DDLPlan) execGuarded(ctx context.Context, db *sql.DB) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if p.discard {
+		// A connection that ran a SET goes back to the pool changed, so the
+		// pool is told it is no good.
+		defer func() { _ = conn.Raw(func(any) error { return driver.ErrBadConn }) }()
+	}
+	var tx *sql.Tx
+	exec := conn.ExecContext
+	if p.atomic {
+		if tx, err = conn.BeginTx(ctx, nil); err != nil {
+			return err
+		}
+		exec = tx.ExecContext
+	}
+	// What was undone is only what ran: a first statement that fails changed
+	// nothing, and putting back the old definition over an object that was
+	// never touched would be the change.
+	for i, stmt := range p.Statements {
+		if _, err := exec(ctx, stmt); err != nil {
+			err = engineRefusal(err)
+			if len(p.Statements) > 1 {
+				err = fmt.Errorf("statement %d of %d failed: %w", i+1, len(p.Statements), err)
+			}
+			if tx != nil {
+				_ = tx.Rollback()
+				return err
+			}
+			// Oracle reports a CREATE that compiled with errors as an error of
+			// its own, after keeping the object.
+			if p.after != nil && strings.Contains(err.Error(), "ORA-24344") {
+				if checked := p.after(ctx, conn); checked != nil {
+					return p.restore(ctx, conn, checked)
+				}
+			}
+			if i > p.guard {
+				return p.restore(ctx, conn, err)
+			}
+			return err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if p.after != nil {
+		if err := p.after(ctx, conn); err != nil {
+			return p.restore(ctx, conn, err)
+		}
+	}
+	return nil
+}
+
+// restore runs the undo statements after a failure and returns the failure,
+// with the restore's own failure beside it when it had one.
+func (p *DDLPlan) restore(ctx context.Context, conn *sql.Conn, cause error) error {
+	if len(p.undo) == 0 {
+		return cause
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for _, stmt := range p.undo {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("%w; putting things back also failed (%v). This is the statement that restores it:\n%s",
+				cause, engineRefusal(err), stmt)
+		}
+	}
+	return cause
 }
 
 // sqlServerRefusal is a SQL Server error read as everything the server said.
@@ -161,6 +275,9 @@ const (
 	OpIndexOnline    = "indexConcurrently"
 )
 
+// ddlPrograms are the stored-program forms, which only some engines have.
+var ddlPrograms = []string{OpFunctions, OpProcedures, OpTriggers}
+
 // ddlAll is what an engine with ordinary relational DDL supports; the per-engine
 // tables below take away what theirs does not.
 var ddlAll = []string{
@@ -198,6 +315,8 @@ var ddlRefusals = map[Driver]map[string]string{
 		OpEnumTypes:     "SQLite has no enum types",
 		OpIndexMethod:   "SQLite has one kind of index; there is no method to choose",
 		OpIndexOnline:   "SQLite has no CONCURRENTLY: the file is locked for the length of the build",
+		OpFunctions:     "SQLite has no stored functions: a function is registered by the application that opens the file",
+		OpProcedures:    "SQLite has no stored procedures",
 	},
 	DriverMSSQL: {
 		OpMaterialized:   "SQL Server has no materialized views; an indexed view is built from the Query tab",
@@ -225,6 +344,9 @@ var ddlRefusals = map[Driver]map[string]string{
 		OpIndexPartial:   "a ClickHouse data-skipping index is added from the Query tab",
 		OpIndexIfMissing: "a ClickHouse data-skipping index is added from the Query tab",
 		OpIndexOnline:    "a ClickHouse data-skipping index is added from the Query tab",
+		OpFunctions:      "a ClickHouse function is a lambda created with CREATE FUNCTION … AS from the Query tab",
+		OpProcedures:     "ClickHouse has no stored procedures",
+		OpTriggers:       "ClickHouse has no triggers; a materialized view does that job",
 	},
 }
 
@@ -232,7 +354,8 @@ var ddlRefusals = map[Driver]map[string]string{
 // subtraction and a new operation is advertised for every engine that has not
 // said it cannot.
 var ddlEverything = append(append([]string{}, ddlAll...),
-	OpMaterialized, OpSchemas, OpEnumTypes, OpIndexMethod, OpIndexPartial, OpIndexIfMissing, OpIndexOnline)
+	OpMaterialized, OpSchemas, OpEnumTypes, OpIndexMethod, OpIndexPartial, OpIndexIfMissing, OpIndexOnline,
+	OpFunctions, OpProcedures, OpTriggers)
 
 // DDLOperations lists the schema operations an engine supports, sorted. It is
 // what the driver catalogue advertises, so a form is never drawn for a change
@@ -251,6 +374,13 @@ func DDLOperations(driver Driver, flavor string) []string {
 		// The one operation the two products behind the MySQL driver disagree
 		// on: CREATE INDEX IF NOT EXISTS is MariaDB's.
 		if op == OpIndexIfMissing && driver == DriverMySQL && !strings.EqualFold(flavor, "mariadb") {
+			continue
+		}
+		// Two products speak a SQL protocol and have no stored programs, or
+		// not the ones this form writes.
+		if slices.Contains(ddlPrograms, op) &&
+			(driver == DriverMySQL && strings.EqualFold(flavor, FlavorTiDB) ||
+				driver == DriverPostgres && strings.EqualFold(flavor, FlavorCockroachDB)) {
 			continue
 		}
 		out = append(out, op)
