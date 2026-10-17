@@ -98,6 +98,9 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"cellRead":       "sql",
 		"explainJSON":    "postgres -cockroachdb mysql -tidb " + mongoProper,
 		"explainAnalyze": "postgres -cockroachdb mysql " + mongoProper,
+		// The editor's assistant, and the policies it drafts.
+		"assistant":       "sql",
+		"assistantPolicy": "postgres -cockroachdb",
 
 		// the schema
 		"ddl":               "sql -clickhouse",

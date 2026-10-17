@@ -93,6 +93,10 @@ type Server struct {
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
 
+	// The SQL editor's assistant: its conversations, its install-wide budget
+	// and how it reaches its provider (handlers_db_assistant.go).
+	assistant *assistantState
+
 	modules moduleSet
 }
 
@@ -123,6 +127,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		destrLim:  httpx.NewLimiter(30, 10),
 		streamLim: httpx.NewLimiter(3000, 600),
 		diskScans: make(chan struct{}, 2),
+		assistant: newAssistantState(),
 	}
 	s.initModules()
 	return s
