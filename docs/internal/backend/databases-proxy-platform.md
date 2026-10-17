@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 118
+  flags (105 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -292,6 +292,55 @@ is connected by naming the instance found, not by typing its address again.
   one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
   preferred) in place of loopback, for pasting on another machine.
+- **A server the dashboard started can speak TLS, with a certificate from the dashboard's own
+  authority** (`database_tls.go`, `database_tls_engines.go`, `database_tls_renew.go`, `dbtls`).
+  The authority is made the first time it is needed (`db_tls_ca`): an ECDSA P-256 certificate lasting
+  ten years, whose key is sealed with `JD_MASTER_KEY` through `auth.Sealer` like every stored secret
+  and is never logged, returned or written anywhere else. Its certificate is public: `GET
+  /databases/tls/authority` (any role) downloads it as `just-dashboard-database-ca.pem`, and a copy lies
+  at `<JD_DATA_DIR>/tls/ca.pem`, which the dashboard's own saved connections verify against and which
+  start-up writes again if the data directory was restored without it. `PUT /databases/{id}/tls`
+  (`system.admin` + `destructive`, audited `database.tls.change`) takes `{enabled, require}`. It
+  signs a one-year server certificate whose names are loopback (`127.0.0.1`, `::1`, `localhost`), the
+  internal name `db-N.jd.internal`, the container's name when that is a valid host name, and the address the
+  port is published on when the exposure switch has made it `public` or `private`. The certificate and
+  key go into a volume of their own, `<container>-tls`, mounted at `/jd-tls`, written into the new
+  container before it starts (`dockerx.RecreateOptions.BeforeStart`) so the first start already finds
+  them. The container is recreated, as the access change recreates it, with a start command that
+  keeps the original and adds the engine's TLS arguments after it (`ssl=on` for PostgreSQL,
+  `--ssl-*` for MySQL and MariaDB, `--tlsMode` for MongoDB), or, for Redis and Valkey, the start script
+  with `tls-port` in place of `port`. **Require TLS** is `hostnossl … reject` in a `pg_hba.conf` the
+  volume holds (PostgreSQL has no setting for it), `--require-secure-transport` (MySQL, and MariaDB
+  from 11.4; older releases are refused), and `requireTLS` (MongoDB). A Redis port speaks one protocol, so
+  for Redis and Valkey TLS on is TLS only; the published port, the connection's address and the exposure
+  switch keep their meaning. Only a server started from one of the dashboard's templates is changed: a
+  compose-owned container, one whose start command or entrypoint was changed, and KeyDB, Dragonfly,
+  ClickHouse and the forks that cannot be provisioned are refused with the reason, and `serverTLS` in
+  the capability table is the same list. The saved connection is rewritten to verify the certificate
+  (`dbx.WithServerTLS`: `sslmode=verify-full&sslrootcert=` for PostgreSQL, `tls=true&tlsCAFile=` for
+  MongoDB, `rediss://` with `tlsCAFile=` for Redis, and `tlsCAFile=` for MySQL, which `NormaliseDSN`
+  turns into a TLS configuration the driver knows), only once the server has answered with it; if it
+  does not within ninety seconds, the container is put back as it was and the volume removed
+  (`502 tls_failed`). Turning TLS off recreates the container with the original command and removes
+  the volume. An application URL (`target=container`, `target=public`) keeps the encryption and drops the
+  path of the authority's file (`dbx.StripServerTLS`), which is this machine's. `GET
+  /databases/{id}/tls` (`system.admin`) reports the state, the certificate's names, serial and dates, how
+  many deployment environments reach the database by its internal name (they stop connecting once TLS is
+  required unless they use it), and the client connection string and command for another machine, with the
+  right `sslmode` or its engine's equivalent and a `<password>` placeholder. **Renewal**: a certificate is
+  renewed thirty days before it ends, and when the names it carries no longer match the addresses
+  the server is reached at, by a worker that looks every six hours (`startDatabaseTLS`); `POST
+  /databases/{id}/tls/renew` (`system.admin`) does it on request. A renewal writes the new files under
+  the running server and asks it to read them (`pg_reload_conf()`, `ALTER INSTANCE RELOAD TLS`, `FLUSH
+  SSL`, `rotateCertificates`, `CONFIG SET tls-cert-file`), run inside the container with the
+  password already in its environment; where the server declines, it restarts the container, and the
+  detail says so. Every renewal is audited as `database.tls.renew`, by the requesting account or by actor
+  `system`, with the reason (`requested`, `expiry`, `names`), the old and new serial and the
+  new end date. TLS changes sit on the protected-connection allowlist beside the access change: they
+  alter how the server is reached, not what it holds. `TestLiveDatabaseServerTLS`
+  (`JD_DB_TLS_LIVE=1`, optionally `JD_DB_TLS_ENGINES=postgres,redis`) switches a real server of each engine
+  on, requires TLS, checks the certificate on the wire against the recorded serial, renews it without a restart,
+  and switches TLS off, in containers of its own.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -1484,7 +1533,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 228 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1543,6 +1592,10 @@ and `protectReadOnlyConnections`.
 | `DELETE` | `/databases/{id}` | `system.admin` + `destructive` | yes | `database.connection.delete` | open |
 | `GET` | `/databases/{id}/access` | `system.admin` | — | — | — |
 | `PUT` | `/databases/{id}/access` | `system.admin` + `destructive` | yes | `database.access.change` | open |
+| `GET` | `/databases/{id}/tls` | `system.admin` | — | — | — |
+| `PUT` | `/databases/{id}/tls` | `system.admin` + `destructive` | yes | `database.tls.change` | open |
+| `POST` | `/databases/{id}/tls/renew` | `system.admin` | yes | `database.tls.renew` | open |
+| `GET` | `/databases/tls/authority` | any role | — | — | — |
 | `GET` | `/databases/{id}/consumers` | read | — | — | — |
 | `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
 | `GET` | `/databases/{id}/overview` | read | — | — | — |
