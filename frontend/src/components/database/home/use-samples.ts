@@ -5,7 +5,7 @@ import { read } from "@/components/database/home/read"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { useViewState } from "@/lib/view-state"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 export const SAMPLE_EVERY_MS = 30_000
 export const HISTORY_RANGES = [
@@ -76,9 +76,7 @@ export function useSamples<T>(
     { enabled: historyEnabled },
   )
   const answered = history.data?.retentionHours
-  useEffect(() => {
-    if (answered !== undefined) setKept(answered)
-  }, [answered])
+  if (answered !== undefined && answered !== kept) setKept(answered)
   const samples = useMemo(
     () => historySamples(history.data?.samples ?? [], toSample),
     [history.data, toSample],
