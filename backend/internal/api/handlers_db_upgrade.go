@@ -400,8 +400,11 @@ func (s *Server) runUpgradeRevert(ctx context.Context, conn *dbConnection, dsn s
 		defer done()
 		grace := 30
 		_ = s.modules.docker.Lifecycle(cleanup, previous.ID, dockerx.ActionStop, &grace)
-		if err := s.modules.docker.Rename(cleanup, previous.ID, previous.Name); err != nil && previous.Name != rec.Container {
-			problems = append(problems, err.Error())
+		// It may not have got as far as taking the name.
+		if now, err := s.modules.docker.Inspect(cleanup, previous.ID); err == nil && now.Name != previous.Name {
+			if err := s.modules.docker.Rename(cleanup, previous.ID, previous.Name); err != nil {
+				problems = append(problems, err.Error())
+			}
 		}
 		if _, err := s.modules.docker.UpdateRestartPolicy(cleanup, previous.ID, "no", 0); err != nil {
 			problems = append(problems, err.Error())
@@ -456,6 +459,11 @@ func (s *Server) handleDBUpgradeComplete(w http.ResponseWriter, r *http.Request)
 	rec, err := s.openUpgrade(r.Context(), id)
 	if err != nil {
 		return err
+	}
+	// A revert running now is starting the server this would remove.
+	if job, running := s.runningTransfer(id); running {
+		return httpx.Err(http.StatusConflict, "transfer_running",
+			fmt.Sprintf("%s is running for this connection; wait for it to end.", job.Title)).Describe(upgradeJob, job.ID)
 	}
 	ctx, cancel := timeoutCtx(r, 2*time.Minute)
 	defer cancel()
