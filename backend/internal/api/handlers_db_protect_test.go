@@ -52,7 +52,13 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /copy":           isRefused,
 	"POST /import":         isRefused,
 	"POST /import/upload":  isRefused,
-	"DELETE /database":     isRefused,
+	// Bringing a database over makes one on this server, and its cutover and
+	// its removal change what the import made there.
+	"POST /imports":                    isRefused,
+	"POST /imports/inspect":            isRefused,
+	"POST /imports/{importId}/cutover": isRefused,
+	"DELETE /imports/{importId}":       isRefused,
+	"DELETE /database":                 isRefused,
 	// The dashboard's own state about the connection.
 	"POST /queries":         staysOpen,
 	"PUT /queries/{qid}":    staysOpen,

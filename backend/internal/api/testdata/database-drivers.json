@@ -120,6 +120,7 @@
       "materializedViews": true,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": "replication",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -353,6 +354,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "replication",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -542,6 +544,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -725,6 +728,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -914,6 +918,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1101,6 +1106,7 @@
       "materializedViews": false,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -1326,6 +1332,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1508,6 +1515,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1688,6 +1696,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1863,6 +1872,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": true,
           "ormTargets": [
@@ -2046,6 +2056,7 @@
       "materializedViews": false,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -2250,6 +2261,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -2442,6 +2454,7 @@
       "materializedViews": false,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -2667,6 +2680,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -2850,6 +2864,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -3026,6 +3041,7 @@
       "materializedViews": true,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": true,
       "orm": true,
       "ormTargets": [
@@ -3229,6 +3245,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": true,
           "orm": true,
           "ormTargets": [
@@ -3409,6 +3426,7 @@
       "materializedViews": true,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -3623,6 +3641,7 @@
           "materializedViews": true,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -3773,6 +3792,7 @@
       "materializedViews": false,
       "memoryAnalysis": false,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": true,
       "orm": false,
       "ormTargets": [],
@@ -3903,6 +3923,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4032,6 +4053,7 @@
           "materializedViews": false,
           "memoryAnalysis": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": false,
           "ormTargets": [],
@@ -4160,6 +4182,7 @@
       "materializedViews": false,
       "memoryAnalysis": true,
       "monitor": true,
+      "onlineImport": "stream",
       "openByDefault": true,
       "orm": false,
       "ormTargets": [],
@@ -4282,6 +4305,7 @@
           "materializedViews": false,
           "memoryAnalysis": true,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4403,6 +4427,7 @@
           "materializedViews": false,
           "memoryAnalysis": true,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4524,6 +4549,7 @@
           "materializedViews": false,
           "memoryAnalysis": true,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4645,6 +4671,7 @@
           "materializedViews": false,
           "memoryAnalysis": true,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
