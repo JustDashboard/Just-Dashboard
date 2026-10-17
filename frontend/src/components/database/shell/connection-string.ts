@@ -1,5 +1,5 @@
 import { buildDsn } from "@/lib/db-dsn"
-import type { DbAccess, DbConnection } from "@/lib/types"
+import type { DbAccess, DbConnection, DbPooler } from "@/lib/types"
 import type { ConnectParts, Engine } from "@/components/database/engine"
 
 /**
@@ -110,6 +110,59 @@ export function connectTargets(
           note: "Reachable from anywhere with the password. Treat the string as a secret.",
         }
       : { id: "public", label: "Anywhere", note: "", unavailable: unpublished(access) },
+  ]
+}
+
+/**
+ * The same three places, through the connection's pooler: its published port
+ * on this server, its name on the network a linked deployment shares with the
+ * database, and the machine's address when the pooler is published beyond it.
+ * The account, the database and the options are the direct string's.
+ */
+export function pooledTargets(
+  conn: DbConnection,
+  pooler: DbPooler,
+  access?: DbAccess,
+): ConnectTarget[] {
+  const address = access && publicAddress(access.publicAddresses)
+  const published = pooler.exposure === "public" && Boolean(address)
+  return [
+    pooler.port
+      ? {
+          id: "host",
+          label: "This server",
+          host: conn.host,
+          port: String(pooler.port),
+          note: "Reachable from programs on this server, through the pooler.",
+        }
+      : {
+          id: "host",
+          label: "This server",
+          note: "",
+          unavailable: "The pooler's container is not published, so it has no port on this server.",
+        },
+    {
+      id: "container",
+      label: "Inside Docker",
+      host: pooler.linkedHost,
+      port: String(pooler.linkedPort),
+      note: "The name a deployment reads as its pooled reference, on the private network the dashboard joins them on.",
+    },
+    published
+      ? {
+          id: "public",
+          label: "Anywhere",
+          host: address,
+          port: String(pooler.port),
+          note: "The pooler is published on every interface, as its database is. Treat the string as a secret.",
+        }
+      : {
+          id: "public",
+          label: "Anywhere",
+          note: "",
+          unavailable:
+            "The pooler is published where its database is, and that is this server only. Open the database to anywhere under Settings and the pooler follows.",
+        },
   ]
 }
 
