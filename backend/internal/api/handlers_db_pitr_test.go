@@ -368,7 +368,12 @@ func TestPITRArchiveRecordsSealWhatIsSecret(t *testing.T) {
 	if err := s.deletePITRArchive(ctx, a.ID); err != nil {
 		t.Fatal(err)
 	}
-	if left, _ := s.pitrRestoresOf(ctx, "jd-postgres"); len(left) != 0 {
-		t.Error("an archive's copies outlived it")
+	// A recovered copy is a database of its own: deleting the archive it came
+	// from forgets the archive's restore points and not the copy.
+	if left, _ := s.pitrRestoresOf(ctx, "jd-postgres"); len(left) != 1 {
+		t.Errorf("deleting the archive left %d records of its copies, want the one", len(left))
+	}
+	if points, _ := s.pitrRestorePoints(ctx, a.ID); len(points) != 0 {
+		t.Error("an archive's restore points outlived it")
 	}
 }

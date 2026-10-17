@@ -376,6 +376,46 @@ func TestLivePointInTimeRecoveryIntoADirectory(t *testing.T) {
 		t.Fatalf("after deleting an archive: %+v", gone.Earlier)
 	}
 
+	// What a job interrupted by a restart of this process left is removed at
+	// the next start; a recorded copy is a database of its own and stays.
+	ctx := context.Background()
+	docker := live.s.modules.docker
+	label := []dockerx.LabelSpec{{Name: pitrLabel, Value: live.name}}
+	run := "jd-pitr-run-" + live.name
+	t.Cleanup(func() { _ = docker.RemoveVolume(context.Background(), run, true) })
+	if _, err := docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: run, Labels: map[string]string{pitrLabel: live.name}}); err != nil {
+		t.Fatal(err)
+	}
+	unfinished := live.name + "-restored-unfinished"
+	if _, err := docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: unfinished + "-pitr-restore", Labels: map[string]string{pitrLabel: live.name}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []dockerx.ContainerSpec{
+		{Name: live.name + "-walg-left", Image: "postgres:17-alpine", Entrypoint: []string{"true"}, Labels: label},
+		{Name: unfinished, Image: "postgres:17-alpine", Entrypoint: []string{"true"}, Labels: label, Mounts: []dockerx.MountSpec{
+			{Type: "volume", Source: unfinished + "-data", Target: dbx.PostgresDataDir},
+			{Type: "volume", Source: unfinished + "-pitr-restore", Target: dbx.WALGMount},
+		}},
+	} {
+		if _, err := docker.Create(ctx, spec, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live.s.sweepPITR(ctx)
+	for _, name := range []string{live.name + "-walg-left", unfinished} {
+		if _, err := docker.Inspect(ctx, name); err == nil {
+			t.Errorf("%s was left by the sweep", name)
+		}
+	}
+	for _, name := range []string{run, unfinished + "-data", unfinished + "-pitr-restore"} {
+		if exists, _ := docker.VolumeExists(ctx, name); exists {
+			t.Errorf("the volume %s was left by the sweep", name)
+		}
+	}
+	if _, err := docker.Inspect(ctx, atPoint.Container); err != nil {
+		t.Errorf("the sweep removed the recorded copy %s: %v", atPoint.Container, err)
+	}
+
 	// Every request was recorded when it was answered, and every job when it
 	// ended.
 	for action, status := range map[string]int{

@@ -1548,6 +1548,12 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
   archive are destructive (`s.destructive`, ordinary confirmation); recovery into a new container is
   `system.admin`; a base backup and a restore point are `service.control`. On a protected connection
   only the switch is refused, since it replaces what the connection reaches.
+- **What an interrupted job leaves is swept at start** (`sweepPITR`): the containers made for one WAL-G
+  command or to fill a volume, the volumes made for one command, and a copy that still mounts its key
+  volume and has no record — one whose recovery never finished — with that volume. Only what carries
+  the feature's `io.just-dashboard.pitr` label is considered; a recorded copy is a database of its own,
+  and its record outlives the archive it came from. The schedule ends an archive whose server's
+  container is gone, and keeps the archive.
 - **Limits.** One server's archive is one cluster's timeline: after a major-version upgrade, turn
   point-in-time recovery off and on again. An install whose dashboard image predates WAL-G, or an
   architecture WAL-G publishes no build for, is told so and offered nothing.

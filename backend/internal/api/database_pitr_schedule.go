@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/docker/docker/errdefs"
 	"github.com/robfig/cron/v3"
 )
 
@@ -98,6 +99,16 @@ func (s *Server) scheduledPITRBackup(id int64) {
 	defer cancel()
 	a, err := s.pitrArchiveByID(ctx, id)
 	if err != nil || a.EndedAt != nil {
+		return
+	}
+	// The server was removed — its container, and with it the tool and the
+	// keys it archived with. Its archive stays, with every moment it holds,
+	// and is no longer written to.
+	if _, err := s.modules.docker.Inspect(ctx, a.Container); errdefs.IsNotFound(err) {
+		if err := s.endPITRArchive(ctx, a.ID); err == nil {
+			s.Log.Info("an archive's server is gone; its archive is kept and no longer scheduled", "container", a.Container)
+			s.reloadPITRSchedule(ctx)
+		}
 		return
 	}
 	base := audit.Entry{Actor: "system", Username: "schedule", Method: "SCHEDULE", Path: "pitr/" + a.Container}

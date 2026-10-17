@@ -231,10 +231,11 @@ CREATE INDEX IF NOT EXISTS idx_db_wal_restore_points_archive ON db_wal_restore_p
 
 -- A copy recovered from an archive into a container of its own, and what
 -- became of it: kept beside the server, or switched in for it, with the name
--- the server it replaced was set aside under.
+-- the server it replaced was set aside under. A copy is a database of its own
+-- once it has recovered, so its record outlives the archive it came from.
 CREATE TABLE IF NOT EXISTS db_wal_restores (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  archive_id    INTEGER NOT NULL REFERENCES db_wal_archives(id) ON DELETE CASCADE,
+  archive_id    INTEGER NOT NULL DEFAULT 0,
   source        TEXT NOT NULL,
   container     TEXT NOT NULL,
   connection_id INTEGER NOT NULL DEFAULT 0,

@@ -180,6 +180,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	s.sweepPITR(cleanupCtx)
 	// Before the engine resumes any run: a release task this process's
 	// predecessor was running has nobody reading its output or its exit.
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {

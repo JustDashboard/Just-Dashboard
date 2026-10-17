@@ -540,3 +540,63 @@ func (s *Server) removeContainerAndVolumes(ctx context.Context, container string
 		}
 	}
 }
+
+// sweepPITR removes what a job of this feature left behind when the process
+// that ran it stopped part-way: the containers made for one WAL-G command or
+// to fill a volume, the volumes made for one command, and a copy whose
+// recovery never finished — with the volume holding the archive's private
+// key, which is the reason this runs at all. A copy that was recorded is a
+// database of its own and is never touched; neither is anything this feature
+// did not label.
+func (s *Server) sweepPITR(ctx context.Context) {
+	docker := s.modules.docker
+	if docker == nil {
+		return
+	}
+	containers, err := docker.ListContainers(ctx, true)
+	if err != nil {
+		return
+	}
+	for _, c := range containers {
+		if c.Labels[pitrLabel] == "" {
+			continue
+		}
+		transient := strings.Contains(c.Name, "-walg-") || strings.Contains(c.Name, "-setup-") ||
+			strings.Contains(c.Name, "-pitr-prepare-")
+		// A copy that finished recovering was started again without the
+		// volume holding the key; one that still mounts it never finished.
+		unfinished := false
+		if !transient && strings.Contains(c.Name, "-restored-") {
+			keyed := false
+			for _, m := range c.Mounts {
+				keyed = keyed || m.Name == c.Name+"-pitr-restore"
+			}
+			var recorded bool
+			err := s.Store.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM db_wal_restores WHERE container = ?)`, c.Name).Scan(&recorded)
+			unfinished = keyed && err == nil && !recorded
+		}
+		if !transient && !unfinished {
+			continue
+		}
+		if err := docker.RemoveContainer(ctx, c.ID, true, true); err != nil {
+			s.Log.Warn("a container an interrupted point-in-time recovery job left could not be removed", "container", c.Name, "err", err)
+			continue
+		}
+		if unfinished {
+			s.removeContainerAndVolumes(ctx, "", c.Name+"-data")
+		}
+		s.Log.Info("removed what an interrupted point-in-time recovery job left", "container", c.Name)
+	}
+	volumes, err := docker.ListVolumes(ctx)
+	if err != nil {
+		return
+	}
+	for _, v := range volumes {
+		if v.Labels[pitrLabel] == "" || !(strings.HasPrefix(v.Name, "jd-pitr-run-") || strings.HasSuffix(v.Name, "-pitr-restore")) {
+			continue
+		}
+		if err := docker.RemoveVolume(ctx, v.Name, false); err == nil {
+			s.Log.Info("removed a volume an interrupted point-in-time recovery job left", "volume", v.Name)
+		}
+	}
+}
