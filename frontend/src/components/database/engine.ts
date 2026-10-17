@@ -236,6 +236,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   cellRead: false,
   explainJSON: false,
   explainAnalyze: false,
+  assistant: false,
+  assistantPolicy: false,
   ddl: false,
   schemas: false,
   catalog: false,

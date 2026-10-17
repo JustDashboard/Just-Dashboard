@@ -1862,6 +1862,8 @@ export type DbCapabilityFlag =
   | "cellRead" // GET /cell: one whole value the grid clipped
   | "explainJSON" // a plan as a tree
   | "explainAnalyze" // a plan measured by running the statement
+  | "assistant" // POST /assistant: the editor's assistant drafts SQL from the schema
+  | "assistantPolicy" // the assistant drafts row-level security policies
   // The schema.
   | "ddl" // the create-table form; gate the other forms on `ddlOperations`
   | "schemas" // more than one namespace to choose from

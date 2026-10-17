@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, Copy, Route } from "@/components/icons"
+import { ChevronDown, ChevronRight, Copy, Route, Sparkles } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -47,12 +47,15 @@ const figure = (value: number, digits = 2) =>
 export function PlanView({
   explained,
   onExplain,
+  onAsk,
   canAnalyze,
   why,
 }: {
   explained: Explained | undefined
   /** Asks for the plan of the statement under the cursor. */
   onExplain: (analyze: boolean) => void
+  /** Asks the editor's assistant what the plan says, where it is set up. */
+  onAsk?: () => void
   /** The engine can measure a plan and the role may run statements. */
   canAnalyze: boolean
   /** Why there is no statement to explain, when there is none. */
@@ -132,6 +135,12 @@ export function PlanView({
             <Button size="xs" variant="ghost" onClick={() => void copyText(raw, "Plan copied")}>
               <Copy />
               Copy
+            </Button>
+          )}
+          {onAsk && (
+            <Button size="xs" variant="ghost" onClick={onAsk}>
+              <Sparkles />
+              Ask the assistant
             </Button>
           )}
         </>
