@@ -186,6 +186,31 @@ export type DatabaseMock = {
   queryLog?: unknown
   /** The lines `GET /logs/search` answers with, for every question. */
   logLines?: { text: string; level?: string; timestamp?: string; [key: string]: unknown }[]
+  /** What `GET /databases/{id}/pitr` answers, by id. */
+  pitr?: Record<number, unknown>
+}
+
+/**
+ * `GET /databases/{id}/pitr` for a server this dashboard runs and has not set
+ * up for point-in-time recovery: what the Backups page reads under the dumps
+ * of every PostgreSQL connection.
+ */
+export function pitrOff(conn: MockConnection, over: Record<string, unknown> = {}) {
+  return {
+    available: true,
+    container: `${conn.name}-db`,
+    running: true,
+    earlier: [],
+    window: {},
+    restorePoints: [],
+    restores: [],
+    defaults: {
+      schedule: "0 3 * * *",
+      retentionDays: 7,
+      directory: "/var/backups/just-dashboard/wal",
+    },
+    ...over,
+  }
 }
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -321,6 +346,7 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       return json(route, { schema: "public", tables: [], edges: [], truncated: false })
     }
     if (rest === "/diagram") return json(route, { layout: null })
+    if (rest === "/pitr") return json(route, options.pitr?.[conn.id] ?? pitrOff(conn))
     return json(route, [])
   })
 

@@ -53,7 +53,7 @@ func newPITRLive(t *testing.T, name string) *pitrLive {
 	t.Helper()
 	pitrLiveTool(t)
 	s := testServer(t)
-	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	s.modules.docker = dockerx.New(envOr("JD_TEST_DOCKER_HOST", "unix:///var/run/docker.sock"))
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
