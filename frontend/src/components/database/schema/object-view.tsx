@@ -2,13 +2,22 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Code, Copy, Plus, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
+import {
+  Code,
+  Copy,
+  Pencil,
+  Plus,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  Trash,
+} from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
+import { FormFact } from "@/components/form"
 import { Metric } from "@/components/page"
 import { EmptyNote, EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -17,12 +26,27 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { CodeView } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { schemaParams, tableParams, type Selected } from "@/components/database/schema/address"
+import {
+  objectParams,
+  schemaParams,
+  tableParams,
+  type Selected,
+} from "@/components/database/schema/address"
 import { qualified } from "@/components/database/schema/changes"
 import { Facts } from "@/components/database/schema/facts"
 import { GroupGlyph, groupOfKind, kindWord } from "@/components/database/schema/kinds"
 import { EnumValueDialog } from "@/components/database/schema/object-forms"
-import type { DbObjectDefinition } from "@/components/database/schema/types"
+import { RoutineDialog, TriggerDialog } from "@/components/database/schema/program-forms"
+import {
+  PROGRAM_OPERATION,
+  dropRoutineRequest,
+  dropTriggerRequest,
+  triggerFunctions,
+  triggerTables,
+  type DbProgram,
+} from "@/components/database/schema/programs"
+import type { DbCatalog, DbObjectDefinition } from "@/components/database/schema/types"
+import { useDestroy } from "@/components/database/schema/use-destroy"
 
 type ObjectSelection = Extract<NonNullable<Selected>, { type: "object" }>
 
@@ -32,8 +56,12 @@ type ObjectSelection = Extract<NonNullable<Selected>, { type: "object" }>
  *
  * The statement is the engine's own text where the engine keeps one, and
  * where it keeps none the dashboard assembles it from the catalogue and says
- * so beside it. "Open in Query" hands that text to the editor, which is where
- * such an object is changed: it is written, not filled in.
+ * so beside it. "Open in Query" hands that text to the editor.
+ *
+ * A function, a procedure and a trigger can also be edited and dropped here,
+ * where the engine's forms can write them and the role may run code in the
+ * database. One whose text holds something the form cannot state is not
+ * offered for editing, and the page says what.
  *
  * An enum's labels are listed in their order, and a label can be added where
  * the engine's forms and the role allow.
@@ -44,6 +72,8 @@ export function ObjectView({
   railOpen,
   onToggleRail,
   onChanged,
+  catalog,
+  onDropped,
 }: {
   selected: ObjectSelection
   /** Counts the times the reader asked for the schema to be read again. */
@@ -52,10 +82,16 @@ export function ObjectView({
   onToggleRail: () => void
   /** A label was added: the catalogue's copy of the type is stale. */
   onChanged: () => void
+  /** The schema's catalogue, for the tables and trigger functions a trigger's form offers. */
+  catalog: DbCatalog | undefined
+  /** The object was dropped: the page it was on is gone. */
+  onDropped: () => void
 }) {
   const { id, engine, href, goto, readOnly } = useDatabase()
   const { can } = useAuth()
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const { destroy, dialog } = useDestroy()
   const read = usePoll(
     (signal) =>
       get<DbObjectDefinition>(
@@ -89,6 +125,56 @@ export function ObjectView({
     !readOnly &&
     engine.capabilities.ddlOperations.includes("enumTypes")
   const missing = !data && read.error instanceof ApiError && read.error.status === 404
+  const program =
+    selected.kind === "function" || selected.kind === "procedure" || selected.kind === "trigger"
+      ? selected.kind
+      : null
+  const mayAuthor =
+    program !== null &&
+    can("service.control") &&
+    can("destructive") &&
+    !readOnly &&
+    engine.capabilities.ddlOperations.includes(PROGRAM_OPERATION[program])
+  const editable = usePoll(
+    (signal) =>
+      get<DbProgram>(
+        `/databases/${id}/program`,
+        {
+          kind: selected.kind,
+          schema: selected.schema || undefined,
+          name: selected.name,
+          signature: selected.signature || undefined,
+          table: selected.table || undefined,
+        },
+        signal,
+      ),
+    0,
+    [id, selected.kind, selected.schema, selected.name, selected.signature, selected.table],
+    { enabled: mayAuthor && !missing },
+  )
+  const drop = () => {
+    if (!program || !data) return
+    const trigger = program === "trigger"
+    void destroy({
+      request: trigger
+        ? dropTriggerRequest(data.schema, selected.name, data.table ?? selected.table)
+        : dropRoutineRequest(program, data.schema, selected.name, selected.signature),
+      title: `Drop ${kindWord(selected.kind)}`,
+      subject: {
+        name: trigger ? full : `${full}(${selected.signature})`,
+        facts: trigger && (
+          <FormFact label="On" mono>
+            {data.table ?? selected.table}
+          </FormFact>
+        ),
+      },
+      sentence: trigger
+        ? "The table stops running its code. The rows stay."
+        : `Whatever calls it fails until it is made again. The engine refuses while another object depends on it.`,
+      done: `Dropped ${selected.name}`,
+      onDone: onDropped,
+    })
+  }
 
   const facts = data
     ? [...(data.owner ? [{ name: "Owner", value: data.owner }] : []), ...data.details]
@@ -128,6 +214,23 @@ export function ObjectView({
               <Button size="xs" className="max-sm:h-8" onClick={() => setAdding(true)}>
                 <Plus />
                 Add label
+              </Button>
+            )}
+            {mayAuthor && data && editable.data && (
+              <Button
+                size="xs"
+                className="max-sm:h-8"
+                disabled={!editable.data.editable}
+                onClick={() => setEditing(true)}
+              >
+                <Pencil />
+                Edit
+              </Button>
+            )}
+            {mayAuthor && data && (
+              <Button size="xs" variant="outline" className="max-sm:h-8" onClick={drop}>
+                <Trash />
+                <span className="max-sm:sr-only">Drop</span>
               </Button>
             )}
             {engine.has("query") && (
@@ -190,6 +293,16 @@ export function ObjectView({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 animate-rise flex-col">
+          {mayAuthor && !editable.data && editable.error && (
+            <p className="shrink-0 border-b border-hairline px-4 py-2 text-hint text-muted-foreground">
+              This {kindWord(selected.kind)} could not be read for editing: {editable.error.message}
+            </p>
+          )}
+          {mayAuthor && editable.data && !editable.data.editable && (
+            <p className="shrink-0 border-b border-hairline px-4 py-2 text-hint text-muted-foreground">
+              Not editable here: {editable.data.reason}. Change it in Query.
+            </p>
+          )}
           {(facts.length > 0 || data.comment || data.table) && (
             <div className="shrink-0 space-y-3 border-b border-hairline px-4 py-3">
               {data.comment && (
@@ -264,6 +377,42 @@ export function ObjectView({
         </div>
       )}
 
+      {editing && editable.data?.editable && editable.data.routine && (
+        <RoutineDialog
+          kind={editable.data.routine.kind}
+          schemas={catalog?.schemas ?? []}
+          schema={selected.schema}
+          existing={{ routine: editable.data.routine, signature: selected.signature }}
+          onClose={() => setEditing(false)}
+          onDone={(answer) => {
+            onChanged()
+            // New parameter types make a different overload, and the address
+            // names the old one: the page moves to the routine that was saved.
+            if (answer.signature !== undefined && answer.signature !== selected.signature) {
+              goto("schema", objectParams({ ...selected, signature: answer.signature }))
+              return
+            }
+            read.refresh()
+            editable.refresh()
+          }}
+        />
+      )}
+      {editing && editable.data?.editable && editable.data.trigger && (
+        <TriggerDialog
+          schemas={catalog?.schemas ?? []}
+          schema={selected.schema}
+          tables={triggerTables(catalog)}
+          functions={triggerFunctions(catalog)}
+          existing={editable.data.trigger}
+          onClose={() => setEditing(false)}
+          onDone={() => {
+            read.refresh()
+            editable.refresh()
+            onChanged()
+          }}
+        />
+      )}
+      {dialog}
       {adding && data && (
         <EnumValueDialog
           schema={data.schema}

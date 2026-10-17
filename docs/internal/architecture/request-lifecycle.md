@@ -86,6 +86,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   `destructive` on top of it when the plan changes a column's type, which rewrites the column, or
   when the operator's own SQL in it (a CHECK condition, an index predicate, a USING conversion, a
   function default) calls anything `dbx` does not vouch for — for a preview as much as for a run.
+  The routes that store code (`POST …/ddl/routine` and `…/ddl/trigger`: a function, a procedure or a
+  trigger) ask for `destructive` on every request, whatever the body says, because the SQL console
+  classifies the same `CREATE` as high risk; they sit at `service.control` only so a form can ask for
+  its statement as it is filled in, and a run spends `destrLim`. Their drops are in `s.destructive`.
 - **Maintenance.** `POST …/maintenance` is `service.control` and names its action in the body. An
   action that locks a table against the application while it runs, or can lose rows (`vacuum_full`,
   `reindex`, MySQL `optimize` and `repair`, SQLite `vacuum`, SQL Server `rebuild`), asks for

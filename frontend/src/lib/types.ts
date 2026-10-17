@@ -2004,6 +2004,9 @@ export type DbDdlOperation =
   | "indexPartial"
   | "indexIfNotExists"
   | "indexConcurrently"
+  | "functions"
+  | "procedures"
+  | "triggers"
 
 export type DbExportFormat = "csv" | "tsv" | "json" | "ndjson" | "sql"
 export type DbImportFormat = "csv" | "tsv" | "json" | "ndjson"
