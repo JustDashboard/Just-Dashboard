@@ -263,6 +263,16 @@ func holdsOwner(sp *Spec, owner string) bool {
 	return false
 }
 
+// KeptPorts are the entries as the spec holds them, for a reader that needs
+// to know which ports are kept and not what the kernel counted.
+func (s *Service) KeptPorts() ([]PortAllowlistSpec, error) {
+	sp, err := s.loadSpec()
+	if err != nil {
+		return nil, err
+	}
+	return sp.PortAllowlists, nil
+}
+
 // PortAllowlistRules is the rules an owner's port would be kept by with
 // these sources, as SetPortAllowlist would load them: the entry's own id
 // where it has one, the next the spec hands out where it has not.

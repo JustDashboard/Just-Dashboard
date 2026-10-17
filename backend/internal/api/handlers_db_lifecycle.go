@@ -238,6 +238,13 @@ func (s *Server) removeDatabaseContainer(
 		}
 		removedVolumes = append(removedVolumes, name)
 	}
+	// A list the gateway kept the port to would go on refusing whatever
+	// publishes that port next.
+	if keeper := s.portKeeper(); keeper != nil {
+		if _, err := keeper.RemovePortAllowlist(ctx, dbPortOwner(server.container.Name)); err != nil {
+			warnings = append(warnings, fmt.Sprintf("the gateway still keeps the port %s published to its list: %v", server.container.Name, err))
+		}
+	}
 	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
 		return err
