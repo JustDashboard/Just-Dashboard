@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select"
 import { SearchInput } from "@/components/page"
 import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
+import { encrypts } from "@/components/backups/encryption"
 import {
   backupInputs,
   editPickedInput,
@@ -132,6 +133,12 @@ export function JobDialog({
   const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, openedJob?.target.prefix ?? "")
   const [accessKey, setAccessKey] = useMemoryState(`${draft}.accessKey`, "")
   const [secretKey, setSecretKey] = useMemoryState(`${draft}.secretKey`, "")
+  // Unset follows the destination until the operator turns it either way.
+  const [encryptChoice, setEncrypt] = useMemoryState<boolean | null>(
+    `${draft}.encrypt`,
+    openedJob?.encrypt ?? null,
+  )
+  const encrypt = encrypts(encryptChoice, targetKind)
   const [schedule, setSchedule] = useMemoryState(
     `${draft}.schedule`,
     scheduleFields(openedJob?.schedule ?? "0 3 * * *"),
@@ -236,6 +243,7 @@ export function JobDialog({
     sqlitePaths: lines(sqlitePaths),
     databaseDumps,
     pauseContainers,
+    encrypt,
     recovery: recoveryEnabled
       ? {
           image: recoveryImage.trim(),
@@ -501,6 +509,14 @@ export function JobDialog({
               </FieldRow>
             </>
           )}
+          <OptionList>
+            <OptionRow
+              title="Encrypt archives with this server's backup key"
+              hint="Restores, recovery checks and downloads here decrypt as they read. Export the key from Backups to open an archive anywhere else. Archives already taken stay as they were written."
+              checked={encrypt}
+              onCheckedChange={setEncrypt}
+            />
+          </OptionList>
         </FormSection>
 
         <FormSection title="When it runs">
@@ -772,6 +788,7 @@ function JobSaveReview({ current, draft }: { current: BackupJob; draft: Record<s
     ["sqlitePaths", "SQLite snapshots"],
     ["databaseDumps", "Database dumps"],
     ["pauseContainers", "Containers to pause"],
+    ["encrypt", "Encrypt archives"],
     ["recovery", "Recovery check"],
   ] as const
   const shown = (value: unknown, key: string) =>
