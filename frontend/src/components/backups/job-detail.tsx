@@ -11,6 +11,7 @@ import {
   Database,
   Download,
   FolderOpen,
+  LockClosed,
   ShieldCheck,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
@@ -57,7 +58,7 @@ import {
   targetLabel,
 } from "@/components/backups/shared"
 import { LastRun } from "@/components/backups/job-card"
-import { RunContents, RunLog, RunRail } from "@/components/backups/job-runs"
+import { RunContents, RunEncryption, RunLog, RunRail } from "@/components/backups/job-runs"
 import { destinationProduct, jobProducts } from "@/components/backups/marks"
 import { JobMap } from "@/components/backups/protection-map"
 import { FileIcon } from "@/components/files/file-icon"
@@ -200,7 +201,8 @@ export function JobPage() {
     if (can("system.admin")) {
       out.push({
         key: "download",
-        label: "Download archive",
+        // The download is the archive inside, so it opens without the key.
+        label: run.manifest?.encryption ? "Download decrypted archive" : "Download archive",
         icon: Download,
         run: () => window.open(downloadUrl(`/backups/runs/${run.id}/download`), "_blank"),
       })
@@ -279,6 +281,12 @@ export function JobPage() {
                       {targetLabel(job)}
                     </span>
                   </HostFact>
+                  {job.encrypt && (
+                    <>
+                      <FactDot />
+                      <span>encrypted with this server&apos;s backup key</span>
+                    </>
+                  )}
                   {job.recovery && (
                     <>
                       <FactDot />
@@ -500,6 +508,15 @@ function RunInspector({
                 <span className="numeric text-foreground">{bytes(run.sizeBytes)}</span>
               </>
             )}
+            {run.manifest?.encryption && (
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1">
+                  <LockClosed aria-hidden className="size-3" />
+                  encrypted
+                </span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -550,6 +567,7 @@ function RunInspector({
 
       <RunLog log={run.log} />
       {run.manifest && <RunContents manifest={run.manifest} />}
+      {run.manifest?.encryption && <RunEncryption encryption={run.manifest.encryption} />}
       {run.artifact && (
         <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
       )}

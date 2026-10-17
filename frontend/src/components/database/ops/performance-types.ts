@@ -363,6 +363,12 @@ export type DbStatementsEnable = {
   sql?: string
   available: boolean
   preloaded: boolean
+  /** Not loaded, and in the list the next start loads: a restart is what is left. */
+  configured?: boolean
+  /** The ALTER SYSTEM that adds the module to that list, where this account can run it. */
+  preload?: string
+  /** Why the list cannot be changed from here, where it cannot. */
+  blocked?: string
   note?: string
 }
 

@@ -527,8 +527,8 @@ configuration, and a draft keyed on the revision was thrown away by a save of th
 sticky strip of anchors, and the section a reader most often came for — the danger zone, one
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
 own, listed under a *Settings* group in the database's rail the way a project's are
-(`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Parameters,
-Extensions (a key–value server's *Modules*) and Danger zone, each
+(`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Resources,
+Parameters, Extensions (a key–value server's *Modules*) and Danger zone, each
 listed only where the engine has it and the danger zone only for a role that may destroy. What else
 the server holds is not among them: it changes nothing about the connection, and Home's *Databases on
 this server* already lists it with Connect and New database, so the old `#databases` anchor opens Home. Every page
@@ -3101,7 +3101,7 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |

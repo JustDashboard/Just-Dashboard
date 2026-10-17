@@ -162,6 +162,101 @@ CREATE TABLE IF NOT EXISTS db_statement_samples (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_db_statement_samples_at ON db_statement_samples(at);
 
+-- The certificate authority that signs the server certificates of the databases
+-- this dashboard started. There is at most one, made the first time TLS is
+-- switched on; its certificate is public and kept as it is, its key is sealed
+-- with the master key like every other secret at rest.
+CREATE TABLE IF NOT EXISTS db_tls_ca (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  cert_pem    TEXT NOT NULL,
+  key_enc     TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  not_after   INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
+-- A database server that speaks TLS with a certificate from that authority:
+-- what it was issued for and when it ends, so that renewal can be decided
+-- without opening the container. The certificate's key lives only in the
+-- container's own volume and is replaced whenever the certificate is.
+CREATE TABLE IF NOT EXISTS db_server_tls (
+  connection_id INTEGER PRIMARY KEY REFERENCES db_connections(id) ON DELETE CASCADE,
+  container     TEXT NOT NULL,
+  require_tls   INTEGER NOT NULL DEFAULT 0,
+  names         TEXT NOT NULL DEFAULT '[]',
+  serial        TEXT NOT NULL DEFAULT '',
+  issued_at     INTEGER NOT NULL,
+  not_after     INTEGER NOT NULL,
+  renewed_at    INTEGER NOT NULL DEFAULT 0
+);
+
+-- Database alerts. A rule watches one database, or every database when
+-- connection_id is NULL, for one kind of trouble (the server down, its disk,
+-- its connections, its replication, a backup failed or missed) against a
+-- line — threshold in the kind's unit, minutes it must hold or a backup's
+-- grace — and tells the notification channels it names, every enabled one
+-- when channels = '[]'. revision moves on every edit, so a verdict reached
+-- on the old terms is never written over the new ones.
+CREATE TABLE IF NOT EXISTS db_alert_rules (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id    INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL,
+  threshold        REAL NOT NULL DEFAULT 0,
+  minutes          INTEGER NOT NULL DEFAULT 0,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 0,
+  notify_recovery  INTEGER NOT NULL DEFAULT 1,
+  channels         TEXT NOT NULL DEFAULT '[]',
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  revision         INTEGER NOT NULL DEFAULT 1,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_db_alert_rules_conn ON db_alert_rules(connection_id);
+-- One subject a rule watches — a database, or a backup job that dumps one —
+-- as the evaluator last read it. since is when the condition began to hold,
+-- fired_at when it had held long enough to be an alert, notified_at when
+-- that was told (0 while the cooldown keeps it back), told_at the last time
+-- this subject's firing was told at all, which the cooldown counts from.
+-- seen and clear count the passes in a row over the line and under its
+-- clearing line. unknown says why the last pass could not judge it.
+CREATE TABLE IF NOT EXISTS db_alert_state (
+  rule_id       INTEGER NOT NULL REFERENCES db_alert_rules(id) ON DELETE CASCADE,
+  subject       TEXT NOT NULL,
+  connection_id INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  job_id        INTEGER NOT NULL DEFAULT 0,
+  label         TEXT NOT NULL DEFAULT '',
+  reading       REAL NOT NULL DEFAULT 0,
+  detail        TEXT NOT NULL DEFAULT '',
+  unknown       TEXT NOT NULL DEFAULT '',
+  seen          INTEGER NOT NULL DEFAULT 0,
+  clear         INTEGER NOT NULL DEFAULT 0,
+  since         INTEGER NOT NULL DEFAULT 0,
+  fired_at      INTEGER NOT NULL DEFAULT 0,
+  notified_at   INTEGER NOT NULL DEFAULT 0,
+  told_at       INTEGER NOT NULL DEFAULT 0,
+  checked_at    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (rule_id, subject)
+);
+-- What each pass told, or kept back and why (kept: 'cooldown', 'recovery'
+-- for a rule that does not tell recoveries), for the Alerts page. The rule
+-- may since be gone; the newest 1000 are kept.
+CREATE TABLE IF NOT EXISTS db_alert_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id       INTEGER NOT NULL,
+  connection_id INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  job_id        INTEGER NOT NULL DEFAULT 0,
+  kind          TEXT NOT NULL,
+  subject       TEXT NOT NULL,
+  label         TEXT NOT NULL DEFAULT '',
+  event         TEXT NOT NULL,
+  detail        TEXT NOT NULL DEFAULT '',
+  delivered     INTEGER NOT NULL DEFAULT 0,
+  failed        INTEGER NOT NULL DEFAULT 0,
+  kept          TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_db_alert_events_conn ON db_alert_events(connection_id, id);
+
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
 -- connection it runs against carries the secret. A NULL connection_id would be
@@ -209,6 +304,30 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   PRIMARY KEY (connection_id, schema_name)
 );
 
+-- The connection pooler (PgBouncer) the dashboard runs beside a PostgreSQL
+-- connection's container: where it is, which database container it forwards to
+-- and by what name, how it was asked to behave, and a digest of the two files
+-- it was last given so a changed password is noticed.
+-- The accounts PgBouncer signs in and reads statistics with are sealed
+-- (secrets_enc); the connection's own password is read from the connection.
+CREATE TABLE IF NOT EXISTS db_poolers (
+  connection_id   INTEGER PRIMARY KEY REFERENCES db_connections(id) ON DELETE CASCADE,
+  container_name  TEXT NOT NULL,
+  container_id    TEXT NOT NULL DEFAULT '',
+  network_name    TEXT NOT NULL,
+  host_port       INTEGER NOT NULL DEFAULT 0,
+  server_name     TEXT NOT NULL,
+  server_port     INTEGER NOT NULL,
+  pool_mode       TEXT NOT NULL,
+  pool_size       INTEGER NOT NULL,
+  max_client_conn INTEGER NOT NULL,
+  auth_mode       TEXT NOT NULL,
+  secrets_enc     TEXT NOT NULL,
+  config_sha      TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+
 -- Databases found on this machine that the operator said to leave alone. The
 -- key is the inventory's own (docker:<container>, compose:<project>/<service>,
 -- host:<unit>, file:<path>), not a connection id: the point of the row is to
@@ -219,6 +338,75 @@ CREATE TABLE IF NOT EXISTS db_inventory_ignored (
   ignored_at INTEGER NOT NULL,
   ignored_by TEXT NOT NULL DEFAULT ''
 );
+
+-- Point-in-time recovery: a PostgreSQL server's write-ahead log archived by
+-- WAL-G into a backup destination, beside scheduled base backups. One row per
+-- archive: the server it is for, by container name (which survives the
+-- container being recreated), the folder inside the destination it writes,
+-- the destination with its keys sealed as a backup job's are, and the key
+-- pair the archive is encrypted with — the public half in the clear, because
+-- that is all a server is handed, and the private half sealed. A server
+-- writes into at most one archive (ended_at = 0). The others are kept for as
+-- long as what they hold is: a moment from before a switch is only in the
+-- archive the server had then. reading is the archive's last listing, so the
+-- page can say what it covers without asking the destination on every poll.
+CREATE TABLE IF NOT EXISTS db_wal_archives (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  container         TEXT NOT NULL,
+  connection_id     INTEGER NOT NULL DEFAULT 0,
+  stream            TEXT NOT NULL,
+  target_kind       TEXT NOT NULL,
+  target_cfg        TEXT NOT NULL DEFAULT '{}',
+  secrets_enc       TEXT NOT NULL DEFAULT '',
+  public_key        TEXT NOT NULL,
+  private_key_enc   TEXT NOT NULL,
+  schedule          TEXT NOT NULL DEFAULT '',
+  retention_days    INTEGER NOT NULL DEFAULT 7,
+  image             TEXT NOT NULL DEFAULT '',
+  tool              TEXT NOT NULL DEFAULT '',
+  created_at        INTEGER NOT NULL,
+  created_by        TEXT NOT NULL DEFAULT '',
+  ended_at          INTEGER NOT NULL DEFAULT 0,
+  reading           TEXT NOT NULL DEFAULT '',
+  read_at           INTEGER NOT NULL DEFAULT 0,
+  last_backup_at    INTEGER NOT NULL DEFAULT 0,
+  last_backup_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_archives_container ON db_wal_archives(container, ended_at);
+
+-- Moments named in an archive's log with pg_create_restore_point, so a
+-- recovery can be asked to stop at one by the name it was given here.
+CREATE TABLE IF NOT EXISTS db_wal_restore_points (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_id INTEGER NOT NULL REFERENCES db_wal_archives(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  lsn        TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_restore_points_archive ON db_wal_restore_points(archive_id, created_at DESC);
+
+-- A copy recovered from an archive into a container of its own, and what
+-- became of it: kept beside the server, or switched in for it, with the name
+-- the server it replaced was set aside under. A copy is a database of its own
+-- once it has recovered, so its record outlives the archive it came from.
+CREATE TABLE IF NOT EXISTS db_wal_restores (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_id    INTEGER NOT NULL DEFAULT 0,
+  source        TEXT NOT NULL,
+  container     TEXT NOT NULL,
+  connection_id INTEGER NOT NULL DEFAULT 0,
+  port          INTEGER NOT NULL DEFAULT 0,
+  target        TEXT NOT NULL DEFAULT '{}',
+  base_backup   TEXT NOT NULL DEFAULT '',
+  recovered_to  INTEGER NOT NULL DEFAULT 0,
+  state         TEXT NOT NULL DEFAULT 'ready',
+  replaced      TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  created_by    TEXT NOT NULL DEFAULT '',
+  switched_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_restores_archive ON db_wal_restores(archive_id, created_at DESC);
 
 -- Boards live with the dashboard's other durable state, including embedded
 -- Excalidraw image data. Revision guards prevent a stale tab overwriting a
@@ -272,6 +460,7 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   retention_days INTEGER NOT NULL DEFAULT 0,
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
+  encrypt     INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
 );
 
@@ -1307,6 +1496,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"backup_jobs", "revision", "INTEGER NOT NULL DEFAULT 1"},
+	// Backup jobs learned to encrypt their archives. A job that predates the
+	// setting keeps writing what it always wrote until somebody turns it on.
+	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's

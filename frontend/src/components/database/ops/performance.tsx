@@ -17,6 +17,7 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { ReplicationView } from "@/components/database/ops/performance-replication"
 import { SessionsView } from "@/components/database/ops/performance-sessions"
 import { StatementsView } from "@/components/database/ops/performance-statements"
+import { StatementsSetupHost } from "@/components/database/ops/statements-setup"
 import { TablesView } from "@/components/database/ops/performance-tables"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -42,7 +43,9 @@ export function SqlPerformance() {
   const { status } = useDatabase()
   return (
     <SectionFrame section="performance">
-      {isDown(status.state) ? <ServerDown what="Performance" /> : <Answering key="answering" />}
+      <StatementsSetupHost>
+        {isDown(status.state) ? <ServerDown what="Performance" /> : <Answering key="answering" />}
+      </StatementsSetupHost>
     </SectionFrame>
   )
 }

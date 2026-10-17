@@ -3,6 +3,7 @@ package dockerx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -291,6 +292,30 @@ func (s *StatsSampler) Sample(ctx context.Context, ids []string) ([]ContainerSta
 	s.client.applyHostCapacity(ctx, out)
 	s.client.applyWritableSizes(ctx, out)
 	return out, nil
+}
+
+// MemoryInUse is what one running container uses now, counted as `docker
+// stats` counts it. It is one one-shot read and nothing more: a sampler's
+// batch also folds in the disk-usage walk, which on a cold cache takes
+// seconds that a question about one container's memory should not wait for.
+func (c *Client) MemoryInUse(ctx context.Context, id string) (int64, error) {
+	cli, err := c.api()
+	if err != nil {
+		return 0, err
+	}
+	resp, err := cli.ContainerStatsOneShot(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	var raw container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return 0, err
+	}
+	if raw.Read.IsZero() {
+		return 0, errors.New("the container is not running")
+	}
+	return int64(convertStats(id, raw).MemUsage), nil
 }
 
 // applyWritableSizes folds the cached disk-usage walk into a stats batch.

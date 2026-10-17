@@ -133,7 +133,6 @@ func TestLiveAPIOpsPostgres(t *testing.T) {
 			"/server/privileges":               `"level":"sequence"`,
 			"/settings":                        `"name":"max_connections"`,
 			"/statements?sort=mean&limit=3":    `"sort":"mean"`,
-			"/advisor?schema=public":           `"engineChecks":true`,
 			"/activity":                        `"status":"active"`,
 			"/server/grants?table=jd_b3_api_t": `"supported":true`,
 		} {
@@ -461,6 +460,12 @@ func TestLiveAPIOpsPostgres(t *testing.T) {
 			t.Errorf("reset: %s", body)
 		}
 		mustStatus(t, r, http.MethodGet, base+"/statements?sort=longest", "", http.StatusBadRequest)
+		// A server that loads the module already is told nothing: the list
+		// is not stored again, and no restart is asked for.
+		if body := mustStatus(t, r, http.MethodPost, base+"/statements/preload", `{}`, http.StatusOK); !strings.Contains(body, `"statements":[]`) ||
+			!strings.Contains(body, `"restartRequired":false`) {
+			t.Errorf("preload of a server that loads the module: %s", body)
+		}
 	})
 
 	t.Run("cancel", func(t *testing.T) {
@@ -687,9 +692,6 @@ func liveAPIOpsMySQL(t *testing.T, flavour, dsn string) {
 	if body := mustStatus(t, r, http.MethodPost, base+"/maintenance", `{"action":"optimize","table":"jd_b3_api_t"}`, http.StatusOK); !strings.Contains(body, "OPTIMIZE TABLE") {
 		t.Errorf("an administrator's optimize: %s", body)
 	}
-	if body := mustStatus(t, viewer, http.MethodGet, base+"/advisor", "", http.StatusOK); !strings.Contains(body, `"engineChecks":true`) {
-		t.Errorf("advisor: %s", body)
-	}
 	mustStatus(t, r, http.MethodPost, base+"/activity/cancel", `{"pid":"not-a-session"}`, http.StatusBadRequest)
 }
 
@@ -750,7 +752,6 @@ func TestLiveAPIOpsSQLServer(t *testing.T) {
 			"/server/roles":                 `"name":"sa"`,
 			"/server/grants":                `"supported":true`,
 			"/statements?sort=calls":        `"sort":"calls"`,
-			"/advisor":                      `"engineChecks":true`,
 		} {
 			if body := mustStatus(t, viewer, http.MethodGet, base+path, "", http.StatusOK); !strings.Contains(body, want) {
 				t.Errorf("GET %s lacks %s: %s", path, want, body)
@@ -1033,7 +1034,6 @@ func TestLiveAPIOpsOracle(t *testing.T) {
 			"/server/privileges":            `"supported":false`,
 			"/server/grants":                `"supported":false`,
 			"/statements?sort=calls":        `"supported":true`,
-			"/advisor":                      `"engineChecks":true`,
 		} {
 			if body := mustStatus(t, viewer, http.MethodGet, base+path, "", http.StatusOK); !strings.Contains(body, want) {
 				t.Errorf("GET %s lacks %s: %s", path, want, body)
@@ -1222,7 +1222,6 @@ func TestLiveAPIOpsClickHouse(t *testing.T) {
 		"/locks":                                   `"supported":false`,
 		"/replication":                             `"supported":false`,
 		"/statements":                              `"sort":"total"`,
-		"/advisor":                                 `"endOfLife"`,
 	} {
 		if body := mustStatus(t, r, http.MethodGet, base+path, "", http.StatusOK); !strings.Contains(body, want) {
 			t.Errorf("GET %s lacks %s: %s", path, want, body)

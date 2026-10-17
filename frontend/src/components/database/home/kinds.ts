@@ -46,9 +46,12 @@ export function byKeyType(a: string, b: string): number {
 
 /**
  * What a statement does, read off its first word: it reads, it adds, it
- * changes, it removes, or it changes the schema. The hue is set on that word
- * alone, so a list of statements is told apart before one is read through —
- * and a list that is all reads says so in one colour.
+ * changes, it removes, it changes the schema and what the catalogue says of
+ * it, or it tells the server how to run — a setting, maintenance, a block of
+ * code. The hue is set on that word alone, so a list of statements is told
+ * apart before one is read through — and a list that is all reads says so in
+ * one colour. A transaction's own words (BEGIN, COMMIT) do none of these and
+ * keep the statement's ink.
  */
 const STATEMENT_VERBS: Record<string, string> = {
   select: tag("blue"),
@@ -66,6 +69,20 @@ const STATEMENT_VERBS: Record<string, string> = {
   create: tag("cyan"),
   alter: tag("cyan"),
   drop: tag("cyan"),
+  comment: tag("cyan"),
+  grant: tag("cyan"),
+  revoke: tag("cyan"),
+  set: tag("amber"),
+  reset: tag("amber"),
+  discard: tag("amber"),
+  vacuum: tag("amber"),
+  analyze: tag("amber"),
+  reindex: tag("amber"),
+  cluster: tag("amber"),
+  refresh: tag("amber"),
+  checkpoint: tag("amber"),
+  do: tag("amber"),
+  call: tag("amber"),
 }
 
 /** A statement's first word, and the hue of what that word does. Neither for a statement with no word to read. */

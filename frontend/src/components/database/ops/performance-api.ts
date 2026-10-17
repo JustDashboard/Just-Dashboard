@@ -21,6 +21,7 @@ import type {
   DbTableStats,
   SqliteFile,
 } from "@/components/database/ops/performance-types"
+import type { DbSettingChange } from "@/components/database/ops/settings-parameters-model"
 
 /**
  * The operations routes of one SQL server, each read in the shape its
@@ -168,6 +169,13 @@ export const resetStatements = (id: number) =>
 
 export const enableExtension = (id: number, name: string) =>
   post<unknown>(`${base(id)}/server/extensions`, { name })
+
+/**
+ * Adds pg_stat_statements to the server's shared_preload_libraries, after the
+ * libraries already listed. Nothing is loaded until the server restarts.
+ */
+export const preloadStatements = (id: number) =>
+  post<DbSettingChange>(`${base(id)}/statements/preload`, {})
 
 /** The plan of a statement, as the engine prints it. Nothing is executed. */
 export const explainStatement = (id: number, query: string, signal?: AbortSignal) =>
