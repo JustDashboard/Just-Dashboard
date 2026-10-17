@@ -134,6 +134,14 @@ describe("a call the assistant asks for", () => {
     const t = decide(asking(), false)
     expect(t.turns[0].parts[1].answer).toBe("declined")
   })
+
+  test("asking something else declines it, as the server does", () => {
+    const t = beginTurn(asking(), "t2", ask, "public")
+    expect(t.turns[0]).toMatchObject({ phase: "done" })
+    expect(t.turns[0].parts[1].answer).toBe("declined")
+    expect(pendingCalls(t)).toEqual([])
+    expect(t.conversation).toBe("c0ffee")
+  })
 })
 
 describe("a conversation", () => {

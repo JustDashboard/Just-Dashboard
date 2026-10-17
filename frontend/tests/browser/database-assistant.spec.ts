@@ -705,13 +705,18 @@ test("the assistant's states, for the pull request @shots", async ({ page }) => 
   await expect(pane(page)).toContainText("tokens in")
   await shot("assistant-answer-1440.png")
 
+  // On a phone the pane lies over the editor, opened from the same control.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(pane(page)).toHaveCount(0)
+  await openAssistant(page)
+  await shot("assistant-answer-390.png")
+  await pane(page).getByRole("button", { name: "Hide the assistant" }).click()
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(pane(page)).toBeVisible()
   await ask(page, "Split it by product")
   await expect(pane(page).locator("[data-slot=assistant-ask]")).toBeVisible()
   await shot("assistant-ask-1440.png")
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(pane(page)).toBeVisible()
-  await shot("assistant-answer-390.png")
 })
 
 test("an error explained, for the pull request @shots", async ({ page }) => {

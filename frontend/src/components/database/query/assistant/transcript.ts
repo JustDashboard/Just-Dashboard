@@ -208,10 +208,13 @@ export function beginTurn(
   const base: Transcript = fresh
     ? { ...EMPTY_TRANSCRIPT, schema, turns: t.schema === schema ? t.turns : [] }
     : t
+  // Asking something else declines what the last answer was waiting on, as
+  // the server does.
+  const settled = pendingCalls(base).length > 0 ? closeAsk(decide(base, false)) : base
   return {
-    ...base,
+    ...settled,
     candidate: "",
-    turns: [...base.turns, { id, asked: askedOf(task), parts: [], phase: "waiting" }],
+    turns: [...settled.turns, { id, asked: askedOf(task), parts: [], phase: "waiting" }],
   }
 }
 
@@ -312,6 +315,12 @@ export function decide(t: Transcript, allow: boolean): Transcript {
     }
     return { ...turn, parts, phase: "waiting" }
   })
+}
+
+/** The last turn, declined and finished: nothing more is coming for it. */
+function closeAsk(t: Transcript): Transcript {
+  const last = t.turns.at(-1)
+  return last ? withTurn(t, last.id, (turn) => ({ ...turn, phase: "done" })) : t
 }
 
 /** Whether a turn is still coming in. */
