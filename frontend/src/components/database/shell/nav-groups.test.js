@@ -39,6 +39,28 @@ describe("a database's pages as the rail's panel", () => {
     expect(settings?.items.at(-1)?.capability).toBe("destructive")
   })
 
+  test("a PostgreSQL server's Settings carry its Version, an administrator's page, and a fork's do not", () => {
+    const pages = (engine) =>
+      databaseNavGroups(engine, (section) => `/databases/7/${section}`).find(
+        (group) => group.label === "Settings",
+      )?.items ?? []
+    const version = pages(served("postgres")).find((item) => item.title === "Version")
+    expect(version?.href).toBe("/databases/7/settings/version")
+    expect(version?.capability).toBe("system.admin")
+    const fork = (flavor) =>
+      engineFor({
+        driver: "postgres",
+        flavor,
+        capabilities: catalogue
+          .find((entry) => entry.id === "postgres")
+          .flavors.find((entry) => entry.id === flavor).capabilities,
+      })
+    for (const flavor of ["timescaledb", "cockroachdb", "yugabytedb"]) {
+      expect(pages(fork(flavor)).map((item) => item.title)).not.toContain("Version")
+    }
+    expect(pages(served("mysql")).map((item) => item.title)).not.toContain("Version")
+  })
+
   test("a group the engine has nothing in is left out", () => {
     expect(titles(engineFor({ driver: "redis" })).map(([label]) => label)).not.toContain("Schema")
   })

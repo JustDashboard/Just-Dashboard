@@ -339,6 +339,43 @@ CREATE TABLE IF NOT EXISTS db_inventory_ignored (
   ignored_by TEXT NOT NULL DEFAULT ''
 );
 
+-- A major-version upgrade of a database server the dashboard started: the new
+-- server is a new container under the old one's name, and the old one is kept
+-- stopped beside it under another until the operator finishes or reverts. The
+-- row is what says which container is which for those days, and what a
+-- dashboard restarted in the middle of an upgrade has to put back. state is
+-- running, upgraded (the revert window is open), finished, reverted or
+-- failed; phase is how far a running one got (prepare, copy, cutover). Names, never
+-- credentials: the password stays in the sealed DSN and the containers.
+CREATE TABLE IF NOT EXISTS db_upgrades (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id     INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  state             TEXT NOT NULL,
+  phase             TEXT NOT NULL DEFAULT '',
+  engine            TEXT NOT NULL,
+  from_version      TEXT NOT NULL,
+  to_version        TEXT NOT NULL,
+  from_image        TEXT NOT NULL,
+  to_image          TEXT NOT NULL,
+  container         TEXT NOT NULL,
+  previous_id       TEXT NOT NULL DEFAULT '',
+  previous_name     TEXT NOT NULL DEFAULT '',
+  previous_restart  TEXT NOT NULL DEFAULT '',
+  previous_volume   TEXT NOT NULL DEFAULT '',
+  candidate         TEXT NOT NULL DEFAULT '',
+  volume            TEXT NOT NULL DEFAULT '',
+  safety_dump       TEXT NOT NULL DEFAULT '',
+  -- What postgresql.auto.conf gave default_transaction_read_only before the
+  -- copy made the old server take reads only, so it is given back exactly.
+  read_only_prior   TEXT NOT NULL DEFAULT '',
+  error             TEXT NOT NULL DEFAULT '',
+  started_by        TEXT NOT NULL DEFAULT '',
+  started_at        INTEGER NOT NULL,
+  upgraded_at       INTEGER NOT NULL DEFAULT 0,
+  ended_at          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_db_upgrades_conn ON db_upgrades(connection_id, id DESC);
+
 -- Point-in-time recovery: a PostgreSQL server's write-ahead log archived by
 -- WAL-G into a backup destination, beside scheduled base backups. One row per
 -- archive: the server it is for, by container name (which survives the

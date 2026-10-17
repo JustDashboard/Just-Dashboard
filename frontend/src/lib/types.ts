@@ -1850,6 +1850,7 @@ export type DbCapabilityFlag =
   // Connections and discovery.
   | "server" // a process that listens, logs and can be started; false = a file
   | "provision" // the dashboard can start one from its own images
+  | "majorUpgrade" // a server started from those images can be moved to a newer major release
   | "serverTLS" // a server it started can speak TLS with a certificate from its own authority
   | "inventoryConnect" // can be connected from the inventory by its key
   | "hostAccount" // POST /host/grant can make or reset an account on a host server

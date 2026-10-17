@@ -219,6 +219,7 @@ export function kindWord(kind: EngineKind): string {
 const NO_CAPABILITIES: DbCapabilities = {
   server: false,
   provision: false,
+  majorUpgrade: false,
   serverTLS: false,
   inventoryConnect: false,
   hostAccount: false,

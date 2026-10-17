@@ -16,6 +16,7 @@ import { ExtensionsSection } from "@/components/database/ops/settings-extensions
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
 import { PoolingSections } from "@/components/database/ops/settings-pooling"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { VersionSections } from "@/components/database/ops/settings-version"
 import { ResourcesSection } from "@/components/database/ops/settings-resources"
 import { TransportSecuritySection } from "@/components/database/ops/settings-tls"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
@@ -35,6 +36,7 @@ const MISSING: Record<SettingsPageKey, string> = {
   pooling: "connection pooling",
   parameters: "parameters to change here",
   extensions: "extensions",
+  version: "release to upgrade from here",
   danger: "danger zone",
 }
 
@@ -73,7 +75,9 @@ function SettingsFrame({
         >
           {engine.can("fileBased")
             ? "It is a file on this machine: there is no server to reach, configure or share."
-            : "The engine keeps nothing of the kind for the dashboard to read or change."}
+            : page === "version"
+              ? "A PostgreSQL server Databases started is moved to a newer release here; this one is upgraded with its own tools."
+              : "The engine keeps nothing of the kind for the dashboard to read or change."}
         </BlockedState>
       </SectionFrame>
     )
@@ -165,6 +169,31 @@ export function SettingsExtensions() {
   return (
     <SettingsFrame page="extensions">
       {(confirm) => <ExtensionsSection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+/**
+ * The release it runs and moving it to a newer one. An upgrade replaces the
+ * server, so the page is an administrator's; any other role reaching the
+ * address is told whose it is.
+ */
+export function SettingsVersion() {
+  const { engine } = useDatabase()
+  const { can } = useAuth()
+  return (
+    <SettingsFrame page="version">
+      {(confirm) =>
+        can("system.admin") ? (
+          <VersionSections confirm={confirm} />
+        ) : (
+          <EmptyState
+            mark={<EngineMark engine={engine} />}
+            title="Upgrades are an administrator's"
+            description="Which release the server runs, and moving it to a newer one, are read and done by an administrator."
+          />
+        )
+      }
     </SettingsFrame>
   )
 }

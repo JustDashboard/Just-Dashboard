@@ -1,4 +1,5 @@
 import {
+  ArrowCircleUp,
   Cpu,
   Globe,
   Layers,
@@ -19,6 +20,7 @@ export type SettingsPageKey =
   | "pooling"
   | "parameters"
   | "extensions"
+  | "version"
   | "danger"
 
 export type SettingsPage = {
@@ -34,9 +36,9 @@ export type SettingsPage = {
 /**
  * The pages a database's Settings has, in the order a reader goes through
  * them: what the dashboard calls it and how it dials it, where it can be
- * reached from, what it may use of the machine, the pooler in front of it, the server's own parameters,
- * what it is extended with, and the acts that end it. What else the server holds is Home's: it changes
- * nothing about this connection, so it is not a setting.
+ * reached from, what it may use of the machine, the pooler in front of it, the server's own
+ * parameters, what it is extended with, the release it runs, and the acts that end it. What else the
+ * server holds is Home's: it changes nothing about this connection, so it is not a setting.
  *
  * Settings was one page of six sections under a strip of anchors, and the
  * section a reader most often came for — the danger zone, a parameter — was
@@ -67,6 +69,13 @@ export function settingsPages(engine: Engine): SettingsPage[] {
       title: keyvalue ? "Modules" : "Extensions",
       path: "extensions",
       icon: Puzzle,
+    },
+    engine.can("majorUpgrade") && {
+      key: "version",
+      title: "Version",
+      path: "version",
+      icon: ArrowCircleUp,
+      capability: "system.admin",
     },
     {
       key: "danger",

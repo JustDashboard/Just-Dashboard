@@ -174,6 +174,13 @@
           "kind": "added",
           "text": "Try an index on a PostgreSQL plan from the Explain view, and list SQL Server's missing indexes on request",
           "detail": "What if? on a plan proposes indexes for the columns it filters, joins and sorts on, skipping any an existing index already leads with. It then tries one with HypoPG, planning the statement again beside the plan without it, so the cost before and after sits side by side. Nothing is created: the real CREATE INDEX CONCURRENTLY is offered only on a click, shown before it runs. A server without the hypopg extension says so. On SQL Server, Missing indexes lists what the optimizer has wished for, with the CREATE INDEX each implies. Both are tools the reader presses for; the Advisor's automatic findings stay removed."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Upgrade a PostgreSQL server to a newer major release, and revert it",
+          "detail": "Databases → Settings → Version checks a newer release of a server Databases started before anything changes, then copies its roles, databases, extensions and parameters into a new server beside it, counts every table, and puts the new server in its place under the same name, port and password, so connections and deployments keep working. The old server is kept, stopped, until the upgrade is finished or reverted, and an upgrade that fails, or a dashboard that stops in the middle of one, puts the old server back."
         }
       ]
     },

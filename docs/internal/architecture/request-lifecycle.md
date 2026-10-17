@@ -283,7 +283,9 @@ What the list lets through is of three kinds:
 
 - **What does not change the database**: the connection's own record (which is how the mark is taken
   off again), its power and its reachability; a dump taken, uploaded or deleted, which are files on
-  this machine; the dashboard's own state about it (saved queries, the diagram's arrangement); the
+  this machine; a major-version upgrade's check, which only reads, and finishing one, which removes
+  the old server the connection no longer reaches; the dashboard's own state about it (saved
+  queries, the diagram's arrangement); the
   POSTs that only read; and stopping work in flight, which changes no data and is what the operator
   of a production server most needs to be able to do.
 - **What is a read or a write by what it carries** — the statement routes, a result as a file, a
@@ -294,8 +296,9 @@ What the list lets through is of three kinds:
 - **What is shown and not run**: a schema form asked only for its statement (`/ddl/*?preview=1`). The
   flag is in the address, so the middleware asks it itself; no other route is opened by it.
 
-Everything else is refused: rows, structure, imports, a restore, a copy, the drop, accounts and
-privileges, settings, extensions, keys, documents, collections and indexes. Two things reach a
+Everything else is refused: rows, structure, imports, a restore, a copy, the drop, a major-version
+upgrade and its revert, accounts and privileges, settings, extensions, keys, documents, collections and
+indexes. Two things reach a
 protected connection from outside its own path and are held to the same answer: restoring a backup
 run into it (`POST /backups/runs/{runID}/restore-database`), and a request addressed to a
 neighbouring connection on the same server that would reset the account it signs in with, or

@@ -82,7 +82,11 @@ A change that weakens any of these has to say so explicitly.
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
    explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
    connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
-   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell.
+   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell. A
+   major-version upgrade runs the servers' own clients inside their own containers through
+   `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
+   (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
