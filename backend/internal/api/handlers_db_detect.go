@@ -1418,7 +1418,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	if tmpl.recipe != "" && s.modules.docker != nil && !s.recipeBuild(r.Context(), tmpl, version).Ready {
 		// Never pulled: the name is this server's own, and a pull of it
-		// could only fail or fetch somebody else's image.
+		// could only fail, minutes into what looked like a start.
 		return httpx.Err(http.StatusConflict, "image_not_built", fmt.Sprintf(
 			"%s %s is built on this server before its first start, and %s has not been built from the current recipe; build it first",
 			tmpl.label, version.id, version.image))
