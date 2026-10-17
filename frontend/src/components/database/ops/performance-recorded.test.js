@@ -10,7 +10,7 @@ import {
   spanWords,
   trendValues,
   windowWords,
-} from "./performance-history"
+} from "./performance-recorded"
 
 const facts = (over = {}) => ({
   supported: true,

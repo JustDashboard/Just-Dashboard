@@ -212,6 +212,11 @@ are dated evidence, not proof of current attachment ownership.
   longer than 90 seconds break chart lines and rates; missing snapshots are ignored. Historical
   working-session counts are the recorded active count minus the recorded waiting count, while live
   session filters use the current session list. SQLite has no activity chart or recording poll.
+  Performance's Statement history (`components/database/ops/performance-history.tsx`) reads
+  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and an
+  open statement's `/statements/history/{statement}` on the same cadence; both are the backend's
+  store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
+  statement's charts, and a reset is a mark on their time axis.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket. The delay doubles from 1 s to a 15 s ceiling with
   half of each step random (`retryDelay`), and resets only after a connection has stayed open for 10 s:

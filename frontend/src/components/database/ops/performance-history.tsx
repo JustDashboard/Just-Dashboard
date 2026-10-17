@@ -48,7 +48,7 @@ import {
   trendValues,
   windowWords,
   type HistoryRow,
-} from "@/components/database/ops/performance-history"
+} from "@/components/database/ops/performance-recorded"
 import {
   NoFigure,
   NotAvailable,
