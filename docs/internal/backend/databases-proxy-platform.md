@@ -538,7 +538,11 @@ are held to one file of scripts (`dbx/testdata/statement-splits.json`, read by
 `TestScriptsSplitWhereTheirEngineReadsThem` and by `sql-text.test.js`): the statement Run sends from
 the cursor is one the server reads as one. Run everything sends the client's separators with the
 statements — the `DELIMITER` lines, the count of a last `GO` — and a statement sent on its own from a
-batch `GO` repeats runs once.
+batch `GO` repeats runs once. The strip beside Run names the lines the statement under the cursor runs
+over, and says so when its separator did not end it: a PL/SQL unit with no `/` line after it runs to
+the end of the text, and a SQL Server routine that went on past its `BEGIN … END` takes in what
+follows, up to the next `GO`. Format lays out the plain statements of such a script and leaves its
+separators and its bodies as written, line breaks included.
 
 Below "high" a statement must be one whose leading verb is fully known: a read, an `INSERT`, or a
 `CREATE` of a table, index, view, schema, sequence or type — what the row and schema forms offer at
