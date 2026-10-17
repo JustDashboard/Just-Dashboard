@@ -695,7 +695,8 @@ func TestLiveMySQLKeepsTheSettingsAndTheOrderItWasMadeUnder(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if p.Editable || !strings.Contains(p.Reason, "which runs first") {
+				// The later of the two says FOLLOWS; the earlier says it is not alone.
+				if p.Editable || !strings.Contains(p.Reason, "which runs first") && !strings.Contains(p.Reason, "FOLLOWS") {
 					t.Errorf("%s: editable %v, reason %q", name, p.Editable, p.Reason)
 				}
 			}

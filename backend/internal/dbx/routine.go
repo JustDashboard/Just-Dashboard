@@ -1091,7 +1091,7 @@ func pgSignatureOf(spec RoutineSpec) func(context.Context, *sql.DB) string {
 		err := db.QueryRowContext(ctx, `
 		  SELECT pg_get_function_identity_arguments(p.oid)
 		  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-		  WHERE `+match+` AND `+pgSchemaIs("n")+` AND p.proname = $2 AND p.proargtypes::oid[] = `+array+`
+		  WHERE `+match+` AND `+pgSchemaIs("n")+` AND p.proname = $2 AND string_to_array(p.proargtypes::text, ' ')::oid[] = `+array+`
 		  LIMIT 1`, args...).Scan(&signature)
 		if err != nil {
 			return ""
