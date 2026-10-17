@@ -6142,6 +6142,10 @@ export type DbFleetEntry = DbConnection & {
   unit?: string
   exposure: DbAccess["exposure"] | "unknown"
   consumers: number
+  /**
+   * When it was last backed up from here: its newest dump, or the newest
+   * backup job run that dumped it, whichever is later. Absent for never.
+   */
   lastBackup?: string
 }
 

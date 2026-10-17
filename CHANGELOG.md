@@ -18,6 +18,23 @@ Automatic attention panels and settings recommendations are removed from the das
   - Ship apps (Deployments, Proxy & TLS), Run databases (Databases, Backups), Work on the server (the Workspace tools), Manage containers (Docker) and Secure the server (Security) are chosen to begin with; Route the network (Network) is marked Experimental, working but still being tested. Every section belongs to one purpose only, so each choice adds something, and Packages, System users and the audit log stay in every answer. Account → Workspace shows the same purposes beside the sidebar itself, with a switch on every section it can hide.
 - Redraw the account pages without tiles, as pictures of what is signed in
   - Profile wires every session and your own API keys into your face, with what guards it, and shows the three roles as a ladder lit up to yours. Sessions draws each session through the network it came in on to the server. API keys draws each key, as the product that holds it, through its role into the API, with chips for keys used this week, never used or about to expire. Every picture is drawn at the size of the one on Configuration, with a label over each name and the address under it. Users opens on the accounts and how many a password alone opens, straight over the accounts themselves. Security opens on what a sign-in passes, with an amber line past a missing second factor.
+- Count backups and certificates on one bar instead of a track under every row
+  - Databases → Backups shows how many databases were backed up today, this week, over a week ago or never on one bar, over a single line per database with the age of its newest dump. Proxy → Sites → Certificates counts valid, due for renewal and expired the same way, over a line per site with its days left.
+- Draw the Databases pictures like the Configuration stack
+  - The control center's picture of what the databases feed and the map use full-size marks, a wide lane for the wires, lanes centred on each other and state dots on the marks, without the dotted background. Databases nothing reads are listed as links under the picture.
+- Draw every wiring picture without the dotted background
+  - The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings.
+
+### Fixed
+
+- Count a backup job's run as a database's last backup
+  - The Databases cards, table and Backups band, and the last dump a database's delete confirmation names, take the later of its newest dump and the newest successful backup job run that dumped it, so a database a nightly job protects is no longer shown as never backed up or a week old.
+- Show a deployment as the reader of the database it reaches through a published port
+  - Databases → What they feed and the map now recognise a deployment whose connection string names this server's own address with the database's published port, and draw a deployment's release as its project. The dashboard's own PostgreSQL sessions are no longer drawn as this server reading every database.
+- Stop offering browser profiles and temporary files as databases found on the server
+  - SQLite files inside browser or browser-automation profiles and temporary directories are counted under Kept by other programs. Found servers are listed in the order they can be connected, and a file row shows the folder it is in.
+- Open the Databases page without waiting for the server to be re-scanned
+  - The fleet reading answers from the last inventory of the machine and refreshes it in the background, and returning to the page draws the last reading at once while the new one loads.
 
 ### Removed
 

@@ -64,6 +64,7 @@ export type DbConnectionSummary = DbConnection & {
   managed: boolean
   /** How many deployment environments are bound to it. */
   consumers: number
+  /** When it was last backed up, by hand or by a backup job: the fleet's `lastBackup`. */
   lastBackup?: string
   /** Resolved for this driver and the flavour that answered. Every key is present. */
   capabilities: DbCapabilities

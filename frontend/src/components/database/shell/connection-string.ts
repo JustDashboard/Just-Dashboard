@@ -154,14 +154,14 @@ export function pooledTargets(
           label: "Anywhere",
           host: address,
           port: String(pooler.port),
-          note: "The pooler is published on every interface, as its database is. Treat the string as a secret.",
+          note: "The pooler is published on every interface, because the database was opened to anywhere. Treat the string as a secret.",
         }
       : {
           id: "public",
           label: "Anywhere",
           note: "",
           unavailable:
-            "The pooler is published where its database is, and that is this server only. Open the database to anywhere under Settings and the pooler follows.",
+            "The pooler is published on this server only. Opening the database to anywhere under Settings moves the pooler with it.",
         },
   ]
 }

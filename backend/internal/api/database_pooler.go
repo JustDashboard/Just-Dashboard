@@ -28,9 +28,9 @@ import (
 //
 // It is the database's, not a separate thing to look after. It shares a
 // private network with the database and reaches it by the container's name;
-// it is published on the host exactly where the database is (loopback unless
-// the access switch has opened the database up, and then by that same switch,
-// audited, because the switch recreates the pooler with it); a deployment
+// it is published on loopback unless the access switch has opened the database
+// to anywhere, and then by that same switch, audited, which moves the pooler
+// with it (followPoolerExposure); a deployment
 // reaches it on its environment network as db-<id>-pool.jd.internal; and it
 // starts, stops and goes away with the database.
 //
