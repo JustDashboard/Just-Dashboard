@@ -122,6 +122,7 @@ free.
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, accounts, grants and a live map
+- Import from another server, kept current by logical replication on PostgreSQL until you cut over
 
 </td>
 </tr>
