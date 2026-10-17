@@ -142,8 +142,8 @@ export const enableExtension = (id: number, name: string) =>
   post<unknown>(`${base(id)}/server/extensions`, { name })
 
 /**
- * Adds pg_stat_statements to the libraries the server loads at start, beside
- * the ones it loads now. Nothing is loaded until the server restarts.
+ * Adds pg_stat_statements to the server's shared_preload_libraries, after the
+ * libraries already listed. Nothing is loaded until the server restarts.
  */
 export const preloadStatements = (id: number) =>
   post<DbSettingChange>(`${base(id)}/statements/preload`, {})

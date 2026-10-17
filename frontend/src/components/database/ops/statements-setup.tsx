@@ -269,7 +269,7 @@ function StatementsSetup({
         <p className="flex items-baseline justify-between gap-3 text-body" role="status">
           <TextShimmer className="font-medium">
             {progress.step === "preload"
-              ? "Adding pg_stat_statements to the libraries loaded at start…"
+              ? "Adding pg_stat_statements to shared_preload_libraries…"
               : progress.step === "restart"
                 ? `Restarting ${name} and waiting for it to answer…`
                 : `Creating the extension in ${database}…`}
@@ -282,22 +282,24 @@ function StatementsSetup({
         <>
           <p className="text-body leading-relaxed">
             PostgreSQL counts statements only when pg_stat_statements is loaded as the server
-            starts. This adds it to the libraries {name} loads at start and keeps every one it loads
-            now. Nothing restarts yet.
+            starts. This adds pg_stat_statements to shared_preload_libraries on{" "}
+            <span className="font-medium">{name}</span>; the libraries already listed stay. Nothing
+            restarts yet.
           </p>
           <Statement label="Runs" sql={enable.preload ?? ""} placeholder="" />
           {!restart.can && (
             <Notice title="The restart is yours to do">
-              {restart.reason} Once {name} has been restarted where it runs, Turn on statement
-              statistics finishes the setup from this page.
+              {restart.reason} Once <span className="font-medium">{name}</span> has been restarted
+              where it runs, Turn on statement statistics finishes the setup from this page.
             </Notice>
           )}
         </>
       ) : progress.step === "restart" ? (
         <>
           <p className="text-body leading-relaxed">
-            pg_stat_statements is in the libraries {name} loads at start. It is loaded the next time
-            the server starts, and then the extension is created in {database}.
+            pg_stat_statements is now in shared_preload_libraries on{" "}
+            <span className="font-medium">{name}</span>. It loads the next time the server starts,
+            and then the extension is created in <span className="font-medium">{database}</span>.
           </p>
           {asked ? (
             <Notice tone="warning" title={`Restart ${name} to load it`}>
@@ -312,8 +314,8 @@ function StatementsSetup({
         </>
       ) : (
         <FormNote>
-          The server is back with pg_stat_statements loaded. Creating the extension in {database} is
-          what is left.
+          <span className="font-medium">{name}</span> is back with pg_stat_statements loaded.
+          Creating the extension in <span className="font-medium">{database}</span> is what is left.
         </FormNote>
       )}
     </TaskDialog>
