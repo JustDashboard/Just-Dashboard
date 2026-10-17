@@ -38,6 +38,11 @@
           "detail": "Databases → Backups shows how many databases were backed up today, this week, over a week ago or never on one bar, over a single line per database with the age of its newest dump. Proxy → Sites → Certificates counts valid, due for renewal and expired the same way, over a line per site with its days left."
         },
         {
+          "kind": "added",
+          "text": "Keep each database's statement statistics over time",
+          "detail": "Databases → Performance → Statement history lists what each statement cost over the last hour, six hours, day or week, with its time drawn across the window, and orders the list by calls, mean time, rows, p95 or rows read. A statement opens on charts of its time, calls, time per call and rows. The dashboard reads the statement list every five minutes, including while the page is closed, and keeps what each statement added for seven days. ClickHouse and MySQL 8 give p50, p95 and p99 from their own run times; PostgreSQL, MariaDB, SQL Server and Oracle keep no distribution, and the page says what each figure is made from. Only a statement's shape is kept, as the Statements view shows it, never one execution of it."
+        },
+        {
           "kind": "fixed",
           "text": "Show a deployment as the reader of the database it reaches through a published port",
           "detail": "Databases → What they feed and the map now recognise a deployment whose connection string names this server's own address with the database's published port, and draw a deployment's release as its project. The dashboard's own PostgreSQL sessions are no longer drawn as this server reading every database."
