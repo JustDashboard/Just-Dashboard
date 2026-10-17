@@ -767,6 +767,7 @@ export function SqlQuery() {
                 if (ran) void runner.fetchMore(tab.id, ran, step, rows)
               }}
               onExplain={explain}
+              onOpenStatement={openStatement}
               onExport={(sql, format, rows) => void exporter.run(sql, format, rows)}
               exporting={exporter.running}
               onShowInEditor={showInEditor}

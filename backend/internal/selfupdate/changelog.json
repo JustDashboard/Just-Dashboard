@@ -155,6 +155,13 @@
           "kind": "added",
           "text": "Encrypt backup archives, with a key you can export",
           "detail": "A backup job can seal its archives with age before they are written to disk, S3 or Backblaze B2, and a new job that writes to a bucket does unless told otherwise. One backup key, sealed with the master key, opens them: restores, database restores, recovery checks and downloads decrypt them on the way, and archives taken before keep restoring as they were. Backups → Backup key exports the key behind a confirmation, recorded in the audit log, so an archive also opens with the age command where the dashboard is not."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Try an index on a PostgreSQL plan from the Explain view, and list SQL Server's missing indexes on request",
+          "detail": "What if? on a plan proposes indexes for the columns it filters, joins and sorts on, skipping any an existing index already leads with. It then tries one with HypoPG, planning the statement again beside the plan without it, so the cost before and after sits side by side. Nothing is created: the real CREATE INDEX CONCURRENTLY is offered only on a click, shown before it runs. A server without the hypopg extension says so. On SQL Server, Missing indexes lists what the optimizer has wished for, with the CREATE INDEX each implies. Both are tools the reader presses for; the Advisor's automatic findings stay removed."
         }
       ]
     },

@@ -99,6 +99,10 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"cellRead":       "sql",
 		"explainJSON":    "postgres -cockroachdb mysql -tidb " + mongoProper,
 		"explainAnalyze": "postgres -cockroachdb mysql " + mongoProper,
+		// Asked for from the Explain view: an index tried on a plan with HypoPG, and
+		// SQL Server's own list of the indexes its plans wanted.
+		"indexWhatIf":    "postgres -cockroachdb -yugabytedb",
+		"missingIndexes": "sqlserver",
 
 		// the schema
 		"ddl":               "sql -clickhouse",

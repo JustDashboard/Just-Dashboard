@@ -124,6 +124,11 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/export", s.handle(s.handleDBExport))
 		r.Method(http.MethodPost, "/{id}/classify", s.handle(s.handleDBClassify))
 		r.Method(http.MethodPost, "/{id}/explain", s.handle(s.handleDBExplain))
+		// Index advice asked for from the Explain view: planning with a
+		// hypothetical index, and SQL Server's own list of missing ones.
+		r.Method(http.MethodPost, "/{id}/explain/index-candidates", s.handle(s.handleDBIndexCandidates))
+		r.Method(http.MethodPost, "/{id}/explain/what-if", s.handle(s.handleDBIndexWhatIf))
+		r.Method(http.MethodGet, "/{id}/missing-indexes", s.handle(s.handleDBMissingIndexes))
 		r.Method(http.MethodPost, "/{id}/orm", s.handle(s.handleDBGenerateORM))
 		r.Method(http.MethodGet, "/{id}/queries", s.handle(s.handleDBSavedList))
 		r.Method(http.MethodGet, "/{id}/history", s.handle(s.handleDBHistory))
