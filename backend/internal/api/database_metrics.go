@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -201,6 +202,11 @@ func (s *Server) handleDBStatsHistory(w http.ResponseWriter, r *http.Request) er
 		return httpx.Internal(err)
 	}
 	retentionDays, err := s.databaseMetricRetentionDays(r.Context())
+	var bad unreadableRetention
+	if errors.As(err, &bad) {
+		// Reading deletes nothing, so a week stands in until a window is chosen.
+		retentionDays, err = databaseMetricRetentionOptions[0], nil
+	}
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -208,9 +214,14 @@ func (s *Server) handleDBStatsHistory(w http.ResponseWriter, r *http.Request) er
 	hours := 1
 	if raw := r.URL.Query().Get("hours"); raw != "" {
 		hours, err = strconv.Atoi(raw)
-		if err != nil || hours < 1 || hours > retentionHours {
-			return httpx.BadRequest("hours must be between 1 and %d", retentionHours)
+		maxHours := databaseMetricRetentionOptions[len(databaseMetricRetentionOptions)-1] * 24
+		if err != nil || hours < 1 || hours > maxHours {
+			return httpx.BadRequest("hours must be between 1 and %d", maxHours)
 		}
+		// A range chosen while a longer retention was set is still a range the
+		// reader may have saved: it answers with what is kept, and says how
+		// much that is in retentionHours, rather than failing every poll.
+		hours = min(hours, retentionHours)
 	}
 	window := time.Duration(hours) * time.Hour
 	bucket := max(databaseMetricEvery.Milliseconds(), window.Milliseconds()/720)

@@ -352,3 +352,19 @@ func TestMintingAScopedKeyIsAuditedAndReadOnly(t *testing.T) {
 		t.Fatalf("a scoped key minted a key: %d", w.Code)
 	}
 }
+
+func TestAScrapeThatCannotReadTheStoreFailsInsteadOfDroppingSeries(t *testing.T) {
+	s := testServer(t)
+	pg := saveOpsConnection(t, s, "main", dbx.DriverPostgres, "postgres://user:pw@127.0.0.1:1/shop")
+	saveSample(t, s, pg, 5*time.Second, postgresSnapshot)
+	secret := testMetricsKey(t, s, true)
+	if w := scrape(s, http.MethodGet, secret); w.Code != http.StatusOK {
+		t.Fatalf("scrape = %d", w.Code)
+	}
+	if _, err := s.Store.DB.Exec(`DROP TABLE db_metric_samples`); err != nil {
+		t.Fatal(err)
+	}
+	if w := scrape(s, http.MethodGet, secret); w.Code != http.StatusInternalServerError {
+		t.Fatalf("a store that cannot be read answered %d, not a failed scrape", w.Code)
+	}
+}

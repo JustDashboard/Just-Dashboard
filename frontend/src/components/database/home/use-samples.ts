@@ -5,7 +5,7 @@ import { read } from "@/components/database/home/read"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { useViewState } from "@/lib/view-state"
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 export const SAMPLE_EVERY_MS = 30_000
 export const HISTORY_RANGES = [
@@ -31,6 +31,10 @@ export function rangesWithin(retentionHours: number) {
   return HISTORY_RANGES.filter((range) => range.hours <= retentionHours)
 }
 
+function longestWithin(retentionHours: number) {
+  return rangesWithin(retentionHours).at(-1)?.hours ?? 1
+}
+
 /** The days the recorder keeps its readings, as the footnotes say it. */
 export function keptFor(retentionHours: number) {
   const days = Math.round(retentionHours / 24)
@@ -46,7 +50,13 @@ export function useSamples<T>(
   historyEnabled = true,
 ) {
   const [chosen, setHours] = useViewState(`databases.${id}.history.hours`, 1)
-  const hours = HISTORY_RANGES.some((range) => range.hours === chosen) ? chosen : 1
+  // What the recorder keeps is learned from its first answer and held across
+  // range changes, which restart the poll. A range saved while more was kept
+  // falls back to the longest one that is still kept, rather than asking for
+  // history that no longer exists.
+  const [kept, setKept] = useState<number>()
+  const known = HISTORY_RANGES.some((range) => range.hours === chosen)
+  const hours = !known ? 1 : kept === undefined || chosen <= kept ? chosen : longestWithin(kept)
   const live = usePoll(
     (signal) => get<T>(`/databases/${id}/stats`, undefined, signal),
     SAMPLE_EVERY_MS,
@@ -65,6 +75,10 @@ export function useSamples<T>(
     [id, hours],
     { enabled: historyEnabled },
   )
+  const answered = history.data?.retentionHours
+  useEffect(() => {
+    if (answered !== undefined) setKept(answered)
+  }, [answered])
   const samples = useMemo(
     () => historySamples(history.data?.samples ?? [], toSample),
     [history.data, toSample],
@@ -72,7 +86,7 @@ export function useSamples<T>(
   return {
     answer: live.data,
     samples,
-    retentionHours: history.data?.retentionHours ?? DEFAULT_RETENTION_HOURS,
+    retentionHours: kept ?? DEFAULT_RETENTION_HOURS,
     hours,
     setHours,
     loading: history.loading,

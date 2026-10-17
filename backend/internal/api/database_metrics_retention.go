@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -48,9 +49,18 @@ func (s *Server) databaseMetricRetentionDays(ctx context.Context) (int, error) {
 	}
 	days, err := strconv.Atoi(value)
 	if err != nil || !slices.Contains(databaseMetricRetentionOptions, days) {
-		return 0, fmt.Errorf("saved retention %q is not one of %v", value, databaseMetricRetentionOptions)
+		return 0, unreadableRetention(value)
 	}
 	return days, nil
+}
+
+// unreadableRetention is a saved value that is not one of the windows. The
+// recorder will not prune on it, and the page treats it as not chosen yet, so
+// choosing a window repairs it.
+type unreadableRetention string
+
+func (e unreadableRetention) Error() string {
+	return fmt.Sprintf("saved retention %q is not one of %v", string(e), databaseMetricRetentionOptions)
 }
 
 // pruneDatabaseMetrics drops what is past the retention and thins what is past
@@ -66,23 +76,47 @@ func (s *Server) pruneDatabaseMetrics(ctx context.Context) {
 		s.Log.Warn("database activity history could not be pruned", "err", err)
 		return
 	}
-	if days <= 7 || time.Since(s.dbMetricThinnedAt) < databaseMetricThinEvery {
-		return
+	if days > 7 && time.Since(s.dbMetricThinnedAt) >= databaseMetricThinEvery {
+		s.thinDatabaseMetrics(ctx)
 	}
+}
+
+// thinDatabaseMetrics keeps the newest sample of each five-minute step older
+// than the raw window. It only looks at what has aged past the window since it
+// last ran, one day at a time, so no statement holds the store for long and a
+// slow pass does not repeat the whole history; the first pass after a start
+// has the backlog to do. An attempt counts as one whether or not it finished,
+// so a failure is tried again in an hour and not at the next sample.
+func (s *Server) thinDatabaseMetrics(ctx context.Context) {
+	s.dbMetricThinnedAt = time.Now()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	step := databaseMetricCoarseEvery.Milliseconds()
-	// The range on b.at keeps each lookup inside one step of the primary key
-	// instead of walking the connection's whole history per row.
-	_, err = s.Store.DB.ExecContext(ctx, `DELETE FROM db_metric_samples WHERE rowid IN (
-		SELECT o.rowid FROM db_metric_samples o WHERE o.at < ? AND o.at < (
-			SELECT MAX(b.at) FROM db_metric_samples b
-			WHERE b.connection_id=o.connection_id AND b.identity=o.identity
-			AND b.at >= o.at / ? * ? AND b.at < (o.at / ? + 1) * ?))`,
-		time.Now().Add(-databaseMetricRawWindow).UnixMilli(), step, step, step, step)
-	if err != nil {
+	chunk := 288 * step
+	cutoff := time.Now().Add(-databaseMetricRawWindow).UnixMilli() / step * step
+	from := s.dbMetricThinnedTo
+	if from > 0 {
+		from -= step
+	} else if err := s.Store.DB.QueryRowContext(ctx, `SELECT COALESCE(MIN(at), 0) FROM db_metric_samples`).Scan(&from); err != nil {
 		s.Log.Warn("database activity history could not be thinned", "err", err)
 		return
 	}
-	s.dbMetricThinnedAt = time.Now()
+	from = from / step * step
+	for lo := from; lo < cutoff; lo += chunk {
+		// The range on b.at keeps each lookup inside one step of the primary
+		// key instead of walking the connection's whole history per row.
+		_, err := s.Store.DB.ExecContext(ctx, `DELETE FROM db_metric_samples WHERE rowid IN (
+			SELECT o.rowid FROM db_metric_samples o WHERE o.at >= ? AND o.at < ? AND o.at < (
+				SELECT MAX(b.at) FROM db_metric_samples b
+				WHERE b.connection_id=o.connection_id AND b.identity=o.identity
+				AND b.at >= o.at / ? * ? AND b.at < (o.at / ? + 1) * ?))`,
+			lo, min(lo+chunk, cutoff), step, step, step, step)
+		if err != nil {
+			s.Log.Warn("database activity history could not be thinned", "err", err)
+			return
+		}
+	}
+	s.dbMetricThinnedTo = cutoff
 }
 
 // databaseMetricSamplesIn is how many samples a window of this many days holds
@@ -100,6 +134,7 @@ type databaseMetricsRetentionOption struct {
 }
 
 type databaseMetricsExport struct {
+	// RetentionDays is 0 when the saved value is not one of the windows.
 	RetentionDays int                              `json:"retentionDays"`
 	Options       []databaseMetricsRetentionOption `json:"options"`
 	// Connections is how many servers the recorder has saved a reading of in
@@ -117,7 +152,8 @@ type databaseMetricsExport struct {
 
 func (s *Server) databaseMetricsExportReport(ctx context.Context) (*databaseMetricsExport, error) {
 	days, err := s.databaseMetricRetentionDays(ctx)
-	if err != nil {
+	var bad unreadableRetention
+	if err != nil && !errors.As(err, &bad) {
 		return nil, err
 	}
 	report := &databaseMetricsExport{
@@ -179,14 +215,17 @@ func (s *Server) handleDBMetricsExportPut(w http.ResponseWriter, r *http.Request
 		return httpx.BadRequest("retentionDays must be one of %v", databaseMetricRetentionOptions)
 	}
 	previous, err := s.databaseMetricRetentionDays(r.Context())
-	if err != nil {
+	detail := map[string]any{"days": req.RetentionDays, "previousDays": previous}
+	var bad unreadableRetention
+	if errors.As(err, &bad) {
+		detail["previousValue"] = string(bad)
+	} else if err != nil {
 		return httpx.Internal(err)
 	}
 	if err := s.Store.SetSetting(r.Context(), databaseMetricRetentionKey, strconv.Itoa(req.RetentionDays)); err != nil {
 		return httpx.Internal(err)
 	}
-	httpx.SetAudit(r, "database.metrics.retention", "database metrics",
-		map[string]any{"days": req.RetentionDays, "previousDays": previous})
+	httpx.SetAudit(r, "database.metrics.retention", "database metrics", detail)
 	report, err := s.databaseMetricsExportReport(r.Context())
 	if err != nil {
 		return httpx.Internal(err)

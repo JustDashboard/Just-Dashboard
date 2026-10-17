@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -56,10 +58,15 @@ func (s *Server) handleDatabaseMetricsExport(w http.ResponseWriter, r *http.Requ
 		err := s.Store.DB.QueryRowContext(r.Context(), `SELECT at, snapshot FROM db_metric_samples
 			WHERE connection_id=? AND identity=? ORDER BY at DESC LIMIT 1`,
 			rec.conn.ID, databaseMetricIdentity(rec)).Scan(&at, &snapshot)
-		if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			// A server never recorded has no series, rather than a zero that
 			// reads as an outage.
 			continue
+		}
+		if err != nil {
+			// Series that vanish look like servers that went away; a failed
+			// scrape is the honest answer to a store that could not be read.
+			return httpx.Internal(err)
 		}
 		base := []promLabel{
 			{"driver", string(rec.conn.Driver)},

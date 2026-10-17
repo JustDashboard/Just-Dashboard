@@ -702,6 +702,28 @@ test("a longer retention offers the longer ranges and says how long activity is 
   )
 })
 
+test("a saved long range falls back to the longest one still kept after retention is shortened", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("jd.view.state.entry.databases.1.history.hours", "2160"),
+  )
+  await holdTime(page)
+  await mockHome(page)
+  const longer = page.waitForRequest((request) => request.url().includes("stats/history?hours=2160"))
+  const fallback = page.waitForRequest((request) => request.url().includes("stats/history?hours=168"))
+  await visit(page, "/databases/1")
+  await longer
+  await fallback
+
+  const activity = block(page, "Activity")
+  const range = activity.getByRole("radiogroup", { name: "Activity history range" })
+  await expect(range.getByRole("radio")).toHaveText(["1h", "6h", "24h", "7d"])
+  await expect(range.getByRole("radio", { name: "7 days" })).toHaveAttribute("aria-checked", "true")
+  await expect(activity).toContainText("kept for 7 days")
+  await expect(chart(page, "Sessions")).toBeVisible()
+})
+
 test("a chart of a few sessions counts them in ones", async ({ page }) => {
   await holdTime(page)
   await mockHome(page, {

@@ -199,8 +199,10 @@ func TestOlderSamplesAreThinnedToTheNewestOfEachFiveMinutes(t *testing.T) {
 		}
 	}
 
-	// Thinned again an hour on, with nothing left to thin, it is a no-op; and
-	// within the hour it is not even attempted.
+	if s.dbMetricThinnedTo == 0 {
+		t.Fatal("a finished pass did not record how far back it had thinned")
+	}
+	// Within the hour it is not even attempted.
 	s.dbMetricThinnedAt = time.Now()
 	insert(old+7*30_000+1, 99)
 	s.pruneDatabaseMetrics(context.Background())
@@ -262,7 +264,7 @@ func TestLongHistoryIsReadableWithoutInventedOutages(t *testing.T) {
 		}
 	}
 	if reply := viewer.do(http.MethodGet, path+"?hours=2161", "", nil); reply.Code != http.StatusBadRequest {
-		t.Fatalf("beyond the retention = %d", reply.Code)
+		t.Fatalf("beyond any retention = %d", reply.Code)
 	}
 
 	// A real outage inside the coarse stretch is still one.
@@ -280,9 +282,51 @@ func TestLongHistoryIsReadableWithoutInventedOutages(t *testing.T) {
 		t.Fatal("a two-hour outage in thinned history was drawn as continuous")
 	}
 
-	// And a retention of a week refuses what is no longer kept.
+	// A range saved while the retention was longer answers with what is kept
+	// and says how much that is, instead of failing every poll.
 	s.Store.SetSetting(t.Context(), databaseMetricRetentionKey, "7")
-	if reply := viewer.do(http.MethodGet, path+"?hours=169", "", nil); reply.Code != http.StatusBadRequest {
-		t.Fatalf("169 hours at a week's retention = %d", reply.Code)
+	reply = viewer.do(http.MethodGet, path+"?hours=2160", "", nil)
+	report.RetentionHours = 0
+	if err := json.Unmarshal(reply.Body.Bytes(), &report); err != nil || reply.Code != http.StatusOK || report.RetentionHours != 168 {
+		t.Fatalf("a range past the retention = %d %s", reply.Code, reply.Body.String())
+	}
+	for _, sample := range report.Samples {
+		if time.UnixMilli(sample.At).Before(now.Add(-169 * time.Hour)) {
+			t.Fatalf("a clamped range returned a sample from %s", time.UnixMilli(sample.At))
+		}
+	}
+}
+
+func TestAnUnreadableSavedRetentionCanBeRepairedFromThePage(t *testing.T) {
+	c, s := newClient(t)
+	id := saveOpsConnection(t, s, "kept", dbx.DriverPostgres, "postgres://user:pw@127.0.0.1:1/db")
+	saveSample(t, s, id, 40*24*time.Hour, `{"counters":{"queries":1}}`)
+	if err := s.Store.SetSetting(t.Context(), databaseMetricRetentionKey, "180"); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing is pruned on a value that is not a window.
+	s.pruneDatabaseMetrics(context.Background())
+	var count int
+	s.Store.DB.QueryRow(`SELECT COUNT(*) FROM db_metric_samples`).Scan(&count)
+	if count != 1 {
+		t.Fatalf("an unreadable retention pruned to %d samples", count)
+	}
+
+	var report databaseMetricsExport
+	reply := c.do(http.MethodGet, "/api/v1/databases/metrics-export", "", nil)
+	if err := json.Unmarshal(reply.Body.Bytes(), &report); err != nil || reply.Code != http.StatusOK || report.RetentionDays != 0 {
+		t.Fatalf("get = %d %s", reply.Code, reply.Body.String())
+	}
+	if reply := c.do(http.MethodGet, fmt.Sprintf("/api/v1/databases/%d/stats/history", id), "", nil); reply.Code != http.StatusOK {
+		t.Fatalf("history on an unreadable retention = %d", reply.Code)
+	}
+	reply = c.do(http.MethodPut, "/api/v1/databases/metrics-export", `{"retentionDays":90}`, nil)
+	if err := json.Unmarshal(reply.Body.Bytes(), &report); err != nil || reply.Code != http.StatusOK || report.RetentionDays != 90 {
+		t.Fatalf("put = %d %s", reply.Code, reply.Body.String())
+	}
+	var detail string
+	s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action='database.metrics.retention'`).Scan(&detail)
+	if !strings.Contains(detail, `"previousValue":"180"`) || !strings.Contains(detail, `"days":90`) {
+		t.Fatalf("audit detail = %q", detail)
 	}
 }

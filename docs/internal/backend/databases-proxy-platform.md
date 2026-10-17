@@ -813,12 +813,13 @@ stays editable on a protected connection.
   keyed by connection and a hash of the saved driver and sealed DSN, so a replaced connection target
   cannot inherit another target's history; an in-flight read is saved only if that target still matches.
   Forgetting the connection cascades to its samples. No credentials, rows, query text or key values
-  are recorded. `GET /{id}/stats/history?hours=1` is on the read surface, accepts 1 hour up to the
-  retention (`retentionHours` in the answer), returns the newest raw totals in each of at most about
+  are recorded. `GET /{id}/stats/history?hours=1` is on the read surface, accepts 1 to 2160 hours,
+  answers no more than the retention (a longer range saved before the retention was shortened is
+  clamped to it, and `retentionHours` in the answer says how much that is), returns the newest raw totals in each of at most about
   720 time buckets and carries missed intervals as gaps, measured in five-minute steps past the
   seven-day mark so thinning is not drawn as an outage.
   It reads only the dashboard store, so history survives restarts and remains readable during an
-  engine outage. Home offers 1h, 6h, 24h and 7d ranges and derives rates from stored totals; negative
+  engine outage. Home offers 1h, 6h, 24h and 7d ranges, and 14d, 30d and 90d when the retention reaches them, and derives rates from stored totals; negative
   counter deltas and recording gaps longer than 90 seconds are never drawn as continuous rates.
   History begins when this version of the dashboard starts; past activity cannot be reconstructed
   from engine totals.

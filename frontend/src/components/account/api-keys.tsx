@@ -88,8 +88,9 @@ export function keyProducts(tokens: ApiToken[]) {
   return [...new Set(tokens.map((k) => keyProduct(k.name)).filter((id) => id !== undefined))]
 }
 
-export function curlExample(origin: string, key = "vpsd_…") {
-  return `curl -H "Authorization: Bearer ${key}" ${origin}/api/v1/system/host`
+export function curlExample(origin: string, key = "vpsd_…", scope?: ApiToken["scope"]) {
+  const path = scope === "metrics.read" ? "metrics/databases" : "system/host"
+  return `curl -H "Authorization: Bearer ${key}" ${origin}/api/v1/${path}`
 }
 
 /** The one line a key's state comes down to. */
@@ -583,6 +584,7 @@ function KeyDialog({
   const [busy, setBusy] = useState(false)
 
   const allowed = replacementRoles(replacement?.role ?? "admin", status?.user?.role ?? "readonly")
+  const scope = replacement?.scope || undefined
 
   const revokePrevious = () => {
     if (!replacement) return
@@ -609,9 +611,11 @@ function KeyDialog({
     const request = generation.current
     setBusy(true)
     try {
+      // A replacement is made the same way as the key it replaces: a key limited
+      // to one job is never replaced by one that can do what its owner can.
       const res = await post<{ secret: string }>("/tokens/", {
         name: name.trim(),
-        role,
+        ...(scope ? { scope } : { role }),
         ttlDays: Number(ttl),
       })
       if (request === generation.current) setSecret(res.secret)
@@ -695,19 +699,23 @@ function KeyDialog({
             </Field>
             <Field
               label="Try it"
-              hint="Send the key as a bearer token on any request. This one returns what the Overview shows."
+              hint={
+                scope
+                  ? "Send the key as a bearer token. This one returns the recorded database metrics."
+                  : "Send the key as a bearer token on any request. This one returns what the Overview shows."
+              }
               trailing={
                 <Button
                   size="xs"
                   variant="outline"
-                  onClick={() => copyText(curlExample(origin, secret), "Command copied")}
+                  onClick={() => copyText(curlExample(origin, secret, scope), "Command copied")}
                 >
                   <Copy />
                   Copy
                 </Button>
               }
             >
-              <Well className="break-all">{curlExample(origin, secret)}</Well>
+              <Well className="break-all">{curlExample(origin, secret, scope)}</Well>
             </Field>
           </div>
         ) : (
@@ -737,7 +745,14 @@ function KeyDialog({
                 />
               </div>
             </Field>
-            <RoleChoice label="Can" value={role} onChange={setRole} roles={allowed} />
+            {scope ? (
+              <Notice title="Reads database metrics only">
+                The replacement is limited the same way: it can scrape the metrics endpoint and
+                nothing else on this dashboard.
+              </Notice>
+            ) : (
+              <RoleChoice label="Can" value={role} onChange={setRole} roles={allowed} />
+            )}
             <Field
               label="Expires"
               hint={
