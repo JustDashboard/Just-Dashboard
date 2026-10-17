@@ -207,8 +207,8 @@ describe("where a database is connected from, through its pooler", () => {
       "db-7-pool.jd.internal",
       "6432",
     ])
-    // Published where its database is: this server only.
-    expect(anywhere.unavailable).toContain("Open the database to anywhere")
+    // On this server only until the access switch opens the database to anywhere.
+    expect(anywhere.unavailable).toContain("Opening the database to anywhere")
   })
 
   test("a pooler published on every interface has a string for another machine", () => {

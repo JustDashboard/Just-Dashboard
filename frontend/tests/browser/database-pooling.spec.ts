@@ -554,7 +554,7 @@ test("Connect offers the pooled string beside the direct one and reads it as poo
     "db-1-pool.jd.internal:6432",
   )
   await popover.getByRole("radio", { name: "Anywhere" }).click()
-  await expect(popover).toContainText("Open the database to anywhere under Settings")
+  await expect(popover).toContainText("Opening the database to anywhere under Settings")
 })
 
 test("Connect offers one string where the database has no pooler", async ({ page }) => {
