@@ -98,7 +98,6 @@ export function readComparison(answer: unknown): Comparison {
 }
 
 /** Text as one line of comment: a line break in a name must not end the comment. */
-// eslint-disable-next-line no-control-regex
 const LINE_BREAKS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
 const comment = (text: string) => `-- ${text.replace(LINE_BREAKS, " ").trim()}\n`
 

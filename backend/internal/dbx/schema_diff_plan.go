@@ -628,8 +628,8 @@ func (p *migrationPlanner) removedRoutines() {
 }
 
 var (
-	// qualifiableHead is the head of a routine or view whose name carries no
-	// schema: SQL Server writes a module as it was typed, and MySQL writes a
+	// mysqlHead and mssqlHead match the head of a routine or view whose name
+	// carries no schema: SQL Server writes a module as it was typed, and MySQL writes a
 	// routine's name alone. Run in another schema, or in none, it would make
 	// the object where the session happens to be.
 	mysqlHead = regexp.MustCompile("(?is)^(\\s*CREATE\\s+(?:ALGORITHM\\s*=\\s*\\w+\\s+)?(?:SQL\\s+SECURITY\\s+\\w+\\s+)?(?:FUNCTION|PROCEDURE|VIEW)\\s+)(`(?:[^`]|``)+`)(\\s|\\(|$)")
