@@ -1182,6 +1182,10 @@ type dbConnSummary struct {
 	FlavorLabel   string `json:"flavorLabel"`
 	Version       string `json:"version,omitempty"`
 	VersionNumber string `json:"versionNumber,omitempty"`
+	// EndOfLife is when that release stops being maintained, where the
+	// table knows it: said beside the version, as a fact, wherever the
+	// version is said.
+	EndOfLife *dbx.EndOfLife `json:"endOfLife,omitempty"`
 	// State is running, stopped, paused, unreachable or broken.
 	State     string `json:"state"`
 	OK        bool   `json:"ok"`
@@ -1289,6 +1293,7 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	if known {
 		out.Flavor, out.FlavorLabel = identity.Flavor, dbx.FlavorLabel(identity.Flavor)
 		out.Version, out.VersionNumber = identity.Version, identity.Number
+		out.EndOfLife, _ = dbx.VersionEndOfLife(conn.Driver, identity.Flavor, identity.Version, time.Now())
 		out.Capabilities = dbx.Capabilities(conn.Driver, identity.Flavor)
 	}
 	out.InFlight = s.dbConns.inFlight(id, out.State)
