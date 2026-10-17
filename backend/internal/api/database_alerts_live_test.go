@@ -27,6 +27,8 @@ func TestLiveDatabaseAlertObservations(t *testing.T) {
 		{dbx.DriverClickHouse, []string{"JD_TEST_CLICKHOUSE_DSN"}, true},
 		{dbx.DriverMongo, []string{"JD_TEST_MONGO_RS_DSN", "JD_TEST_MONGO_DSN"}, true},
 		{dbx.DriverRedis, []string{"JD_TEST_REDIS_DSN"}, false},
+		{dbx.DriverMSSQL, []string{"JD_TEST_MSSQL_DSN"}, true},
+		{dbx.DriverOracle, []string{"JD_TEST_ORACLE_ADMIN_DSN"}, false},
 	} {
 		t.Run(c.envs[0], func(t *testing.T) {
 			dsn := opsLiveAnyDSN(t, c.envs...)

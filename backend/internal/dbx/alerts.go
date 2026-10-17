@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -250,9 +251,11 @@ func ReadEngineDisk(ctx context.Context, db *sql.DB, driver Driver) (*DiskUse, e
 		  ORDER BY (total_space - free_space) / total_space DESC
 		  LIMIT 1`).Scan(&out.Path, &out.Used, &out.Total)
 	case DriverMSSQL:
-		// Needs VIEW SERVER STATE; without it the disk is measured here.
+		// Needs VIEW SERVER STATE; without it the disk is measured here. On
+		// Linux the volume has no mount point to report, so the data file
+		// names where it is instead.
 		err = db.QueryRowContext(ctx, `
-		  SELECT TOP 1 vs.volume_mount_point,
+		  SELECT TOP 1 COALESCE(NULLIF(vs.volume_mount_point, ''), mf.physical_name),
 		         CAST(vs.total_bytes - vs.available_bytes AS BIGINT), CAST(vs.total_bytes AS BIGINT)
 		  FROM sys.master_files mf
 		  CROSS APPLY sys.dm_os_volume_stats(mf.database_id, mf.file_id) vs
@@ -264,6 +267,9 @@ func ReadEngineDisk(ctx context.Context, db *sql.DB, driver Driver) (*DiskUse, e
 	}
 	if err != nil {
 		return nil, err
+	}
+	if ext := strings.ToLower(path.Ext(out.Path)); ext == ".mdf" || ext == ".ldf" || ext == ".ndf" {
+		out.Path = path.Dir(out.Path)
 	}
 	return out, nil
 }
