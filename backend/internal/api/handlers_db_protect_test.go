@@ -53,6 +53,13 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /import":         isRefused,
 	"POST /import/upload":  isRefused,
 	"DELETE /database":     isRefused,
+	// A major-version upgrade replaces the server the connection reaches,
+	// and so does its revert. Checking reads, and finishing removes the old
+	// server, which the connection no longer reaches.
+	"POST /upgrade":          isRefused,
+	"POST /upgrade/revert":   isRefused,
+	"POST /upgrade/check":    staysOpen,
+	"POST /upgrade/complete": staysOpen,
 	// The dashboard's own state about the connection.
 	"POST /queries":         staysOpen,
 	"PUT /queries/{qid}":    staysOpen,
