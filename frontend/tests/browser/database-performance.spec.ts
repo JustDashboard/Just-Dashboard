@@ -1504,7 +1504,8 @@ test("a PostgreSQL statement is listed as its shape, with a ? where a password o
   const panel = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
   await expect(panel).toContainText("The statement, as a shape")
   await expect(panel).toContainText("Only a statement that reads or changes rows has a plan")
-  await expect(panel.getByRole("textbox")).toHaveCount(0)
+  // The editor's own input is a textbox too; what counts is that no value is asked for.
+  await expect(panel.getByRole("textbox", { name: /^The value for/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/statement=/)
 
