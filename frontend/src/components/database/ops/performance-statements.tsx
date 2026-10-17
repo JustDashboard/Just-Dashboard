@@ -173,6 +173,19 @@ export function StatementsView() {
     engine.can("statementsReset") &&
     can("destructive") &&
     !readOnly
+  // Where the header's controls wrap under its title, the filter is a row of
+  // its own as wide as the list it filters, below the title and the reset.
+  const narrow = width < 520
+  const filterBox = data?.supported && (
+    <SearchInput
+      dense
+      aria-label="Filter the statements"
+      placeholder="Filter by text"
+      value={filter}
+      containerClassName={narrow ? "order-last basis-full" : "sm:w-56"}
+      onChange={(event) => setFilter(event.target.value)}
+    />
+  )
 
   return (
     <Panel plain aria-label="Statements" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
@@ -182,16 +195,7 @@ export function StatementsView() {
         actions={
           <>
             <Stale poll={statements} />
-            {data?.supported && (
-              <SearchInput
-                dense
-                aria-label="Filter the statements"
-                placeholder="Filter by text"
-                value={filter}
-                containerClassName="sm:w-56"
-                onChange={(event) => setFilter(event.target.value)}
-              />
-            )}
+            {!narrow && filterBox}
             {mayReset && (
               <Button size="sm" variant="outline" onClick={reset}>
                 Reset statistics
@@ -199,7 +203,9 @@ export function StatementsView() {
             )}
           </>
         }
-      />
+      >
+        {narrow && filterBox}
+      </PanelHeader>
       <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>
         {(answer) =>
           !answer.supported ? (
@@ -228,7 +234,7 @@ export function StatementsView() {
                   </span>{" "}
                   of statement time counted
                   {answer.since && (
-                    <span title={timestamp(answer.since)}> since {relativeTime(answer.since)}</span>
+                    <span title={timestamp(answer.since)}> from {relativeTime(answer.since)}</span>
                   )}
                 </p>
               </div>
