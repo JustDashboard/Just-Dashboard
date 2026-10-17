@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 116
+  flags (107 a yes or a no, three a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -429,7 +429,8 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
     validation check and command classify); and stopping work in flight, which changes no data and
     is what the operator of a production server most needs to be able to do (`/query/cancel`,
     `/activity/cancel`, `/activity/kill`, `/redis/clients/kill`, `/mongo/killop`).
-  - *By content.* `/query`, `/script`, `/explain` with `analyze`, and `/export/query` are let through
+  - *By content.* `/query`, `/script`, `/explain` with `analyze`, `/export/query` and `/rls/test` (a
+    SELECT run as another role in a transaction that is rolled back) are let through
     when every statement classifies as a read by the rules of the connection's own engine
     (`dbx.ClassifyFor`: what one engine takes for a string another takes for the end of one, and
     `SELECT … INTO`, a `WITH` that leads into a `MERGE` or an `INSERT`, and `INTO OUTFILE` are not
@@ -448,7 +449,7 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
     middleware itself and not by a check of the body; no other route is opened by it.
   - *Refused*: rows, structure, imports, a restore, a copy, the drop, roles, privileges, settings,
     extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
-    profiler, a statistics reset.
+    profiler, a statistics reset, row-level security policies and their switches.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
   run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
@@ -746,11 +747,11 @@ stays editable on a protected connection.
   foreign keys, comments, real type names with enum labels, and each index's method, predicate, included
   columns and size. SQLite and ClickHouse keep a table's check constraints nowhere but in the statement
   it was created with, so theirs are read out of that statement (`createTableItems`).
-- **A schema change is planned, then shown or run.** There are twenty `/databases/{id}/ddl/*` routes:
+- **A schema change is planned, then shown or run.** There are twenty-four `/databases/{id}/ddl/*` routes:
   create, truncate and drop a table; rename a table or a column; add, alter and drop a column; create and
   drop an index, a foreign key, a unique or check constraint, a view and a schema; comment on a table or
-  a column; create an enum type and add a label to one. What an engine takes of them is its
-  `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
+  a column; create an enum type and add a label to one — and, for PostgreSQL, the four of row-level
+  security below. What an engine takes of them is its `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
   `runDDL` returns it for `?preview=1` or executes it, so the statement a dialog shows is the server's
   own and not a page's approximation of it. Each planner starts at `ddlDialect(driver, op)`, which
   refuses an operation the engine does not have in words that name the engine (`ddlRefusals`): SQLite
@@ -787,6 +788,43 @@ stays editable on a protected connection.
   refused for the capability it would need is recorded under the change's own action. No schema route
   takes a typed phrase, and dropping a schema never cascades: the engine's refusal of a schema that still
   holds something is the guard.
+- **Row-level security is a table's, and PostgreSQL's.** `dbx/rls.go`; the `rowSecurity` flag, which
+  CockroachDB lacks, gates it. `GET /databases/{id}/rls?schema=&table=` (read surface) answers whether
+  the table filters its rows (`relrowsecurity`), whether its owner is held to the filter
+  (`relforcerowsecurity`), who no policy filters (superusers and `BYPASSRLS`, `exempt`) and each
+  policy of `pg_policy` — name, command, permissive or restrictive, roles, `using`, `withCheck`. The
+  forms are `ddl/policy` (create, change, drop) and `ddl/row-security` (on, off, force), planned by
+  `PlanCreatePolicy`, `PlanAlterPolicy`, `PlanDropPolicy` and `PlanRowSecurity` and shown or run by
+  `runDDL` like the rest, so the dialog's statement is the one that runs. A policy decides who sees
+  which rows as a grant decides who sees which tables, so the routes are `system.admin`, not
+  `service.control`: dropping a policy is behind `s.destructive` as well, and so is turning security
+  off, which the handler asks of the destructive capability by hand because it is a `PATCH`. The
+  conditions are the operator's SQL, confined by `validateFragment` as a CHECK condition is, and
+  read for calls: `current_setting` and the `has_*_privilege` family are vouched for
+  (`policyCalls`), anything else — `auth.uid()`, a subquery's qualified table — is named in the reply
+  and needs the destructive capability, for a preview as much as for a run. A command refuses the
+  clause it has no use for (an INSERT has no `USING`, a SELECT or DELETE no `WITH CHECK`) before the
+  statement is drawn, and an alter reads the policy's command to do so. `ALTER POLICY` cannot change
+  a policy's command or kind or take a condition away; a condition sent empty is left as it is.
+  Audited as `database.ddl.create_policy`, `.alter_policy`, `.drop_policy` and `.row_security`.
+  - *The role test.* `POST …/rls/test` (`service.control`) runs one SELECT as another role and
+    answers the rows (`dbx.RunAsRole`). The statement is read first by the query runner's own
+    classifier and has to be a `SELECT`, `WITH`, `TABLE` or `VALUES` that classifies as a read; it
+    then runs on a connection of its own in a read-only transaction that is rolled back and never
+    committed, after `SET LOCAL statement_timeout`, `set_config(name, value, true)` for each setting
+    and `SET LOCAL ROLE` — in that order, the role last. A setting has to be named with a dot
+    (`app.tenant_id`): `set_config('role', …)` is how a statement leaves the role it was put in, and
+    the statement that does so anyway is refused afterwards, because the transaction's
+    `current_user` is read again and must still be the role. At most 100 rows are read (1000 at
+    most), twenty settings of 4 KiB. The answer says the role, every statement sent before the query
+    (`setup`) and, when the table is named, why the filter may not apply to that role: security is
+    off, the role owns the table and it is not forced, or the role is exempt. The account the
+    connection signs in with has to be a member of the role, as `SET ROLE` requires; that is
+    reported in words ("not a member"). A function the SELECT calls that writes is refused by the
+    read-only transaction. On a protected connection the test is let through when the statement is a
+    read (`protectedRoleTest`) and refused when it is not. Audited as `database.rls.test` with the
+    role, the settings' *names* (their values are the operator's test data and may be a token), the
+    statement and the row count.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -1004,7 +1042,8 @@ stays editable on a protected connection.
     `?preview=1` returns the same body with `preview:true` and executes nothing. MySQL escapes `_`
     and `%` in the database name, which is a pattern at that position.
   - *Fine-grained privileges.* `GET …/server/privileges` publishes the closed set per engine and
-    level (`PrivilegeLevels`: database, schema, table, sequence, role membership on PostgreSQL;
+    level (`PrivilegeLevels`: database, schema, table, sequence, function, column and role membership
+    on PostgreSQL;
     database and table on MySQL/ClickHouse; database, schema, table on SQL Server); a request names
     privileges from that set and the keyword that reaches the statement is the set's.
     `POST …/server/roles/{name}/privileges` and its `/revoke` (`system.admin`, `?preview=1`) render
@@ -1015,6 +1054,16 @@ stays editable on a protected connection.
     databases, schemas, relations and `pg_default_acl`; `SHOW GRANTS` parsed on MySQL, for every
     host a name has when none is given, the line's password hash never returned;
     `system.grants`; `sys.database_permissions`), bounded at 1000.
+    PostgreSQL's two levels beyond the object kinds are `function` — EXECUTE on one function by its
+    name and the argument types the catalogue lists (`routine`, `arguments`; no `arguments` names it by
+    its name alone), or on every function of a schema, with `future:true` for the ones made later —
+    and `column`: SELECT, INSERT, UPDATE and REFERENCES on named `columns` of a table. The statements
+    are `GRANT EXECUTE ON ROUTINE …` (a function, a procedure or an aggregate) and `GRANT SELECT
+    (a, b), … ON TABLE …`; the argument list is confined by `validateFragment` and a character class
+    to its own parentheses, because it follows the function's name and what follows is the rest of
+    the statement. `GET …/server/grants` lists both (`aclexplode` over `pg_proc.proacl` and
+    `pg_attribute.attacl`; a function by `routine` and `arguments`, a column by `table` and
+    `column`), and `pg_default_acl` rows for functions.
   - *What a non-administrator is not shown.* The role list and detail are on the read surface, so
     two things are withheld there: the password entries of a Redis ACL rule (`withoutACLSecrets`),
     and the values of a PostgreSQL role's own settings (`rolconfig`) whose name is one the settings
@@ -1484,7 +1533,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the ten it calls): 230 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1508,7 +1557,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  29 open, 12 by content, 20 preview only, 61 refused.
+  29 open, 13 by content, 24 preview only, 61 refused.
 
 **Every database** (19)
 
@@ -1580,7 +1629,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (28)
+**Schema** (34)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1597,7 +1646,11 @@ and `protectReadOnlyConnections`.
 | `DELETE` | `/databases/{id}/ddl/foreign-key` | `destructive` | yes | `database.ddl.drop_foreign_key` | preview only |
 | `POST` | `/databases/{id}/ddl/index` | `service.control` | by content: plan | `database.ddl.create_index` | preview only |
 | `DELETE` | `/databases/{id}/ddl/index` | `destructive` | yes | `database.ddl.drop_index` | preview only |
+| `POST` | `/databases/{id}/ddl/policy` | `system.admin` | by content: plan | `database.ddl.create_policy` | preview only |
+| `PATCH` | `/databases/{id}/ddl/policy` | `system.admin` | by content: plan | `database.ddl.alter_policy` | preview only |
+| `DELETE` | `/databases/{id}/ddl/policy` | `system.admin` + `destructive` | yes | `database.ddl.drop_policy` | preview only |
 | `POST` | `/databases/{id}/ddl/rename` | `service.control` | by content: plan | `database.ddl.rename` | preview only |
+| `PATCH` | `/databases/{id}/ddl/row-security` | `system.admin` | by content: turning it off | `database.ddl.row_security` | preview only |
 | `POST` | `/databases/{id}/ddl/schema` | `service.control` | by content: plan | `database.ddl.create_schema` | preview only |
 | `DELETE` | `/databases/{id}/ddl/schema` | `destructive` | yes | `database.ddl.drop_schema` | preview only |
 | `POST` | `/databases/{id}/ddl/table` | `service.control` | by content: plan | `database.ddl.create_table` | preview only |
@@ -1612,6 +1665,8 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/object` | read | — | — | — |
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
+| `GET` | `/databases/{id}/rls` | read | — | — | — |
+| `POST` | `/databases/{id}/rls/test` | `service.control` | — | `database.rls.test` | by content |
 
 **Operations** (21)
 
@@ -1788,9 +1843,10 @@ What the table cannot say in a cell:
 - `POST …/restore` with a new database as its target also needs `system.admin`, checked in the
   handler; `POST …/redis/command` and `POST …/mongo/command` ask for `system.admin` for the commands
   their classifiers mark as administrative.
-- A `/ddl/*` route in the `service.control` group needs the destructive capability when its plan
-  rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for a preview as
-  much as for a run.
+- A `/ddl/*` route in the `service.control` or `system.admin` group needs the destructive capability
+  when its plan rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for
+  a preview as much as for a run; `PATCH …/ddl/row-security` asks for it when the body turns row-level
+  security off.
 - The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
 - `GET /databases/inventory`, `GET /databases/fleet` are `read` and answer more
   for `system.admin`; the sections above say what.

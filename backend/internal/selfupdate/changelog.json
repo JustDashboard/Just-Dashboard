@@ -61,6 +61,16 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Edit a PostgreSQL table's row-level security and try it as a role",
+          "detail": "Databases → Schema → a table has a Row security reading. Turn security on or off, hold the owner to it, and add, change and drop policies from templates (owner only, owner by a setting, tenant isolation, read-only for a role), each with the statement shown before it runs. Try it as a role runs one SELECT as that role with the settings its policies read, in a transaction that is rolled back."
+        },
+        {
+          "kind": "added",
+          "text": "Grant EXECUTE on functions and privileges on single columns",
+          "detail": "Databases → Access → an account's PostgreSQL grants list Functions and Columns beside Tables. Press EXECUTE on one function or on every function of a schema, and the ones made later, or SELECT, INSERT, UPDATE and REFERENCES on chosen columns of a table."
         }
       ]
     },
