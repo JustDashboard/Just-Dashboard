@@ -33,14 +33,15 @@ const backedUp = (hours: number) => new RegExp(`backed up ${hours}h(?: \\d+[ms])
  * shop's newest dump is ten days old and a job dumped it five hours ago;
  * cache is dumped by its job alone; blog was dumped by hand an hour ago,
  * after the fleet last read its job's run; notes was dumped three hours ago;
- * nothing backs app up.
+ * nothing backs app up. Each time is some minutes past the hour, as a real
+ * one would be.
  */
 const JOBS: FleetMock = {
-  dumps: { [SHOP.id]: 240, [CACHE.id]: null, [BLOG.id]: 1, [APP.id]: null, [NOTES.id]: 3 },
+  dumps: { [SHOP.id]: 240.6, [CACHE.id]: null, [BLOG.id]: 1.2, [APP.id]: null, [NOTES.id]: 3.4 },
   fleet: {
-    [SHOP.id]: { lastBackup: hoursAgo(5) },
-    [CACHE.id]: { lastBackup: hoursAgo(2) },
-    [BLOG.id]: { lastBackup: hoursAgo(20) },
+    [SHOP.id]: { lastBackup: hoursAgo(5.2) },
+    [CACHE.id]: { lastBackup: hoursAgo(2.7) },
+    [BLOG.id]: { lastBackup: hoursAgo(20.4) },
   },
 }
 
@@ -151,8 +152,14 @@ test.describe("the last backup the control center reads", () => {
     await backups(page).scrollIntoViewIfNeeded()
     await shot("fleet-band-1440")
 
-    await card(page, "shop").scrollIntoViewIfNeeded()
+    // The shelves from their top, so every card is in the picture rather than
+    // the band with the first row under it.
     await expect(card(page, "shop")).toContainText(backedUp(5))
+    await page
+      .getByRole("list", { name: "Containers" })
+      .locator("xpath=../..")
+      .evaluate((shelves) => shelves.scrollIntoView({ block: "start" }))
+    await scroller(page).evaluate((el) => el.scrollBy(0, -16))
     await shot("fleet-cards-1440")
 
     await page.getByRole("radio", { name: "Table" }).click()
