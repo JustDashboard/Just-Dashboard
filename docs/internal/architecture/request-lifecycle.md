@@ -284,7 +284,8 @@ What the list lets through is of three kinds:
   flag is in the address, so the middleware asks it itself; no other route is opened by it.
 
 Everything else is refused: rows, structure, imports, a restore, a copy, the drop, accounts and
-privileges, settings, extensions, keys, documents, collections and indexes. Two things reach a
+privileges, settings, extensions, keys, documents, collections and indexes — and the SQL editor's
+assistant, which changes nothing but would send the connection's structure to a model. Two things reach a
 protected connection from outside its own path and are held to the same answer: restoring a backup
 run into it (`POST /backups/runs/{runID}/restore-database`), and a request addressed to a
 neighbouring connection on the same server that would reset the account it signs in with, or
