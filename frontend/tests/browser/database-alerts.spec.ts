@@ -9,6 +9,18 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  */
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+const HOUR = 3_600_000
+
+/** A moment as the server writes one into a sentence: "2026-10-17 03:00 UTC". */
+const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`
+
+/** The newest 03:00 UTC that has passed: when the nightly backup last ran. */
+function lastNight() {
+  const at = new Date()
+  at.setUTCHours(3, 0, 0, 0)
+  if (at.getTime() > Date.now()) at.setUTCDate(at.getUTCDate() - 1)
+  return at.getTime()
+}
 
 const CHANNELS = [
   {
@@ -53,6 +65,8 @@ const rule = (id: number, over: Record<string, unknown>): Rule => ({
 })
 
 function watching() {
+  const ran = lastNight()
+  const failed = ran - 48 * HOUR
   return {
     rules: [
       rule(11, { kind: "disk", threshold: 90, minutes: 5 }),
@@ -100,8 +114,8 @@ function watching() {
         jobId: 3,
         label: "nightly-db",
         state: "quiet",
-        reading: 7,
-        detail: "The next run of nightly-db is due 2026-10-18 03:00 UTC.",
+        reading: (Date.now() - ran) / HOUR,
+        detail: `The next run of nightly-db is due ${utc(ran + 24 * HOUR)}.`,
         checkedAt: ago(0.2),
       },
     ],
@@ -153,12 +167,11 @@ function watching() {
         subject: "job:3",
         label: "nightly-db",
         event: "fired",
-        detail:
-          "The run of nightly-db that started 2026-10-15 03:00 UTC failed: pg_dump: error: connection refused",
+        detail: `The run of nightly-db that started ${utc(failed)} failed: pg_dump: error: connection refused`,
         delivered: 0,
         failed: 0,
         kept: "cooldown",
-        createdAt: ago(2900),
+        createdAt: new Date(failed + 4 * 60_000).toISOString(),
       },
     ],
     lastPass: ago(0.2),
@@ -251,11 +264,14 @@ test.describe("database alerts", () => {
 
     const disk = ruleRow(page, "Disk filling up")
     await expect(disk.getByText("above 90% for 5 min")).toBeVisible()
-    await expect(disk.getByText(/Firing · 92% used since/)).toBeVisible()
+    // Said to the minute: a status that ticked seconds read as a clock.
+    await expect(disk.getByText(/^Firing for \d+ min · 92% used$/)).toBeVisible()
     // The reading is drawn against the rule's line, and said in the server's words.
     await expect(disk.getByRole("meter", { name: "92% used against a 90% line" })).toBeVisible()
     await expect(disk.getByText(/of the volume shop-pgdata is used/)).toBeVisible()
     await expect(rules(page).getByText("1 firing")).toBeVisible()
+    // Where the messages go is its own phrase beside the count.
+    await expect(rules(page).getByText("Goes to", { exact: true })).toBeVisible()
 
     await expect(
       ruleRow(page, "Connections near the limit").getByText(/Quiet · 32% of the limit/),
@@ -321,7 +337,7 @@ test.describe("database alerts", () => {
     await again.getByLabel("Cooldown in minutes").fill("abc")
     await again.getByRole("button", { name: "Add alert" }).click()
     // Refused before it is sent, beside the field that caused it.
-    await expect(again.getByText("Between 0 and 10080 minutes.")).toBeVisible()
+    await expect(again.getByText("Between 0 min and 7 days.")).toBeVisible()
     await again.getByLabel("Cooldown in minutes").fill("0")
     await again.getByRole("button", { name: "Add alert" }).click()
     await expect(again).toHaveCount(0)
@@ -370,6 +386,10 @@ test.describe("database alerts", () => {
       ),
     ).toBeVisible()
     await expect(recent(page).getByText("Nothing has been told about shop yet.")).toBeVisible()
+    // The channels a first rule would tell are drawn as they are, not as something to add.
+    const picture = page.getByRole("list", { name: "Who is told about shop" })
+    await expect(picture.getByText("on-call · ops mail")).toBeVisible()
+    await expect(picture.getByText("once a rule is added")).toBeVisible()
     await rules(page)
       .getByRole("button", { name: /^Disk filling up/ })
       .click()
@@ -394,9 +414,12 @@ test.describe("database alerts", () => {
   test("a viewer reads the rules and is offered nothing to change", async ({ page }) => {
     await mockAlerts(page, { viewer: true })
     await visit(page)
-    await expect(ruleRow(page, "Disk filling up").getByText(/Firing · 92% used/)).toBeVisible()
+    await expect(
+      ruleRow(page, "Disk filling up").getByText(/Firing for \d+ min · 92% used/),
+    ).toBeVisible()
     await expect(page.getByRole("button", { name: "Add alert" })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
+    // The strip's own menu is the database's, not a rule's.
+    await expect(rules(page).getByRole("button", { name: /^Actions for/ })).toHaveCount(0)
 
     await page.unrouteAll({ behavior: "ignoreErrors" })
     await mockAlerts(page, { viewer: true, alerts: NOTHING() })
@@ -409,7 +432,9 @@ test.describe("database alerts", () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await mockAlerts(page)
     await visit(page)
-    await expect(ruleRow(page, "Disk filling up").getByText(/Firing · 92% used/)).toBeVisible()
+    await expect(
+      ruleRow(page, "Disk filling up").getByText(/Firing for \d+ min · 92% used/),
+    ).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
@@ -424,7 +449,9 @@ test.describe("database alerts", () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockAlerts(page)
     await visit(page)
-    await expect(ruleRow(page, "Disk filling up").getByText(/Firing · 92% used/)).toBeVisible()
+    await expect(
+      ruleRow(page, "Disk filling up").getByText(/Firing for \d+ min · 92% used/),
+    ).toBeVisible()
     await page.screenshot({ path: `${dir}/alerts-firing-1440.png` })
 
     await rules(page).getByRole("button", { name: "Add alert" }).click()
@@ -433,18 +460,27 @@ test.describe("database alerts", () => {
     await sheet.getByLabel("Alert line").fill("30")
     await sheet.getByRole("switch", { name: /on-call/ }).click()
     await expect(sheet.getByText(/more than 30 s behind/)).toBeVisible()
+    // Off the switch it pressed, or its hover reads as a choice.
+    await page.mouse.move(0, 0)
     await page.screenshot({ path: `${dir}/alerts-add-1440.png` })
     await sheet.getByRole("button", { name: "Cancel" }).click()
 
     await page
       .getByRole("button", { name: "Actions for Disk filling up: above 90% for 5 min" })
       .click()
+    const menu = page.getByRole("menu")
+    await expect(menu.getByRole("menuitem", { name: "Send test" })).toBeVisible()
+    await menu.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    )
     await page.screenshot({ path: `${dir}/alerts-menu-1440.png` })
     await page.keyboard.press("Escape")
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.reload()
-    await expect(ruleRow(page, "Disk filling up").getByText(/Firing · 92% used/)).toBeVisible()
+    await expect(
+      ruleRow(page, "Disk filling up").getByText(/Firing for \d+ min · 92% used/),
+    ).toBeVisible()
     await page.screenshot({ path: `${dir}/alerts-firing-390.png` })
 
     await page.unrouteAll({ behavior: "ignoreErrors" })
@@ -457,7 +493,9 @@ test.describe("database alerts", () => {
     await page.unrouteAll({ behavior: "ignoreErrors" })
     await mockAlerts(page, { viewer: true })
     await visit(page)
-    await expect(ruleRow(page, "Disk filling up").getByText(/Firing · 92% used/)).toBeVisible()
+    await expect(
+      ruleRow(page, "Disk filling up").getByText(/Firing for \d+ min · 92% used/),
+    ).toBeVisible()
     await page.screenshot({ path: `${dir}/alerts-viewer-1440.png` })
   })
 })

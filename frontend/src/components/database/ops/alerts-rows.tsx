@@ -15,6 +15,7 @@ import type { DbAlertKind, NotificationChannel } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import { ChannelNames } from "@/components/deploy/settings/traffic-alerts"
+import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { Meter } from "@/components/meter"
 import { ProductLogo } from "@/components/product-logo"
 import { Status, type DotTone } from "@/components/status-dot"
@@ -25,6 +26,7 @@ import {
   ALERT_KINDS,
   draftFor,
   eventOutcome,
+  firingFor,
   focusOf,
   isBackupKind,
   meterOf,
@@ -91,13 +93,13 @@ function standing(
       return {
         tone: "danger",
         meter: "danger",
-        label: `Firing · ${reading}${focus.since ? ` since ${relativeTime(focus.since)}` : ""}`,
+        label: `Firing${focus.since ? ` for ${firingFor(focus.since)}` : ""} · ${reading}`,
       }
     case "held":
       return {
         tone: "danger",
         meter: "danger",
-        label: `Firing · ${reading}, kept back by the cooldown`,
+        label: `Firing${focus.since ? ` for ${firingFor(focus.since)}` : ""} · ${reading}, held by the cooldown`,
       }
     case "pending":
       return { tone: "warning", meter: "warning", label: `Holding · ${reading}` }
@@ -195,6 +197,33 @@ export function AlertRow({
         </p>
       )}
     </li>
+  )
+}
+
+/**
+ * Where the rules' messages go, as the services they post to and their
+ * names. It is its own phrase beside the firing count, never run on from it.
+ */
+export function GoesTo({
+  channels,
+  className,
+}: {
+  channels: NotificationChannel[]
+  className?: string
+}) {
+  if (channels.length === 0) {
+    return <span className={cn("text-warning", className)}>No channel yet, so nobody is told</span>
+  }
+  return (
+    <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1", className)}>
+      <span>Goes to</span>
+      {channels.map((channel) => (
+        <span key={channel.id} className="inline-flex min-w-0 items-center gap-1">
+          <ChannelGlyph channel={channel} />
+          <span className="truncate text-foreground/85">{channel.name}</span>
+        </span>
+      ))}
+    </span>
   )
 }
 

@@ -13,7 +13,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
+import { toldBy } from "@/components/deploy/settings/traffic-alerts"
+import { FactDot } from "@/components/metrics/host-identity"
 import { Panel, PanelHeader } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
@@ -30,7 +31,13 @@ import {
   sentence,
 } from "@/components/database/ops/alerts-model"
 import { AlertsPicture } from "@/components/database/ops/alerts-picture"
-import { AlertRow, EventRow, KindTile, StarterCard } from "@/components/database/ops/alerts-rows"
+import {
+  AlertRow,
+  EventRow,
+  GoesTo,
+  KindTile,
+  StarterCard,
+} from "@/components/database/ops/alerts-rows"
 import type { DbAlertRule, DbAlerts, DbAlertTest } from "@/components/database/ops/alerts-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -89,7 +96,6 @@ export function Alerts() {
       .sort((a, b) => a - b)
       .join()
   const shared = rules.every((rule) => told(rule) === told(rules[0]))
-  const everyChannel = rules.some((rule) => rule.channels.length === 0)
   const reached = [...new Set(rules.flatMap((rule) => toldBy(rule.channels, channelList)))]
 
   const edit = (next: { rule?: DbAlertRule; kind?: DbAlertKind }) => {
@@ -220,10 +226,14 @@ export function Alerts() {
                   {firing} firing
                 </span>
               )}
+              {firing > 0 && rules.length > 0 && (
+                <span aria-hidden className="hidden md:inline">
+                  <FactDot />
+                </span>
+              )}
               {rules.length > 0 && (
-                <ChannelNames
-                  ids={everyChannel ? [] : reached.map((channel) => channel.id)}
-                  channels={channelList}
+                <GoesTo
+                  channels={reached}
                   className="hidden text-hint text-muted-foreground md:inline-flex"
                 />
               )}

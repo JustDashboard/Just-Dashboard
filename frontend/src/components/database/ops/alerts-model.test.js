@@ -9,6 +9,7 @@ import {
   draftRule,
   durationWords,
   eventOutcome,
+  firingFor,
   focusOf,
   isBackupKind,
   isFiring,
@@ -72,6 +73,11 @@ describe("a rule as a sentence", () => {
     expect(durationWords(1440)).toBe("1 day")
     expect(durationWords(10080)).toBe("7 days")
     expect(cooldownWords(0)).toBe("every time it crosses")
+    // A firing is said to the minute, so the status does not tick like a clock.
+    const now = Date.parse("2026-10-17T03:30:00Z")
+    expect(firingFor("2026-10-17T03:20:30Z", now)).toBe("9 min")
+    expect(firingFor("2026-10-17T03:29:50Z", now)).toBe("1 min")
+    expect(firingFor("2026-10-17T01:00:00Z", now)).toBe("2 h 30 min")
     expect(cooldownWords(30)).toBe("at most once every 30 min")
   })
 
@@ -116,6 +122,11 @@ describe("the form's draft", () => {
     expect(Object.keys(draftErrors({ ...draft, threshold: "" }))).toEqual(["threshold"])
     expect(Object.keys(draftErrors({ ...draft, minutes: "2.5" }))).toEqual(["minutes"])
     expect(Object.keys(draftErrors({ ...draft, cooldown: "-1" }))).toEqual(["cooldown"])
+    // The ranges are said in words, not as raw bounds.
+    expect(draftErrors({ ...draftFor(undefined, "replication", "this"), threshold: "0" })).toEqual({
+      threshold: "Between 1 s and 24 h (86400 s).",
+    })
+    expect(draftErrors({ ...draft, cooldown: "20000" }).cooldown).toBe("Between 0 min and 7 days.")
     const down = draftFor(undefined, "down", "this")
     expect(Object.keys(draftErrors({ ...down, minutes: "0" }))).toEqual(["minutes"])
     // A kind with no line has nothing to refuse there.
@@ -173,6 +184,10 @@ describe("where a rule stands", () => {
       mark: 90,
       label: "45% used against a 90% line",
     })
+    expect(
+      meterOf(rule({ kind: "connections", threshold: 80 }), subject("quiet", { reading: 32 }))
+        .label,
+    ).toBe("32% of the limit against an 80% line")
     const lag = meterOf(
       rule({ kind: "replication", threshold: 60 }),
       subject("firing", { reading: 150 }),

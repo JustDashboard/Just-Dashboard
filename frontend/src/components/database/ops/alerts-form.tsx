@@ -26,7 +26,6 @@ import {
   draftErrors,
   draftFor,
   draftRule,
-  durationWords,
   sentence,
   withKind,
   type AlertDraft,
@@ -181,7 +180,7 @@ export function AlertForm({
             <Field
               label={draft.kind === "replication" ? "Behind by more than" : "Above"}
               htmlFor={lineId}
-              hint={`${spec.line.min} to ${spec.line.max}`}
+              hint={spec.line.of}
               error={errors.threshold}
               className="animate-rise"
             >
@@ -207,9 +206,7 @@ export function AlertForm({
               hint={
                 draft.kind === "backup_missed"
                   ? "After a run was due."
-                  : Number(draft.minutes) > 0
-                    ? `= ${durationWords(Number(draft.minutes) || 0)}`
-                    : "Two readings in a row."
+                  : draft.minutes.trim() === "0" && "Two readings in a row, 30 s apart."
               }
               info={
                 draft.kind === "backup_missed"

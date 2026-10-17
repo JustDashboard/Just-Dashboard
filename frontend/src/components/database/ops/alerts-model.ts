@@ -20,7 +20,8 @@ export type AlertKindSpec = {
   hint: string
   /** The line's unit; absent for a kind with no line. */
   unit?: "%" | "s"
-  line?: { min: number; max: number; start: number }
+  /** Its range, where it starts, and in words what it is of and how far it goes. */
+  line?: { min: number; max: number; start: number; of: string; range: string }
   /** How long it must hold, or a missed backup's grace after its time. */
   minutes: { min: number; max: number; start: number; label: string }
   /** The rule's predicate, read after its label and a colon. */
@@ -42,54 +43,77 @@ export function durationWords(minutes: number): string {
 
 const held = (minutes: number) => (minutes > 0 ? ` for ${durationWords(minutes)}` : "")
 
+/** How long a subject has been firing, to the minute: a status that ticked seconds read as a clock. */
+export function firingFor(since: string, now = Date.now()) {
+  return durationWords(Math.max(1, Math.floor((now - Date.parse(since)) / 60_000)))
+}
+
+/** "a" or "an" before a figure, as it is said: an 80% line, an 18 s line. */
+function article(figure: number) {
+  const said = String(figure)
+  return said.startsWith("8") || /^(11|18)(\d{3})?$/.test(said) ? "an" : "a"
+}
+
 const percent = (value: number) =>
   `${value >= 10 || value === 0 ? Math.round(value) : value.toFixed(1)}%`
 
 export const ALERT_KINDS: Record<DbAlertKind, AlertKindSpec> = {
   down: {
     label: "Server down",
-    hint: "It does not answer the dashboard for a few minutes.",
+    hint: "The server doesn't answer.",
     minutes: { min: 1, max: 1440, start: 2, label: "For" },
     describe: (rule) => `no answer${held(rule.minutes)}`,
     read: (reading) => (reading > 0 ? "not answering" : "answering"),
   },
   disk: {
     label: "Disk filling up",
-    hint: "The disk its data is on passes a share of its size.",
+    hint: "Its data volume passes a set % full.",
     unit: "%",
-    line: { min: 10, max: 99, start: 90 },
+    line: { min: 10, max: 99, start: 90, of: "Of the disk's size.", range: "Between 10% and 99%." },
     minutes: { min: 0, max: 1440, start: 5, label: "For" },
     describe: (rule) => `above ${rule.threshold}%${held(rule.minutes)}`,
     read: (reading) => `${percent(reading)} used`,
   },
   connections: {
     label: "Connections near the limit",
-    hint: "The sessions it holds near the most it allows.",
+    hint: "Open connections near the server's limit.",
     unit: "%",
-    line: { min: 10, max: 100, start: 80 },
+    line: {
+      min: 10,
+      max: 100,
+      start: 80,
+      of: "Of the most it allows.",
+      range: "Between 10% and 100%.",
+    },
     minutes: { min: 0, max: 1440, start: 5, label: "For" },
     describe: (rule) => `above ${rule.threshold}% of the limit${held(rule.minutes)}`,
     read: (reading) => `${percent(reading)} of the limit`,
   },
   replication: {
     label: "Replication behind",
-    hint: "A replica falls behind, or stops following.",
+    hint: "A replica falls behind or stops following.",
     unit: "s",
-    line: { min: 1, max: 86400, start: 60 },
+    line: {
+      min: 1,
+      max: 86400,
+      start: 60,
+      of: "Seconds behind, up to 24 h.",
+      range: "Between 1 s and 24 h (86400 s).",
+    },
     minutes: { min: 0, max: 1440, start: 2, label: "For" },
     describe: (rule) => `more than ${rule.threshold} s behind${held(rule.minutes)}, or stopped`,
     read: (reading) => (reading < 0 ? "stopped" : `${Math.round(reading)} s behind`),
   },
   backup_failed: {
     label: "Backup failed",
-    hint: "The last run of a backup job that dumps it failed.",
+    hint: "A backup job for it fails.",
     minutes: NO_HOLD,
     describe: () => "the last run of a backup job fails",
     read: (reading) => (reading > 0 ? "last run failed" : "last run succeeded"),
   },
   backup_missed: {
     label: "Backup missed",
-    hint: "A scheduled backup has not succeeded by its time.",
+    hint: "No successful backup when one was due.",
     minutes: { min: 5, max: 10080, start: 60, label: "Grace" },
     describe: (rule) => `no successful run ${durationWords(rule.minutes)} after one is due`,
     read: (hours) => `${Math.round(hours)} h since a success`,
@@ -182,18 +206,18 @@ export function draftErrors(
       value < spec.line.min ||
       value > spec.line.max
     ) {
-      errors.threshold = `Between ${spec.line.min} and ${spec.line.max}${spec.unit === "%" ? "%" : " s"}.`
+      errors.threshold = spec.line.range
     }
   }
   if (spec.minutes.max > 0) {
     const value = whole(draft.minutes)
     if (!(value >= spec.minutes.min && value <= spec.minutes.max)) {
-      errors.minutes = `Between ${spec.minutes.min} and ${spec.minutes.max} minutes.`
+      errors.minutes = `Between ${durationWords(spec.minutes.min)} and ${durationWords(spec.minutes.max)}.`
     }
   }
   const cooldown = whole(draft.cooldown)
   if (!(cooldown >= 0 && cooldown <= MAX_COOLDOWN)) {
-    errors.cooldown = `Between 0 and ${MAX_COOLDOWN} minutes.`
+    errors.cooldown = `Between 0 min and ${durationWords(MAX_COOLDOWN)}.`
   }
   return errors
 }
@@ -255,6 +279,6 @@ export function meterOf(rule: DbAlertRule, subject: DbAlertSubject | undefined) 
   return {
     value: (subject.reading / scale) * 100,
     mark: (rule.threshold / scale) * 100,
-    label: `${spec.read(subject.reading)} against a ${rule.threshold}${spec.unit === "%" ? "%" : " s"} line`,
+    label: `${spec.read(subject.reading)} against ${article(rule.threshold)} ${rule.threshold}${spec.unit === "%" ? "%" : " s"} line`,
   }
 }

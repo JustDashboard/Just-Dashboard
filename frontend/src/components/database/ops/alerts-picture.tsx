@@ -87,6 +87,10 @@ export function AlertsPicture({
       hint={data?.lastPass ? `checked ${relativeTime(data.lastPass)}` : "not checked yet"}
     />
   )
+  // With channels and no rule yet, the channels a first rule would tell are
+  // drawn as they are, muted, rather than as a thing still to be added.
+  const waiting =
+    channels.filter((c) => c.enabled).length > 0 ? channels.filter((c) => c.enabled) : channels
   const told = (
     <WireNode
       nodeRef={channelsMark}
@@ -96,6 +100,10 @@ export function AlertsPicture({
           <WireMark size="md" tone="logo">
             <ChannelGlyph channel={reached[0]} />
           </WireMark>
+        ) : channels.length > 0 ? (
+          <WireMark size="md" tone="neutral">
+            <ChannelGlyph channel={waiting[0]} />
+          </WireMark>
         ) : (
           <WirePlaceholder size="md" fallback={Bell} />
         )
@@ -104,10 +112,12 @@ export function AlertsPicture({
       title={
         reached.length > 0 ? (
           <span className="wrap-anywhere">{reached.map((c) => c.name).join(" · ")}</span>
-        ) : (
-          <span className="text-muted-foreground">
-            {channels.length === 0 ? "No notification channel" : "Nobody yet"}
+        ) : channels.length > 0 ? (
+          <span className="wrap-anywhere text-muted-foreground">
+            {waiting.map((c) => c.name).join(" · ")}
           </span>
+        ) : (
+          <span className="text-muted-foreground">No notification channel</span>
         )
       }
       hint={
@@ -118,6 +128,12 @@ export function AlertsPicture({
             />
             {plural(reached.length, "channel")}
           </span>
+        ) : reached.length === 0 && channels.length > 0 ? (
+          rules.length === 0 ? (
+            "once a rule is added"
+          ) : (
+            "nobody is told: its channels are paused or gone"
+          )
         ) : (
           <Link
             href="/deploy/notifications"
