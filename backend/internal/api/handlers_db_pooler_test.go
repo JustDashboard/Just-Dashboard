@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,6 +139,7 @@ func pooledHarness(t *testing.T) (h *connHarness, id int64, pooler *fakeDBContai
 		hostIP: "127.0.0.1", hostPort: 6433, port: dbx.PoolerListenPort}
 	h.engine.containers = []*fakeDBContainer{database, pooler}
 	id = h.add("pg", dbx.DriverPostgres, fmt.Sprintf("postgres://app:pw@127.0.0.1:%d/app?sslmode=disable", port))
+	pooler.labels = map[string]string{poolerLabel: strconv.FormatInt(id, 10)}
 	rec := &poolerRecord{
 		ConnectionID: id, Container: "pg-pgbouncer", ContainerID: "bb22", Network: poolerNetworkName(id), HostPort: 6433,
 		ServerName: "pg", ServerPort: 5432, Settings: dbx.DefaultPoolerSettings(),
