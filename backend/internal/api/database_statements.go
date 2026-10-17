@@ -329,10 +329,11 @@ func (s *Server) pruneStatementHistory(ctx context.Context, cutoff time.Time) {
 var statementHistorySorts = []string{"total", "mean", "calls", "rows", "rowsRead", "p95"}
 
 // How many points a window is cut into: the list's trend is a sparkline, the
-// one statement's charts are read off.
+// one statement's charts are read off — a point an hour over a week, one
+// every ten minutes over a day, one a reading over six hours or less.
 const (
 	statementTrendPoints = 24
-	statementChartPoints = 120
+	statementChartPoints = 168
 )
 
 // statementBucket is a window's step for about that many points: a whole
