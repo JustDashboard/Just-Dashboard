@@ -129,6 +129,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"privileges":      "postgres -cockroachdb mysql sqlserver clickhouse",
 		"statements":      "postgres -cockroachdb mysql -tidb clickhouse sqlserver oracle",
 		"statementsReset": "postgres -cockroachdb mysql -tidb",
+		"statementsSetup": "postgres -cockroachdb -yugabytedb",
 		"queryLog":        "postgres mysql clickhouse mongodb redis",
 		"clickhouseViews": "clickhouse",
 		"sqliteFile":      "sqlite",

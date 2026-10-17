@@ -263,6 +263,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   privileges: false,
   statements: false,
   statementsReset: false,
+  statementsSetup: false,
   queryLog: false,
   clickhouseViews: false,
   sqliteFile: false,

@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Count a new PostgreSQL server's statements from its first start, and turn the statistics on for one that never loaded them",
+          "detail": "Every PostgreSQL template, pgvector, PostGIS and TimescaleDB among them, now starts with pg_stat_statements loaded and the extension created in its new database, so Performance ranks statements at once; TimescaleDB keeps its own library beside it, and the list stays one the Parameters page can change. Logging the plan of every statement slower than a second (auto_explain) is a choice when the database is created. On a server that never loaded the module, Turn on statement statistics adds it to the libraries the server loads at start, keeping the ones it has, then asks before restarting the server and creates the extension once it answers again; where the dashboard cannot restart the server, it says where that happens instead."
         }
       ]
     },

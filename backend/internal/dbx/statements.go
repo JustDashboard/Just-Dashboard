@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,8 +61,16 @@ type StatementsEnable struct {
 	Available bool `json:"available"`
 	// Preloaded is false when the module is installed but not loaded at
 	// start, so creating the extension would give a view that errors.
-	Preloaded bool   `json:"preloaded"`
-	Note      string `json:"note,omitempty"`
+	Preloaded bool `json:"preloaded"`
+	// Configured is true when the module is not loaded and is in the list
+	// the server loads at its next start: a restart is what is left.
+	Configured bool `json:"configured"`
+	// Preload is the statement that adds the module to that list, keeping
+	// every library already in it — what PreloadStatements runs — where this
+	// account can run it. Blocked says why it cannot, where it cannot.
+	Preload string `json:"preload,omitempty"`
+	Blocked string `json:"blocked,omitempty"`
+	Note    string `json:"note,omitempty"`
 }
 
 type StatementsReport struct {
@@ -137,6 +146,12 @@ type StatementResetter interface {
 	ResetStatements(ctx context.Context, db *sql.DB) (statement string, err error)
 }
 
+// StatementsPreloader is the optional half for an engine whose statistics
+// come from a library the server has to load as it starts.
+type StatementsPreloader interface {
+	PreloadStatements(ctx context.Context, db *sql.DB) (*SettingChange, error)
+}
+
 // ErrBadStatementsOption marks a sort the request named that is not one of
 // the closed set.
 type ErrBadStatementsOption struct{ msg string }
@@ -194,31 +209,193 @@ func ResetStatements(ctx context.Context, db *sql.DB, driver Driver) (string, er
 	return r.ResetStatements(ctx, db)
 }
 
+// PreloadStatements adds the engine's statistics library to the ones the
+// server loads at its next start, and returns what that did. The restart that
+// loads it is the caller's to decide on.
+func PreloadStatements(ctx context.Context, db *sql.DB, driver Driver) (*SettingChange, error) {
+	d, err := DialectFor(driver)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := d.(StatementsPreloader)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return p.PreloadStatements(ctx, db)
+}
+
 // --- PostgreSQL --------------------------------------------------------------
+
+// pgStatementsLibrary is the module, the library it is loaded from and the
+// extension it is created as: all three have the one name.
+const pgStatementsLibrary = "pg_stat_statements"
+
+// pgPreload is what decides the libraries PostgreSQL loads as it starts: the
+// list it loaded, the list its next start will load, where the value comes
+// from and whether this account may change it.
+type pgPreload struct {
+	loaded, next []string
+	source       string
+	super        bool
+}
+
+// readPgPreload reads the list the server loaded and the one it will load.
+// The second is the last line the configuration files hold for it — ALTER
+// SYSTEM's, where it has run — whatever the server says of that line now: a
+// line it cannot apply until it restarts is marked with an error, and is the
+// very line the next start reads. Only a superuser may read the files, and
+// only a superuser may change the list, so for anybody else the two are the
+// same list. A value set on the command line is the next start's whatever the
+// files say.
+func readPgPreload(ctx context.Context, db *sql.DB) (pgPreload, error) {
+	var out pgPreload
+	var loaded string
+	if err := db.QueryRowContext(ctx, `
+	  SELECT setting, COALESCE(source, ''),
+	         COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false)
+	  FROM pg_settings WHERE name = 'shared_preload_libraries'`).Scan(&loaded, &out.source, &out.super); err != nil {
+		return out, err
+	}
+	out.loaded = pgLibraries(loaded)
+	out.next = out.loaded
+	if !out.super || out.source == "command line" {
+		return out, nil
+	}
+	var stored string
+	switch err := db.QueryRowContext(ctx, `
+	  SELECT setting FROM pg_file_settings
+	  WHERE name = 'shared_preload_libraries'
+	  ORDER BY seqno DESC LIMIT 1`).Scan(&stored); {
+	case err == nil:
+		out.next = pgLibraries(stored)
+	case !errors.Is(err, sql.ErrNoRows):
+		return out, err
+	}
+	return out, nil
+}
+
+// blocked says why the list cannot be changed from here, or nothing.
+func (p pgPreload) blocked() string {
+	switch {
+	case p.source == "command line":
+		return "shared_preload_libraries is set on the command line this server is started with, which outranks anything stored from here; add pg_stat_statements there."
+	case !p.super:
+		return "Only a superuser can change shared_preload_libraries, and the account this connection signs in with is not one."
+	}
+	return ""
+}
+
+// pgLibraries reads a shared_preload_libraries value as its libraries, in
+// order: the server prints the list with commas, and quotes a name that needs
+// it.
+func pgLibraries(value string) []string {
+	out := []string{}
+	for _, item := range strings.Split(value, ",") {
+		if name := strings.Trim(strings.TrimSpace(item), `"`); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func hasLibrary(libraries []string, name string) bool {
+	for _, lib := range libraries {
+		if lib == name {
+			return true
+		}
+	}
+	return false
+}
+
+// withStatementsLibrary is a list of libraries with the statistics library
+// added at its end.
+func withStatementsLibrary(libraries []string) []string {
+	return append(append([]string{}, libraries...), pgStatementsLibrary)
+}
+
+// pgPreloadStatement is the ALTER SYSTEM that stores libraries as the list to
+// load. It is the statement the page shows before the change and the one the
+// change runs, written by the rules the Parameters page writes the same
+// parameter by: each library its own literal.
+func pgPreloadStatement(libraries []string) string {
+	return `ALTER SYSTEM SET "shared_preload_libraries" = ` +
+		pgSettingLiteral(Setting{Name: "shared_preload_libraries"}, strings.Join(libraries, ", "))
+}
 
 // pgStatementsEnable works out why there are no statistics. The module is
 // useless unless it was loaded at server start, so "create the extension" is
-// only the answer when shared_preload_libraries already names it.
+// only the answer when shared_preload_libraries already names it; before
+// that, the answer is the library added to the list and a restart, which is
+// offered only where the module is installed — a server told to load a
+// library it cannot find does not start.
 func pgStatementsEnable(ctx context.Context, db *sql.DB) *StatementsEnable {
-	out := &StatementsEnable{Extension: "pg_stat_statements"}
+	out := &StatementsEnable{Extension: pgStatementsLibrary}
 	_ = db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_stat_statements')`).Scan(&out.Available)
-	var preload sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT current_setting('shared_preload_libraries', true)`).Scan(&preload); err == nil {
-		for _, lib := range strings.Split(preload.String, ",") {
-			if strings.TrimSpace(lib) == "pg_stat_statements" {
-				out.Preloaded = true
-			}
-		}
+	preload, err := readPgPreload(ctx, db)
+	if err == nil {
+		out.Preloaded = hasLibrary(preload.loaded, pgStatementsLibrary)
+		out.Configured = !out.Preloaded && hasLibrary(preload.next, pgStatementsLibrary)
 	}
 	switch {
 	case !out.Available:
 		out.Note = "The pg_stat_statements module is not installed on this server; it ships in the contrib package of the same PostgreSQL version."
-	case !out.Preloaded:
-		out.Note = "Add pg_stat_statements to shared_preload_libraries and restart the server first; the extension only records once it is loaded at start."
-	default:
+	case out.Preloaded:
 		out.SQL = "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+	case out.Configured:
+		out.Note = "pg_stat_statements is set to load the next time the server starts; the statistics begin once it has restarted."
+	default:
+		// Where the page can do it, the note says what it takes rather than
+		// telling the reader to do by hand what the button beside it does.
+		out.Note = "Add pg_stat_statements to shared_preload_libraries and restart the server first; the extension only records once it is loaded at start."
+		if err == nil {
+			if out.Blocked = preload.blocked(); out.Blocked == "" {
+				out.Preload = pgPreloadStatement(withStatementsLibrary(preload.next))
+				out.Note = "Statement statistics need pg_stat_statements loaded when the server starts. Turning them on takes one restart."
+			}
+		}
 	}
 	return out
+}
+
+// PreloadStatements stores pg_stat_statements in shared_preload_libraries
+// beside every library already there, and asks the server to read its
+// configuration again. The parameter is read only at start, so nothing is
+// loaded until the server restarts; RestartRequired says so.
+//
+// The list it adds to is the one the next start would load, not the one the
+// server is running with: a library somebody stored and has not restarted
+// for yet is kept. A list that already names the module stores nothing.
+func (postgresDialect) PreloadStatements(ctx context.Context, db *sql.DB) (*SettingChange, error) {
+	var available bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_stat_statements')`).Scan(&available); err != nil {
+		return nil, err
+	}
+	if !available {
+		return nil, settingRefused("the pg_stat_statements module is not installed on this server, and a server told to load a library it cannot find does not start")
+	}
+	preload, err := readPgPreload(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	const name = "shared_preload_libraries"
+	if hasLibrary(preload.next, pgStatementsLibrary) {
+		return &SettingChange{
+			Name: name, Value: strings.Join(preload.next, ","), Statements: []string{}, Persisted: true,
+			RestartRequired: !hasLibrary(preload.loaded, pgStatementsLibrary),
+		}, nil
+	}
+	if reason := preload.blocked(); reason != "" {
+		return nil, settingRefused("%s", reason)
+	}
+	libraries := withStatementsLibrary(preload.next)
+	out, err := pgApplySetting(ctx, db, Setting{Name: name, Context: "postmaster"}, pgPreloadStatement(libraries))
+	if err != nil {
+		return nil, err
+	}
+	// What was stored, rather than what the files are read back as: a line
+	// waiting for a restart is not one pgApplySetting reads.
+	out.Name, out.Value = name, strings.Join(libraries, ",")
+	return out, nil
 }
 
 func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsOptions) (*StatementsReport, error) {

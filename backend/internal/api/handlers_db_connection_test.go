@@ -1568,7 +1568,7 @@ var gatedCapabilities = []string{
 	"comments", "indexes", "extensions",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
-	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "queryLog", "clickhouseViews", "sqliteFile",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "queryLog", "clickhouseViews", "sqliteFile",
 	// Redis
 	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
 	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
