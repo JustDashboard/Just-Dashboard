@@ -7,6 +7,7 @@ import { DownHome } from "@/components/database/home/down"
 import { DocumentHome } from "@/components/database/home/mongo-home"
 import { KeyValueHome } from "@/components/database/home/redis-home"
 import { SqlHome } from "@/components/database/home/sql-home"
+import { StatementsSetupHost } from "@/components/database/ops/statements-setup"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
@@ -39,7 +40,9 @@ export function DatabaseHome() {
   const answering = status.state === "running"
   return (
     <SectionFrame section="home">
-      {answering && Home ? <Home key="answering" /> : <DownHome key="down" />}
+      <StatementsSetupHost>
+        {answering && Home ? <Home key="answering" /> : <DownHome key="down" />}
+      </StatementsSetupHost>
     </SectionFrame>
   )
 }
