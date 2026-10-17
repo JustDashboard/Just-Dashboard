@@ -150,6 +150,13 @@ var capabilityTable = []Capability{
 	// The dashboard can start one from its own closed list of images.
 	{"provision", On("postgres", "mysql", "redis", "mongodb", "clickhouse").
 		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB)},
+	// A server the dashboard started can speak TLS with a certificate from its
+	// own authority. The engines that are provisioned and can be told to: KeyDB
+	// and Dragonfly read their TLS settings in ways the template does not drive,
+	// ClickHouse's are an XML file, and the forks that cannot be provisioned have
+	// no container of the dashboard's to mount a certificate into.
+	{"serverTLS", On("postgres", "mysql", "redis", "mongodb").
+		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB, FlavorKeyDB, FlavorDragonfly)},
 }
 
 // listOf is the answer of a flag whose value is a list. Never nil: an engine

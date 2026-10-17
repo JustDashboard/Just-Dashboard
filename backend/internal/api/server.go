@@ -88,7 +88,10 @@ type Server struct {
 	// (handlers_procs.go).
 	procContainers containerNames
 
-	dbConns        dbConnState
+	dbConns dbConnState
+	// Certificates for the databases this dashboard started
+	// (database_tls.go).
+	dbTLS          dbTLSState
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
@@ -208,6 +211,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// happen, whether or not anybody has the Routing page open.
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
+	s.startDatabaseTLS(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -297,6 +301,7 @@ func (s *Server) Shutdown() {
 	}
 	s.stopProxyExtras()
 	s.stopDatabaseMetrics()
+	s.stopDatabaseTLS()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {

@@ -15,6 +15,7 @@ import { DangerSection } from "@/components/database/ops/settings-danger"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { TransportSecuritySection } from "@/components/database/ops/settings-tls"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -123,9 +124,15 @@ export function Settings() {
 }
 
 export function SettingsNetwork() {
+  const { engine } = useDatabase()
   return (
     <SettingsFrame page="network">
-      {(confirm) => <ReachabilitySection confirm={confirm} />}
+      {(confirm) => (
+        <>
+          <ReachabilitySection confirm={confirm} />
+          {engine.can("serverTLS") && <TransportSecuritySection confirm={confirm} />}
+        </>
+      )}
     </SettingsFrame>
   )
 }

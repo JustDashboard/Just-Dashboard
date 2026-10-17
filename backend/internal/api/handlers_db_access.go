@@ -335,6 +335,10 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 	}
 	ctx, cancel := timeoutCtx(r, 5*time.Minute)
 	defer cancel()
+	// Both this and a TLS change recreate the container, and two recreates of
+	// one container at once would each park the other's.
+	s.dbTLS.mu.Lock()
+	defer s.dbTLS.mu.Unlock()
 
 	server := s.serverBehind(ctx, conn, info)
 	if server == nil {
@@ -391,6 +395,15 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 	detail["firewall"] = firewall
 	if ferr != nil {
 		detail["firewallError"] = ferr.Error()
+	}
+	// A certificate names the addresses its server is reached at, and this
+	// change is what adds or removes one of them.
+	if row, err := s.dbTLSRow(ctx, id); err == nil && row != nil && s.dbTLSRenewalReason(ctx, id, row.NotAfter) == "names" {
+		if _, renewed, err := s.renewDBTLSLocked(ctx, id, "names"); err != nil {
+			detail["tlsError"] = err.Error()
+		} else {
+			detail["tlsNames"] = renewed["names"]
+		}
 	}
 	httpx.SetAudit(r, "database.access.change", conn.Name, detail)
 
@@ -476,6 +489,7 @@ func publicConnectionURL(driver dbx.Driver, dsn string, info *dbx.ConnInfo, addr
 		return "", fmt.Errorf("this server has no public address")
 	}
 	// applicationConnectionURL joins host and port itself, bracketing an
-	// IPv6 literal on the way.
+	// IPv6 literal on the way. The caller has already made the string one for
+	// another machine (applicationDSN).
 	return applicationConnectionURL(driver, dsn, info, address, info.Port)
 }

@@ -1842,6 +1842,7 @@ export type DbCapabilityFlag =
   // Connections and discovery.
   | "server" // a process that listens, logs and can be started; false = a file
   | "provision" // the dashboard can start one from its own images
+  | "serverTLS" // a server it started can speak TLS with a certificate from its own authority
   | "inventoryConnect" // can be connected from the inventory by its key
   | "hostAccount" // POST /host/grant can make or reset an account on a host server
   | "fileBased" // no host, port or account to ask for
@@ -5893,6 +5894,58 @@ export type DbAccess = {
     active: boolean
     open: boolean
     editable: boolean
+  }
+}
+
+/**
+ * GET /databases/{id}/tls: whether a server the dashboard started speaks TLS
+ * with a certificate from the dashboard's own authority, and what it needs
+ * next. `supported: false` carries `reason`, in a sentence.
+ */
+export type DbTLS = {
+  supported: boolean
+  reason?: string
+  enabled: boolean
+  /** A connection without TLS is refused. Always true where the port speaks one protocol. */
+  require: boolean
+  /** The engine can accept TLS and plaintext on one port; Redis cannot. */
+  canOptional: boolean
+  /** This release can refuse plaintext. */
+  canRequire: boolean
+  /** The dashboard's own saved connection checks the certificate against the authority. */
+  verified: boolean
+  container?: string
+  port?: number
+  exposure?: DbAccess["exposure"]
+  names: string[]
+  serial?: string
+  issuedAt?: string
+  notAfter?: string
+  /** When the renewal takes it up. */
+  renewAt?: string
+  renewedAt?: string
+  /**
+   * What a linked application is given: the string it had before TLS ("plain",
+   * while TLS is only allowed), TLS without checking the certificate
+   * ("unverified", once required), or TLS that checks and so needs the
+   * authority's certificate ("needsCA", Redis).
+   */
+  applications?: "plain" | "unverified" | "needsCA"
+  /** Deployment environments that reach this database by its internal name. */
+  linked: number
+  authority: {
+    subject: string
+    fingerprint: string
+    notAfter: string
+    createdAt: string
+  } | null
+  client?: {
+    host: string
+    port: number
+    /** Absent for an engine whose client has no URL form. The password is a placeholder. */
+    url?: string
+    command: string
+    caFile: string
   }
 }
 

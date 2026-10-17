@@ -124,6 +124,34 @@ CREATE TABLE IF NOT EXISTS db_metric_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_db_metric_samples_at ON db_metric_samples(at);
 
+-- The certificate authority that signs the server certificates of the databases
+-- this dashboard started. There is at most one, made the first time TLS is
+-- switched on; its certificate is public and kept as it is, its key is sealed
+-- with the master key like every other secret at rest.
+CREATE TABLE IF NOT EXISTS db_tls_ca (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  cert_pem    TEXT NOT NULL,
+  key_enc     TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  not_after   INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
+-- A database server that speaks TLS with a certificate from that authority:
+-- what it was issued for and when it ends, so that renewal can be decided
+-- without opening the container. The certificate's key lives only in the
+-- container's own volume and is replaced whenever the certificate is.
+CREATE TABLE IF NOT EXISTS db_server_tls (
+  connection_id INTEGER PRIMARY KEY REFERENCES db_connections(id) ON DELETE CASCADE,
+  container     TEXT NOT NULL,
+  require_tls   INTEGER NOT NULL DEFAULT 0,
+  names         TEXT NOT NULL DEFAULT '[]',
+  serial        TEXT NOT NULL DEFAULT '',
+  issued_at     INTEGER NOT NULL,
+  not_after     INTEGER NOT NULL,
+  renewed_at    INTEGER NOT NULL DEFAULT 0
+);
+
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
 -- connection it runs against carries the secret. A NULL connection_id would be

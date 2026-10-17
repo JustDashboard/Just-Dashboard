@@ -8,6 +8,11 @@
       "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
       "changes": [
         {
+          "kind": "added",
+          "text": "Switch a database to TLS with a certificate from the dashboard's own authority",
+          "detail": "Databases → Settings → Network turns TLS on for a PostgreSQL, MySQL, MariaDB, MongoDB, Redis or Valkey server the dashboard started, or off again. The first time, the dashboard makes a certificate authority and seals its key with the master key; each server gets a one-year certificate naming loopback, its db-N.jd.internal name and the address it is published on. TLS can be allowed beside plain text or required, except on Redis and Valkey, where the port then speaks TLS only. The dashboard's own connection verifies the certificate, the CA certificate downloads from the same section with a connection string and command for another machine, and certificates are renewed a month before they end, with an audit entry, by asking the running server to read the new one. The container is restarted only if the server cannot, and the renewal checks the certificate the server presents before it records it. Turning TLS on, off or to required recreates the container; if the server does not come up with it, it is put back as it was. Applications linked to the database keep the connection string they had while TLS is allowed, and are given one that encrypts without checking the certificate once it is required."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."
