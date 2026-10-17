@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Upgrade a PostgreSQL server to a newer major release, and revert it",
+          "detail": "Databases → Settings → Version checks a newer release of a server Databases started before anything changes, then copies its roles, databases, extensions and parameters into a new server beside it, counts every table, and puts the new server in its place under the same name, port and password, so connections and deployments keep working. The old server is kept, stopped, until the upgrade is finished or reverted, and an upgrade that fails, or a dashboard that stops in the middle of one, puts the old server back."
         }
       ]
     },

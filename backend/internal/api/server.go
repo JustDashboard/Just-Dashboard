@@ -183,6 +183,14 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
 	cleanupCancel()
+	// A database upgrade this process's predecessor was carrying out has
+	// nobody left to finish it or undo it: the old server is put back in the
+	// background, since it may have to be started and waited for.
+	go func() {
+		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		s.recoverDatabaseUpgrades(upgradeCtx)
+	}()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
 	// purpose is to have been running while nobody was looking.

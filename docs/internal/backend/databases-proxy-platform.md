@@ -14,7 +14,7 @@ capability table below), never by a page.
 discovery, dumps. `internal/api` is the routes. `handlers_db.go` mounts `/databases` behind the
 protected-connection guard, and each surface registers its own routes from its own file —
 `mountDatabaseAdminRoutes`, `…RedisRoutes`, `…MongoRoutes`, `…InventoryRoutes`, `…ConnectionRoutes`,
-`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes` and `…TransferRoutes` — grouped by the capability
+`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes` and `…UpgradeRoutes` — grouped by the capability
 it needs. [Routes](#routes) lists every one with its capability, whether it is destructive, the
 action it is audited as and what a protected connection does with it. The pages over them are the
 `/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
@@ -57,7 +57,7 @@ depend on what a request carries are stated once in
   answer from the interfaces their dialects implement (`OpsCapabilities`, `ExplainForms`) and Redis and
   MongoDB are named beside them; the ones that belong to one surface are registered beside its code from
   an `init` (`RegisterCapabilities`, in `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`,
-  `redis_`, `mongo_`, `transfer_` and `orm_capabilities.go`). A registration replaces a row of the same
+  `redis_`, `mongo_`, `transfer_`, `upgrade_` and `orm_capabilities.go`). A registration replaces a row of the same
   name for every engine, so a flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses
   one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
   `ormTargets`, `exportFormats`, `importFormats`; empty and never null) or a word where a feature comes
@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 116
+  flags (103 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -423,7 +423,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   the test and is refused all the same.
   - *Always let through*, because they do not change the database: the connection's own record,
     power and reachability; taking a dump, adding one made elsewhere and deleting one, which are
-    files on this machine (`/backup`, `/backups/upload`, `DELETE /backups`); saved queries and the
+    files on this machine (`/backup`, `/backups/upload`, `DELETE /backups`); a major-version upgrade's
+    check, which only reads, and finishing one, which removes the old server the connection no longer
+    reaches (`/upgrade/check`, `/upgrade/complete`); saved queries and the
     diagram's arrangement; the POSTs that only read (`/classify`, `/orm`, `/rows/sql`,
     `/redis/classify`, MongoDB's find, count, document, explain, aggregate preview, schema,
     validation check and command classify); and stopping work in flight, which changes no data and
@@ -446,9 +448,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   - *Shown, not run.* A schema form asked for its statement (`/ddl/*?preview=1`) is let through:
     `runDDL` answers a preview before it executes. The flag is in the address, so it is asked in the
     middleware itself and not by a check of the body; no other route is opened by it.
-  - *Refused*: rows, structure, imports, a restore, a copy, the drop, roles, privileges, settings,
-    extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
-    profiler, a statistics reset.
+  - *Refused*: rows, structure, imports, a restore, a copy, the drop, a major-version upgrade and its
+    revert, roles, privileges, settings, extensions, keys, streams, ACL users, documents, collections,
+    indexes, validation rules, the profiler, a statistics reset.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
   run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
@@ -471,8 +473,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
       `database`, `DELETE /{id}/database` with `database`, and `POST
       /backups/runs/{runID}/restore-database` with `database` are refused with `409
       connection_read_only` when a protected connection is on that database
-      (`refuseDatabaseOfProtected`); `removeContainer` is refused while a protected connection is on
-      any database of that server (`refuseServerOfProtected`). A Redis archive restored with no
+      (`refuseDatabaseOfProtected`); `removeContainer`, a major-version upgrade and its revert are
+      refused while a protected connection is on any database of that server
+      (`refuseServerOfProtected`). A Redis archive restored with no
       database named writes into the numbered databases its header lists, not into the
       connection's own, so those are the ones asked about (`restoreDestinations`,
       `dbx.RedisArchiveDatabases`) — and the ones the job reports as `database` (`"8"`, `"0,3"`).
@@ -1462,6 +1465,121 @@ the detail of each classifier is below, with the surface it guards.
   renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
   (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
 
+### Major-version upgrades
+
+A PostgreSQL server Databases started is moved to a newer major release from its Settings → Version
+page, the way Railway and the managed providers do it rather than the way the other self-hosted panels
+do: changing the tag is how a database is lost, because a major release does not open the data
+directory of the one before it. `handlers_db_upgrade.go` holds the routes, the record and the recovery;
+`database_upgrade.go` the work; `dbx/upgrade.go` everything that is a fact of PostgreSQL — the
+questions asked of each server, what their answers mean, the roles' statements and the parameters the
+new release still has.
+
+- **Which servers, and to what.** A server is one this upgrades when a running container that is not
+  compose's publishes the connection's loopback port, its image is a release of the `postgres`,
+  `pgvector` or `postgis` template (`upgradeTemplateOf`, compared as the Engine resolves a reference),
+  its data directory is on a named volume, and it does not remove itself when it stops. The releases
+  it can go to are the template's newer ones in the closed list, so what is pulled is still always a
+  reference written in `provisionTemplates`. TimescaleDB is a template too and is left out:
+  its hypertables live in a catalogue of its own that a dump of one release does not carry into the
+  next. The capability flag `majorUpgrade` (`dbx/upgrade_capabilities.go`) is PostgreSQL's, and not
+  CockroachDB's, YugabyteDB's or TimescaleDB's; MySQL and MariaDB are not offered.
+  `GET /{id}/upgrade` answers `{offered, reason, engine, label, container, version, image, volume,
+  targets, window, last, job}`: `reason` is the sentence a server that is not one of these is shown
+  with, `window` the upgrade whose old server is still kept, `last` the last that ended.
+- **The check changes nothing.** `POST /{id}/upgrade/check {version}` is a job: it pulls the release
+  where it is not on the machine (its layers' states are the job's lines), starts it beside the server
+  as `<name>-pg<to>-check` — from the server's own container settings, with no port, no data volume
+  and no first-start scripts — asks both servers what the checks need, and removes it. The server is
+  read through its own container (`pgSide`: psql over the socket, as the image's superuser, with a
+  query that answers one JSON value), so the same reading works for both servers and needs no
+  password the operator never had. The report (`upgradeReport`, the job's `result` line) is one line
+  per check, `ok`, `warning` or `blocker`: the version path; every installed extension against the
+  new image's catalogue (one it lacks stops the upgrade, one it carries at another version is said);
+  the libraries in `shared_preload_libraries`, loaded in the new release (one it has not stops it,
+  since the server would not start); disk space — the copy against what `df` reports where the data
+  volume is, and the safety dump against the dump directory; the names the upgrade takes; client
+  sessions, which will be ended; prepared transactions and tablespaces, which a copy cannot carry and
+  stop it; replication slots and subscriptions, which are not carried or arrive switched off; the
+  parameters, which are carried as below or, when edited into `postgresql.conf` by hand, are not; and
+  `pg_hba.conf` rules the new server will not have. The page offers the upgrade only after a check
+  that nothing stops, and the upgrade runs the same checks again first.
+- **The upgrade** (`POST /{id}/upgrade {version}`, destructive, a job of the transfer kind
+  `major-upgrade` so that no dump, restore or copy of the connection runs beside it) is recorded in
+  `db_upgrades` before each step is taken. The new release is started beside the server as
+  `<name>-pg<to>-upgrade`, on a loopback port of its own and the new volume `<name>-pg<to>-data`,
+  from the old container's own settings read back with what the old image supplied left out
+  (`upgradeSpec`: its `PATH`, `PG_MAJOR` and `PG_VERSION`, its command and labels, the host name Docker
+  derived from its id) — carried into a newer image they would name the old release's binaries. The
+  checks run against it; a safety dump of the connection's database is taken (`takeDump`, origin
+  `safety`, listed on Backups with the note of the upgrade); then the old server takes reads only
+  (`ALTER SYSTEM SET default_transaction_read_only = on` and a reload, after which every client
+  session is ended so a transaction begun before it does not go on writing). Its roles are read with
+  `pg_dumpall --globals-only` and replayed on the new server over a connection by `dbx`'s own script
+  reader (`PostgresGlobals`), which leaves out the one statement the new server cannot run — creating
+  the account it was created with — and refuses any client command, as a restore does. Each database
+  is `pg_dump -Fc` in the old container read by `pg_restore --exit-on-error` in the new one as it is
+  written, through `dockerx.ExecPipe`: the bytes pass through this process, never a shell, a file or a
+  network path between the containers. `postgres` and `template1` are restored into; every other
+  database is made by the restore, with its owner, encoding and settings, after the new release's own
+  first database is dropped. What `ALTER SYSTEM` set — the Parameters page — is carried as
+  `postgresql.auto.conf`'s own text (`CarryPostgresParameters`, since a list such as
+  `shared_preload_libraries` set again as one string is one library with a comma in it), less a
+  parameter the new release no longer has; a `-c` on the command line goes with the container's
+  settings. The new server is restarted to load them, and the copy is counted against the old server:
+  the same databases, roles and extensions, and the same number of rows in every table
+  (`PostgresRowCountsQuery`; a table an extension owns is the extension's to fill). A difference stops
+  the upgrade.
+- **The cutover** runs on a context of its own, so a cancel cannot land between the two servers. The
+  old server's `postgresql.auto.conf` is put back as it was (without a reload: it is about to stop),
+  it is stopped with the database grace and renamed `<name>-pg<from>`, with its restart policy set to
+  `no` so a reboot cannot start it on the port the new one holds. The copy's container is removed,
+  keeping its volume, and a container of the new release is created under the old name with the old
+  one's port binding, restart policy, limits, logging and user networks (with their aliases). It has
+  to take the exact port and let the saved connection sign in (`awaitConnection`), which proves that
+  nothing that dials the server changes: the saved connection, every other saved connection to the
+  same server, the deployments' `${{database.ID}}` references and the port's exposure all name that
+  place. The deployment networks are attached to it at once (`deploymentDatabaseNetworks.rebind`, the
+  bind reconciliation does on its next pass, which detaches the stopped old container from the
+  alias), and every saved connection to the server drops its pool and what was kept about the server,
+  so Home reads the new version straight away.
+- **Nothing half-done.** A failure before the cutover removes the copy's container and volume and lets
+  the old server take writes again (`undoCopy`); a failure during it removes the new container and
+  volume and gives the old one back its name and restart policy, starts it and waits for the saved
+  connection (`failCutover`). Either is recorded as `failed` with the reason, shown on the page with
+  the safety dump that was kept. A dashboard that stops in the middle of an upgrade puts the server
+  back when it starts (`recoverDatabaseUpgrades`, from the record's `phase` and the
+  `read_only_prior` it kept), and removes a check's release left behind. The upgrade's own containers
+  carry `io.just-dashboard.database-upgrade` and are not listed by the inventory, so the sync never
+  connects one.
+- **The old server is kept** until the operator says. `POST /{id}/upgrade/revert {dumpFirst}`
+  (destructive, a job) takes a dump of the new server's database first unless told not to, stops the
+  new server and sets it aside, gives the old one back its name and restart policy and waits for the
+  saved connection, attaches it to the deployment networks again and removes the new server with its
+  volume — what was written to it since the cutover goes with it; if the old one does not come back,
+  the new one is put back. `POST /{id}/upgrade/complete` (destructive) removes the old container and
+  the named volumes it mounted, keeping one another container uses, and closes the record. Both
+  refuse while the old container has been started by hand. The kept container is a stopped server
+  like any other to the inventory, which lists it; forgetting the connection forgets its upgrades'
+  records with it (`ON DELETE CASCADE`), and a container still kept is then the Docker page's to
+  remove.
+- **Protection.** The upgrade and its revert replace what a protected connection reaches and are
+  refused, through the connection and through a neighbour on the same server
+  (`refuseServerOfProtected`); the check only reads and finishing removes what the connection no
+  longer reaches, so both are let through. Every route is `system.admin`; the three that change the
+  server are in `s.destructive`.
+- **Audit.** The requests are `database.upgrade.check`, `database.upgrade`, `database.upgrade.revert`
+  and `database.upgrade.complete`; each job's end is `.finish` after its request's action; every step
+  of an upgrade is `database.upgrade.step` with the step named (`safety-dump`, `read-only`, `copy`,
+  `parameters`, `verify`, `cutover`, `undo`); a recovery after a restart is `database.upgrade.recover`.
+  None carries a password: the containers' clients read theirs from their environment, never an
+  argument.
+- `TestLiveUpgradePostgres16To17` (`JD_TEST_UPGRADE_LIVE=1`) starts a PostgreSQL 16 the way Databases
+  does, with data in two databases, a role with a password, `pg_trgm`, `hstore` and
+  `pg_stat_statements` preloaded from the command line, and a parameter set with `ALTER SYSTEM`; it
+  checks, upgrades, reverts, recovers an interrupted upgrade, upgrades again and finishes, and reads
+  each result off the servers themselves.
+
 ### Tests
 
 Which variables name which fixture, which tests fall back to a standard port and which never do, and the
@@ -1484,7 +1602,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the ten it calls): 229 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1508,7 +1626,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  29 open, 12 by content, 20 preview only, 61 refused.
+  31 open, 12 by content, 20 preview only, 63 refused.
 
 **Every database** (19)
 
@@ -1676,6 +1794,16 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/import/upload` | `service.control` | by content: `replace` | `database.import` | refused |
 | `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
 | `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
+
+**A server's release** (5)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/upgrade` | `system.admin` | — | — | — |
+| `POST` | `/databases/{id}/upgrade` | `system.admin` + `destructive` | yes | `database.upgrade`, `.finish`, `.step` | refused |
+| `POST` | `/databases/{id}/upgrade/check` | `system.admin` | — | `database.upgrade.check`, `.finish` | open |
+| `POST` | `/databases/{id}/upgrade/complete` | `system.admin` + `destructive` | yes | `database.upgrade.complete` | open |
+| `POST` | `/databases/{id}/upgrade/revert` | `system.admin` + `destructive` | yes | `database.upgrade.revert`, `.finish` | refused |
 
 **Redis** (43)
 

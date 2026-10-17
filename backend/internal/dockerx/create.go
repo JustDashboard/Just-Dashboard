@@ -381,6 +381,12 @@ func extraNetworks(spec ContainerSpec) []string {
 	return spec.Networks[1:]
 }
 
+// ImagePresent reports whether an image is already on this machine, for a
+// caller that pulls it itself so the pull can be shown.
+func (c *Client) ImagePresent(ctx context.Context, ref string) bool {
+	return c.imagePresent(ctx, ImageRef(ref))
+}
+
 func (c *Client) imagePresent(ctx context.Context, ref string) bool {
 	cli, err := c.api()
 	if err != nil {

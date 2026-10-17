@@ -73,6 +73,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		// connections and discovery
 		"server":           "sql -sqlite mongodb redis",
 		"provision":        "postgres -cockroachdb -yugabytedb mysql -percona -tidb clickhouse mongodb -ferretdb redis",
+		"majorUpgrade":     "postgres -cockroachdb -yugabytedb -timescaledb",
 		"inventoryConnect": "sql mongodb redis",
 		"hostAccount":      "postgres -cockroachdb -yugabytedb mysql -tidb clickhouse mongodb -ferretdb redis -keydb -dragonfly",
 		"fileBased":        "sqlite",

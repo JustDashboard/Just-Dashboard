@@ -77,6 +77,12 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/backup", nil},
 	{http.MethodPost, "/backups/upload", nil},
 	{http.MethodDelete, "/backups", nil},
+	// An upgrade's check starts the new release beside the server and only
+	// reads the server; finishing one removes the old server it left behind,
+	// which is no longer the one the connection reaches. The upgrade and its
+	// revert replace what the connection reaches, and are not on this list.
+	{http.MethodPost, "/upgrade/check", nil},
+	{http.MethodPost, "/upgrade/complete", nil},
 	// The dashboard's own state about the connection.
 	{http.MethodPost, "/queries", nil},
 	{http.MethodPut, "/queries/{qid}", nil},
