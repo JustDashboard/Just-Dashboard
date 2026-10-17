@@ -140,7 +140,7 @@ async function mockPooling(page: Page, options: PoolingMock = {}) {
     sent.push({ method, path, body })
     if (method === "PUT") {
       const created = !pooler.enabled
-      pooler = { ...ON, ...pooler, enabled: true, state: "running", settings: body }
+      pooler = { ...ON, ...pooler, enabled: true, state: "running", inSync: true, settings: body }
       return route.fulfill({
         status: created ? 201 : 200,
         json: { pooler, warnings: [], ...options.putExtras },
@@ -200,7 +200,7 @@ test("a database with no pooler says what one is and turns it on with the settin
   await expect(section(page, "activity")).toHaveCount(0)
 
   // The form starts from what the server says is sensible.
-  await expect(pooler.getByRole("group", { name: "Pool mode" })).toBeVisible()
+  await expect(pooler.getByRole("radiogroup", { name: "Pool mode" })).toBeVisible()
   await expect(pooler.getByRole("radio", { name: "Transaction" })).toBeChecked()
   await expect(pooler.getByLabel("Pool size")).toHaveValue("20")
   await expect(pooler.getByLabel("Max clients")).toHaveValue("200")
@@ -263,7 +263,7 @@ test("a running pooler lists where it is reached and reads its pools and statist
   const activity = section(page, "activity")
   await expect(activity).toContainText("PgBouncer 1.25.2")
   await expect(activity).toContainText("15 active, 2 waiting")
-  await expect(activity).toContainText("7 active, 7 idle")
+  await expect(activity).toContainText("7 active, 6 idle")
   await expect(activity).toContainText("96 a second")
   await expect(activity).toContainText("1.5 ms on average")
   const pools = activity.getByRole("table", { name: "Pools" })

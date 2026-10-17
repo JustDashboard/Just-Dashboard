@@ -161,10 +161,11 @@ export function poolerAddresses(
 /** Microseconds as the unit a reader compares: "0.4 ms", "12 ms", "1.2 s". */
 export function micros(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0 ms"
-  const ms = value / 1000
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`
-  if (ms >= 10) return `${Math.round(ms)} ms`
-  return `${ms.toFixed(1)} ms`
+  // Rounded from whole microseconds: 1450 / 1000 is 1.4499… in binary, which
+  // toFixed would write as 1.4.
+  if (value >= 1_000_000) return `${(Math.round(value / 100_000) / 10).toFixed(1)} s`
+  if (value >= 10_000) return `${Math.round(value / 1000)} ms`
+  return `${(Math.round(value / 100) / 10).toFixed(1)} ms`
 }
 
 /** The totals across the pools, for the headline figures. */

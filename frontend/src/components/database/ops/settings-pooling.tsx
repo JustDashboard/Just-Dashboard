@@ -697,13 +697,13 @@ function Figures({ stats }: { stats: DbPoolerStats }) {
                 <TableRow key={`${pool.database}:${pool.user}`}>
                   <TableCell className="py-2 font-mono">{pool.database}</TableCell>
                   <TableCell className="px-2 py-2 font-mono">{pool.user}</TableCell>
-                  <TableCell className="numeric px-2 py-2 text-right">
+                  <TableCell className="numeric px-2 py-2 text-right max-sm:whitespace-normal">
                     {pool.clActive} active
                     {pool.clWaiting > 0 && (
                       <span className="text-warning">, {pool.clWaiting} waiting</span>
                     )}
                   </TableCell>
-                  <TableCell className="numeric px-2 py-2 text-right">
+                  <TableCell className="numeric px-2 py-2 text-right max-sm:whitespace-normal">
                     {pool.svActive} active, {pool.svIdle + pool.svUsed} idle
                   </TableCell>
                   <TableCell className="numeric px-2 py-2 text-right max-sm:hidden">

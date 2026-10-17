@@ -100,6 +100,7 @@ describe("the figures", () => {
   test("microseconds are written in the unit a reader compares", () => {
     expect(micros(0)).toBe("0 ms")
     expect(micros(420)).toBe("0.4 ms")
+    expect(micros(1450)).toBe("1.5 ms")
     expect(micros(12_400)).toBe("12 ms")
     expect(micros(1_250_000)).toBe("1.3 s")
     expect(micros(Number.NaN)).toBe("0 ms")
