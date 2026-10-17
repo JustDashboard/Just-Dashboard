@@ -575,7 +575,38 @@ test("point-in-time recovery screenshots @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to write the screenshots")
   const dir = process.env.JD_SHOTS
   let state: "off" | "on" | "failing" | "copy" = "off"
+  const dump = (file: string, minutes: number, size: number, durationMs: number) => ({
+    file,
+    size,
+    takenAt: ago(minutes),
+    format: "pg_dump archive",
+    durationMs,
+    database: "shop",
+    tool: "pg_dump",
+    toolVersion: "16.12",
+    summary: "written by pg_dump",
+    contents: {},
+    origin: "dump",
+    by: "operator",
+  })
   await mockPitr(page, {
+    // Healthy dumps above the panel, so the shots show no error where the page reads them.
+    "GET /databases/1/backups": {
+      dir: "/var/backups/jd/databases/shop",
+      options: {
+        schemaOnly: true,
+        dataOnly: true,
+        tables: true,
+        compression: true,
+        databases: false,
+        newDatabase: true,
+      },
+      files: [
+        dump(`shop-${stamp(137)}.dump`, 137, 48_213_904, 5_412),
+        dump(`shop-${stamp(1_553)}.dump`, 1_553, 47_902_311, 5_187),
+        dump(`shop-${stamp(2_993)}.dump`, 2_993, 47_388_760, 5_033),
+      ],
+    },
     "GET /databases/1/pitr": () =>
       state === "off"
         ? pitrOff(SHOP, { container: "shop-db" })
