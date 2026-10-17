@@ -9,4 +9,5 @@ export {
   SettingsExtensions,
   SettingsNetwork,
   SettingsParameters,
+  SettingsResources,
 } from "@/components/database/ops/settings"

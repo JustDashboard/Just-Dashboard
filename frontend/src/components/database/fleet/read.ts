@@ -2,6 +2,7 @@ import { get } from "@/lib/api"
 import type { DbFleet, DbTopology } from "@/lib/types"
 import type {
   DbBackupSummary,
+  DbHostCapacity,
   DbInventory,
   DbProvisionTemplate,
 } from "@/components/database/fleet/types"
@@ -78,3 +79,10 @@ export const readTopology = (signal: AbortSignal) =>
 
 export const readTemplates = (signal: AbortSignal) =>
   read<DbProvisionTemplate[]>("/databases/provision/options", signal, Array.isArray)
+
+export const readCapacity = (signal: AbortSignal) =>
+  read<DbHostCapacity>(
+    "/databases/provision/capacity",
+    signal,
+    (value) => typeof value.cpus === "number" && typeof value.memoryBytes === "number",
+  )

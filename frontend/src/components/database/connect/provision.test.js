@@ -35,7 +35,10 @@ const postgres = {
   port: 5432,
   defaultUser: "jd",
   database: true,
+  defaultLimits: { memoryMb: 1024, cpus: 1 },
+  minMemoryMb: 6,
 }
+const mysql = { ...postgres, engine: "mysql", label: "MySQL", minMemoryMb: 512 }
 const redis = {
   engine: "redis",
   label: "Redis",
@@ -113,6 +116,18 @@ describe("what the start form sends", () => {
     expect(sent.version).toBe("7")
   })
 
+  test("a limited server sends its limits, and a limit of zero is none and is left out", () => {
+    const limited = { ...EMPTY_PROVISION, limited: true, memoryMb: 1024, cpus: 1.5 }
+    const sent = provisionRequest(postgres, limited)
+    expect(sent.memoryMb).toBe(1024)
+    expect(sent.cpus).toBe(1.5)
+    expect(provisionRequest(postgres, { ...limited, cpus: 0 }).cpus).toBeUndefined()
+    // Switched off, what the fields still hold is not sent.
+    const open = provisionRequest(postgres, { ...limited, limited: false })
+    expect(open.memoryMb).toBeUndefined()
+    expect(open.cpus).toBeUndefined()
+  })
+
   test("the image follows the version", () => {
     expect(provisionImage(postgres, EMPTY_PROVISION)).toBe("postgres:16-alpine")
     expect(provisionImage(postgres, { ...EMPTY_PROVISION, version: "17" })).toBe(
@@ -135,6 +150,23 @@ describe("the answers the server would refuse", () => {
       password: "short",
     })
     expect(Object.keys(problems).sort()).toEqual(["database", "name", "password", "user"])
+  })
+
+  test("limits are held to this machine, and only while the server is limited", () => {
+    const host = { memoryBytes: 4 * 1024 ** 3, cpus: 2 }
+    const draft = { ...EMPTY_PROVISION, limited: true, memoryMb: 8192, cpus: 4 }
+    expect(Object.keys(provisionProblems(postgres, draft, host)).sort()).toEqual(["cpus", "memory"])
+    expect(provisionProblems(postgres, { ...draft, limited: false }, host)).toEqual({})
+    expect(provisionProblems(postgres, { ...draft, memoryMb: 1024, cpus: 1 }, host)).toEqual({})
+  })
+
+  test("an engine whose first start needs more memory says so", () => {
+    const draft = { ...EMPTY_PROVISION, limited: true, memoryMb: 448, cpus: 1 }
+    expect(provisionProblems(mysql, draft).memory).toBe(
+      "MySQL needs at least 512 MiB the first time it starts.",
+    )
+    expect(provisionProblems(postgres, draft)).toEqual({})
+    expect(provisionProblems(mysql, { ...draft, memoryMb: 512 })).toEqual({})
   })
 
   test("a field the engine does not have is not judged", () => {

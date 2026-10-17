@@ -61,7 +61,10 @@ for (const path of CREATION_PAGES) {
     await panel.getByText("Account", { exact: true }).click()
     await panel.getByLabel("User", { exact: true }).fill("orders_user")
     await panel.getByLabel("Password", { exact: true }).fill("password-123")
-    await expect(panel.getByRole("switch")).not.toBeChecked()
+    await expect(panel.getByRole("switch", { name: /^Publish its port/ })).not.toBeChecked()
+    await expect(
+      panel.getByRole("switch", { name: "Limit the memory and processors it may use" }),
+    ).not.toBeChecked()
     await panel.getByRole("button", { name: "Create", exact: true }).click()
     const progress = panel.locator("[data-slot=database-progress]")
     const current = progress.locator('[aria-current="step"]')

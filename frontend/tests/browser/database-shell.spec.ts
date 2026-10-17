@@ -38,6 +38,7 @@ test("Redis and MongoDB have only their own pages, under their own names", async
     "Backups",
     "General",
     "Network",
+    "Resources",
     "Parameters",
     "Modules",
     "Danger zone",
@@ -57,6 +58,7 @@ test("Redis and MongoDB have only their own pages, under their own names", async
     // A document database's parameters are status counters, which are Performance's.
     "General",
     "Network",
+    "Resources",
     "Danger zone",
   ])
 })
