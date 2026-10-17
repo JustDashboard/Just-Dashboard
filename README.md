@@ -121,7 +121,8 @@ free.
 - Table editor with staged, reviewed edits and a SQL editor with plans
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
-- Protected connections, dump backups, accounts, grants and a live map
+- Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
+  grants and a live map
 
 </td>
 </tr>
