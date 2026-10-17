@@ -88,7 +88,9 @@ export function LimitField({
           value={value}
           readOnly={disabled}
           aria-invalid={Boolean(error)}
-          className="font-mono"
+          // No native spinner: the field steps by arrow key like every other
+          // input in the product, and the arrows crowded the unit beside it.
+          className="[appearance:textfield] font-mono [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           onChange={(event) => onChange(Math.max(0, Number(event.target.value)))}
         />
         <InputGroupAddon align="inline-end">

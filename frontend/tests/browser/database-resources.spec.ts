@@ -192,6 +192,8 @@ test("lifting a limit says it replaces the container, and is asked for with it n
   await expect(dialog).toContainText("Every open session is dropped")
   await expect(dialog).toContainText("Up to 1.5 cores, any amount of memory")
   // Cancelled, nothing is sent and the edit is still there to save.
+  // The bar holds the edit while it is asked, rather than saying it is saving.
+  await expect(saveBar(page)).toContainText("1 unsaved change")
   await dialog.getByRole("button", { name: "Cancel" }).click()
   await expect(dialog).toHaveCount(0)
   expect(server.sent).toEqual([])
@@ -329,7 +331,10 @@ test("a file has no server, so Settings lists no Resources page", async ({ page 
 test("Home's limits lead an administrator to where they are changed", async ({ page }) => {
   await mockResources(page)
   await visit(page, "/databases/1")
-  await expect(page.locator('a[href="/databases/1/settings/resources"]')).toHaveText("Change")
+  // The rail lists the page too: the link meant is the one in Runs as.
+  await expect(
+    page.getByLabel("Runs as").getByRole("link", { name: "Change", exact: true }),
+  ).toHaveAttribute("href", "/databases/1/settings/resources")
 })
 
 test("a new server can be limited from the start, with the template's limits filled in", async ({

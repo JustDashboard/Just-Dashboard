@@ -52,12 +52,6 @@ export type ConfirmRequest = {
     report: (reading: Partial<OperationReading>) => void,
   ) => Promise<void | "reported">
   onDone?: () => void
-  /**
-   * The dialog was closed without the action: Cancel, Escape or a press
-   * outside. A caller waiting on the answer — a page's save bar asking before
-   * the write that needs it — is told no.
-   */
-  onCancel?: () => void
 }
 
 /**
@@ -99,10 +93,6 @@ function ConfirmBody({
   const [startedAt, setStartedAt] = useState(0)
   const [progress, setProgress] = useState<OperationReading>({ label: "" })
   const matches = !request.phrase || typed === request.phrase
-  const dismiss = () => {
-    request.onCancel?.()
-    onOpenChange(false)
-  }
 
   const run = async () => {
     if (!matches || busy) return
@@ -127,12 +117,12 @@ function ConfirmBody({
   return (
     <Modal
       open
-      onOpenChange={(open) => !busy && !open && dismiss()}
+      onOpenChange={(open) => !busy && onOpenChange(open)}
       title={request.title}
       progress={busy && { ...progress, startedAt }}
       footer={
         <>
-          <Button variant="outline" onClick={dismiss} disabled={busy}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
           {/*

@@ -89,7 +89,10 @@ function MemoryFacts({ data, memoryMb }: { data: DbResources; memoryMb: number }
   const { engine } = useDatabase()
   const setting = engine.capabilities.memoryBuffer
   const fact = data.buffer && bufferFact(data.buffer, memoryMb)
-  const name = <code className="font-mono text-foreground">{data.buffer?.setting ?? setting}</code>
+  // The setting's own spelling, at the size of the line it sits in.
+  const name = (
+    <code className="font-mono text-hint text-foreground">{data.buffer?.setting ?? setting}</code>
+  )
   return (
     <>
       {data.host.memoryBytes > 0 && (
@@ -112,8 +115,8 @@ function MemoryFacts({ data, memoryMb }: { data: DbResources; memoryMb: number }
         )
       )}
       {data.oomKilled && (
-        <span className="block text-warning">
-          the kernel stopped it last time for going past its limit
+        <span className="mt-1 block text-warning">
+          The kernel stopped it the last time it stopped, for going past its memory limit.
         </span>
       )}
     </>
@@ -196,40 +199,40 @@ function ResourcesForm({
     if (count === 0) return true
     if (invalid) return false
     if (!replaces) return apply()
-    // Asked first: the replacement drops every session to the server.
-    return new Promise<boolean>((resolve) =>
-      confirm({
-        title: `Replace ${container}`,
-        confirmLabel: "Replace and save",
-        workingLabel: `Replacing ${container}…`,
-        subject: {
-          mark: <EngineMark engine={engine} size="sm" />,
-          name: conn.name,
-          facts: (
-            <>
-              <FormFact label="Container" mono>
-                {container}
-              </FormFact>
-              <FormFact label="Then">{limitsWords(after)}</FormFact>
-            </>
-          ),
-        },
-        description: (
+    // Asked first, because the replacement drops every session to the server.
+    // The bar keeps the edit until the answer: a confirmed replacement saves
+    // from the dialog, and a cancelled one leaves the edit where it was.
+    confirm({
+      title: `Replace ${container}`,
+      confirmLabel: "Replace and save",
+      workingLabel: `Replacing ${container}…`,
+      subject: {
+        mark: <EngineMark engine={engine} size="sm" />,
+        name: conn.name,
+        facts: (
           <>
-            <p>
-              Docker cannot take a limit away from a container that exists, so {container} is
-              replaced with the same configuration and {without}.
-            </p>
-            <p>The data is kept. Every open session is dropped while the container is replaced.</p>
+            <FormFact label="Container" mono>
+              {container}
+            </FormFact>
+            <FormFact label="Then">{limitsWords(after)}</FormFact>
           </>
         ),
-        action: async () => {
-          resolve(await apply())
-          return "reported"
-        },
-        onCancel: () => resolve(false),
-      }),
-    )
+      },
+      description: (
+        <>
+          <p>
+            Docker cannot take a limit away from a container that exists, so {container} is replaced
+            with the same configuration and {without}.
+          </p>
+          <p>The data is kept. Every open session is dropped while the container is replaced.</p>
+        </>
+      ),
+      action: async () => {
+        await apply()
+        return "reported"
+      },
+    })
+    return false
   }
 
   return (
@@ -291,22 +294,26 @@ function ResourcesForm({
           />
         </FieldRow>
         {held === "stopped" ? (
-          <FormNote data-slot="resources-held">
+          <FormNote className="max-w-prose" data-slot="resources-held">
             <span className="font-medium text-foreground">Not while it is stopped.</span> Lifting a
             limit replaces {container} with one that is started; start it first.
           </FormNote>
         ) : held === "role" ? (
-          <FormNote data-slot="resources-held">
+          <FormNote className="max-w-prose" data-slot="resources-held">
             Lifting a limit replaces the container, which your role may not do.
           </FormNote>
         ) : replaces ? (
-          <FormNote tone="warning" className="animate-rise" data-slot="resources-replace">
+          <FormNote
+            tone="warning"
+            className="max-w-prose animate-rise"
+            data-slot="resources-replace"
+          >
             Docker cannot take a limit away from a container that exists: saving replaces{" "}
             {container} with {without}. The data is kept; every open session is dropped while it
             restarts.
           </FormNote>
         ) : (
-          <FormNote>
+          <FormNote className="max-w-prose">
             Docker applies a new limit to {container} at once; nothing is restarted.
           </FormNote>
         )}
