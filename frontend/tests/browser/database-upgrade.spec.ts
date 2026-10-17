@@ -272,6 +272,9 @@ const settled = (surface: Locator) =>
         .map((animation) => animation.finished),
     ),
   )
+/** Scrolls whatever holds a surface so its top is at the top of the view. */
+const atTop = (surface: Locator) =>
+  surface.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }))
 const noSideways = (page: Page) =>
   page.evaluate(() =>
     [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]
@@ -707,7 +710,8 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
   await settled(page.locator("[data-slot=page]").first())
   await page.screenshot({ path: shot("version-report-1440"), fullPage: true })
 
-  // The upgrade asked for.
+  // The upgrade asked for, over the page from its top.
+  await atTop(section(page, "version"))
   await upgrade.getByRole("button", { name: "Upgrade to PostgreSQL 17" }).click()
   await expect(dialog(page)).toBeVisible()
   await settled(dialog(page))
@@ -715,9 +719,12 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
 
   // The upgrade under way.
   await dialog(page).getByRole("button", { name: "Upgrade", exact: true }).click()
-  await expect(progress(page)).toContainText("shop_main: 21.4 MB copied")
-  await settled(progress(page))
-  await page.screenshot({ path: shot("version-upgrading-1440"), fullPage: true })
+  const underWay = page.getByRole("region", { name: "Upgrade shop to PostgreSQL 17, running" })
+  await expect(underWay).toContainText("shop_main: 21.4 MB copied")
+  await expect(dialog(page)).toHaveCount(0)
+  await atTop(section(page, "upgrade"))
+  await settled(underWay)
+  await page.screenshot({ path: shot("version-upgrading-1440") })
 
   // A check that stops it.
   state = OFFERED

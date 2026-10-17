@@ -821,7 +821,6 @@ function RevertDialog({
       dirty={!dumpFirst}
       busy={busy}
       refusal={refusal}
-      note="It runs on the server; this page shows it."
       command="Revert"
       commandIcon={RotateCounterClockwise}
       destructive

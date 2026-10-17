@@ -1,5 +1,6 @@
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type { Job, JobLine } from "@/lib/types"
+import { ago } from "@/components/database/home/readings"
 import { transferResult } from "@/components/database/ops/backups-model"
 
 /**
@@ -7,6 +8,14 @@ import { transferResult } from "@/components/database/ops/backups-model"
  * routes' answers as the server writes them, and the sentences made from
  * them. No React, so each sentence can be held to its inputs.
  */
+
+/**
+ * How long ago something happened, in the one unit a head has room for:
+ * "41m ago", not "41m 10s ago", whose seconds tick while it is read.
+ */
+function since(iso: string): string {
+  return ago(Date.parse(iso), Date.now())
+}
 
 /** One release a server can be moved to: its id in the closed list, and the image. */
 export type DbUpgradeTarget = { version: string; image: string }
@@ -150,7 +159,7 @@ export function blockers(report: DbUpgradeReport): DbUpgradeCheck[] {
 /** What a report comes to, in the words a section's head carries. */
 export function reportWords(report: DbUpgradeReport | undefined): string {
   if (!report) return "Not checked yet"
-  const when = relativeTime(report.checkedAt)
+  const when = since(report.checkedAt)
   const stopping = blockers(report).length
   if (stopping > 0) return `Checked ${when} · ${plural(stopping, "thing", "things")} to fix first`
   const notes = report.checks.filter((check) => check.verdict === "warning").length
@@ -174,7 +183,7 @@ export function upgradeSteps(
 
 /** What the kept server is, for the head of its section. */
 export function keptWords(record: DbUpgradeRecord): string {
-  const when = record.upgradedAt ? ` ${relativeTime(record.upgradedAt)}` : ""
+  const when = record.upgradedAt ? ` ${since(record.upgradedAt)}` : ""
   const who = record.startedBy ? ` by ${record.startedBy}` : ""
   return `Upgraded${when}${who}`
 }
@@ -197,7 +206,7 @@ export function lastWords(
   label: string,
 ): { tone: "danger" | "default"; title: string; body: string } | undefined {
   if (!last || !last.endedAt) return undefined
-  const when = relativeTime(last.endedAt)
+  const when = since(last.endedAt)
   if (last.state === "failed") {
     return {
       tone: "danger",

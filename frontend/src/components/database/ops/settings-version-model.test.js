@@ -127,7 +127,7 @@ describe("what the checks found", () => {
 
 describe("the server kept after an upgrade", () => {
   test("says when and by whom the upgrade was made", () => {
-    expect(keptWords(record())).toBe("Upgraded 2h 12m ago by operator")
+    expect(keptWords(record())).toBe("Upgraded 2h ago by operator")
     expect(keptWords(record({ upgradedAt: undefined, startedBy: undefined }))).toBe("Upgraded")
   })
 
