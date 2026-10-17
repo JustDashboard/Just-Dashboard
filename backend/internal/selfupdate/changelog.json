@@ -71,6 +71,11 @@
           "kind": "added",
           "text": "Enable, update and disable PostgreSQL extensions with their options, and load the ones that need it at start",
           "detail": "Databases → Settings → Extensions lists extensions by what they are for, with what the server's image does not ship and which have a newer version, searchable and filtered by category. Enabling one chooses its version, its schema and CASCADE for what it needs; an update goes to the server's default or another version it ships; disabling lists what depends on the extension before CASCADE can drop it too. Each shows its statement before it runs. An extension such as pg_cron, pg_stat_statements, TimescaleDB or auto_explain, which works only once the server loads its library at start, is enabled in one dialog: the library is added to shared_preload_libraries with every library already there kept, the server is restarted when you say so, then the extension is created."
+        },
+        {
+          "kind": "security",
+          "text": "A SELECT that runs other SQL or outlives its rollback is no longer a read",
+          "detail": "PostgreSQL's query_to_xml, cursor_to_xml and table_to_xml families, ts_stat, crosstab, connectby and every dblink function run text they are handed as SQL, which can spell a function's name in pieces that no reading of the statement sees. Advisory locks, statistics resets, replication and WAL functions, MySQL and MariaDB named locks and := assignments, sequence values on every engine, and Oracle's DBMS_XMLGEN, DBMS_SQL, UTL_HTTP and similar packages act past the read-only transaction a read runs in. All of these now ask for the destructive capability and a confirmation in the query editor, and are refused on a protected connection."
         }
       ]
     },
