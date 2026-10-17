@@ -33,9 +33,9 @@ import {
   resetStatements,
 } from "@/components/database/ops/performance-api"
 import {
+  hasPlaceholder,
   isStatementSort,
   millis,
-  planFor,
   rowsPerCall,
   shareWords,
   statementKeys,
@@ -75,10 +75,11 @@ const MORE = 200
  * reader chooses, since "slowest on average" and "called most" are different
  * lists and the server ranks each over everything it tracked.
  *
- * The text is a shape — the server replaces every value before it leaves — so
- * a row is something to recognise. It opens on the whole statement and its
- * figures, and on its plan: asked as it stands where it has no placeholder,
- * and with the values the reader puts in where it has.
+ * The text is a shape — every value in it is replaced before it leaves the
+ * server, by the engine or by the dashboard where the engine keeps a statement
+ * as it was sent — so a row is something to recognise. It opens on the whole
+ * statement and its figures, and on its plan: asked as it stands where it has
+ * no placeholder, and with the values the reader puts in where it has.
  *
  * Where the statistics are off, the view says what turns them on, and offers
  * it where one press does.
@@ -328,8 +329,8 @@ export function StatementsView() {
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <FormNote>
                   The bar is a statement&apos;s share of all the time counted. The text is a shape:
-                  the server replaces every value before it leaves, and a row&apos;s plan is asked
-                  for with values put back in.
+                  every value in it is replaced before it leaves the server, and a row&apos;s plan
+                  is asked for with values put back in.
                 </FormNote>
                 {answer.statements.length >= limit && limit < MORE && (
                   <Button size="xs" variant="ghost" onClick={() => setLimit(MORE)}>
@@ -418,7 +419,9 @@ function StatementPanel({
 }) {
   const { engine, goto } = useDatabase()
   const { can } = useAuth()
-  const shape = planFor(statement.query) === "shape"
+  // Labelled by what the text holds, not by whether it plans: a CREATE ROLE
+  // with a ? where its password was is a shape too.
+  const shape = hasPlaceholder(statement.query)
   const lines = statement.query.split("\n").length
   const each = rowsPerCall(statement)
   const mayQuery = engine.has("query") && can("service.control")
