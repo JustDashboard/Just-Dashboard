@@ -20,6 +20,19 @@ type SQLStatement struct {
 	leader      string
 	returnsRows bool
 	dollar      bool
+	// plsql: an Oracle PL/SQL unit, sent with the semicolon after its END.
+	plsql bool
+	// compound: the statement holds statements of its own, a body or a block.
+	compound bool
+	// block: it is a block or a flow-control statement that runs now — a
+	// PL/SQL block, T-SQL's BEGIN … END or IF, MariaDB's BEGIN NOT ATOMIC —
+	// rather than a definition whose body runs when it is called.
+	block bool
+	// ownTransaction: it opens, ends or marks a transaction itself.
+	ownTransaction bool
+	// program is the stored program an Oracle CREATE defines, which the engine
+	// keeps even when it does not compile.
+	program *storedProgram
 }
 
 // Risk classifies a statement so the UI can warn before it runs.
@@ -36,47 +49,30 @@ const maxScriptStatements = 500
 
 // ParseScript splits a query into its statements for an engine and classifies
 // each one. Anything the lexer cannot attribute is an error rather than a
-// guess, and callers treat that error as a refusal.
+// guess, and callers treat that error as a refusal. Where a statement ends is
+// the engine's own business, body and client separators included
+// (statement_split.go); a SQL Server batch that GO repeats is there as many
+// times as it runs.
 func ParseScript(driver Driver, query string) ([]SQLStatement, error) {
-	tokens, err := lexSQL(lexRulesFor(driver), query)
+	pieces, err := splitScript(driver, query)
 	if err != nil {
 		return nil, err
 	}
+	if len(pieces) > maxScriptStatements {
+		return nil, fmt.Errorf("a script may hold at most %d statements", maxScriptStatements)
+	}
 	var out []SQLStatement
-	line, counted := 1, 0
-	flush := func(part []sqlToken) error {
-		if len(part) == 0 {
-			return nil
-		}
-		if len(out) >= maxScriptStatements {
-			return fmt.Errorf("a script may hold at most %d statements", maxScriptStatements)
-		}
-		start, end := part[0].start, part[len(part)-1].end
-		line += strings.Count(query[counted:start], "\n")
-		counted = start
-		st := SQLStatement{SQL: query[start:end], Line: line}
+	for _, piece := range pieces {
+		start, end := piece.tokens[0].start, piece.tokens[len(piece.tokens)-1].end
+		st := SQLStatement{SQL: query[start:end], Line: piece.line, plsql: piece.plsql}
 		// Offsets become relative to the statement, which is the text every
 		// later question is asked of.
-		rel := make([]sqlToken, len(part))
-		for i, t := range part {
+		rel := make([]sqlToken, len(piece.tokens))
+		for i, t := range piece.tokens {
 			rel[i] = sqlToken{t.kind, t.start - start, t.end - start}
 		}
 		st.read(driver, rel)
 		out = append(out, st)
-		return nil
-	}
-	from := 0
-	for i, t := range tokens {
-		if t.kind != tokSemicolon {
-			continue
-		}
-		if err := flush(tokens[from:i]); err != nil {
-			return nil, err
-		}
-		from = i + 1
-	}
-	if err := flush(tokens[from:]); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -116,7 +112,7 @@ func explainStatement(driver Driver, query string) (*SQLStatement, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.dollar || !explainLeaders[st.leader] {
+	if st.dollar || st.compound || !explainLeaders[st.leader] {
 		return nil, fmt.Errorf("this statement cannot be explained safely")
 	}
 	return st, nil
@@ -305,12 +301,32 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	// SELECT. Anything else in front of the first word means there is no
 	// leading verb to trust.
 	leading := true
-	for _, t := range tokens {
+	// segments are the statements a body holds, cut at its semicolons, so a
+	// DELETE in one is not scoped by the WHERE of another. A statement with no
+	// body is one segment.
+	type segment struct {
+		from, to int
+		where    bool
+	}
+	segments := []segment{{}}
+	for i, t := range tokens {
 		switch {
+		case t.kind == tokSemicolon:
+			segments[len(segments)-1].to = t.start
+			// A PL/SQL unit ends in the semicolon after its END, which closes
+			// it rather than separating two statements in it.
+			if i < len(tokens)-1 {
+				st.compound = true
+				segments = append(segments, segment{from: t.end})
+			}
+			leading = false
 		case t.kind == tokWord:
 			word := strings.ToLower(st.SQL[t.start:t.end])
 			keywords[word] = true
 			code = append(code, word)
+			if word == "where" {
+				segments[len(segments)-1].where = true
+			}
 			if leading {
 				st.leader, leading = word, false
 			}
@@ -320,10 +336,17 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 			leading = false
 		}
 	}
+	if last := &segments[len(segments)-1]; last.to <= last.from {
+		last.to = len(st.SQL)
+	}
+	st.block = runsAsBlock(driver, st.plsql, st.leader, code)
 
 	writes := keywords["insert"] || keywords["update"] || keywords["delete"] || keywords["merge"]
 	st.returnsRows = rowLeaders[st.leader] || engineRowLeaders[driver][st.leader] ||
-		keywords["returning"] || driver == DriverMSSQL && keywords["output"]
+		keywords["returning"] || driver == DriverMSSQL && keywords["output"] ||
+		// A block hands back the rows of the queries in it; the drivers of
+		// these two take a statement that returns none through Query as well.
+		st.block && (driver == DriverMSSQL || driver == DriverMySQL)
 	if st.leader == "with" && writes && !keywords["returning"] && !keywords["output"] {
 		st.returnsRows = false
 	}
@@ -355,11 +378,21 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 		add("critical", "runs a shell command on the database host")
 	}
 	// The WHERE that scopes a statement has to be code. One that only appears
-	// in a comment or a string scopes nothing.
-	if words.has("delete") && !keywords["where"] {
+	// in a comment or a string scopes nothing, and neither does one that
+	// belongs to another statement of the same body.
+	deletesAll, updatesAll := false, false
+	for _, seg := range segments {
+		part := words
+		if st.compound {
+			part = rawWords(st.SQL[seg.from:seg.to])
+		}
+		deletesAll = deletesAll || part.has("delete") && !seg.where
+		updatesAll = updatesAll || part.has("update") && part.has("set") && !seg.where
+	}
+	if deletesAll {
 		add("critical", "deletes every row (no WHERE clause)")
 	}
-	if words.has("update") && words.has("set") && !keywords["where"] {
+	if updatesAll {
 		add("critical", "updates every row (no WHERE clause)")
 	}
 	if words.has("delete") {
@@ -385,6 +418,14 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	}
 	if st.dollar {
 		add("high", "contains a dollar-quoted body, which runs whatever is written inside it")
+	}
+	// A body holds statements the engine runs as written — when it is
+	// called, or now — and whatever leads it says nothing about them. It is
+	// also the one place this package and the engine might disagree about
+	// where a statement ends, so whatever was cut as one piece has to cost at
+	// least what any of its pieces could.
+	if st.compound {
+		add("high", "holds a block of statements, which runs whatever is written inside it")
 	}
 	if driver == DriverMSSQL {
 		for _, word := range batchWords {
@@ -463,6 +504,43 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	}
 	risk.Destructive = risk.Level == "critical" || risk.Level == "high"
 	st.Risk = risk
+
+	// A block that runs now manages a transaction by what is in it, and its
+	// BEGIN is not one; a definition's body runs later, when it is called.
+	if st.block {
+		st.ownTransaction = keywords["commit"] || keywords["rollback"] || keywords["savepoint"]
+	} else {
+		st.ownTransaction = transactionWords[st.leader]
+	}
+	if driver == DriverOracle && st.plsql && st.leader == "create" {
+		st.program = oracleProgram(st.SQL, tokens)
+	}
+}
+
+// runsAsBlock reports a statement that is a block, or a flow-control
+// statement, the engine runs as it is sent.
+func runsAsBlock(driver Driver, plsql bool, leader string, code []string) bool {
+	switch driver {
+	case DriverOracle:
+		// A PL/SQL unit that neither CREATEs something nor is a query (WITH
+		// FUNCTION) is a block: DECLARE, BEGIN, <<label>>.
+		return plsql && leader != "create" && leader != "with"
+	case DriverMSSQL:
+		switch leader {
+		case "begin":
+			return len(code) < 2 || !tsqlNotBlocks[code[1]]
+		case "if", "while":
+			return true
+		}
+	case DriverMySQL:
+		switch leader {
+		case "begin":
+			return len(code) > 2 && code[1] == "not" && code[2] == "atomic"
+		case "if", "case", "while", "loop", "repeat":
+			return true
+		}
+	}
+	return false
 }
 
 // wordSet is every word in a statement's raw text.

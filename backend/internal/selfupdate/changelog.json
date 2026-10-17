@@ -103,6 +103,13 @@
           "kind": "added",
           "text": "Tell your notification channels when a database stops answering, fills its disk, runs out of connections, falls behind or misses a backup",
           "detail": "A database's new Alerts page holds rules for that database or for every database: the server not answering, the disk its data is on, its connections against its limit, replication lag, and a backup job that failed or has not succeeded by its time. Each rule has its line, how long it must hold, a cooldown and whether its recovery is told, and reaches the webhook, Discord, Slack, Telegram and e-mail channels the deployments already use, with a test from the rule's menu. Rules are judged on the activity recorder's thirty-second reading and the backup runs, a reading must fall a margin under the line before it recovers, and the page lists what was told lately."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Run stored procedures, triggers and PL/SQL blocks from the query editor",
+          "detail": "The editor and the server now end a statement where its engine does: MySQL and MariaDB scripts with DELIMITER, or a procedure as SHOW CREATE prints it; SQLite triggers; SQL Server batches separated by GO, with GO 3 running a batch three times; Oracle PL/SQL blocks, procedures and packages ended by a / line; and PostgreSQL functions with BEGIN ATOMIC bodies. Running the statement under the cursor sends the whole body, the strip says which lines it covers and warns when a block runs on to the end of the text, Format leaves separators and bodies as written, and an Oracle procedure that does not compile fails with the compiler's errors. A statement with a body is never treated as a read, so a protected connection refuses it."
         }
       ]
     },

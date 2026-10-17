@@ -82,7 +82,7 @@ func RunScript(ctx context.Context, db *sql.DB, driver Driver, statements []SQLS
 			return nil, fmt.Errorf("ClickHouse has no transactions, so a script cannot be run inside one")
 		}
 		for _, st := range statements {
-			if transactionWords[st.leader] {
+			if st.ownTransaction {
 				return nil, fmt.Errorf("line %d manages a transaction itself; turn off running the script in one transaction", st.Line)
 			}
 		}

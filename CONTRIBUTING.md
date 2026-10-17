@@ -539,9 +539,9 @@ Each area of the section has its own browser spec over one mocked server
 (`frontend/tests/browser/database-fixture.ts`, which answers with the driver
 catalogue above, and `database-fleet-fixture.ts` for a machine with and without
 Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
-`database-fleet-backups.spec.ts`, `database-home.spec.ts`,
-`database-data.spec.ts`, `database-query.spec.ts`, `database-schema.spec.ts`,
-`database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-fleet-backups.spec.ts`, `database-home.spec.ts`, `database-data.spec.ts`,
+`database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
+the editor), `database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs
