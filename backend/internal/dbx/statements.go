@@ -701,10 +701,15 @@ func (oracleDialect) Statements(ctx context.Context, db *sql.DB, opts Statements
 // the engines that keep the text as it was sent.
 //
 // It reads the text the way a SQL lexer would, far enough to know what is a
-// literal: a quoted identifier is copied whole, a comment is copied whole (an
-// apostrophe in one is not the start of a string), a string becomes one ?
-// whatever is inside it, and a number becomes one ? unless it is part of a
-// name or of a bind marker. The text an engine hands over may have been cut
+// literal: a quoted identifier is copied whole, a comment is dropped (an
+// apostrophe in one is not the start of a string, and what an application
+// writes in one — a request id, a user — is as much its data as a literal),
+// a string becomes one ? whatever is inside it, and a number becomes one ?
+// unless it is part of a name or of a bind marker. An optimizer hint is a
+// comment the server reads, so it stays, with the literals in it shaped.
+// Oracle keeps the text with its line breaks turned into spaces, so a -- comment
+// runs to the end of what it hands over, and the rest of the statement goes
+// with it. The text an engine hands over may have been cut
 // short; a string still open at the end is a literal like any other and is
 // dropped with the rest. brackets is true for SQL Server, where [..] quotes a
 // name.
@@ -750,6 +755,17 @@ func statementShape(text string, brackets bool) string {
 		}
 		return j
 	}
+	// dropComment stands in for a comment that ended at end: it still separates
+	// two tokens, and the spaces after it are not kept as well.
+	dropComment := func(end int) int {
+		if l := last(); l != 0 && l != ' ' && l != '\n' && l != '\t' && l != '\r' {
+			b.WriteByte(' ')
+		}
+		for end < len(text) && text[end] == ' ' {
+			end++
+		}
+		return end
+	}
 	// copyThrough copies from i up to and including the closing delimiter, a
 	// doubled one being the delimiter itself, and returns where it stopped.
 	copyThrough := func(i int, closing byte) int {
@@ -776,17 +792,30 @@ func statementShape(text string, brackets bool) string {
 			if end < 0 {
 				end = len(text) - i
 			}
-			b.WriteString(text[i : i+end])
-			i += end
-		case c == '/' && i+1 < len(text) && text[i+1] == '*':
-			end := strings.Index(text[i+2:], "*/")
-			if end < 0 {
-				b.WriteString(text[i:])
-				i = len(text)
-				break
+			if text[i:min(i+3, len(text))] == "--+" {
+				b.WriteString("--+")
+				b.WriteString(statementShape(text[i+3:i+end], brackets))
+				i += end
+			} else {
+				i = dropComment(i + end)
 			}
-			b.WriteString(text[i : i+2+end+2])
-			i += 2 + end + 2
+		case c == '/' && i+1 < len(text) && text[i+1] == '*':
+			end := shapeCommentEnd(text, i, brackets)
+			if text[i:min(i+3, len(text))] == "/*+" {
+				body := text[i+3 : end]
+				closed := strings.HasSuffix(body, "*/")
+				if closed {
+					body = body[:len(body)-2]
+				}
+				b.WriteString("/*+")
+				b.WriteString(statementShape(body, brackets))
+				if closed {
+					b.WriteString("*/")
+				}
+				i = end
+			} else {
+				i = dropComment(end)
+			}
 		case c == '"' || c == '`':
 			i = copyThrough(i, c)
 		case c == '[' && brackets:
@@ -851,6 +880,28 @@ func statementShape(text string, brackets bool) string {
 		}
 	}
 	return b.String()
+}
+
+// shapeCommentEnd returns where the /* comment starting at i ends, after its
+// closing */ or at the end of an unterminated one. T-SQL nests them, which
+// the other engines do not.
+func shapeCommentEnd(text string, i int, nested bool) int {
+	depth := 1
+	for j := i + 2; j < len(text); {
+		switch {
+		case strings.HasPrefix(text[j:], "*/"):
+			j += 2
+			if depth--; depth == 0 || !nested {
+				return j
+			}
+		case nested && strings.HasPrefix(text[j:], "/*"):
+			depth++
+			j += 2
+		default:
+			j++
+		}
+	}
+	return len(text)
 }
 
 // clipStatementText cuts a string to at most n bytes without splitting a character.

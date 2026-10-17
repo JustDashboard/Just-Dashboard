@@ -1152,7 +1152,12 @@ stays editable on a protected connection.
   never one execution: the list is on the read surface and a literal is somebody's e-mail address, or in
   a `CREATE ROLE` a password. MySQL and MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to
   (`normalizeQuery`), and for SQL Server and Oracle `dbx.statementShape` replaces every string and number
-  literal with `?` before the text leaves the package. PostgreSQL's text is shaped in the package as
+  literal with `?` before the text leaves the package. It also drops comments: a comment is whatever the application wrote (a request id,
+  a user), and Oracle stores the text with its line breaks turned into spaces, so a `--` comment cannot be
+  told from the code after it and takes the rest of the statement with it. An optimizer hint (`/*+ .. */`,
+  `--+`) is kept with its literals shaped, and SQL Server's nested block comments are read as it reads them.
+  `TestLiveAPIOracleStatementsCarryNoLiterals` (INSERT, INSERT ALL, MERGE, a PL/SQL block, comments, hints)
+  and its SQL Server and MySQL siblings read `/statements` as a viewer and look for what was run. PostgreSQL's text is shaped in the package as
   well, by `pgStatementShape` (`dbx/statements_shape.go`): `pg_stat_statements` writes `$n` over the
   constants of the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) and keeps every
   utility statement as it was sent while `pg_stat_statements.track_utility` is on, its default —
