@@ -27,6 +27,9 @@ type liveShop struct {
 	open func(ctx context.Context, t *testing.T, dsn string) (*sql.DB, string)
 	// references is false where the engine has no foreign keys.
 	references bool
+	// prefix is what the shop's two tables are called before customers and
+	// orders, on a server where they share a schema with other tables.
+	prefix string
 }
 
 func exec(ctx context.Context, t *testing.T, db *sql.DB, statements ...string) {
@@ -114,6 +117,39 @@ var liveShops = []liveShop{
 		),
 	},
 	{
+		// Oracle's schema is its account's, shared with whatever else the
+		// fixture holds, so the tables carry the slug instead.
+		name: "oracle", env: "JD_TEST_ORACLE_DSN", driver: dbx.DriverOracle, references: true,
+		prefix: "jdt_ai_assistant_",
+		open: func(ctx context.Context, t *testing.T, dsn string) (*sql.DB, string) {
+			db, err := dbx.OpenDatabase(ctx, dbx.DriverOracle, dsn, "")
+			if err != nil {
+				t.Skipf("not answering: %v", err)
+			}
+			drop := func() {
+				for _, table := range []string{"JDT_AI_ASSISTANT_ORDERS", "JDT_AI_ASSISTANT_CUSTOMERS"} {
+					_, _ = db.ExecContext(context.Background(), "DROP TABLE "+table+" PURGE")
+				}
+			}
+			t.Cleanup(func() {
+				drop()
+				db.Close()
+			})
+			if err := db.PingContext(ctx); err != nil {
+				t.Skipf("not answering: %v", err)
+			}
+			drop()
+			exec(ctx, t, db,
+				"CREATE TABLE JDT_AI_ASSISTANT_CUSTOMERS (ID NUMBER(19) PRIMARY KEY, EMAIL VARCHAR2(200) NOT NULL UNIQUE, NOTE VARCHAR2(100) DEFAULT '"+liveSentinel+"-default')",
+				"COMMENT ON TABLE JDT_AI_ASSISTANT_CUSTOMERS IS '"+liveSentinel+"-comment'",
+				"CREATE TABLE JDT_AI_ASSISTANT_ORDERS (ID NUMBER(19) PRIMARY KEY, CUSTOMER_ID NUMBER(19) NOT NULL REFERENCES JDT_AI_ASSISTANT_CUSTOMERS(ID), TOTAL NUMBER(12,2), STATUS VARCHAR2(60) NOT NULL)",
+				"INSERT INTO JDT_AI_ASSISTANT_CUSTOMERS(ID, EMAIL) VALUES (1, '"+liveSentinel+"@example.com')",
+				"INSERT INTO JDT_AI_ASSISTANT_ORDERS VALUES (1, 1, 42.50, '"+liveSentinel+"')",
+			)
+			return db, "JDTEST"
+		},
+	},
+	{
 		name: "sqlserver", env: "JD_TEST_MSSQL_DSN", driver: dbx.DriverMSSQL, references: true,
 		open: inDatabase(dbx.DriverMSSQL,
 			"CREATE TABLE customers (id BIGINT PRIMARY KEY, email NVARCHAR(200) NOT NULL UNIQUE, note NVARCHAR(100) DEFAULT '"+liveSentinel+"-default')",
@@ -139,11 +175,13 @@ func TestLiveSchemaContextIsTheStructureAndNoValues(t *testing.T) {
 				schema = "dbo"
 			}
 
-			snapshot, err := ReadSchema(ctx, db, shop.driver, schema, "count the orders by customer")
+			orders, customers := shop.prefix+"orders", shop.prefix+"customers"
+			question := "count the " + orders + " by customer"
+			snapshot, err := ReadSchema(ctx, db, shop.driver, schema, question)
 			if err != nil {
 				t.Fatal(err)
 			}
-			text, stats := SchemaText(snapshot, "count the orders by customer")
+			text, stats := SchemaText(snapshot, question)
 			prompt := SystemPrompt(shop.name, text, true)
 			if strings.Contains(prompt, liveSentinel) {
 				t.Fatalf("a value from inside the database reached the prompt:\n%s", prompt)
@@ -151,19 +189,21 @@ func TestLiveSchemaContextIsTheStructureAndNoValues(t *testing.T) {
 			if stats.Described < 2 {
 				t.Errorf("stats %+v\n%s", stats, text)
 			}
-			for _, want := range []string{"orders\n", "customers\n", "  customer_id ", "  email ", "  total "} {
-				if !strings.Contains(text, want) {
+			// Oracle writes an unquoted name in capitals.
+			read := strings.ToLower(text)
+			for _, want := range []string{orders + "\n", customers + "\n", "  customer_id ", "  email ", "  total "} {
+				if !strings.Contains(read, want) {
 					t.Errorf("the schema text lacks %q:\n%s", want, text)
 				}
 			}
-			if shop.references && !strings.Contains(strings.ToLower(text), "references customers(id)") {
+			if shop.references && !strings.Contains(read, "references "+customers+"(id)") {
 				t.Errorf("the reference from orders to customers is not said:\n%s", text)
 			}
-			if strings.Index(text, "orders\n") > strings.Index(text, "customers\n") {
+			if strings.Index(read, orders+"\n") > strings.Index(read, customers+"\n") {
 				t.Errorf("the table the question named is not first:\n%s", text)
 			}
 
-			tables, missing := Describe(ctx, db, shop.driver, snapshot.Schema, []string{"ORDERS", "no_such_table"}, snapshot.Names)
+			tables, missing := Describe(ctx, db, shop.driver, snapshot.Schema, []string{strings.ToUpper(orders), "no_such_table"}, snapshot.Names)
 			if len(tables) != 1 || len(tables[0].Columns) != 4 || len(missing) != 1 {
 				t.Fatalf("described %+v, missing %v", tables, missing)
 			}
