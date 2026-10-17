@@ -929,7 +929,9 @@ type dbBackupFile struct {
 	Size    int64     `json:"size"`
 	TakenAt time.Time `json:"takenAt"`
 	// Format is what the file is, read from its first bytes: a pg_dump
-	// archive, SQL text, a gzipped JSON Lines document set.
+	// archive, SQL text, or the dashboard's own gzipped JSON Lines — a
+	// MongoDB collection's documents, or each Redis key's DUMP payload, which
+	// is not an RDB file and which only the dashboard restores.
 	Format string `json:"format"`
 	// The rest is what the dump's description says, where it has one. A file
 	// put in the directory by hand has none of it.
