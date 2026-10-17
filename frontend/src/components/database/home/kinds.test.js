@@ -33,6 +33,21 @@ describe("the hues a home tells kinds apart with", () => {
     expect(statementVerb("UPDATE t SET a = $1")?.color).toBe("var(--tag-violet)")
     expect(statementVerb("DELETE FROM t")?.color).toBe("var(--tag-pink)")
     expect(statementVerb("ALTER TABLE t ADD c int")?.color).toBe("var(--tag-cyan)")
+    expect(statementVerb("COMMENT ON TABLE orders IS ?")?.color).toBe("var(--tag-cyan)")
+    expect(statementVerb("GRANT SELECT ON t TO app")?.color).toBe("var(--tag-cyan)")
+  })
+
+  test("one that tells the server how to run has a hue of its own", () => {
+    for (const statement of [
+      "SET statement_timeout = ?",
+      "RESET work_mem",
+      "VACUUM (ANALYZE) orders",
+      "REFRESH MATERIALIZED VIEW daily_totals",
+      "DO ?",
+      "CALL archive_orders($1)",
+    ]) {
+      expect(statementVerb(statement)?.color).toBe("var(--tag-slate)")
+    }
   })
 
   test("a statement that is none of those is left in its own ink", () => {
