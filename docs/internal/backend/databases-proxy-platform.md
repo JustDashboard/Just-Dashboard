@@ -1559,7 +1559,10 @@ new release still has.
   volume — what was written to it since the cutover goes with it; if the old one does not come back,
   the new one is put back. `POST /{id}/upgrade/complete` (destructive) removes the old container and
   the named volumes it mounted, keeping one another container uses, and closes the record. Both
-  refuse while the old container has been started by hand.
+  refuse while the old container has been started by hand. The kept container is a stopped server
+  like any other to the inventory, which lists it; forgetting the connection forgets its upgrades'
+  records with it (`ON DELETE CASCADE`), and a container still kept is then the Docker page's to
+  remove.
 - **Protection.** The upgrade and its revert replace what a protected connection reaches and are
   refused, through the connection and through a neighbour on the same server
   (`refuseServerOfProtected`); the check only reads and finishing removes what the connection no
