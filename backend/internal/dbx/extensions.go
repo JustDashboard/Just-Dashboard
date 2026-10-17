@@ -219,9 +219,15 @@ func withCatalogue(list []Extension, loaded []string, present map[string]bool) [
 	return out
 }
 
+// annotated is an extension with what the catalogue knows of it. A library
+// it works without is not named: enabling it is then CREATE EXTENSION alone,
+// and loading the library as well is a parameter like any other.
 func annotated(e Extension) Extension {
 	if info, ok := extensionCatalogue[e.Name]; ok {
-		e.Category, e.About, e.Library = info.Category, info.About, info.Library
+		e.Category, e.About = info.Category, info.About
+		if !info.Optional {
+			e.Library = info.Library
+		}
 	}
 	return e
 }
