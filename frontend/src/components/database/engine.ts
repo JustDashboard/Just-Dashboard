@@ -1,6 +1,7 @@
 import {
   Archive,
   ChartActivity,
+  CloudDownload,
   CodeBracket,
   FileText,
   GridSquare,
@@ -70,6 +71,7 @@ export type SectionId =
   | "logs"
   | "access"
   | "backups"
+  | "import"
   | "settings"
 
 export type SectionGroupId = "home" | "work" | "schema" | "insights" | "operate"
@@ -330,6 +332,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   json: false,
   hashFieldTtl: false,
   commandReference: false,
+  onlineImport: false,
 }
 
 /**
@@ -357,8 +360,18 @@ const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
   redis: ["console", "server", "dump", "roles"],
 }
 
+/**
+ * The engines that open the Import page, which is gated on a word and not a
+ * flag. Before the catalogue is read it is the plain form: the replication
+ * one is PostgreSQL's alone, and the server says so.
+ */
+const FLOOR_IMPORT: readonly DbDriver[] = ["postgres", "mysql", "sqlserver", "mongodb", "redis"]
+
 function floorOf(driver: DbDriver): Partial<DbCapabilities> {
-  return Object.fromEntries(FLOOR[driver].map((flag) => [flag, true]))
+  return {
+    ...Object.fromEntries(FLOOR[driver].map((flag) => [flag, true])),
+    ...(FLOOR_IMPORT.includes(driver) && { onlineImport: "stream" as const }),
+  }
 }
 
 const TABLES: EngineNouns = {
@@ -721,7 +734,7 @@ type SectionSpec = {
   /** The kinds of engine that have the page at all. */
   kinds: readonly EngineKind[]
   /** A capability the engine must also have. Absent: the kind alone decides. */
-  needs?: DbCapabilityFlag
+  needs?: DbCapabilityName
   workbench?: boolean
   /** What the page is, in the sentence that says an engine has none. */
   thing: string
@@ -826,6 +839,15 @@ const SECTIONS: SectionSpec[] = [
     kinds: OPENED,
     needs: "dump",
     thing: "dumps",
+  },
+  {
+    id: "import",
+    group: "operate",
+    title: "Import",
+    icon: CloudDownload,
+    kinds: OPENED,
+    needs: "onlineImport",
+    thing: "imports from another server",
   },
   {
     id: "settings",

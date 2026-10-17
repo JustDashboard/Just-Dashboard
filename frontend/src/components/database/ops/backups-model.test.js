@@ -48,6 +48,9 @@ describe("what a transfer job is and what it produced", () => {
     expect(transferKind(job("a", "backup", "running"))).toBe("backup")
     expect(transferKind(job("a", "restore", "running"))).toBe("restore")
     expect(transferKind(job("a", "copy", "running"))).toBe("copy")
+    // An import and its cutover are one kind of operation to the lists.
+    expect(transferKind({ kind: "database.transfer.4.import" })).toBe("import")
+    expect(transferKind({ kind: "database.transfer.4.import-cutover" })).toBe("import")
     expect(transferKind({ kind: "packages.upgrade" })).toBeUndefined()
   })
 
