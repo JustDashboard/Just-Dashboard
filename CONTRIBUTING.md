@@ -339,7 +339,7 @@ to the contribution terms above, including the additional licence grant to the p
   `dbx/servertls.go`) also run
   `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
   with the engines' images already pulled (`postgres:17-alpine`, `redis:8-alpine`, `mysql:8.4`,
-  `mariadb:11.4`, `mongo:8`, `valkey/valkey:8-alpine`). `JD_DB_TLS_ENGINES=postgres,redis` narrows it to
+  `mariadb:11.4`, `mariadb:10.11`, `mongo:8`, `valkey/valkey:8-alpine`). `JD_DB_TLS_ENGINES=postgres,mariadb-10.11` (the subtests' names) narrows it to
   some of them, and `openssl` is read for the certificate a SQL server presents. For each engine it
   starts a server, switches it to TLS, requires TLS, checks the certificate on the wire against the
   recorded serial, renews it (by request and by the schedule) without a restart, switches TLS off,

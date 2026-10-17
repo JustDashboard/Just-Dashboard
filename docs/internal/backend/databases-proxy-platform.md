@@ -304,14 +304,16 @@ is connected by naming the instance found, not by typing its address again.
   signs a one-year server certificate whose names are loopback (`127.0.0.1`, `::1`, `localhost`), the
   internal name `db-N.jd.internal`, the container's name when that is a valid host name, and the address the
   port is published on when the exposure switch has made it `public` or `private`. The certificate and
-  key go into a volume of their own, `<container>-tls`, mounted at `/jd-tls`, written into the new
+  key go into a volume of their own, `<container>-tls`, labelled `jd.tls-of=<connection id>` when the
+  dashboard makes it (a volume of that name without the label is somebody else's and is refused, and only
+  a labelled one is ever removed, by the source the container actually mounts), mounted at `/jd-tls`, written into the new
   container before it starts (`dockerx.RecreateOptions.BeforeStart`) so the first start already finds
   them. The container is recreated, as the access change recreates it, with a start command that
   keeps the original and adds the engine's TLS arguments after it (`ssl=on` for PostgreSQL,
   `--ssl-*` for MySQL and MariaDB, `--tlsMode` for MongoDB), or, for Redis and Valkey, the start script
   with `tls-port` in place of `port`. **Require TLS** is `hostnossl … reject` in a `pg_hba.conf` the
-  volume holds (PostgreSQL has no setting for it), `--require-secure-transport` (MySQL, and MariaDB
-  from 11.4; older releases are refused), and `requireTLS` (MongoDB). A Redis port speaks one protocol, so
+  volume holds (PostgreSQL has no setting for it), `--require-secure-transport` (MySQL, and MariaDB,
+  which has had it since 10.5.2, so every release the template offers), and `requireTLS` (MongoDB). A Redis port speaks one protocol, so
   for Redis and Valkey TLS on is TLS only; the published port, the connection's address and the exposure
   switch keep their meaning. Only a server started from one of the dashboard's templates is changed: a
   compose-owned container, one whose start command or entrypoint was changed, and KeyDB, Dragonfly,
@@ -321,26 +323,51 @@ is connected by naming the instance found, not by typing its address again.
   MongoDB, `rediss://` with `tlsCAFile=` for Redis, and `tlsCAFile=` for MySQL, which `NormaliseDSN`
   turns into a TLS configuration the driver knows), only once the server has answered with it; if it
   does not within ninety seconds, the container is put back as it was and the volume removed
-  (`502 tls_failed`). Turning TLS off recreates the container with the original command and removes
-  the volume. An application URL (`target=container`, `target=public`) keeps the encryption and drops the
-  path of the authority's file (`dbx.StripServerTLS`), which is this machine's. `GET
+  (`502 tls_failed`, whose message says what actually happened: if putting it back failed too, it says
+  the database may be unreachable and where to look). Turning TLS off recreates the container with the original command and removes
+  the volume. **What a linked application is given.** A program in another container (or on the host's network)
+  has no copy of the authority and no file at the dashboard's path, so the URL routes — `target=container`,
+  `target=host`, `target=public` and the string a host-network deployment resolves — go through
+  `applicationDSN` and `dbx.ForApplication`, never the saved string. While TLS is only *allowed* the
+  application gets the string it had before TLS and still connects without it. Once TLS is *required* it gets
+  a string that uses TLS without checking the certificate where the driver has a word for that (PostgreSQL
+  `sslmode=require`, MongoDB `tls=true&tlsInsecure=true`, MySQL `tls=skip-verify`); a Redis URL has none, so
+  it is `rediss://` and the application needs the authority's certificate. The traffic stays on the
+  internal network, and the Network settings say plainly that linked applications encrypt but do not
+  verify the certificate unless they are given the CA, which downloads there (`applications` in `GET
+  /databases/{id}/tls`: `plain`, `unverified`, `needsCA`). `GET
   /databases/{id}/tls` (`system.admin`) reports the state, the certificate's names, serial and dates, how
   many deployment environments reach the database by its internal name (they stop connecting once TLS is
   required unless they use it), and the client connection string and command for another machine, with the
   right `sslmode` or its engine's equivalent and a `<password>` placeholder. **Renewal**: a certificate is
   renewed thirty days before it ends, and when the names it carries no longer match the addresses
   the server is reached at, by a worker that looks every six hours (`startDatabaseTLS`); `POST
-  /databases/{id}/tls/renew` (`system.admin`) does it on request. A renewal writes the new files under
-  the running server and asks it to read them (`pg_reload_conf()`, `ALTER INSTANCE RELOAD TLS`, `FLUSH
+  /databases/{id}/tls/renew` (`system.admin` + `destructive`, because it can restart the container) does
+  it on request. A renewal writes the new files beside the pair
+  the server reads, swaps them in with one command (a failure part way leaves the old pair), and asks the
+  running server to read them (`pg_reload_conf()`, `ALTER INSTANCE RELOAD TLS`, `FLUSH
   SSL`, `rotateCertificates`, `CONFIG SET tls-cert-file`), run inside the container with the
-  password already in its environment; where the server declines, it restarts the container, and the
-  detail says so. Every renewal is audited as `database.tls.renew`, by the requesting account or by actor
+  password already in its environment. It then connects to the server and compares the certificate it
+  presents with the one just issued (`dbx.ServedCertificate`: the engine's own switch to TLS, then the
+  handshake, verified against the authority), because `pg_reload_conf()` returns true when PostgreSQL kept
+  the old one; where the server declines or kept it, **the container is restarted** (always, on a Redis
+  that cannot take the settings at once), the detail says so, and the row is saved only once the new
+  certificate is the one presented. Every renewal is audited as `database.tls.renew`, by the requesting account or by actor
   `system`, with the reason (`requested`, `expiry`, `names`), the old and new serial and the
   new end date. TLS changes sit on the protected-connection allowlist beside the access change: they
-  alter how the server is reached, not what it holds. `TestLiveDatabaseServerTLS`
+  alter how the server is reached, not what it holds. A TLS change and an access change take the same lock,
+  since each recreates the container, and the access change re-issues the certificate only when the names it
+  should carry have changed. A connection whose server speaks TLS is not forgotten, or dropped with its
+  database, until TLS is turned off (`409 tls_on`): the record of the certificate goes with the connection, and
+  the server would keep a certificate nothing renews.
+  **The authority has no rotation path, deliberately.** It lasts ten years. A certificate is never issued to
+  outlive it, so in the last year its servers' certificates end where it does, the schedule stops renewing
+  such a certificate (a renewal could not lengthen it), and after the authority ends no certificate can be
+  issued and the verifying connections stop connecting. What to do then is to turn TLS off on each database;
+  replacing the authority is not built. `TestLiveDatabaseServerTLS`
   (`JD_DB_TLS_LIVE=1`, optionally `JD_DB_TLS_ENGINES=postgres,redis`) switches a real server of each engine
-  on, requires TLS, checks the certificate on the wire against the recorded serial, renews it without a restart,
-  and switches TLS off, in containers of its own.
+  on, requires TLS, checks the certificate on the wire against the recorded serial, renews it by request and by the schedule without a restart, checks the string a linked application is given in both
+  modes, and switches TLS off, in containers of its own; MariaDB is run on 11.4 and on 10.11.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -1557,7 +1584,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  29 open, 12 by content, 20 preview only, 61 refused.
+  31 open, 12 by content, 20 preview only, 61 refused.
 
 **Every database** (19)
 
@@ -1594,7 +1621,7 @@ and `protectReadOnlyConnections`.
 | `PUT` | `/databases/{id}/access` | `system.admin` + `destructive` | yes | `database.access.change` | open |
 | `GET` | `/databases/{id}/tls` | `system.admin` | — | — | — |
 | `PUT` | `/databases/{id}/tls` | `system.admin` + `destructive` | yes | `database.tls.change` | open |
-| `POST` | `/databases/{id}/tls/renew` | `system.admin` | yes | `database.tls.renew` | open |
+| `POST` | `/databases/{id}/tls/renew` | `system.admin` + `destructive` | yes | `database.tls.renew` | open |
 | `GET` | `/databases/tls/authority` | any role | — | — | — |
 | `GET` | `/databases/{id}/consumers` | read | — | — | — |
 | `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
