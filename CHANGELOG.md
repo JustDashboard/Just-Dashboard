@@ -10,6 +10,13 @@ Every release of Just Dashboard, newest first.
 
 Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.
 
+### Added
+
+- Run PgBouncer in front of a PostgreSQL database from its Pooling settings
+  - A one-click connection pooler in its own container on a private network with the database, published on this server only until the database is opened to anywhere under Network, which moves the pooler with it. Choose transaction or session pooling, the pool size and the client limit, and authenticate through a userlist kept in step with the connection's password or through auth_query. Connect shows the pooled string beside the direct one, a deployment variable can hold the pooled reference ${{database.ID.pooled}}, and the page reads the pools and statistics. The pooler starts, stops and is removed with its database.
+- Enable, update and disable PostgreSQL extensions with their options, and load the ones that need it at start
+  - Databases → Settings → Extensions lists extensions by what they are for, with what the server's image does not ship and which have a newer version, searchable and filtered by category. Enabling one chooses its version, its schema and CASCADE for what it needs; an update goes to the server's default or another version it ships; disabling lists what depends on the extension before CASCADE can drop it too. Each shows its statement before it runs. An extension such as pg_cron, pg_stat_statements, TimescaleDB or auto_explain, which works only once the server loads its library at start, is enabled in one dialog: the library is added to shared_preload_libraries with every library already there kept, the server is restarted when you say so, then the extension is created.
+
 ### Changed
 
 - Show updates in a compact notice and a dedicated installation dialog
