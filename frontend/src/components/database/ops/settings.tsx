@@ -12,7 +12,6 @@ import { BlockedState } from "@/components/database/kit/blocked-state"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { AddressSection, ConnectionForm } from "@/components/database/ops/settings-connection"
 import { DangerSection } from "@/components/database/ops/settings-danger"
-import { ServerDatabasesSection } from "@/components/database/ops/settings-databases"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
@@ -31,7 +30,6 @@ const MISSING: Record<SettingsPageKey, string> = {
   network: "network to configure",
   parameters: "parameters to change here",
   extensions: "extensions",
-  databases: "other databases",
   danger: "danger zone",
 }
 
@@ -94,13 +92,18 @@ function SettingsFrame({
  *
  * It is also where an address from the one-page Settings lands: `#danger`,
  * `#reachability` or a parameter search (`?q=`) is sent on, in place, to the
- * page that holds it now.
+ * page that holds it now, and `#databases` to Home, whose list of what else
+ * the server holds is the one that section was.
  */
 export function Settings() {
   const { href } = useDatabase()
   const router = useRouter()
   const search = useSearchParams()
   useEffect(() => {
+    if (window.location.hash === "#databases") {
+      router.replace(href("home"))
+      return
+    }
     const page = formerSettingsPage(window.location.hash, search)
     if (!page) return
     const query = page === "parameters" ? search.toString() : ""
@@ -137,10 +140,6 @@ export function SettingsExtensions() {
       {(confirm) => <ExtensionsSection confirm={confirm} />}
     </SettingsFrame>
   )
-}
-
-export function SettingsDatabases() {
-  return <SettingsFrame page="databases">{() => <ServerDatabasesSection />}</SettingsFrame>
 }
 
 /**

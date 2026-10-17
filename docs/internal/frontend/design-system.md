@@ -528,16 +528,18 @@ sticky strip of anchors, and the section a reader most often came for — the da
 parameter — was the one at the foot of six screens. Since the 2026-10-16 pass each is a page of its
 own, listed under a *Settings* group in the database's rail the way a project's are
 (`database/shell/settings-pages.ts` beside `PROJECT_SETTINGS_NAV`): General, Network, Parameters,
-Extensions (a key–value server's *Modules*), Databases and Danger zone, each
-listed only where the engine has it and the danger zone only for a role that may destroy. Every page
+Extensions (a key–value server's *Modules*) and Danger zone, each
+listed only where the engine has it and the danger zone only for a role that may destroy. What else
+the server holds is not among them: it changes nothing about the connection, and Home's *Databases on
+this server* already lists it with Connect and New database, so the old `#databases` anchor opens Home. Every page
 is one centred column of `SettingSection`s under the page's one save bar, and the labels and the
 protection switch are one `SettingForm` over two sections, saved there rather than by a button of
-their own. Three of them open on a `SettingPicture` on the page's ground, as the section's other
+their own. Two of them open on a `SettingPicture` on the page's ground, as the section's other
 pictures stand: General draws the address as the way the dashboard reaches it
 (this server, the account it signs in as, the server as its product, the database it opens), Network
 who can reach the port (this machine's programs and *Anywhere*, through the container as Docker's
 whale, to the server; amber while it is published on every interface, dashed while nothing outside
-reaches it) and Databases the server and what it holds. Access opens on who signs in, each account
+reaches it). Access opens on who signs in, each account
 wired to the server and pulsing while it holds sessions, and Backups on where the dumps go — the
 database and its schedule, this server's dump tool, the directory — the line in the colour of how
 recent the newest dump is. An address from the one-page Settings (`#danger`, `#reachability`, a

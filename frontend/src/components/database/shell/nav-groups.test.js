@@ -20,10 +20,7 @@ describe("a database's pages as the rail's panel", () => {
       ["Work", ["Keys", "Console"]],
       ["Insights", ["Performance", "Logs"]],
       ["Operate", ["Access", "Backups"]],
-      [
-        "Settings",
-        ["General", "Network", "Parameters", "Modules", "Numbered databases", "Danger zone"],
-      ],
+      ["Settings", ["General", "Network", "Parameters", "Modules", "Danger zone"]],
     ])
     expect(titles(engineFor({ driver: "mongodb" }))[1]).toEqual([
       "Work",

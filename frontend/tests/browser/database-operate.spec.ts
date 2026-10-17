@@ -1226,7 +1226,7 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     expect(rail(page).getByRole("link")).toContainText(names, { useInnerText: true })
 
   await visit(page, "/databases/1/settings")
-  await listed(["General", "Network", "Parameters", "Extensions", "Databases", "Danger zone"])
+  await listed(["General", "Network", "Parameters", "Extensions", "Danger zone"])
   for (const id of ["address", "connection", "protection"]) {
     await expect(section(page, id)).toBeVisible()
   }
@@ -1234,7 +1234,6 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     ["network", "reachability"],
     ["parameters", "parameters"],
     ["extensions", "extensions"],
-    ["databases", "databases"],
     ["danger", "danger"],
   ]) {
     await visit(page, `/databases/1/settings/${path}`)
@@ -1245,7 +1244,7 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     "Server parameters",
   )
 
-  // A file has no server: no network, no extensions, no neighbours.
+  // A file has no server: no network, no extensions.
   await visit(page, "/databases/7/settings")
   await listed(["General", "Parameters", "Danger zone"])
   await expect(rail(page).getByRole("link", { name: "Network", exact: true })).toHaveCount(0)
@@ -1260,8 +1259,8 @@ test("settings are pages in the rail, each a form in sections, with only the pag
 
   // A document database answers the parameters route with status counters:
   // those are Performance's, and Settings has no page for them.
-  await visit(page, "/databases/5/settings/databases")
-  await expect(section(page, "databases")).toBeVisible()
+  await visit(page, "/databases/5/settings")
+  await expect(section(page, "address")).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Parameters", exact: true })).toHaveCount(0)
   expect(server.seen).not.toContain("GET 5/settings")
 })
@@ -1276,6 +1275,10 @@ test("an address from the one-page Settings lands on the page that holds its sec
 
   await visit(page, "/databases/1/settings#reachability")
   await expect.poll(() => where(page)).toBe("/databases/1/settings/network")
+
+  // What else the server holds is Home's now.
+  await visit(page, "/databases/1/settings#databases")
+  await expect.poll(() => where(page)).toBe("/databases/1")
 
   // A link to one parameter shows the parameters, searched for it.
   await visit(page, "/databases/1/settings?q=work_mem")
@@ -1710,11 +1713,6 @@ test("a key–value server's parameters are its own configuration, and a secret 
   await visit(page, "/databases/4/settings/extensions")
   await expect(section(page, "extensions").getByRole("heading", { level: 3 })).toHaveText("Modules")
   await expect(section(page, "extensions")).toContainText("ReJSON")
-  // Its numbered databases are places to browse, not things to connect or create.
-  await visit(page, "/databases/4/settings/databases")
-  const numbered = section(page, "databases")
-  await expect(numbered.getByRole("link", { name: "Browse the keys of database 3" })).toBeVisible()
-  await expect(numbered.getByRole("button", { name: "New database" })).toHaveCount(0)
 })
 
 test("an extension is enabled with one press and disabled after being asked", async ({ page }) => {
@@ -1748,36 +1746,6 @@ test("an extension is enabled with one press and disabled after being asked", as
   await expect
     .poll(() => server.sent.find((one) => one.request === "POST 1/server/extensions")?.body)
     .toEqual({ name: "pgcrypto" })
-})
-
-test("another database of the server is opened as a connection, and a new one made", async ({
-  page,
-}) => {
-  const server = await mockOperate(page, {
-    answers: {
-      "POST 1/server/databases/connect": { id: 9, name: "shop.shop_staging", driver: "postgres" },
-      "POST 1/server/databases": { id: 10, name: "shop.shop_next", driver: "postgres" },
-    },
-  })
-  await visit(page, "/databases/1/settings/databases")
-  const databases = section(page, "databases")
-  // The one this connection is on is a card; one with no connection is a row with its command.
-  await expect(databases.locator("[data-slot=choice-row]")).toHaveCount(1)
-  await expect(databases.locator("[data-slot=choice-row]")).toContainText("shop_main")
-  await expect(databases.locator("[data-database=shop_staging]")).toContainText("owned by app")
-  await databases.getByRole("button", { name: "Connect shop_staging" }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/databases/connect")?.body)
-    .toEqual({ database: "shop_staging" })
-
-  await databases.getByRole("button", { name: "New database" }).click()
-  await dialog(page).getByLabel("Name").fill("shop_main")
-  await expect(dialog(page)).toContainText("already has a database of that name")
-  await dialog(page).getByLabel("Name").fill("shop_next")
-  await dialog(page).getByRole("button", { name: "Create", exact: true }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/databases")?.body)
-    .toEqual({ name: "shop_next", connect: true })
 })
 
 test("forgetting a linked connection is refused in the dialog, with the way to the deployment", async ({
@@ -1908,10 +1876,6 @@ test("a role that may not administer reads the settings and changes none of them
   await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toHaveCount(0)
   await expect(page.getByText("The danger zone is an administrator's")).toBeVisible()
-  await visit(page, "/databases/1/settings/databases")
-  await expect(
-    section(page, "databases").getByRole("button", { name: /Connect|New database/ }),
-  ).toHaveCount(0)
   await visit(page, "/databases/1/settings/extensions")
   await expect(
     section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
@@ -1944,10 +1908,6 @@ test("a protected connection keeps its labels editable and offers nothing that c
   await visit(page, "/databases/1/settings/extensions")
   await expect(
     section(page, "extensions").getByRole("button", { name: /^(Enable|Disable) / }),
-  ).toHaveCount(0)
-  await visit(page, "/databases/1/settings/databases")
-  await expect(
-    section(page, "databases").getByRole("button", { name: /Connect|New database/ }),
   ).toHaveCount(0)
   await visit(page, "/databases/1/settings/danger")
   await expect(section(page, "danger")).toContainText("This connection is protected")
@@ -2795,8 +2755,6 @@ for (const [label, viewport] of [
       ["/databases/4/settings/parameters", "parameters"],
       ["/databases/7/settings/parameters", "parameters"],
       ["/databases/4/settings/extensions", "extensions"],
-      ["/databases/1/settings/databases", "databases"],
-      ["/databases/5/settings/databases", "databases"],
       ["/databases/1/settings/danger", "danger"],
       ["/databases/4/settings/danger", "danger"],
     ]) {

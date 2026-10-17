@@ -57,7 +57,7 @@ export function databasePlace(pathname: string): { id: number; section: SectionI
 }
 
 /** The pages under Settings, as their address spells them. */
-const SETTINGS_PATHS = ["network", "parameters", "extensions", "databases", "danger"]
+const SETTINGS_PATHS = ["network", "parameters", "extensions", "danger"]
 
 /**
  * The pages the section had while the connection was a query parameter, and
