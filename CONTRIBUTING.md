@@ -465,9 +465,11 @@ Some tests reach past a database to the machine and run only when asked:
 | `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
+| `JD_TEST_WALG=<path>` | a WAL-G release binary, the one `backend/Dockerfile` pins: provisions a PostgreSQL 17 through the route, archives it into a directory, recovers copies to a moment and to a restore point, switches one in, turns archiving off and deletes an archive (`TestLivePointInTimeRecoveryIntoADirectory`); it creates and removes its own `jdt-pitr-postgres-…` containers, volumes and directory |
+| `JD_TEST_PITR_S3=http://key:secret@host:port/bucket` | with `JD_TEST_WALG`, the same through an S3 store the run owns — a MinIO container on Docker's network, so the server's container reaches it — including a recovery while the server is stopped and one past the end of the archive (`TestLivePointInTimeRecoveryIntoS3`) |
 
-The ones that need Docker (the inventory, provisioning and power tests) read
-`JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
+The ones that need Docker (the inventory, provisioning, power and point-in-time recovery tests)
+read `JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
 
 ### Fixtures
 

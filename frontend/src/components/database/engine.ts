@@ -317,6 +317,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   serverDatabaseConnect: false,
   copy: false,
   copyStructureOnly: false,
+  pitr: false,
   catalogGroups: [],
   ddlOperations: [],
   maintenanceActions: [],

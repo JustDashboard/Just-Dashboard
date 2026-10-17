@@ -287,6 +287,12 @@ Removal matches a fingerprint and retains comments and unrecognised lines. Reads
 The current host-execution implementation and its relationship to the documented invariant are recorded in
 [`../reference/verification-findings.md`](../reference/verification-findings.md).
 
+A backup job's destination can also be given to a PostgreSQL server's point-in-time recovery
+(`fromJob` on `POST /databases/{id}/pitr`): its kind, configuration and sealed keys are copied into the
+archive's own record, and a directory gets a `wal` folder beside the job's archives. The archive is not
+a run of the job and is not pruned by its retention; see
+[Databases → Point-in-time recovery](databases-proxy-platform.md#point-in-time-recovery).
+
 ## Backup presentation in 0.7.5
 
 Backups displays schedules, next runs, recorded outcomes, coverage and recovery controls. The automatic

@@ -1948,6 +1948,7 @@ export type DbCapabilityFlag =
   | "serverDatabaseConnect" // POST /{id}/server/databases/connect opens another one as a connection
   | "copy"
   | "copyStructureOnly"
+  | "pitr" // GET /{id}/pitr: the write-ahead log archived with WAL-G, recovered to a moment
 
 /** A branch of the schema catalogue (`GET /catalog`). */
 export type DbCatalogGroup =
