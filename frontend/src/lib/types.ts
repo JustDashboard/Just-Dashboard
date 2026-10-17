@@ -1875,6 +1875,7 @@ export type DbCapabilityFlag =
   | "comments"
   | "indexes"
   | "extensions"
+  | "schemaDiff" // GET /schema-diff: two schemas compared and the migration between them written
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
   | "sessions" // sessions, Redis clients, MongoDB operations

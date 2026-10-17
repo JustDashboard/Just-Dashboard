@@ -338,6 +338,7 @@ export const DATABASE_SURFACES = [
   "/databases/1/search",
   "/databases/1/schema",
   "/databases/1/diagram",
+  "/databases/1/compare",
   "/databases/1/generate",
   "/databases/1/performance",
   "/databases/1/advisor",
