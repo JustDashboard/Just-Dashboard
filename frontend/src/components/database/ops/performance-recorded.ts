@@ -13,16 +13,16 @@ import type { MetricEvent } from "@/lib/types"
  */
 
 const SORTS: { id: DbStatementHistorySort; label: string }[] = [
-  { id: "total", label: "Of runtime" },
+  { id: "total", label: "Share" },
   { id: "calls", label: "Calls" },
   { id: "mean", label: "Mean" },
   { id: "p95", label: "p95" },
   { id: "rows", label: "Rows" },
-  { id: "rowsRead", label: "Rows read" },
+  { id: "rowsRead", label: "Examined" },
 ]
 
 /**
- * The orders a history can be listed in. p95 and rows read are offered only
+ * The orders a history can be listed in. p95 and rows examined are offered only
  * where the engine keeps what they are made from: elsewhere the server would
  * rank every row as having none.
  */
@@ -101,13 +101,13 @@ export function historyMethod(engine: EngineWords, facts: DbStatementHistoryFact
     case "mysql":
       return [
         facts.percentiles
-          ? `performance_schema keeps running totals for each digest, and a histogram of how long its runs took. ${reading}. p50, p95 and p99 are read from the histogram over the same readings: never under the true figure, and over it by less than 5%. Rows read is what the server examined to answer.`
-          : `performance_schema keeps running totals for each digest. ${reading}. Rows read is what the server examined to answer. ${engine.label} keeps no histogram of run times, so there are no percentiles.`,
+          ? `performance_schema keeps running totals for each digest, and a histogram of how long its runs took. ${reading}. p50, p95 and p99 are read from the histogram over the same readings: never under the true figure, and over it by less than 5%. Examined is the rows the server read to answer.`
+          : `performance_schema keeps running totals for each digest. ${reading}. Examined is the rows the server read to answer. ${engine.label} keeps no histogram of run times, so there are no percentiles.`,
         kept,
       ]
     case "clickhouse":
       return [
-        `ClickHouse's query log holds every finished query. Every ${every} the dashboard sums the runs that finished since the reading before, by the query's shape. p50, p95 and p99 are read from those runs' own durations: never under the true figure, and over it by less than 5%.`,
+        `ClickHouse's query log holds every finished query. Every ${every} the dashboard sums the runs that finished since the reading before, by the query's shape. p50, p95 and p99 are read from those runs' own durations: never under the true figure, and over it by less than 5%. Examined is the rows each run read.`,
         kept,
       ]
     case "sqlserver":

@@ -354,9 +354,12 @@ const SPREAD: Series[] = [
 ]
 const ROWS: Series[] = [
   { key: "returned", label: "Returned", color: "var(--chart-2)" },
-  { key: "read", label: "Read", color: "var(--chart-5)" },
+  { key: "read", label: "Examined", color: "var(--chart-5)" },
 ]
 const count = (value: number) => compact(value)
+const timeTick = (value: number) => (value === 0 ? "0" : millis(value))
+/** One gutter for the four charts, as wide as the widest label any of them prints. */
+const AXIS_WIDTH = 56
 
 /**
  * One statement's history over the window: its figures across it, and a
@@ -467,7 +470,7 @@ function Figures({
     entry.rowsRead !== undefined && entry.rows > 0 ? entry.rowsRead / entry.rows : undefined
   return (
     <MetricStrip>
-      <Metric label="Of runtime" value={shareWords(entry.share)} />
+      <Metric label="Share" value={shareWords(entry.share)} />
       <Metric label="Calls" value={entry.calls.toLocaleString()} />
       <Metric label="Total" value={millis(entry.totalMs)} />
       <Metric label="Mean" value={millis(entry.meanMs)} />
@@ -483,7 +486,7 @@ function Figures({
       />
       {entry.rowsRead !== undefined && (
         <Metric
-          label="Rows read"
+          label="Rows examined"
           value={entry.rowsRead.toLocaleString()}
           hint={
             examined === undefined
@@ -530,6 +533,8 @@ function Charts({
         rows={rows}
         series={TIME}
         format={millis}
+        axisFormat={timeTick}
+        axisWidth={AXIS_WIDTH}
         domain={time.domain}
         yTicks={time.ticks}
         events={events}
@@ -543,6 +548,7 @@ function Charts({
         rows={rows}
         series={CALLS}
         format={count}
+        axisWidth={AXIS_WIDTH}
         domain={calls.domain}
         yTicks={calls.ticks}
         events={events}
@@ -556,6 +562,8 @@ function Charts({
         rows={rows}
         series={spread}
         format={millis}
+        axisFormat={timeTick}
+        axisWidth={AXIS_WIDTH}
         domain={perCall.domain}
         yTicks={perCall.ticks}
         events={events}
@@ -569,6 +577,7 @@ function Charts({
         rows={rows}
         series={ROWS}
         format={count}
+        axisWidth={AXIS_WIDTH}
         domain={read.domain}
         yTicks={read.ticks}
         events={events}

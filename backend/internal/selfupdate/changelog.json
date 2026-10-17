@@ -40,7 +40,7 @@
         {
           "kind": "added",
           "text": "Keep each database's statement statistics over time",
-          "detail": "Databases → Performance → Statement history lists what each statement cost over the last hour, six hours, day or week, with its time drawn across the window, and orders the list by calls, mean time, rows, p95 or rows read. A statement opens on charts of its time, calls, time per call and rows. The dashboard reads the statement list every five minutes, including while the page is closed, and keeps what each statement added for seven days. ClickHouse and MySQL 8 give p50, p95 and p99 from their own run times; PostgreSQL, MariaDB, SQL Server and Oracle keep no distribution, and the page says what each figure is made from. Only a statement's shape is kept, as the Statements view shows it, never one execution of it."
+          "detail": "Databases → Performance → Statement history lists what each statement cost over the last hour, six hours, day or week, with its time drawn across the window, and orders the list by its share of the time, calls, mean time, p95, rows or rows examined. A statement opens on charts of its time, calls, time per call and rows. The dashboard reads the statement list every five minutes, including while the page is closed, and keeps what each statement added for seven days. ClickHouse and MySQL 8 give p50, p95 and p99 from their own run times; PostgreSQL, MariaDB, SQL Server and Oracle keep no distribution, and the page says what each figure is made from. Only a statement's shape is kept, as the Statements view shows it, never one execution of it."
         },
         {
           "kind": "fixed",

@@ -413,37 +413,49 @@ const statementHistory =
     return { ...facts, sort, buckets, statements, ...over }
   }
 
-/** `GET /{id}/statements/history/{statement}`: its points, the first before recording began. */
-const statementHistoryOf = (recorded: Recorded[], r: Recorded) => (_call: number, url: URL) => {
-  const now = Date.now()
-  const hours = Number(url.searchParams.get("hours") ?? 1)
-  const facts = historyFacts(hours, chartBucket(hours), recorded, now)
-  const at = windowBuckets(now, hours, facts.bucketSeconds)
-  const entry = historyEntry(r, hours, facts.totalMs)
-  const points = at.map((ts, index) => {
-    if (index === 0) return { at: ts, recorded: false, calls: 0, totalMs: 0, rows: 0 }
-    const weight = r.curve(index / at.length) / at.length
-    const calls = Math.max(1, Math.round(entry.calls * weight))
-    const totalMs = entry.totalMs * weight
-    return {
-      at: ts,
-      recorded: true,
-      calls,
-      totalMs,
-      meanMs: totalMs / calls,
-      rows: Math.round(entry.rows * weight),
-      ...(r.rowsRead === undefined ? {} : { rowsRead: Math.round((entry.rowsRead ?? 0) * weight) }),
-      ...(r.p95Ms === undefined
-        ? {}
-        : {
-            p50Ms: r.p50Ms! * (0.9 + 0.2 * weight * at.length),
-            p95Ms: r.p95Ms * (0.9 + 0.2 * weight * at.length),
-            p99Ms: r.p99Ms! * (0.9 + 0.2 * weight * at.length),
-          }),
-    }
-  })
-  return { ...facts, statement: entry, points }
-}
+/**
+ * `GET /{id}/statements/history/{statement}`: its points, the first before
+ * recording began. `gap` is a point a third of the way through that no
+ * reading fell in, and `reset` the counters started again two thirds of the
+ * way through.
+ */
+const statementHistoryOf =
+  (recorded: Recorded[], r: Recorded, marks: { gap?: boolean; reset?: boolean } = {}) =>
+  (_call: number, url: URL) => {
+    const now = Date.now()
+    const hours = Number(url.searchParams.get("hours") ?? 1)
+    const facts = historyFacts(hours, chartBucket(hours), recorded, now)
+    const at = windowBuckets(now, hours, facts.bucketSeconds)
+    const entry = historyEntry(r, hours, facts.totalMs)
+    const gap = marks.gap ? Math.round(at.length / 3) : -1
+    const resets = marks.reset ? [iso(at[Math.round((at.length * 2) / 3)])] : []
+    const points = at.map((ts, index) => {
+      if (index === 0 || index === gap)
+        return { at: ts, recorded: false, calls: 0, totalMs: 0, rows: 0 }
+      const weight = r.curve(index / at.length) / at.length
+      const calls = Math.max(1, Math.round(entry.calls * weight))
+      const totalMs = entry.totalMs * weight
+      return {
+        at: ts,
+        recorded: true,
+        calls,
+        totalMs,
+        meanMs: totalMs / calls,
+        rows: Math.round(entry.rows * weight),
+        ...(r.rowsRead === undefined
+          ? {}
+          : { rowsRead: Math.round((entry.rowsRead ?? 0) * weight) }),
+        ...(r.p95Ms === undefined
+          ? {}
+          : {
+              p50Ms: r.p50Ms! * (0.9 + 0.2 * weight * at.length),
+              p95Ms: r.p95Ms * (0.9 + 0.2 * weight * at.length),
+              p99Ms: r.p99Ms! * (0.9 + 0.2 * weight * at.length),
+            }),
+      }
+    })
+    return { ...facts, resets, statement: entry, points }
+  }
 
 const NO_HISTORY_YET = (_call: number, url: URL) => ({
   ...statementHistory(SHOP_HISTORY)(0, url),
@@ -997,9 +1009,10 @@ const ANSWERS: Record<string, unknown> = {
   "GET 1/statements": STATEMENTS,
   "GET 1/statements/history": statementHistory(SHOP_HISTORY),
   ...Object.fromEntries(
-    SHOP_HISTORY.map((r) => [
+    SHOP_HISTORY.map((r, index) => [
       `GET 1/statements/history/${r.id}`,
-      statementHistoryOf(SHOP_HISTORY, r),
+      // The stock update's history has a reading missed and a reset in it.
+      statementHistoryOf(SHOP_HISTORY, r, index === 1 ? { gap: true, reset: true } : {}),
     ]),
   ),
   "GET 1/tablestats": TABLESTATS,
@@ -2192,8 +2205,8 @@ test("statement history ranks a window's statements by the column pressed, each 
   await expect(history).toContainText("so there are no percentiles")
   // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
   await expect(history.getByRole("columnheader", { name: "p95" })).toHaveCount(0)
-  await expect(history.getByRole("columnheader", { name: "Rows read" })).toHaveCount(0)
-  await expect(history.getByRole("columnheader", { name: "Of runtime" })).toHaveAttribute(
+  await expect(history.getByRole("columnheader", { name: "Examined" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "Share" })).toHaveAttribute(
     "aria-sort",
     "descending",
   )
@@ -2223,6 +2236,7 @@ test("statement history ranks a window's statements by the column pressed, each 
     await expect(panel.getByRole("heading", { name: chart, exact: true })).toBeVisible()
   }
   await expect(panel).toContainText("A point for every 5 minutes.")
+  await expect(panel).toContainText("A mark on the time axis is where the statistics were reset.")
   await expect(panel).toContainText("UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2")
   await expect(panel.getByRole("button", { name: "Open in Query" })).toBeVisible()
   await page.keyboard.press("Escape")
@@ -2314,7 +2328,7 @@ test("an engine that keeps run times gives the history its percentiles and the r
   const history = historyView(page)
   await expect(history.getByRole("row")).toHaveCount(ANALYTICS_HISTORY.length + 1)
   await expect(history.getByRole("columnheader", { name: "p95" })).toBeVisible()
-  await expect(history.getByRole("columnheader", { name: "Rows read" })).toBeVisible()
+  await expect(history.getByRole("columnheader", { name: "Examined" })).toBeVisible()
   await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
   await expect(history).toContainText("ClickHouse's query log holds every finished query")
   await history.getByRole("row").nth(1).click()
