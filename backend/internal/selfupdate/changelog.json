@@ -8,6 +8,11 @@
       "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
       "changes": [
         {
+          "kind": "added",
+          "text": "Compare two database schemas and write the SQL that makes one like the other",
+          "detail": "A new Compare page under Schema lists what differs between this connection's schema and another schema of the same engine, side by side: tables with their columns, keys, indexes, constraints and foreign keys, views, sequences, enum types, and functions and procedures as text. The migration is ordered so tables exist before the keys that point at them and a key is dropped before its table, destructive steps are marked, and what the engine cannot change in place is said so in a comment. It is text to copy, save or open in Query and is never run by the dashboard. PostgreSQL, MySQL and MariaDB, SQL Server and SQLite."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."

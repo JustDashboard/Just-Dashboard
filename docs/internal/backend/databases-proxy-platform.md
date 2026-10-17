@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 118
+  flags (105 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -787,6 +787,41 @@ stays editable on a protected connection.
   refused for the capability it would need is recorded under the change's own action. No schema route
   takes a typed phrase, and dropping a schema never cascades: the engine's refusal of a schema that still
   holds something is the guard.
+- **Two schemas are compared, and the migration between them is written, never run.** `GET
+  /databases/{id}/schema-diff?to=<id>&schema=&toSchema=` reads this connection's schema (*from*) and
+  another's (*to*) — a saved connection to the same driver, this one's other schemas included — and
+  answers what differs, the ordered steps that turn *from* into *to*, and the same steps as one
+  script. It is on the read surface and leaves no audit entry: the statements are text, and the
+  Query tab classifies and records them if they are run. A protected connection is compared like any
+  other. The flag is `schemaDiff` (`dbx/schema_diff_capabilities.go`): PostgreSQL, MySQL (MariaDB and
+  Percona included), SQL Server and SQLite, and not TimescaleDB, CockroachDB, YugabyteDB, TiDB or
+  Azure SQL Edge, whose statements differ from their driver's. Each side is read once
+  (`ReadSchemaSnapshot`): the tables through `dbx.Detail` — up to 400 a side, past which the route
+  refuses by name — and the views, materialized views, sequences, enum types, functions and
+  procedures through the catalogue, with their definitions as the engine writes them. A kind of
+  object the login cannot read whole is left out of both sides and named under `notes`, so it is never
+  reported as missing. Triggers, events, grants, comments, storage options and rows are not
+  compared.
+  - *The diff* (`DiffSchemas`) matches objects by name and the parts of a table — columns, primary
+    key, indexes, unique and check constraints, foreign keys — by name and then by definition, so an
+    index or key that differs only by an engine-generated name is not a difference. Where the two
+    schemas have different names, text that spells the schema out (`"alpha".mood`, a default's
+    `nextval('alpha.t_id_seq')`, a view's `FROM alpha.t`) is compared with the name taken away and
+    written for the *from* schema when it is planned. A renamed table or column reads as one dropped
+    and one added.
+  - *The plan* (`PlanMigration`) reuses the generators the schema forms use — `PlanAddColumn`,
+    `PlanAlterColumn`, `PlanDropColumn`, `PlanCreateIndex`, `PlanAddConstraint`, `PlanAddForeignKey`,
+    the drops, `PlanCreateEnum` and `PlanAddEnumValue`, `PlanCreateView` and `PlanDropView` — and
+    writes a new table with the same renderer the schema page shows a table's DDL with (SQLite's and
+    MySQL's own text, with MySQL's foreign keys taken out). The order: enum types, sequences and
+    routines first; then the views that read what will change are dropped, then foreign keys,
+    indexes and constraints that hold the old shape; new tables; column changes; dropped tables
+    (a table before the ones it references, a key of a cycle dropped first); then primary keys,
+    indexes, constraints and foreign keys, sequence ownership, views, and the routines, sequences and
+    enum types that went. A step the generator refuses — a NOT NULL column with no default, an
+    identity column, an expression default it does not write, anything SQLite cannot alter in place —
+    is a *manual* step: no statements, and a comment in the script saying why. Every drop, and a
+    column's change of type, is marked destructive in the script and in the answer.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -1484,7 +1519,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 225 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1580,7 +1615,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (28)
+**Schema** (29)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1612,6 +1647,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/object` | read | — | — | — |
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
+| `GET` | `/databases/{id}/schema-diff` | read | — | — | — |
 
 **Operations** (21)
 
