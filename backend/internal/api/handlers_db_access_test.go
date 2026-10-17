@@ -474,3 +474,41 @@ func TestTheReachRoutesAreAnAdministrators(t *testing.T) {
 		t.Fatalf("a refused role changed something: gateway %v, Docker %v", keeper.did(), h.engine.did())
 	}
 }
+
+// The string for another machine names the address the port is published on
+// when that is one of the host's own: the public address would lead nowhere.
+func TestTheStringForAnotherMachineNamesTheBoundAddress(t *testing.T) {
+	h, _, router, id := reachHarness(t, "100.101.12.4")
+	rec := do(t, router, http.MethodGet, pathf("/databases/%d/url?target=public", id), "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "@100.101.12.4:5432/") {
+		t.Fatalf("the string for another machine = %d %s", rec.Code, rec.Body.String())
+	}
+	got := readJSON[dbAccess](t, do(t, h.as(auth.RoleAdmin), http.MethodGet, pathf("/databases/%d/access", id), ""))
+	if got.Exposure != exposurePrivate || got.Address != "100.101.12.4" {
+		t.Fatalf("reading = %s %q", got.Exposure, got.Address)
+	}
+}
+
+// A list a container left behind when it was removed from the Docker page
+// would hold its port against every list after it. The next database to keep
+// that port to a list takes it away; one whose container is still there is
+// left to the gateway to refuse.
+func TestAListLeftByARemovedContainerGivesWayToTheNext(t *testing.T) {
+	h, keeper, router, id := reachHarness(t, "0.0.0.0")
+	keeper.entries = []netx.PortAllowlistSpec{{ID: 3, Owner: "database:gone-db", Name: "gone-db", Protocol: "tcp", Port: 5432, Sources: []string{"192.0.2.1"}}}
+	rec := do(t, router, http.MethodPut, pathf("/databases/%d/access", id), `{"exposure":"allowlist","allow":["203.0.113.7"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("keeping a list = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := keeper.did(); !slices.Equal(got, []string{"remove database:gone-db", "set database:shop-db 5432 203.0.113.7"}) {
+		t.Fatalf("the gateway was told %v", got)
+	}
+
+	h.engine.containers = append(h.engine.containers, &fakeDBContainer{id: "beef", name: "other-db", image: "postgres:17", state: "exited"})
+	keeper.entries = []netx.PortAllowlistSpec{{ID: 4, Owner: "database:other-db", Name: "other-db", Protocol: "tcp", Port: 5432, Sources: []string{"192.0.2.1"}}}
+	keeper.calls = nil
+	do(t, router, http.MethodPut, pathf("/databases/%d/access", id), `{"exposure":"allowlist","allow":["203.0.113.8"]}`)
+	if got := keeper.did(); slices.Contains(got, "remove database:other-db") {
+		t.Fatalf("the list of a container that is still there was taken away: %v", got)
+	}
+}

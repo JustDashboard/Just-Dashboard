@@ -324,7 +324,9 @@ is connected by naming the instance found, not by typing its address again.
   about what the dashboard itself binds. The summary and the fleet read the same exposure (`listed` on
   the host view upgrades a public binding the gateway keeps to `allowlist`, from the spec alone). Removing
   the container from the danger zone releases its list, which would otherwise go on refusing whatever
-  published that port next; removing it from the Docker page does not. `GET
+  published that port next; removing it from the Docker page does not, and the next database to keep
+  that port to a list takes the leftover away first (`releaseOrphanedDBPort`: a `database:` owner whose
+  container Docker no longer has). `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
   preferred) in place of loopback, for pasting on another machine — or the bound address, for a port
   published on one of the host's own.

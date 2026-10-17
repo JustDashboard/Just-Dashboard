@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/docker/docker/errdefs"
 )
 
 // Where a database can be reached from, and changing it.
@@ -616,6 +617,9 @@ func (s *Server) applyDBAccess(ctx context.Context, r *http.Request, p *dbAccess
 	out := dbAccessOutcome{Gateway: "unchanged"}
 	keeper := s.portKeeper()
 	if p.steps.Keep {
+		if err := s.releaseOrphanedDBPort(ctx, p.port); err != nil {
+			return out, mapNetworkError(err)
+		}
 		if _, err := keeper.SetPortAllowlist(ctx, s.dbPortRequest(p, p.to.Allow), actor(r)); err != nil {
 			return out, mapNetworkError(err)
 		}
@@ -648,6 +652,30 @@ func (s *Server) applyDBAccess(ctx context.Context, r *http.Request, p *dbAccess
 		}
 	}
 	return out, nil
+}
+
+// releaseOrphanedDBPort takes away a list another database container kept
+// the port to and left behind when it was removed from the Docker page: the
+// gateway allows one list per port, and nothing is left that could change it.
+func (s *Server) releaseOrphanedDBPort(ctx context.Context, port int) error {
+	keeper := s.portKeeper()
+	kept, err := keeper.KeptPorts()
+	if err != nil {
+		return err
+	}
+	for _, e := range kept {
+		name, ours := strings.CutPrefix(e.Owner, "database:")
+		if !ours || e.Port != port || e.Protocol != "tcp" {
+			continue
+		}
+		if _, err := s.modules.docker.Inspect(ctx, name); !errdefs.IsNotFound(err) {
+			continue
+		}
+		if _, err := keeper.RemovePortAllowlist(ctx, e.Owner); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) dbPortRequest(p *dbAccessPlan, allow []string) netx.PortAllowlistRequest {
@@ -826,17 +854,18 @@ func (s *Server) handleDBAccessPreview(w http.ResponseWriter, r *http.Request) e
 	}
 	if len(change.ops) == 0 {
 		out.Steps = append(out.Steps, dbAccessStep{Kind: "firewall", Description: change.note})
-	}
-	client := s.dbAccessClient(r)
-	fctx := netsec.WithAccess(ctx, s.firewallAccess(r))
-	for _, chunk := range planChunks(change.ops) {
-		review, err := s.modules.netsec.PreviewPlan(fctx, netsec.FirewallPlan{Operations: chunk}, client)
-		if err != nil {
-			out.Firewall, out.FirewallError = "failed", err.Error()
-			break
-		}
-		for _, step := range review.Steps {
-			out.Steps = append(out.Steps, dbAccessStep{Kind: "firewall", Description: change.backend + ": " + step.Description})
+	} else {
+		client := s.dbAccessClient(r)
+		fctx := netsec.WithAccess(ctx, s.firewallAccess(r))
+		for _, chunk := range planChunks(change.ops) {
+			review, err := s.modules.netsec.PreviewPlan(fctx, netsec.FirewallPlan{Operations: chunk}, client)
+			if err != nil {
+				out.Firewall, out.FirewallError = "failed", err.Error()
+				break
+			}
+			for _, step := range review.Steps {
+				out.Steps = append(out.Steps, dbAccessStep{Kind: "firewall", Description: change.backend + ": " + step.Description})
+			}
 		}
 	}
 	if p.steps.Release {
