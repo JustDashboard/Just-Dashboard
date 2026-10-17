@@ -92,6 +92,9 @@ type Server struct {
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
+	// The statement recorder's readings between one and the next
+	// (database_statements.go).
+	dbStatements statementHistory
 
 	modules moduleSet
 }

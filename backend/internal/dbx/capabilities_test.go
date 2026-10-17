@@ -132,6 +132,8 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"queryLog":        "postgres mysql clickhouse mongodb redis",
 		"clickhouseViews": "clickhouse",
 		"sqliteFile":      "sqlite",
+		// The statement list kept over time, wherever the list can be read.
+		"statementHistory": "postgres -cockroachdb mysql -tidb clickhouse sqlserver oracle",
 
 		// Redis
 		"keys": redis, "keyTree": redis, "keyTypeFilter": redis, "keyMeta": redis, "valueDownload": redis,

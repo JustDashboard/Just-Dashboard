@@ -34,6 +34,10 @@ func (s *Server) mountDatabaseAdminRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/server/extensions", s.handle(s.handleDBExtensions))
 	r.Method(http.MethodGet, "/{id}/server/settings", s.handle(s.handleDBSettings))
 	r.Method(http.MethodGet, "/{id}/statements", s.handle(s.handleDBStatements))
+	// What each statement cost over a recorded window, read from the
+	// dashboard's own store (database_statements.go).
+	r.Method(http.MethodGet, "/{id}/statements/history", s.handle(s.handleDBStatementHistory))
+	r.Method(http.MethodGet, "/{id}/statements/history/{statement}", s.handle(s.handleDBStatementHistoryOne))
 	r.Method(http.MethodGet, "/{id}/backups", s.handle(s.handleDBBackupList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
