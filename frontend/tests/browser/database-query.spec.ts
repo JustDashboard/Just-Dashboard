@@ -43,6 +43,8 @@ const OUTLINES: Record<
     },
     kinds: { order_summary: "view" },
   },
+  // The MySQL connection, retyped as SQL Server by the specs that need one.
+  2: { schema: "dbo", tables: { orders: ["id", "customer_id", "status", "total_cents"] } },
   7: { schema: "main", tables: { notes: ["id", "title", "body"], notebooks: ["id", "title"] } },
 }
 
@@ -307,7 +309,7 @@ async function mockWork(page: Page, options: WorkMock = {}) {
 
   await page.route("**/api/v1/databases/orm/targets", (route) => json(route, TARGETS))
 
-  await page.route(/\/api\/v1\/databases\/(1|7)\/.+/, async (route) => {
+  await page.route(/\/api\/v1\/databases\/(1|2|7)\/.+/, async (route) => {
     const request = route.request()
     const url = new URL(request.url())
     const [, id, rest] = /^\/api\/v1\/databases\/(\d+)(\/.*)$/.exec(url.pathname) ?? []
@@ -325,7 +327,7 @@ async function mockWork(page: Page, options: WorkMock = {}) {
                 { name: "analytics", tables: 2 },
                 { name: "pg_catalog", system: true, tables: 140 },
               ]
-            : [{ name: "main", default: true, tables: 2 }],
+            : [{ name: outline.schema, default: true, tables: 2 }],
         objects: {},
         truncated: [],
         limit: 5000,
@@ -2238,4 +2240,643 @@ test("an expired streamed export rechecks once and returns to sign-in", async ({
   await expect(page).toHaveURL(/\/login\?reason=session$/)
   await expect(page.getByText("Your session ended. Sign in again to continue.")).toBeVisible()
   expect(rechecks).toBe(1)
+})
+
+/* ---------------------------------------------------------- index advice */
+
+/**
+ * "What if?" on a PostgreSQL plan and "Missing indexes" on a SQL Server one.
+ * Both are buttons the reader presses on the Explain view, and nothing is
+ * asked of the server until they are: the specs hold the requests to that.
+ */
+
+const ADVICE_SQL =
+  "select o.id, o.total_cents from orders o join customers c on c.id = o.customer_id where o.status = 'open' and o.total_cents > 10000 order by o.id limit 20"
+
+const SEQ_PLAN = [
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Total Cost": 2507.96,
+      "Plan Rows": 20,
+      Plans: [
+        {
+          "Node Type": "Sort",
+          "Total Cost": 2524.4,
+          "Plan Rows": 6595,
+          "Sort Key": ["o.id"],
+          Plans: [
+            {
+              "Node Type": "Seq Scan",
+              "Relation Name": "orders",
+              Alias: "o",
+              "Total Cost": 2236,
+              "Plan Rows": 19804,
+              Filter: "((o.total_cents > 10000) AND (o.status = 'open'::text))",
+            },
+          ],
+        },
+      ],
+    },
+  },
+]
+
+const HYPOTHETICAL = "<13551>btree_orders_status_total_cents"
+
+const INDEX_PLAN = [
+  {
+    Plan: {
+      "Node Type": "Limit",
+      "Total Cost": 118.4,
+      "Plan Rows": 20,
+      Plans: [
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "orders",
+          Alias: "o",
+          "Index Name": HYPOTHETICAL,
+          "Total Cost": 118.4,
+          "Plan Rows": 6595,
+          "Index Cond": "((o.status = 'open'::text) AND (o.total_cents > 10000))",
+        },
+      ],
+    },
+  },
+]
+
+const CANDIDATES = [
+  {
+    schema: "public",
+    table: "orders",
+    columns: ["status", "total_cents"],
+    uses: ["equality", "range"],
+    statement:
+      'CREATE INDEX CONCURRENTLY "orders_status_total_cents_idx" ON "public"."orders" ("status", "total_cents")',
+  },
+  {
+    schema: "public",
+    table: "orders",
+    columns: ["customer_id"],
+    uses: ["join"],
+    statement:
+      'CREATE INDEX CONCURRENTLY "orders_customer_id_idx" ON "public"."orders" ("customer_id")',
+  },
+  {
+    schema: "public",
+    table: "customers",
+    columns: ["tier"],
+    uses: ["equality"],
+    statement: 'CREATE INDEX CONCURRENTLY "customers_tier_idx" ON "public"."customers" ("tier")',
+  },
+]
+
+type AdviceMock = {
+  /** What `POST /explain/index-candidates` answers; a number is an error status. */
+  advice?: { candidates: unknown[]; hypopg: { state: string; version?: string } } | number
+  /** `POST /explain/what-if` answers this error. */
+  whatIfFails?: string
+  /** What `GET /missing-indexes` answers; a number is an error status. */
+  missing?: Record<string, unknown> | number
+}
+
+/** The advice routes, laid over `mockWork`'s. Hands back what the page sent. */
+async function mockAdvice(page: Page, options: AdviceMock = {}) {
+  const sent = {
+    candidates: [] as Record<string, unknown>[],
+    whatIf: [] as Record<string, unknown>[],
+    ddl: [] as { preview: boolean; body: Record<string, unknown> }[],
+    missing: 0,
+  }
+  await page.route("**/api/v1/databases/1/explain/index-candidates", async (route) => {
+    sent.candidates.push(route.request().postDataJSON())
+    const advice = options.advice ?? {
+      candidates: CANDIDATES,
+      hypopg: { state: "ready", version: "1.4.1" },
+    }
+    if (typeof advice === "number") {
+      return json(
+        route,
+        { error: { code: "bad_request", message: 'syntax error at or near "selec"' } },
+        advice,
+      )
+    }
+    return json(route, advice)
+  })
+  await page.route("**/api/v1/databases/1/explain/what-if", async (route) => {
+    const asked = route.request().postDataJSON() as Record<string, unknown>
+    sent.whatIf.push(asked)
+    if (options.whatIfFails) {
+      return json(route, { error: { code: "bad_request", message: options.whatIfFails } }, 400)
+    }
+    const columns = (asked.columns as string[]).join(",")
+    // Only an index that leads with the filtered column helps this statement.
+    const helps = columns.startsWith("status")
+    const name = `<13551>btree_${asked.table}_${(asked.columns as string[]).join("_")}`
+    const cols = (asked.columns as string[]).map((c) => `"${c}"`).join(", ")
+    return json(route, {
+      statement: `CREATE INDEX ON "${asked.schema}"."${asked.table}" (${cols})`,
+      indexName: name,
+      before: SEQ_PLAN,
+      after: helps
+        ? [
+            {
+              Plan: {
+                ...INDEX_PLAN[0].Plan,
+                Plans: [{ ...INDEX_PLAN[0].Plan.Plans[0], "Index Name": name }],
+              },
+            },
+          ]
+        : SEQ_PLAN,
+      beforeCost: 2507.96,
+      afterCost: helps ? 118.4 : 2507.96,
+      used: helps,
+    })
+  })
+  await page.route("**/api/v1/databases/1/ddl/index**", async (route) => {
+    const request = route.request()
+    const body = request.postDataJSON() as Record<string, unknown>
+    const preview = new URL(request.url()).searchParams.get("preview") === "1"
+    sent.ddl.push({ preview, body })
+    const fields = (body.fields as string[]).map((f) => `"${f}"`).join(", ")
+    const statement = `CREATE INDEX CONCURRENTLY "orders_${(body.fields as string[]).join("_")}_idx" ON "public"."orders" (${fields})`
+    return json(route, {
+      statement,
+      statements: [statement],
+      ...(preview ? { preview: true } : {}),
+    })
+  })
+  await page.route("**/api/v1/databases/2/missing-indexes", async (route) => {
+    sent.missing += 1
+    const missing = options.missing ?? MISSING
+    if (typeof missing === "number") {
+      return json(
+        route,
+        { error: { code: "query_failed", message: "connection reset by peer" } },
+        missing,
+      )
+    }
+    return json(route, missing)
+  })
+  return sent
+}
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+
+const MISSING = {
+  supported: true,
+  since: minutesAgo(3 * 24 * 60 + 17),
+  indexes: [
+    {
+      schema: "dbo",
+      table: "orders",
+      equality: ["customer_id"],
+      inequality: ["created_at"],
+      include: ["total_cents", "status"],
+      seeks: 1204,
+      scans: 12,
+      avgCost: 14.8,
+      avgImpact: 96.4,
+      lastSeek: minutesAgo(23),
+      statement:
+        "CREATE NONCLUSTERED INDEX [orders_customer_id_created_at_idx] ON [dbo].[orders] ([customer_id], [created_at]) INCLUDE ([total_cents], [status])",
+    },
+    {
+      schema: "dbo",
+      table: "shipments",
+      equality: ["carrier", "status"],
+      inequality: [],
+      include: [],
+      seeks: 311,
+      scans: 0,
+      avgCost: 3.2,
+      avgImpact: 71.9,
+      lastSeek: minutesAgo(41),
+      statement:
+        "CREATE NONCLUSTERED INDEX [shipments_carrier_status_idx] ON [dbo].[shipments] ([carrier], [status])",
+    },
+  ],
+}
+
+const SQL_SERVER = {
+  rows: { 2: { driver: "sqlserver" } },
+  summaries: {
+    2: {
+      flavor: "sqlserver",
+      flavorLabel: "SQL Server",
+      versionNumber: "16.0",
+      version: "SQL Server 16.0",
+    },
+  },
+}
+
+const whatIfDialog = (page: Page) =>
+  page.getByRole("dialog", { name: "What if there were an index?" })
+const missingDialog = (page: Page) => page.getByRole("dialog", { name: "Missing indexes" })
+
+/** Opens the editor of connection 1 on `sql` and asks for its plan. */
+async function explained(page: Page, sql = ADVICE_SQL) {
+  await openEditor(page)
+  await write(page, sql)
+  await commands(page).getByRole("button", { name: "Explain", exact: true }).click()
+  await expect(results(page).locator("[data-slot=plan-tree]")).toBeVisible()
+}
+
+/** The Plan view of a tab that has not been explained: its empty state offers the tools that need no plan. */
+async function openPlanTab(page: Page, sql: string) {
+  await write(page, sql)
+  await results(page).getByRole("tab", { name: /^Plan/ }).click()
+  await expect(results(page)).toContainText("No plan yet")
+}
+
+async function settled(dialog: ReturnType<Page["getByRole"]>) {
+  await dialog.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  )
+}
+
+test("What if? proposes indexes for the plan, tries one without creating it and shows both costs", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page, { capabilities: ["read", "service.control"] })
+  const advice = await mockAdvice(page)
+  await explained(page)
+  // Nothing was asked for the advice until the button was pressed.
+  expect(advice.candidates).toHaveLength(0)
+
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  const candidates = dialog.getByRole("radio")
+  await expect(candidates).toHaveCount(3)
+  expect(advice.candidates).toEqual([{ query: ADVICE_SQL }])
+  expect(sent.explain).toHaveLength(1)
+  await expect(candidates.first()).toBeChecked()
+  await expect(dialog).toContainText("status equals · total_cents range")
+  await expect(dialog.getByLabel("Columns")).toHaveValue("status, total_cents")
+  // The extension is there, so nothing is said about it.
+  await expect(dialog).not.toContainText("HypoPG")
+  await expect(dialog.getByRole("button", { name: "Create the real index…" })).toHaveCount(0)
+
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  const without = dialog.getByRole("region", { name: "Without the index" })
+  const withIt = dialog.getByRole("region", { name: "With the index" })
+  await expect(without).toContainText("2,508")
+  await expect(without).toContainText("Seq Scan orders o")
+  await expect(withIt).toContainText("118")
+  await expect(withIt).toContainText(
+    "Index Scan orders o using <13551>btree_orders_status_total_cents",
+  )
+  await expect(withIt).toContainText("hypothetical")
+  await expect(dialog).toContainText("The cost falls by 95%, and the planner chose the index.")
+  await expect(dialog).toContainText('CREATE INDEX ON "public"."orders" ("status", "total_cents")')
+  expect(advice.whatIf).toEqual([
+    { query: ADVICE_SQL, schema: "public", table: "orders", columns: ["status", "total_cents"] },
+  ])
+  // Trying an index created nothing.
+  expect(advice.ddl).toHaveLength(0)
+
+  // The columns can be edited, and an answer is only for the index in the field now.
+  await dialog.getByLabel("Columns").fill("total_cents")
+  await expect(dialog.getByRole("region", { name: "With the index" })).toHaveCount(0)
+  await dialog.getByLabel("Columns").press("Enter")
+  await expect(dialog).toContainText(
+    "The cost does not change. The planner did not choose this index.",
+  )
+  expect(advice.whatIf.at(-1)?.columns).toEqual(["total_cents"])
+
+  // Another candidate puts its own columns in the field.
+  await candidates.nth(1).check()
+  await expect(dialog.getByLabel("Columns")).toHaveValue("customer_id")
+  await expect(dialog.getByRole("region", { name: "With the index" })).toHaveCount(0)
+})
+
+test("the real index is offered after a try, shown as the server will run it, and made on the click", async ({
+  page,
+}) => {
+  await mockWork(page, { capabilities: ["read", "service.control"] })
+  const advice = await mockAdvice(page)
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await expect(dialog.getByRole("radio")).toHaveCount(3)
+  await expect(dialog.getByRole("button", { name: "Create the real index…" })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await dialog.getByRole("button", { name: "Create the real index…" }).click()
+
+  const create = page.getByRole("dialog", { name: "Create index" })
+  await expect(create).toContainText(
+    'CREATE INDEX CONCURRENTLY "orders_status_total_cents_idx" ON "public"."orders" ("status", "total_cents")',
+  )
+  await expect(create).toContainText("Built without blocking writes")
+  expect(advice.ddl.map((entry) => entry.preview)).toEqual([true])
+  expect(advice.ddl[0].body).toEqual({
+    schema: "public",
+    table: "orders",
+    fields: ["status", "total_cents"],
+    concurrently: true,
+  })
+
+  await create.getByRole("button", { name: "Create index" }).click()
+  await expect(page.getByText("Created an index on orders")).toBeVisible()
+  expect(advice.ddl.map((entry) => entry.preview)).toEqual([true, false])
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+test("a server without HypoPG says so once, and the candidates are still listed", async ({
+  page,
+}) => {
+  await mockWork(page, { capabilities: ["read", "service.control"] })
+  const advice = await mockAdvice(page, {
+    advice: { candidates: CANDIDATES, hypopg: { state: "not_installed" } },
+  })
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await expect(dialog).toContainText(
+    "HypoPG (the hypopg extension) is not installed on this server.",
+  )
+  await expect(dialog.getByRole("radio")).toHaveCount(3)
+  await expect(dialog.getByRole("button", { name: "Try it" })).toBeDisabled()
+  expect(advice.whatIf).toHaveLength(0)
+
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+})
+
+test("an extension that is there but not created in this database is said as that", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await mockAdvice(page, { advice: { candidates: CANDIDATES, hypopg: { state: "not_created" } } })
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  await expect(whatIfDialog(page)).toContainText(
+    "installed on this server but not created in this database",
+  )
+})
+
+test("a plan whose filters, joins and sorts all have an index has nothing to try", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await mockAdvice(page, {
+    advice: { candidates: [], hypopg: { state: "ready", version: "1.4.1" } },
+  })
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await expect(dialog).toContainText("Every filter, join and sort here already has an index")
+  await expect(dialog.getByRole("radio")).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Try it" })).toHaveCount(0)
+})
+
+test("a refused question is said in the engine's words, and the dialog stays usable", async ({
+  page,
+}) => {
+  await mockWork(page)
+  const advice = await mockAdvice(page, { advice: 400 })
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await expect(dialog.getByRole("alert")).toContainText('syntax error at or near "selec"')
+  await dialog.getByRole("button", { name: "Close" }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(advice.candidates).toHaveLength(1)
+
+  // A try the engine refuses keeps the candidates and says why under them.
+  const failing = await mockAdvice(page, { whatIfFails: 'column "nope" does not exist' })
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  await expect(dialog.getByRole("radio")).toHaveCount(3)
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await expect(dialog.getByRole("alert")).toContainText('column "nope" does not exist')
+  await expect(dialog.getByRole("button", { name: "Try it" })).toBeEnabled()
+  expect(failing.whatIf).toHaveLength(1)
+})
+
+test("a role that only reads may try an index, and is not offered the real one", async ({
+  page,
+}) => {
+  await mockWork(page, { viewer: true })
+  await mockAdvice(page)
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await expect(dialog).toContainText("The cost falls by 95%")
+  await expect(dialog.getByRole("button", { name: "Create the real index…" })).toHaveCount(0)
+})
+
+test("a protected connection may be asked, and is not offered the real index", async ({ page }) => {
+  await mockWork(page, {
+    capabilities: ["read", "service.control"],
+    rows: { 1: { readOnly: true } },
+    summaries: { 1: { readOnly: true } },
+  })
+  await mockAdvice(page)
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await expect(dialog).toContainText("The cost falls by 95%")
+  await expect(dialog.getByRole("button", { name: "Create the real index…" })).toHaveCount(0)
+})
+
+test("an engine without hypothetical indexes has no What if? on its plan", async ({ page }) => {
+  await mockWork(page)
+  const advice = await mockAdvice(page)
+  await openEditor(page, "/databases/7/query")
+  await write(page, "select * from notes where title = 'a'")
+  await commands(page).getByRole("button", { name: "Explain", exact: true }).click()
+  await expect(results(page)).toContainText("estimated")
+  await expect(results(page).getByRole("button", { name: "What if?" })).toHaveCount(0)
+  await expect(results(page).getByRole("button", { name: "Missing indexes" })).toHaveCount(0)
+  expect(advice.candidates).toHaveLength(0)
+})
+
+test("What if? fits a phone: no sideways scroll, with the result on screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockWork(page, { capabilities: ["read", "service.control"] })
+  await mockAdvice(page)
+  await explained(page)
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await expect(dialog).toContainText("The cost falls by 95%")
+  const sideways = await dialog.evaluate((el) => {
+    const body = el.querySelector<HTMLElement>("[data-slot=modal-body]") ?? el
+    return [el, body, document.documentElement].some(
+      (node) => node.scrollWidth > node.clientWidth + 1,
+    )
+  })
+  expect(sideways).toBe(false)
+  const box = (await dialog.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(390)
+})
+
+/* ------------------------------------------------ SQL Server: missing indexes */
+
+test("Missing indexes lists what SQL Server's plans wanted, and opens one in the editor", async ({
+  page,
+}) => {
+  await mockWork(page, { ...SQL_SERVER, capabilities: ["read", "service.control"] })
+  const advice = await mockAdvice(page)
+  await openEditor(page, "/databases/2/query")
+  // The list is the server's own, not the statement's: it is reachable before any plan.
+  await openPlanTab(page, "select * from orders where customer_id = 7")
+  await expect(results(page).getByRole("button", { name: "What if?" })).toHaveCount(0)
+  expect(advice.missing).toBe(0)
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+
+  const dialog = missingDialog(page)
+  const rows = dialog.getByRole("list", { name: "Missing indexes" }).getByRole("listitem")
+  await expect(rows).toHaveCount(2)
+  expect(advice.missing).toBe(1)
+  await expect(rows.first()).toContainText("dbo.orders")
+  await expect(rows.first()).toContainText("96%")
+  await expect(rows.first()).toContainText("customer_id, created_at · includes total_cents, status")
+  await expect(rows.first()).toContainText(
+    "CREATE NONCLUSTERED INDEX [orders_customer_id_created_at_idx] ON [dbo].[orders]",
+  )
+  await expect(dialog).toContainText("Counted since the server started")
+
+  await rows.first().getByRole("button", { name: "Open in the editor" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect
+    .poll(() => editorText(page))
+    .toContain("CREATE NONCLUSTERED INDEX [orders_customer_id_created_at_idx]")
+})
+
+test("Missing indexes says when there is none, when the login may not read them, and when the read fails", async ({
+  page,
+}) => {
+  await mockWork(page, { ...SQL_SERVER })
+  await mockAdvice(page, { missing: { supported: true, indexes: [], since: minutesAgo(95) } })
+  await openEditor(page, "/databases/2/query")
+  await openPlanTab(page, "select 1")
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  const dialog = missingDialog(page)
+  await expect(dialog).toContainText("The optimizer has wished for no index")
+  await dialog.getByRole("button", { name: "Close" }).click()
+
+  await mockAdvice(page, {
+    missing: {
+      supported: false,
+      indexes: [],
+      reason: "This login may not read the missing-index views (they need VIEW SERVER STATE).",
+    },
+  })
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  await expect(dialog).toContainText("The missing indexes cannot be read")
+  await expect(dialog).toContainText("they need VIEW SERVER STATE")
+  await dialog.getByRole("button", { name: "Close" }).click()
+
+  await mockAdvice(page, { missing: 502 })
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  await expect(dialog.getByRole("alert")).toContainText("connection reset by peer")
+  await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible()
+})
+
+test("a role that only reads sees the missing indexes but cannot open one in the editor", async ({
+  page,
+}) => {
+  await mockWork(page, { ...SQL_SERVER, viewer: true })
+  await mockAdvice(page)
+  await openEditor(page, "/databases/2/query")
+  await openPlanTab(page, "select 1")
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  const dialog = missingDialog(page)
+  await expect(dialog.getByRole("listitem")).toHaveCount(2)
+  await expect(dialog.getByRole("button", { name: "Open in the editor" })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: "Copy" }).first()).toBeVisible()
+})
+
+test("Missing indexes fits a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockWork(page, { ...SQL_SERVER, capabilities: ["read", "service.control"] })
+  await mockAdvice(page)
+  await openEditor(page, "/databases/2/query")
+  await openPlanTab(page, "select 1")
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  const dialog = missingDialog(page)
+  await expect(dialog.getByRole("listitem")).toHaveCount(2)
+  const sideways = await dialog.evaluate((el) =>
+    [el, document.documentElement].some((node) => node.scrollWidth > node.clientWidth + 1),
+  )
+  expect(sideways).toBe(false)
+})
+
+/* ------------------------------------------------------------- screenshots */
+
+test("index advice, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  const shots = process.env.JD_SHOTS!
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, { capabilities: ["read", "service.control"] })
+  await mockAdvice(page)
+  await explained(page)
+
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  const dialog = whatIfDialog(page)
+  await expect(dialog.getByRole("radio")).toHaveCount(3)
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/whatif-candidates-1440.png` })
+
+  await dialog.getByRole("button", { name: "Try it" }).click()
+  await expect(dialog).toContainText("The cost falls by 95%")
+  await dialog.getByText("Tried as a hypothetical index").scrollIntoViewIfNeeded()
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/whatif-result-1440.png` })
+
+  await dialog.getByLabel("Columns").fill("total_cents")
+  await dialog.getByLabel("Columns").press("Enter")
+  await expect(dialog).toContainText("The planner did not choose this index.")
+  await dialog.getByText("Tried as a hypothetical index").scrollIntoViewIfNeeded()
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/whatif-not-chosen-1440.png` })
+
+  await dialog.getByLabel("Columns").fill("status, total_cents")
+  await dialog.getByLabel("Columns").press("Enter")
+  await expect(dialog).toContainText("and the planner chose the index.")
+  await dialog.getByRole("button", { name: "Create the real index…" }).click()
+  const create = page.getByRole("dialog", { name: "Create index" })
+  await expect(create).toContainText("CREATE INDEX CONCURRENTLY")
+  await settled(create)
+  await page.screenshot({ path: `${shots}/whatif-create-index-1440.png` })
+  await create.getByRole("button", { name: "Cancel" }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await dialog.getByText("Tried as a hypothetical index").scrollIntoViewIfNeeded()
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/whatif-result-390.png` })
+  await dialog.getByRole("button", { name: "Close" }).click()
+
+  // A server without the extension.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockAdvice(page, { advice: { candidates: CANDIDATES, hypopg: { state: "not_installed" } } })
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  await expect(dialog).toContainText("is not installed on this server")
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/whatif-no-hypopg-1440.png` })
+})
+
+test("missing indexes, state by state @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "set JD_SHOTS to a directory to save the screenshots")
+  const shots = process.env.JD_SHOTS!
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, { ...SQL_SERVER, capabilities: ["read", "service.control"] })
+  await mockAdvice(page)
+  await openEditor(page, "/databases/2/query")
+  await openPlanTab(
+    page,
+    "select o.id, o.total_cents from orders o where o.customer_id = 7 and o.created_at > '2026-09-01'",
+  )
+  await results(page).getByRole("button", { name: "Missing indexes" }).click()
+  const dialog = missingDialog(page)
+  await expect(dialog.getByRole("listitem")).toHaveCount(2)
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/missing-indexes-1440.png` })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settled(dialog)
+  await page.screenshot({ path: `${shots}/missing-indexes-390.png` })
 })
