@@ -1,4 +1,4 @@
-import type { DbAccess, DbCapabilities, DbConnection, DbFlavor } from "@/lib/types"
+import type { DbAccess, DbCapabilities, DbConnection, DbEndOfLife, DbFlavor } from "@/lib/types"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
 
@@ -48,6 +48,8 @@ export type DbConnectionSummary = DbConnection & {
   /** The server's own description of itself ("PostgreSQL 16.4"), and the bare number in it. */
   version?: string
   versionNumber?: string
+  /** When that release stops being maintained, where the table knows it. */
+  endOfLife?: DbEndOfLife
   state: DbState
   ok: boolean
   /** The engine's or the driver's own words when it did not answer, without the password. */

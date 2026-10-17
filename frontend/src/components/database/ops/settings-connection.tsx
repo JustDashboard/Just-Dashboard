@@ -45,6 +45,7 @@ import {
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import type { DbConnectionSummary } from "@/components/database/shell/types"
+import { supportFact } from "@/components/database/support"
 
 /** The fields of the labels form, as `connectionChanges` names them. */
 const LABELS = ["name", "environment", "notes"] as const
@@ -113,8 +114,8 @@ export function ConnectionForm() {
     }
   }
 
-  // What the connection is, under its name: the product that answered, and
-  // when the dashboard was given it.
+  // What the connection is, under its name: the product that answered, until
+  // when its release is maintained, and when the dashboard was given it.
   const what = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
       <EngineGlyph engine={engine} className="size-3.5" />
@@ -122,6 +123,12 @@ export function ConnectionForm() {
         {engine.label}
         {summary?.versionNumber ? ` ${summary.versionNumber}` : ""}
       </span>
+      {summary?.endOfLife && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{supportFact(summary.endOfLife)}</span>
+        </>
+      )}
       <span aria-hidden>·</span>
       <span title={timestamp(conn.createdAt)}>added {calendarDate(conn.createdAt)}</span>
     </span>
