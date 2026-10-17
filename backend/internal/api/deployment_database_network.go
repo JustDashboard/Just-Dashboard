@@ -27,6 +27,9 @@ type deploymentDatabaseNetworks struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
+	// poolerFaults is why a pooler could not be joined to an environment's
+	// network, by environment and connection, while it cannot.
+	poolerFaults map[[2]int64]string
 }
 
 type deploymentDatabaseNetwork struct {
@@ -46,8 +49,10 @@ func databaseURLConnectionIDs(variables map[string]string) ([]int64, error) {
 			continue
 		}
 		host := strings.ToLower(u.Hostname())
-		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), ".jd.internal"), 10, 64)
-		if err != nil || id <= 0 || host != databaseDNSName(id) {
+		// The pooler's name is the database's with -pool, and joins the same
+		// network through the same binding.
+		id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), ".jd.internal"), "-pool"), 10, 64)
+		if err != nil || id <= 0 || (host != databaseDNSName(id) && host != poolerDNSName(id)) {
 			return nil, errors.New("invalid managed database hostname")
 		}
 		if !slices.Contains(ids, id) {
@@ -81,9 +86,14 @@ func (o *deploymentDatabaseNetworks) NetworksForRuntime(ctx context.Context, env
 	if err != nil {
 		return nil, err
 	}
+	pooled := pooledDatabaseIDs(variables)
 	for _, id := range ids {
 		if err := o.bind(ctx, network, id); err != nil {
 			return nil, err
+		}
+		// A variable that reads the pooler has nothing to connect to without it.
+		if fault := o.poolerFaults[[2]int64{environmentID, id}]; pooled[id] && fault != "" {
+			return nil, errors.New("the connection pooler could not be joined to the environment's network: " + fault)
 		}
 	}
 	return []string{network.Name}, nil
@@ -175,6 +185,9 @@ func (o *deploymentDatabaseNetworks) bind(ctx context.Context, network deploymen
 		o.markUnavailable(ctx, network.EnvironmentID, connectionID, err)
 		return err
 	}
+	// The pooler is the database's extra, not its binding: one that cannot be
+	// joined is recorded on its own, and ${{database.N}} keeps working.
+	o.notePooler(ctx, network.EnvironmentID, connectionID, o.attachPooler(ctx, network, connectionID))
 	_, err = s.Store.DB.ExecContext(ctx, `UPDATE deploy_database_bindings SET container_id=?,container_name=?,status='connected',detail='',checked_at=? WHERE environment_id=? AND connection_id=?`, detail.ID, strings.TrimPrefix(detail.Name, "/"), time.Now().UTC().Unix(), network.EnvironmentID, connectionID)
 	return err
 }
@@ -244,6 +257,12 @@ func (o *deploymentDatabaseNetworks) attachDatabase(ctx context.Context, network
 func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, environmentID int64, revision int, target string) (string, error) {
 	var id int64
 	format, database := "", ""
+	// 5.pooled, 5.pooled.jdbc: the same reference, through the connection's
+	// pooler. The rest of it is read as it always was.
+	pooled := false
+	if match := pooledReferenceRE.FindStringSubmatch(target); match != nil {
+		target, pooled = match[1]+match[2], true
+	}
 	if match := databaseReferenceShapeRE.FindStringSubmatch(target); match != nil {
 		target, format, database = match[1], match[2], match[3]
 	}
@@ -274,11 +293,22 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 	if json.Unmarshal([]byte(raw), &plan) != nil {
 		return "", deploy.ErrInvalidPlan
 	}
-	if !plan.HostNetwork {
-		dsn, err = o.server.databaseApplicationURL(ctx, conn, dsn)
-		if err != nil {
-			return "", err
+	switch {
+	case pooled:
+		place := "container"
+		if plan.HostNetwork {
+			place = "host"
 		}
+		dsn, err = o.server.poolerConnectionURL(ctx, conn, dsn, place)
+	case !plan.HostNetwork:
+		dsn, err = o.server.databaseApplicationURL(ctx, conn, dsn)
+	default:
+		// On the host's network the address is the saved one, but the program
+		// is still in a container with no copy of the authority's file.
+		dsn = o.server.applicationDSN(ctx, conn, dsn)
+	}
+	if err != nil {
+		return "", err
 	}
 	if format != "" && format != "url" || database != "" {
 		return deploy.ConnectionStringForFormat(dsn, format, database)
@@ -291,6 +321,95 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 // 5.jdbc, 5.adonet, 5.url.app_cache. Only a numeric id takes a suffix, so a
 // connection name that contains dots is never misread.
 var databaseReferenceShapeRE = regexp.MustCompile(`^([0-9]+)\.(url|jdbc-mariadb|jdbc|adonet|mysql2)(?:\.([A-Za-z0-9_]{1,63}))?$`)
+
+// pooledReferenceRE reads the pooled form of a reference: the connection's id,
+// ".pooled", and whatever shape the plain reference would have asked for.
+var pooledReferenceRE = regexp.MustCompile(`^([0-9]+)\.pooled((?:\.[A-Za-z0-9_-]+)*)$`)
+
+// attachPooler joins the connection's pooler, when it has one, to the
+// environment's network under its own name, beside the database. It is part of
+// binding the database, so a pooler that is replaced or whose attachment is
+// lost is put back by the same pass that repairs the database's.
+func (o *deploymentDatabaseNetworks) attachPooler(ctx context.Context, network deploymentDatabaseNetwork, connectionID int64) error {
+	rec, err := o.server.poolerRecord(ctx, connectionID)
+	if err != nil || rec == nil {
+		return err
+	}
+	docker := o.server.modules.docker
+	detail, err := docker.Inspect(ctx, rec.Container)
+	if errdefs.IsNotFound(err) {
+		// Nothing to join; the pooler's own page says its container is gone.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	alias := poolerDNSName(connectionID)
+	aliases := []string{alias}
+	for _, endpoint := range detail.NetworkList {
+		if endpoint.Name != network.Name {
+			continue
+		}
+		if slices.Contains(endpoint.Aliases, alias) {
+			return nil
+		}
+		aliases = append(aliases, endpoint.Aliases...)
+		if err := docker.DisconnectNetwork(ctx, network.Name, detail.ID, false); err != nil {
+			return err
+		}
+	}
+	netDetail, err := docker.NetworkDetail(ctx, network.Name)
+	if err != nil {
+		return err
+	}
+	for _, member := range netDetail.Members {
+		if member.ID != detail.ID && slices.Contains(member.Aliases, alias) {
+			return errors.New("the pooler alias is already used by another container")
+		}
+	}
+	if err := docker.ConnectNetwork(ctx, network.Name, detail.ID, aliases); err != nil {
+		return err
+	}
+	o.record(ctx, "deploy.database.pooler.attach", network.EnvironmentID, connectionID, detail.ID, nil)
+	return nil
+}
+
+// notePooler keeps the outcome of joining a pooler to an environment's network,
+// and puts a failure on the audit trail once per distinct cause: the pass that
+// repairs bindings runs every few seconds, and a pooler that stays unjoinable
+// would otherwise write a line each time. Called under the adapter's lock.
+func (o *deploymentDatabaseNetworks) notePooler(ctx context.Context, environmentID, connectionID int64, cause error) {
+	key := [2]int64{environmentID, connectionID}
+	if cause == nil {
+		delete(o.poolerFaults, key)
+		return
+	}
+	if o.poolerFaults == nil {
+		o.poolerFaults = map[[2]int64]string{}
+	}
+	if o.poolerFaults[key] == cause.Error() {
+		return
+	}
+	o.poolerFaults[key] = cause.Error()
+	o.record(ctx, "deploy.database.pooler.attach", environmentID, connectionID, "", cause)
+}
+
+// pooledDatabaseIDs are the connections whose pooler a set of variables reads,
+// by the hostnames in them.
+func pooledDatabaseIDs(variables map[string]string) map[int64]bool {
+	ids := map[int64]bool{}
+	for _, value := range variables {
+		u, err := url.Parse(value)
+		if err != nil {
+			continue
+		}
+		host := strings.ToLower(u.Hostname())
+		if id, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(host, "db-"), "-pool.jd.internal"), 10, 64); err == nil && id > 0 && host == poolerDNSName(id) {
+			ids[id] = true
+		}
+	}
+	return ids
+}
 
 // markUnavailable records why a binding could not be repaired, beside the
 // status the settings page already reads.
@@ -456,7 +575,11 @@ func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, 
 			if err := o.server.Store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM deploy_database_bindings WHERE environment_id=? AND container_id=?`, environmentID, id).Scan(&allowed); err != nil {
 				return err
 			}
-			if allowed == 0 {
+			var pooler int
+			if err := o.server.Store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM db_poolers p JOIN deploy_database_bindings b ON b.connection_id=p.connection_id WHERE b.environment_id=? AND p.container_id=?`, environmentID, id).Scan(&pooler); err != nil {
+				return err
+			}
+			if allowed+pooler == 0 {
 				return errors.New("remove application containers before removing their database network")
 			}
 			ids = append(ids, id)

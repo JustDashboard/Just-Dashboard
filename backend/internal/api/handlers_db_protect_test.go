@@ -36,12 +36,20 @@ const (
 // route that is on neither fails the test below: it is refused all the same,
 // and somebody still has to decide that it should be.
 var protectedRouteVerdicts = map[string]string{
-	// The connection's own record, its server's reach and its power.
-	"PUT ":          staysOpen,
-	"DELETE ":       staysOpen,
-	"PUT /access":   staysOpen,
-	"POST /power":   staysOpen,
-	"PUT /settings": isRefused,
+	// The connection's own record, its server's reach, what its container may
+	// use and its power.
+	"PUT ":                 staysOpen,
+	"DELETE ":              staysOpen,
+	"PUT /access":          staysOpen,
+	"POST /access/preview": staysOpen,
+	"PUT /resources":       staysOpen,
+	"PUT /tls":             staysOpen,
+	"POST /tls/renew":      staysOpen,
+	"POST /power":          staysOpen,
+	"PUT /settings":        isRefused,
+	// A pooler is a container and, in one mode, an account in the database.
+	"PUT /pooler":    isRefused,
+	"DELETE /pooler": isRefused,
 	// Dumps are files on this machine: taking one, adding one made elsewhere
 	// and deleting one. Loading one back, importing a file and copying into a
 	// new database write to a server.
@@ -50,9 +58,21 @@ var protectedRouteVerdicts = map[string]string{
 	"DELETE /backups":      staysOpen,
 	"POST /restore":        isRefused,
 	"POST /copy":           isRefused,
-	"POST /import":         isRefused,
-	"POST /import/upload":  isRefused,
-	"DELETE /database":     isRefused,
+	// Point-in-time recovery: the log archived, a base backup, a named moment
+	// and a copy recovered beside the server leave the database alone, as
+	// deleting an archive the server no longer writes does. Switching a copy
+	// in replaces what the connection reaches.
+	"POST /pitr":                       staysOpen,
+	"PUT /pitr":                        staysOpen,
+	"DELETE /pitr":                     staysOpen,
+	"POST /pitr/backup":                staysOpen,
+	"POST /pitr/restore-points":        staysOpen,
+	"POST /pitr/restore":               staysOpen,
+	"DELETE /pitr/archives/{aid}":      staysOpen,
+	"POST /pitr/restores/{rid}/switch": isRefused,
+	"POST /import":                     isRefused,
+	"POST /import/upload":              isRefused,
+	"DELETE /database":                 isRefused,
 	// The dashboard's own state about the connection.
 	"POST /queries":         staysOpen,
 	"PUT /queries/{qid}":    staysOpen,
@@ -103,6 +123,8 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /activity/kill":    staysOpen,
 	"POST /maintenance":      byContent,
 	"POST /statements/reset": isRefused,
+	// The library list a server loads at start is one of its parameters.
+	"POST /statements/preload": isRefused,
 	// Accounts, databases and extensions on the server.
 	"POST /server/roles":                          isRefused,
 	"PUT /server/roles/{name}":                    isRefused,
@@ -113,7 +135,9 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /server/databases":                      isRefused,
 	"POST /server/databases/connect":              isRefused,
 	"POST /server/extensions":                     isRefused,
+	"PATCH /server/extensions/{name}":             isRefused,
 	"DELETE /server/extensions/{name}":            isRefused,
+	"POST /server/preload":                        isRefused,
 	// Redis: the console runs a read, the bulk action counts, a client can be
 	// disconnected. Keys, streams, accounts and configuration are writes.
 	"POST /redis/classify":       staysOpen,

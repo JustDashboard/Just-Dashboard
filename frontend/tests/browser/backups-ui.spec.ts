@@ -134,6 +134,31 @@ test("a thing nothing covers opens the form filled in for it", async ({ page }) 
   )
 })
 
+test("the form names each database dump for what it is, and a Redis one is not an RDB file", async ({
+  page,
+}) => {
+  await page.goto("/backups")
+  await page.getByRole("button", { name: "Back up Caddy configuration" }).click()
+  const dumps = page.getByRole("dialog").getByRole("group", { name: "Database dumps" })
+  await expect(dumps).toContainText(
+    "pg_dump, mysqldump, mongodump — or the dashboard's built-in dump",
+  )
+  await expect(dumps).toContainText(
+    "Redis is always the built-in one: its keys as JSON Lines that the dashboard restores, not an RDB file.",
+  )
+  await expect(dumps).not.toContainText("Redis snapshot")
+})
+
+test("the dump formats in the job form, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names where the screenshots go")
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/backups")
+  await page.getByRole("button", { name: "Back up Caddy configuration" }).click()
+  const dumps = page.getByRole("dialog").getByRole("group", { name: "Database dumps" })
+  await dumps.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: `${process.env.JD_SHOTS}/backup-dump-formats-1440.png` })
+})
+
 test("a delayed database handoff opens a saveable native-dump-only job and consumes the URL", async ({
   page,
 }) => {
