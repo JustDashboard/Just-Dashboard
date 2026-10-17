@@ -64,7 +64,8 @@ var (
 		"9.7": eolDate("2034-04-30"),
 	}
 	// MariaDB: long-term series are kept five years (three from 11.8 on), the
-	// rest until the following release.
+	// rest until the following release — a day known only once that release
+	// is out, so the newest rolling one (13.0) has none yet.
 	mariadbEOL = map[string]time.Time{
 		"5.5": eolDate("2020-04-11"), "10.0": eolDate("2019-03-31"), "10.1": eolDate("2020-10-17"),
 		"10.2": eolDate("2022-05-23"), "10.3": eolDate("2023-05-25"), "10.4": eolDate("2024-06-18"),
@@ -74,15 +75,16 @@ var (
 		"11.2": eolDate("2024-11-21"), "11.3": eolDate("2024-05-29"), "11.4": eolDate("2029-05-29"),
 		"11.5": eolDate("2024-11-21"), "11.6": eolDate("2025-02-13"), "11.7": eolDate("2025-05-12"),
 		"11.8": eolDate("2028-06-04"), "12.0": eolDate("2025-11-18"), "12.1": eolDate("2026-02-13"),
-		"12.2": eolDate("2026-05-28"), "12.3": eolDate("2029-06-12"), "13.0": eolDate("2026-12-31"),
+		"12.2": eolDate("2026-05-28"), "12.3": eolDate("2029-06-12"),
 	}
-	// MongoDB: each release's end is published with it — a few years for a
-	// major, until the next one for the minors between them.
+	// MongoDB: the self-managed lifecycle table, a few years for a major and
+	// until the next one for the minors between them. 8.3's row there says
+	// both "TBD" and a date, so it is not listed until it says one.
 	mongoEOL = map[string]time.Time{
 		"3.6": eolDate("2021-04-30"), "4.0": eolDate("2022-04-30"), "4.2": eolDate("2023-04-30"),
 		"4.4": eolDate("2024-02-29"), "5.0": eolDate("2024-10-31"), "6.0": eolDate("2025-07-31"),
 		"7.0": eolDate("2027-08-31"), "8.0": eolDate("2029-10-31"), "8.1": eolDate("2025-09-30"),
-		"8.2": eolDate("2026-07-31"), "8.3": eolDate("2029-10-31"), "9.0": eolDate("2031-10-31"),
+		"8.2": eolDate("2026-07-31"), "9.0": eolDate("2031-10-31"),
 	}
 	// ClickHouse: a long-term release is maintained for a year from the day
 	// it came out. Where that day is not listed the year is counted from the

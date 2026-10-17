@@ -213,6 +213,119 @@ const BUILD_OUTPUT = [
   "#5 18.07 Setting up postgresql-18-postgis-3 (3.6.4+dfsg-2.pgdg13+1) ...",
 ]
 
+/**
+ * A database's home with its own reads answered, so a screenshot of the line
+ * the support status is on shows the home as it is on a healthy server.
+ */
+async function mockHealthyHome(page: Page) {
+  const at = (step: number) =>
+    new Date(Date.parse("2026-10-17T09:00:00Z") + step * 30_000).toISOString()
+  const stats = (step: number) => ({
+    supported: true,
+    at: at(step),
+    driver: "postgres",
+    version: "PostgreSQL 14.11",
+    uptimeSeconds: 186_400,
+    role: "standalone",
+    database: "shop_main",
+    databaseBytes: 24_517_655,
+    connections: { total: 12, active: 2, idle: 10, idleInTransaction: 0, waiting: 0, max: 100 },
+    counters: {
+      transactionsCommitted: 1_000 + step * 50,
+      transactionsRolledBack: 0,
+      blocksHit: 900_000 + step * 990,
+      blocksRead: 2_700 + step * 10,
+      rowsRead: 400_000 + step * 5_000,
+      rowsWritten: 90_000 + step * 50,
+    },
+    gauges: { replicas: 0 },
+    pool: null,
+  })
+  const dump = {
+    file: "shop-20261017-060000.dump",
+    size: 420_000,
+    takenAt: "2026-10-17T06:00:00Z",
+    format: "pg_dump archive",
+    durationMs: 900,
+    tool: "pg_dump",
+    summary: "written by pg_dump",
+    origin: "dump",
+  }
+  const answers: Record<string, unknown> = {
+    "/stats": stats(3),
+    "/stats/history": {
+      samples: [0, 1, 2].map((step) => ({
+        at: Date.parse(at(step)),
+        stats: stats(step),
+        gap: false,
+      })),
+      everySeconds: 30,
+      retentionHours: 168,
+    },
+    "/tablestats": {
+      supported: true,
+      schema: "",
+      truncated: false,
+      tables: [
+        { schema: "public", table: "orders", rows: 9_000, totalBytes: 3_399_680 },
+        { schema: "public", table: "customers", rows: 2_400, totalBytes: 1_064_960 },
+      ],
+    },
+    "/consumers": {
+      checkedAt: "2026-10-17T09:00:00Z",
+      nodes: [
+        { id: "db:1", kind: "database", name: "shop", product: "postgres", connId: 1 },
+        {
+          id: "deploy:7",
+          kind: "deployment",
+          name: "shop-api",
+          product: "nodejs",
+          detail: "production",
+          href: "/deploy/7",
+        },
+      ],
+      edges: [
+        {
+          from: "db:1",
+          to: "deploy:7",
+          via: ["binding", "session"],
+          sessions: 8,
+          status: "connected",
+        },
+      ],
+    },
+    "/backups": {
+      dir: "/var/lib/just-dashboard/backups/databases/shop",
+      files: [dump],
+      options: {},
+    },
+    "/schemas": [{ name: "shop_main", size: 24_517_655, owner: "app" }],
+    "/statements": {
+      supported: true,
+      sort: "total",
+      resettable: true,
+      totalMs: 100,
+      since: "2026-10-17T08:00:00Z",
+      statements: [
+        {
+          id: "1",
+          query: "SELECT *\n  FROM orders\n WHERE customer_id = $1",
+          calls: 1_200,
+          totalMs: 60,
+          meanMs: 0.05,
+          rows: 1_200,
+          hitRatio: 1,
+          share: 0.6,
+        },
+      ],
+    },
+  }
+  await page.route("**/api/v1/databases/1/**", (route) => {
+    const rest = new URL(route.request().url()).pathname.replace(/^\/api\/v1\/databases\/1/, "")
+    return Object.hasOwn(answers, rest) ? route.fulfill({ json: answers[rest] }) : route.fallback()
+  })
+}
+
 const panel = (page: Page) => page.locator("[data-slot=flow-panel]")
 const engine = (page: Page, image: RegExp) => page.getByRole("button", { name: image })
 const noSideScroll = (page: Page) =>
@@ -249,10 +362,10 @@ test("PostgreSQL 18 is the default, and each release says how long it is maintai
     "data-state",
     "on",
   )
-  await expect(settings).toContainText("Supported until 2030-11")
+  await expect(settings).toContainText("Supported until Nov 2030")
   // PostgreSQL 14 is still maintained, so it stands with the rest.
   await settings.getByRole("radio", { name: "14", exact: true }).click()
-  await expect(settings).toContainText("Supported until 2026-11")
+  await expect(settings).toContainText("Supported until Nov 2026")
   await expect(settings.getByText("Older versions")).toHaveCount(0)
   await settings.getByRole("radio", { name: "18", exact: true }).click()
   await settings.getByRole("button", { name: "Create", exact: true }).click()
@@ -273,21 +386,23 @@ test("a release past its end of life is kept behind Older versions, which says s
     "data-state",
     "on",
   )
-  await expect(settings).toContainText("Supported until 2032-04")
+  await expect(settings).toContainText("Supported until Apr 2032")
   // Folded away, and not one of the versions offered first.
   await expect(settings.getByRole("radio", { name: "8.0", exact: true })).toBeHidden()
   const older = settings.getByRole("button", { name: /Older versions/ })
   await expect(older).toHaveAttribute("aria-expanded", "false")
   await older.click()
   await expect(older).toHaveAttribute("aria-expanded", "true")
-  await expect(settings).toContainText("8.0 — End of life since 2026-04-30")
+  await expect(settings).toContainText("8.0 — End of life since Apr 30, 2026")
   await expect(settings).toContainText("no more fixes, security fixes included")
   await settings.getByRole("radio", { name: "8.0", exact: true }).click()
   await expect(settings.getByRole("radio", { name: "8.4", exact: true })).toHaveAttribute(
     "data-state",
     "off",
   )
-  await expect(settings.getByText("End of life since 2026-04-30").first()).toBeVisible()
+  // Said once, in the fold beside 8.0: under 9.7 and 8.4 it would read as theirs.
+  await expect(settings.getByText("End of life since Apr 30, 2026")).toHaveCount(1)
+  await expect(settings.getByText("Supported until Apr 2032")).toHaveCount(0)
   await expect(settings.getByText("mysql:8.0", { exact: true })).toBeVisible()
   await settings.getByRole("button", { name: "Create", exact: true }).click()
   await expect(page).toHaveURL(/\/databases\/20$/)
@@ -345,7 +460,7 @@ test("the full template says what it carries and builds its image as a job befor
   // The build's own output, where the job console draws every job.
   await expect(settings.getByText("Building jd-postgres-full:18").first()).toBeVisible()
   await expect(settings.getByText(/Setting up postgresql-18-pgvector/)).toBeVisible()
-  await expect(settings).toContainText("Leave and the build goes on")
+  await expect(settings).toContainText("This keeps running if you close the page")
   expect(server.bodies("POST /databases/provision")).toEqual([])
 
   finished = true
@@ -411,10 +526,12 @@ test("the catalogue's empty and failed answers are said, and Retry asks again", 
     failing ? refusal(503, "docker_unavailable", "Docker did not answer", true) : { body: [] },
   )
   await page.goto("/databases/new")
-  await expect(page.getByText("Docker did not answer")).toBeVisible()
+  await expect(page.getByText("Not available on this host")).toBeVisible()
+  // A catalogue that could not be read is not one that offers nothing.
+  await expect(page.getByText("This server offers no engine to start from here.")).toHaveCount(0)
   failing = false
   await page.getByRole("button", { name: "Retry loading database engines" }).click()
-  await expect(page.getByText("Docker did not answer")).toHaveCount(0)
+  await expect(page.getByText("Not available on this host")).toHaveCount(0)
   await expect(page.getByText("This server offers no engine to start from here.")).toBeVisible()
 })
 
@@ -432,10 +549,10 @@ test("a role that may only read is not offered the catalogue, and reads the supp
   await page.goto("/databases/1")
   // Beside the version it is about, before where the server runs.
   await expect(page.locator("[data-slot=host-identity]")).toContainText(
-    /PostgreSQL 16\.4\s*·\s*supported until 2028-11/,
+    /PostgreSQL 16\.4\s*·\s*supported until Nov 2028/,
   )
   await page.goto("/databases/1/settings")
-  await expect(page.locator("section#connection")).toContainText("supported until 2028-11")
+  await expect(page.locator("section#connection")).toContainText("supported until Nov 2028")
 })
 
 test("Home and General say a release's end of life beside its version, and nothing where it is unknown", async ({
@@ -453,9 +570,9 @@ test("Home and General say a release's end of life beside its version, and nothi
   await page.goto("/databases/1")
   const identity = page.locator("[data-slot=host-identity]")
   await expect(identity).toContainText("PostgreSQL 13.14")
-  await expect(identity).toContainText("end of life since 2025-11-13")
+  await expect(identity).toContainText("end of life since Nov 13, 2025")
   await page.goto("/databases/1/settings")
-  await expect(page.locator("section#connection")).toContainText("end of life since 2025-11-13")
+  await expect(page.locator("section#connection")).toContainText("end of life since Nov 13, 2025")
 
   // Redis has no dates in the table: its version stands alone.
   await page.goto("/databases/4")
@@ -472,7 +589,7 @@ test("the catalogue and a build in progress fit a phone without sideways scrolli
   await panel(page)
     .getByRole("button", { name: /Older versions/ })
     .click()
-  await expect(panel(page)).toContainText("End of life since 2026-04-30")
+  await expect(panel(page)).toContainText("End of life since Apr 30, 2026")
   expect(await noSideScroll(page)).toBe(false)
 
   await page.goto("/databases/new?engine=postgres-full")
@@ -484,7 +601,7 @@ test("the catalogue and a build in progress fit a phone without sideways scrolli
     summaries: { 1: { endOfLife: eol("PostgreSQL", "16", "2028-11-09", false) } },
   })
   await page.goto(`/databases/${SHOP.id}`)
-  await expect(page.locator("[data-slot=host-identity]")).toContainText("supported until 2028-11")
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("supported until Nov 2028")
   expect(await noSideScroll(page)).toBe(false)
 })
 
@@ -496,7 +613,7 @@ test("screenshots of the refreshed catalogue @shots", async ({ page }) => {
 
   await mockCatalogue(page)
   await page.goto("/databases/new?engine=postgres")
-  await expect(panel(page)).toContainText("Supported until 2030-11")
+  await expect(panel(page)).toContainText("Supported until Nov 2030")
   await page.screenshot({ path: `${shots}/catalogue-postgres-18-1440.png` })
 
   await page.goto("/databases/new?engine=mysql")
@@ -504,7 +621,7 @@ test("screenshots of the refreshed catalogue @shots", async ({ page }) => {
     .getByRole("button", { name: /Older versions/ })
     .click()
   await panel(page).getByRole("radio", { name: "8.0", exact: true }).click()
-  await expect(panel(page)).toContainText("End of life since 2026-04-30")
+  await expect(panel(page)).toContainText("End of life since Apr 30, 2026")
   await page.screenshot({ path: `${shots}/catalogue-older-versions-1440.png` })
 
   await page.goto("/databases/new?engine=postgres-full")
@@ -524,11 +641,14 @@ test("screenshots of the refreshed catalogue @shots", async ({ page }) => {
       },
     },
   })
+  await mockHealthyHome(page)
   await page.goto("/databases/1")
-  await expect(page.locator("[data-slot=host-identity]")).toContainText("supported until 2026-11")
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("supported until Nov 2026")
+  await expect(page.getByText("This server's statistics are not available")).toHaveCount(0)
+  await expect(page.getByText(/Could not read/)).toHaveCount(0)
   await page.screenshot({ path: `${shots}/home-support-status-1440.png` })
   await page.goto("/databases/1/settings")
-  await expect(page.locator("section#connection")).toContainText("supported until 2026-11")
+  await expect(page.locator("section#connection")).toContainText("supported until Nov 2026")
   await page.screenshot({ path: `${shots}/general-support-status-1440.png` })
 
   await page.setViewportSize({ width: 390, height: 844 })
@@ -537,7 +657,7 @@ test("screenshots of the refreshed catalogue @shots", async ({ page }) => {
   await panel(page)
     .getByRole("button", { name: /Older versions/ })
     .click()
-  await expect(panel(page)).toContainText("End of life since 2026-04-30")
+  await expect(panel(page)).toContainText("End of life since Apr 30, 2026")
   await panel(page).scrollIntoViewIfNeeded()
   await page.screenshot({ path: `${shots}/catalogue-older-versions-390.png` })
 })

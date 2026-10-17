@@ -240,11 +240,14 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   in `dbx/eol.go` (PostgreSQL, MySQL, MariaDB, MongoDB, SQL Server, Oracle, and ClickHouse's long-term
   March and August releases; TimescaleDB is dated as the PostgreSQL it runs on). Redis, Valkey, KeyDB,
   Dragonfly and the forks that keep their own calendar (CockroachDB, YugabyteDB, TiDB, FerretDB) have
-  no date and say nothing. The version picker says the chosen release's "Supported until 2030-11" or
-  "End of life since 2026-04-30" under it. A release whose date has passed stays on the closed list —
+  no date and say nothing, and so does a release whose last day is not published yet (MariaDB's newest
+  rolling release, MongoDB 8.3). The version picker says the chosen release's "Supported until Nov 2030"
+  under it — a day still ahead to the month, in `calendarDate`'s words on the UTC calendar
+  (`components/database/support.ts`). A release whose date has passed stays on the closed list —
   each engine's most recent such line, for a server that has to match the one it replaces — and the
   picker keeps it behind an *Older versions* fold that states each one's status; it moves there by
-  itself on the day it ends (PostgreSQL 14 on 2026-11-12), with no change here. Every default was
+  itself on the day it ends (PostgreSQL 14 on 2026-11-12), with no change here; chosen, it is dated
+  there ("End of life since Apr 30, 2026") and not under the releases still maintained. Every default was
   maintained on the day of the refresh (`TestProvisionCatalogueDefaultsWereMaintainedWhenItWasRefreshed`),
   and no offered tag floats across release lines. Existing servers on any release keep working: the
   list decides only what can be started.
@@ -307,7 +310,8 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   `endOfLife` is when the release the server last said it runs stops being maintained
   (`dbx.VersionEndOfLife`, by driver, flavour and the server's own version string), absent where the
   table has no date: Home's identity line and General's *Name and labels* say it beside the version as
-  a plain fact — "supported until 2028-11", "end of life since 2025-11-13" — and nowhere else, with no
+  a plain fact — "supported until Nov 2028", "end of life since Nov 13, 2025", in the words of the
+  "added Sep 1, 2026" beside it — and nowhere else, with no
   colour, badge or advice. See *The provisioning catalogue* for the table.
 - **Where a server runs is read off the machine each time** (`dbHostView.place`), never stored: the
   container that publishes or answers at the address, then the

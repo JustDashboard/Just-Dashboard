@@ -37,6 +37,9 @@ func TestVersionEndOfLife(t *testing.T) {
 		{DriverMongo, FlavorMongoDB, "6.0.29", "6.0", true, true},
 		{DriverMongo, FlavorMongoDB, "8.0.34", "8.0", false, true},
 		{DriverMongo, FlavorMongoDB, "2.4.14", "", false, false},
+		// Neither has a published last day yet.
+		{DriverMongo, FlavorMongoDB, "8.3.13", "", false, false},
+		{DriverMySQL, FlavorMariaDB, "13.0.2-MariaDB-ubu2404", "", false, false},
 		{DriverMSSQL, FlavorSQLServer, "Microsoft SQL Server 2016 (SP3) - 13.0.6300.2 (X64)", "2016", true, true},
 		{DriverMSSQL, FlavorSQLServer, "Microsoft SQL Server 2022 (RTM-CU12) - 16.0.4115.5", "2022", false, true},
 		{DriverOracle, FlavorOracle, "Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 - Production", "19", false, true},

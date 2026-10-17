@@ -340,7 +340,9 @@ export function DatabaseCreation({
             // under the scrollbar, and pulled back out so they still start
             // where the title does.
             <div className="-mx-3 space-y-5 px-3 pt-1 pb-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
-              {shelves.length === 0 && (
+              {/* Only once the catalogue has answered: under an error that
+                  says it could not be read, "no engine" contradicted it. */}
+              {templates.data && shelves.length === 0 && (
                 <EmptyNote className="px-0 text-left">
                   This server offers no engine to start from here.
                 </EmptyNote>
@@ -414,11 +416,9 @@ export function DatabaseCreation({
                 />
               )}
               <p className="text-hint leading-relaxed text-muted-foreground">
+                {/* The console under the stages says what leaving does. */}
                 {work.phase === "build" ? (
-                  <>
-                    The image is built once, on this server, and that takes a few minutes. Leave and
-                    the build goes on; Create here picks it up again.
-                  </>
+                  "The image is built once, on this server, and that takes a few minutes."
                 ) : (
                   <>
                     {recipe
@@ -496,8 +496,15 @@ export function DatabaseCreation({
                 {(releases.current.length > 1 || releases.older.length > 0) && (
                   <Field
                     label="Version"
-                    // The chosen release's support status, as a plain fact.
-                    hint={release?.endOfLife && supportWords(release.endOfLife)}
+                    // The chosen release's support status, as a plain fact —
+                    // under the releases it is about. An older one chosen is
+                    // dated in the fold, and its date under these would read
+                    // as theirs.
+                    hint={
+                      release?.endOfLife && !olderChosen
+                        ? supportWords(release.endOfLife)
+                        : undefined
+                    }
                   >
                     {releases.current.length > 0 && (
                       <Segments
@@ -687,7 +694,7 @@ function BuiltHere({
         ? "It starts like any other."
         : release.build?.job
           ? "Create waits for that build, then starts it."
-          : "The first build takes a few minutes and is kept for the next server."}{" "}
+          : "The first build takes a few minutes, and is kept for the next one started here."}{" "}
       Each extension is enabled under Settings → Extensions once it runs.
     </Notice>
   )
