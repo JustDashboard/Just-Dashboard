@@ -19,8 +19,18 @@ import { SHOP, mockDatabases, pitrOff, type DatabaseMock } from "./database-fixt
 const expect = baseExpect.configure({ timeout: 15_000 })
 test.describe.configure({ timeout: 60_000 })
 
-const NOW = "2026-10-17T09:00:00Z"
+// Every time is minutes before the test runs, at offsets that are not round
+// hours, so a screenshot never reads "6h 0s ago" or a moment yet to come.
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
+const NOW = ago(2)
+/** A moment as a container or an archive is named by it: 20261017-074512. */
+const stamp = (minutes: number) => ago(minutes).replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+const ARCHIVE_STREAM = `shop-db-${stamp(60 * 24 * 6 - 40)}`
+const NEXT_STREAM = `shop-db-${stamp(0)}`
+const COPY_NAME = `shop-db-restored-${stamp(7)}`
+const NEW_COPY = `shop-db-restored-${stamp(0)}`
+/** As the server writes a recovery's target time. */
+const targetTime = (iso: string) => iso.replace("T", " ").slice(0, 19) + "+00"
 
 type Reply = { status: number; body: unknown }
 const isReply = (value: unknown): value is Reply =>
@@ -41,7 +51,7 @@ const ARCHIVE = {
   id: 3,
   container: "shop-db",
   connectionId: 1,
-  stream: "shop-db-20261010-030000",
+  stream: ARCHIVE_STREAM,
   targetKind: "s3",
   target: {
     bucket: "acme-backups",
@@ -57,17 +67,17 @@ const ARCHIVE = {
   createdBy: "operator",
   reading: {
     backups: [
-      backup("base_000000010000000000000041", 60 * 24 * 6, 812_000_000),
-      backup("base_000000010000000000000098", 60 * 24 * 3, 845_000_000),
-      backup("base_0000000100000000000000F2", 360, 861_000_000),
+      backup("base_000000010000000000000041", 60 * 24 * 6 - 37, 812_000_000),
+      backup("base_000000010000000000000098", 60 * 24 * 3 + 23, 845_000_000),
+      backup("base_0000000100000000000000F2", 401, 861_000_000),
     ],
     latest: "000000010000000000000107",
     latestAt: ago(1),
-    window: { from: ago(60 * 24 * 6), to: ago(1) },
+    window: { from: ago(60 * 24 * 6 - 37), to: ago(1.3) },
     size: 2_710_000_000,
     readAt: ago(1),
   },
-  lastBackupAt: ago(360),
+  lastBackupAt: ago(401),
 }
 
 const ARCHIVER = {
@@ -75,7 +85,7 @@ const ARCHIVER = {
   walLevel: "replica",
   archivedCount: 1840,
   lastArchived: "000000010000000000000107",
-  lastArchivedAt: ago(1),
+  lastArchivedAt: ago(1.3),
   failedCount: 0,
   current: "000000010000000000000108",
   waiting: 0,
@@ -88,14 +98,14 @@ const archiving = (over: Record<string, unknown> = {}) =>
     container: "shop-db",
     archive: ARCHIVE,
     archiver: ARCHIVER,
-    window: { from: ARCHIVE.reading.window.from, to: ago(1) },
-    nextBackup: "2026-10-18T03:00:00Z",
+    window: { from: ARCHIVE.reading.window.from, to: ago(1.3) },
+    nextBackup: ago(-(17 * 60 + 13)),
     restorePoints: [
       {
         id: 1,
         name: "before-orders-migration",
         lsn: "0/F2000028",
-        createdAt: ago(240),
+        createdAt: ago(257),
         createdBy: "operator",
       },
     ],
@@ -106,12 +116,12 @@ const COPY = {
   id: 7,
   archiveId: 3,
   source: "shop-db",
-  container: "shop-db-restored-20261017-085500",
+  container: COPY_NAME,
   connectionId: 12,
   port: 5434,
-  target: { kind: "time", time: ago(90) },
+  target: { kind: "time", time: ago(93) },
   baseBackup: "base_0000000100000000000000F2",
-  recoveredTo: ago(91),
+  recoveredTo: ago(94),
   state: "ready",
   createdAt: ago(5),
   createdBy: "operator",
@@ -119,8 +129,8 @@ const COPY = {
 
 const PLAN = {
   container: "shop-db",
-  stream: "shop-db-20261017-090000",
-  location: "s3://acme-backups/postgres/shop-db-20261017-090000",
+  stream: NEXT_STREAM,
+  location: `s3://acme-backups/postgres/${NEXT_STREAM}`,
   settings: {
     archive_command: "/jd-pitr/wal-g wal-push %p",
     archive_mode: "on",
@@ -135,13 +145,13 @@ const PLAN = {
     "-c",
     "archive_timeout=60",
   ],
-  mounts: ["shop-db-20261017-090000-pitr:/jd-pitr:ro"],
+  mounts: [`${NEXT_STREAM}-pitr:/jd-pitr:ro`],
 }
 
 const TITLES: Record<string, string> = {
   enable: "Set up point-in-time recovery for shop-db",
-  restore: "Recover shop-db into shop-db-restored-20261017-090500",
-  switch: "Switch shop-db to shop-db-restored-20261017-085500",
+  restore: `Recover shop-db into ${NEW_COPY}`,
+  switch: `Switch shop-db to ${COPY_NAME}`,
   disable: "Turn point-in-time recovery off for shop-db",
 }
 
@@ -229,6 +239,9 @@ async function momentAgo(page: Page, minutes: number) {
   return page.evaluate((back) => {
     const d = new Date(Date.now() - back * 60_000)
     d.setMilliseconds(0)
+    // A field shows a time with no seconds without them, and a fill that
+    // reads back otherwise is refused as malformed.
+    if (d.getSeconds() === 0) d.setSeconds(7)
     const pad = (n: number) => String(n).padStart(2, "0")
     return {
       local: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
@@ -276,7 +289,7 @@ test("a server that does not archive offers it, and the setup shows what the ser
   await expect(dialog(page)).toContainText(
     "postgres -c 'archive_command=/jd-pitr/wal-g wal-push %p' -c archive_mode=on",
   )
-  await expect(dialog(page)).toContainText("s3://acme-backups/postgres/shop-db-20261017-090000")
+  await expect(dialog(page)).toContainText(`s3://acme-backups/postgres/${NEXT_STREAM}`)
   await expect
     .poll(() => server.sent.findLast((one) => one.request === "POST /databases/1/pitr")?.body)
     .toMatchObject({
@@ -309,7 +322,7 @@ test("an archiving server says what it can go back to and what that rests on", a
   await visit(page)
   await expect(panel(page).locator("[data-slot=pitr-window]")).toContainText("Any moment from")
   await expect(panel(page).locator("dl")).toContainText("000000010000000000000107")
-  await expect(panel(page)).toContainText("s3://acme-backups/postgres/shop-db-20261010-030000")
+  await expect(panel(page)).toContainText(`s3://acme-backups/postgres/${ARCHIVE_STREAM}`)
   await expect(panel(page)).toContainText("the last 7 days")
   await expect(panel(page)).toContainText("3 base backups")
   const backups = panel(page).getByRole("table", { name: "Base backups" })
@@ -347,10 +360,10 @@ test("a recovery is planned by the server, runs beside it, and ends with a way i
   page,
 }) => {
   const restorePlan = {
-    container: "shop-db-restored-20261017-090500",
+    container: NEW_COPY,
     port: 5434,
     backup: "base_0000000100000000000000F2",
-    backupAt: ago(360),
+    backupAt: ago(401),
     settings: {
       archive_mode: "off",
       restore_command: "/jd-pitr/wal-g wal-fetch %f %p",
@@ -363,7 +376,7 @@ test("a recovery is planned by the server, runs beside it, and ends with a way i
     "POST /databases/1/pitr/restore": (_call: number, body: unknown) =>
       (body as { preview?: boolean }).preview ? restorePlan : job("r1", "restore", "running"),
     "GET /jobs/r1": jobThatEnds("r1", "restore", {
-      container: "shop-db-restored-20261017-090500",
+      container: NEW_COPY,
       connectionId: 12,
       port: 5434,
       recoveredTo: ago(90),
@@ -379,15 +392,13 @@ test("a recovery is planned by the server, runs beside it, and ends with a way i
     .click()
   await dialog(page).getByLabel("Moment, in this browser's time").fill(moment.local)
   await expect(dialog(page)).toContainText("recovery_target_time = '2026-10-17 07:30:00+00'")
-  await expect(dialog(page)).toContainText("shop-db-restored-20261017-090500 · 127.0.0.1:5434")
+  await expect(dialog(page)).toContainText(`${NEW_COPY} · 127.0.0.1:5434`)
   await expect(dialog(page)).toContainText("base_0000000100000000000000F2")
 
   await dialog(page).getByRole("button", { name: "Recover into a new server" }).click()
   await expect(progress(page)).toHaveAttribute("aria-label", /succeeded$/)
   await expect(progress(page)).toContainText("Recovered to 2026-10-17T07:30:00Z")
-  await expect(
-    panel(page).getByRole("button", { name: "Open shop-db-restored-20261017-090500" }),
-  ).toBeVisible()
+  await expect(panel(page).getByRole("button", { name: `Open ${NEW_COPY}` })).toBeVisible()
   const sent = server.sent.filter((one) => one.request === "POST /databases/1/pitr/restore").at(-1)
   expect(sent?.body).toEqual({ archiveId: 3, target: { kind: "time", time: moment.iso } })
 })
@@ -396,10 +407,10 @@ test("a moment before the archive is refused before it is asked for", async ({ p
   const server = await mockPitr(page, {
     "GET /databases/1/pitr": archiving(),
     "POST /databases/1/pitr/restore": {
-      container: "shop-db-restored-20261017-090500",
+      container: NEW_COPY,
       port: 5434,
       backup: "base_0000000100000000000000F2",
-      backupAt: ago(360),
+      backupAt: ago(401),
       settings: { archive_mode: "off", restore_command: "/jd-pitr/wal-g wal-fetch %f %p" },
     },
   })
@@ -408,7 +419,7 @@ test("a moment before the archive is refused before it is asked for", async ({ p
   await dialog(page)
     .getByRole("button", { name: /^A moment/ })
     .click()
-  await dialog(page).getByLabel("Moment, in this browser's time").fill("2020-01-01T00:00:00")
+  await dialog(page).getByLabel("Moment, in this browser's time").fill("2020-01-01T00:00:05")
   await expect(dialog(page)).toContainText("no earlier")
   await expect(
     dialog(page).getByRole("button", { name: "Recover into a new server" }),
@@ -433,12 +444,13 @@ test("a recovered copy is switched in only after it is confirmed", async ({ page
   })
   await visit(page)
   const copies = panel(page).getByRole("group", { name: "Recovered copies" })
-  await expect(copies).toContainText("shop-db-restored-20261017-085500")
-  await expect(
-    copies.getByRole("link", { name: "Open shop-db-restored-20261017-085500" }),
-  ).toHaveAttribute("href", "/databases/12")
+  await expect(copies).toContainText(COPY_NAME)
+  await expect(copies.getByRole("link", { name: `Open ${COPY_NAME}` })).toHaveAttribute(
+    "href",
+    "/databases/12",
+  )
   await copies.getByRole("button", { name: "Switch in" }).click()
-  const confirm = page.getByRole("dialog", { name: "Switch to shop-db-restored-20261017-085500" })
+  const confirm = page.getByRole("dialog", { name: `Switch to ${COPY_NAME}` })
   await expect(confirm).toContainText("takes its name, its port and its networks")
   await expect(confirm.getByRole("textbox")).toHaveCount(0)
   expect(server.sent.filter((one) => one.request.endsWith("/switch"))).toHaveLength(0)
@@ -582,52 +594,82 @@ test("point-in-time recovery screenshots @shots", async ({ page }) => {
             ? archiving({ restores: [COPY] })
             : archiving(),
     "POST /databases/1/pitr": PLAN,
-    "POST /databases/1/pitr/restore": {
-      container: "shop-db-restored-20261017-090500",
-      port: 5434,
-      backup: "base_0000000100000000000000F2",
-      backupAt: ago(360),
-      settings: {
-        archive_mode: "off",
-        restore_command: "/jd-pitr/wal-g wal-fetch %f %p",
-        recovery_target_time: "2026-10-17 07:30:00+00",
-        recovery_target_action: "promote",
-      },
+    // The plan says what the form asked for: the moment typed, as the server writes it.
+    "POST /databases/1/pitr/restore": (_call: number, body: unknown) => {
+      const time = (body as { target?: { time?: string } }).target?.time
+      return {
+        container: NEW_COPY,
+        port: 5434,
+        backup: "base_0000000100000000000000F2",
+        backupAt: ago(401),
+        settings: {
+          archive_mode: "off",
+          restore_command: "/jd-pitr/wal-g wal-fetch %f %p",
+          ...(time
+            ? { recovery_target_time: targetTime(time), recovery_target_action: "promote" }
+            : {}),
+        },
+      }
     },
   })
   await page.setViewportSize({ width: 1440, height: 900 })
+  // Finite animations only: the dumps' picture above the panel pulses for as long as it is drawn.
+  const settled = (region: ReturnType<typeof page.locator>) =>
+    region.evaluate((el) =>
+      Promise.all(
+        el
+          .getAnimations({ subtree: true })
+          .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+          .map((a) => a.finished),
+      ),
+    )
+  // The whole page, so nothing of the panel is cut at the window's edge.
   const shoot = async (name: string) => {
-    await panel(page).scrollIntoViewIfNeeded()
+    await settled(panel(page))
+    await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true })
+  }
+  // A dialog in a window tall enough to hold its body unscrolled, so nothing in it is cut where
+  // it would scroll.
+  const shootDialog = async (name: string, open: ReturnType<typeof page.locator>) => {
+    await settled(open)
+    const hidden = await open.evaluate((el) => {
+      const body = el.querySelector<HTMLElement>(".overflow-y-auto")
+      return body ? body.scrollHeight - body.clientHeight : 0
+    })
+    if (hidden > 0) {
+      await page.setViewportSize({ width: 1440, height: Math.min(900 + hidden + 16, 1800) })
+      await settled(open)
+    }
     await page.screenshot({ path: `${dir}/${name}.png` })
+    await page.setViewportSize({ width: 1440, height: 900 })
   }
 
   await visit(page)
   await expect(panel(page)).toContainText("The log of shop-db is not archived")
   await shoot("pitr-off-1440")
+
   await panel(page).getByRole("button", { name: "Set up point-in-time recovery" }).first().click()
   await dialog(page).getByRole("radio", { name: "S3" }).click()
   await dialog(page).getByLabel("Bucket").fill("acme-backups")
+  await dialog(page).getByLabel("Region").fill("eu-central-1")
   await dialog(page).getByLabel("Prefix").fill("postgres")
   await expect(dialog(page)).toContainText("archive_mode=on")
-  await page.screenshot({ path: `${dir}/pitr-setup-1440.png` })
-  await page.keyboard.press("Escape")
-  await page.keyboard.press("Escape")
+  await shootDialog("pitr-setup-1440", dialog(page))
 
   state = "on"
   await page.reload()
   await expect(panel(page)).toContainText("Any moment from")
   await shoot("pitr-archiving-1440")
+
   await panel(page).getByRole("button", { name: "Recover to a moment" }).click()
   await dialog(page)
     .getByRole("button", { name: /^A moment/ })
     .click()
   await dialog(page)
     .getByLabel("Moment, in this browser's time")
-    .fill((await momentAgo(page, 90)).local)
+    .fill((await momentAgo(page, 93)).local)
   await expect(dialog(page)).toContainText("recovery_target_time")
-  await page.screenshot({ path: `${dir}/pitr-recover-1440.png` })
-  await page.keyboard.press("Escape")
-  await page.keyboard.press("Escape")
+  await shootDialog("pitr-recover-1440", dialog(page))
 
   state = "failing"
   await page.reload()
@@ -640,8 +682,9 @@ test("point-in-time recovery screenshots @shots", async ({ page }) => {
     .getByRole("group", { name: "Recovered copies" })
     .getByRole("button", { name: "Switch in" })
     .click()
-  await expect(page.getByRole("dialog", { name: /^Switch to/ })).toBeVisible()
-  await page.screenshot({ path: `${dir}/pitr-switch-1440.png` })
+  const confirm = page.getByRole("dialog", { name: /^Switch to/ })
+  await expect(confirm).toContainText("takes its name, its port and its networks")
+  await shootDialog("pitr-switch-1440", confirm)
   await page.keyboard.press("Escape")
 
   state = "on"
