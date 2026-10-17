@@ -6,7 +6,6 @@ export { SqlPerformance } from "@/components/database/ops/performance"
 export {
   Settings,
   SettingsDanger,
-  SettingsDatabases,
   SettingsExtensions,
   SettingsNetwork,
   SettingsParameters,
