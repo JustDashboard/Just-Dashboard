@@ -92,6 +92,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
 		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
 		s.mountDatabaseAdminRoutes(r)
+		s.mountDatabasePoolerRoutes(r)
 		r.Method(http.MethodGet, "/{id}/ping", s.handle(s.handleDBPing))
 		r.Method(http.MethodGet, "/{id}/stats", s.handle(s.handleDBStats))
 		r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleDBStatsHistory))

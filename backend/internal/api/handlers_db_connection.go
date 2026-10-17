@@ -202,6 +202,9 @@ type forgottenConnection struct {
 	// the last connection to it.
 	origin  string
 	ignored bool
+	// pooler is what became of the connection's pooler container, when it
+	// had one: it goes with the connection, and the entry says so.
+	pooler string
 }
 
 // audited adds the mark to the audit detail of the request that forgot the
@@ -209,13 +212,18 @@ type forgottenConnection struct {
 // what the next sync does, so the entry that records the one records the
 // other.
 func (f forgottenConnection) audited(detail map[string]any) map[string]any {
-	if !f.ignored {
+	if !f.ignored && f.pooler == "" {
 		return detail
 	}
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	detail["origin"], detail["ignored"] = f.origin, true
+	if f.ignored {
+		detail["origin"], detail["ignored"] = f.origin, true
+	}
+	if f.pooler != "" {
+		detail["pooler"] = f.pooler
+	}
 	return detail
 }
 
@@ -233,6 +241,7 @@ func (f forgottenConnection) audited(detail map[string]any) map[string]any {
 // thing to call.
 func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (forgottenConnection, error) {
 	origin := s.connectionOrigin(ctx, id)
+	pooler, _ := s.poolerRecord(ctx, id)
 	result, err := s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
 	if err != nil {
@@ -246,6 +255,7 @@ func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (
 	return forgottenConnection{
 		removed: true, origin: origin,
 		ignored: s.afterConnectionForgotten(ctx, id, origin, actor),
+		pooler:  s.forgetPooler(ctx, pooler),
 	}, nil
 }
 
@@ -1415,6 +1425,10 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 		result["target"] = place.Container.Name
 		if after, err := s.modules.docker.Inspect(ctx, place.Container.ID); err == nil {
 			result["state"] = after.State
+		}
+		// The pooler goes where its database goes.
+		if pooler := s.followPoolerPower(ctx, id, action); pooler != "" {
+			detail["pooler"], result["pooler"] = pooler, pooler
 		}
 	case "systemd":
 		detail["unit"] = place.Unit.Name

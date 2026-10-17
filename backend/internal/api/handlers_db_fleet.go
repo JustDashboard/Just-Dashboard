@@ -1035,7 +1035,7 @@ type topoAddressBook struct {
 // postgres://…@203.0.113.7:5435/app reaches the container published on 5435
 // the dashboard reaches at 127.0.0.1:5435 — so each of those is looked for.
 func topoAddresses(conn *dbConnection, info *dbx.ConnInfo, port int, server *dbServer, serverIPs, hosts []string) topoAddressBook {
-	book := topoAddressBook{needles: []string{databaseDNSName(conn.ID)}}
+	book := topoAddressBook{needles: []string{databaseDNSName(conn.ID), poolerDNSName(conn.ID)}}
 	seen := map[string]bool{}
 	reach := func(hosts []string, port int) {
 		p := strconv.Itoa(port)

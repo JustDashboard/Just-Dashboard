@@ -385,6 +385,11 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 		// The pool dialled the old container; the new one has a new socket.
 		s.modules.dbs.Close(id)
 		s.dbConns.stale(id)
+		// A pooler is published where its database is, so the same switch
+		// moves it.
+		if pooler := s.followPoolerExposure(ctx, r, conn, dsn); pooler != nil {
+			detail["pooler"] = pooler
+		}
 	}
 
 	firewall, ferr := s.setDBFirewall(ctx, r, int(server.binding.PublicPort), req.Exposure == exposurePublic)
