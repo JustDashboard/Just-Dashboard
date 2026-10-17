@@ -39,6 +39,11 @@
         },
         {
           "kind": "fixed",
+          "text": "Count a backup job's run as a database's last backup",
+          "detail": "The Databases cards, table and Backups band, and the last dump a database's delete confirmation names, take the later of its newest dump and the newest successful backup job run that dumped it, so a database a nightly job protects is no longer shown as never backed up or a week old."
+        },
+        {
+          "kind": "fixed",
           "text": "Show a deployment as the reader of the database it reaches through a published port",
           "detail": "Databases → What they feed and the map now recognise a deployment whose connection string names this server's own address with the database's published port, and draw a deployment's release as its project. The dashboard's own PostgreSQL sessions are no longer drawn as this server reading every database."
         },

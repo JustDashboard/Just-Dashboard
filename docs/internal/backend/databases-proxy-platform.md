@@ -311,7 +311,8 @@ is connected by naming the instance found, not by typing its address again.
   every session that connected under `dbx.ApplicationName`, on other engines the asking pool), where it
   runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
   summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
-  bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
+  bound to it, and when it was last backed up (`lastBackup`, below under *The dumps on disk*). Each
+  entry also carries the summary's own `power`
   (which of start, stop and restart the power route would take now, or the reason for none),
   `managed` (whether the access route can change the port's reach) and `inFlight`, read off the
   placement the entry already needed — no second look at the machine and no dial — so a card
@@ -930,11 +931,19 @@ stays editable on a protected connection.
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
   `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
-  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
-  never one execution: the list is on the read surface and a literal is somebody's e-mail address.
-  PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
-  and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
-  leaves the package. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  with the grant the account lacks (`reason`). The rule is that the text is a statement's shape, never
+  one execution: the list is on the read surface and a literal is somebody's e-mail address. MySQL and
+  MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to (`normalizeQuery`), and for SQL
+  Server and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the
+  text leaves the package. PostgreSQL's text is returned as `pg_stat_statements` keeps it, and the
+  extension replaces constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`,
+  `MERGE`). A utility statement — `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a
+  column `DEFAULT`, a `DO` body — is kept as it was sent while `pg_stat_statements.track_utility` is on,
+  its default, and reaches the list with its literals, a role's password included. That falls short of
+  the rule and is recorded as an open finding in
+  [verification findings](../reference/verification-findings.md#postgresql-statement-statistics-keep-utility-literals);
+  it is not an exception to it.
+- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
@@ -1069,7 +1078,11 @@ stays editable on a protected connection.
   shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
-  `/activity` and `/statements`, it returns statement text with its literals at read capability.
+  `/activity`, and unlike `/statements`, it returns each statement as the server recorded it, literals
+  included, at read capability — a Redis entry is the command with every argument, a value it set
+  among them; only `fp` is a shape. It sits at `read` beside the log routes, which hand back lines as
+  the log holds them
+  ([request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries)).
 
 ### Redis
 
@@ -1428,17 +1441,23 @@ the detail of each classifier is below, with the surface it guards.
   (`resolveRestoreSource`), by name or by the path the listing reports, and through `files.Resolve` only
   for a file elsewhere; it used to hold every dump to the roots, so narrowing them stopped the dashboard
   restoring what it could still download.
-- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
-  newest first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there
-  to dump again) removes one, contained against that directory exactly as the download is. The fleet
-  reads the same listing for "last backup", and `GET /databases/backups/summary` is every connection's
-  newest dump in one read that dials nothing. What a dump holds — the options it was taken with, the
-  tool and version that wrote it, how long it took, a note, who asked — is in a small file beside it
-  (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed. Beside it rather
-  than in a table because the directory is what gets copied off the machine. A file with no
-  description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
-  (`service.control`) streams a dump made elsewhere into the directory through the scoped
-  `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory newest
+  first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there to dump
+  again) removes one, contained against that directory exactly as the download is. The fleet and a
+  connection's summary say when it was last backed up (`lastBackup`) from the same listing and from the
+  backup jobs: the later of the newest dump here and the start of the newest successful job run whose
+  archive holds the connection's native dump (`backups.Store.LastDatabaseDumps`, by the `CoversDatabase`
+  test a restore applies, read once per fleet request). The listing alone called a database a nightly
+  job protects never backed up. `GET /databases/backups/summary` is every connection's newest dump in
+  the directory in one read that dials nothing, polled every few seconds while a dump runs, so the
+  control center takes the later of its answer and the fleet's. What a dump holds — the options it was
+  taken with, the tool and version that wrote it, how long it took, a note, who asked — is in a small
+  file beside it (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed.
+  Beside it rather than in a table because the directory is what gets copied off the machine. A file
+  with no description is listed with what its first bytes say it is.
+  `POST /databases/{id}/backups/upload` (`service.control`) streams a dump made elsewhere into the
+  directory through the scoped `files.Service`, under a validated name, capped by
+  `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
   A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
   one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
   process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
@@ -4234,6 +4253,17 @@ runs the two tests; it refuses before touching anything if the changelog does no
 version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit it by hand.** The ordering
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
+
+A note added to a release whose version is already bumped — every change merged into an open patch
+branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not
+in `CHANGELOG.md` until the markdown is generated again. Nothing fails meanwhile:
+`TestRootChangelogMentionsThisRelease` checks only that the release has a section there, not what the
+section says. Run `scripts/release.sh` with the version the branch already carries (`0.7.5` on
+`patch/0.7.5`): the version files are rewritten with the values they hold, so the only file that
+changes is `CHANGELOG.md`. Its first step alone does the same without the tests:
+`cd backend && go run ./scripts/gen-changelog.go -expect 0.7.5 -out ../CHANGELOG.md`, which refuses
+unless the changelog's newest release is the version named. Do it last before the branch is merged into
+`main`, because the GitHub release takes its notes from that section.
 
 A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
 `main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on

@@ -36,6 +36,29 @@ routes instead use `gitx.Resolve`, which independently cleans, resolves symlinks
 validate sources/local targets through `files.Resolve`; artifact reads and retention validate their
 stored paths under current roots as well. Git's parallel resolver remains a design-convergence item.
 
+## PostgreSQL statement statistics keep utility literals
+
+Found on 2026-10-17, after the audit above. The Databases reference holds the statement statistics
+(`GET /databases/{id}/statements`, read capability) to a statement's shape, never one execution. On
+PostgreSQL the text is `pg_stat_statements.query` as the extension keeps it, and the extension
+replaces constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`).
+Utility statements are kept as they were sent while `pg_stat_statements.track_utility` is on, which is
+its default. Checked against PostgreSQL 17.11: `CREATE ROLE … PASSWORD '…'` and
+`ALTER ROLE … PASSWORD '…'` were listed with the password in clear, as were a `SET` value, a `COMMENT`,
+a column `DEFAULT` and a `DO` body, while the `SELECT`, `INSERT` and `UPDATE` run beside them read
+`$1`. The dashboard's own role form sends a new password that way (`dbx.passwordLiteral`), so on a
+server that loads the extension an account that may only read can be shown a password an
+administrator set from the dashboard. The Performance page's Statements panel tells its reader the
+same rule ("the server replaces every value before it leaves").
+
+The other engines held the rule in the same check: MySQL 8.4's digest text and ClickHouse 25.8's
+`normalizeQuery` replaced every literal, and `dbx.statementShape` does so for SQL Server and Oracle
+(`TestStatementShapeDropsLiteralsAndNothingElse`); MariaDB 11.4 ships with `performance_schema` off and
+lists nothing. The code is unchanged. Closing the gap — shaping PostgreSQL's text here as well, by a
+pass that keeps the `$n` markers the Statements panel asks values for (`dbx.statementShape` reads `$1`
+as SQL Server's money literal), or leaving utility statements out of the list — is a decision still
+to be made, and until then the rule stands as the contract.
+
 ## Verified inventory drift corrected in this documentation change
 
 - The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.

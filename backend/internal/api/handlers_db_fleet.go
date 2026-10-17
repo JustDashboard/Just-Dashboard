@@ -98,7 +98,8 @@ type fleetEntry struct {
 	InFlight *dbPowerChange `json:"inFlight,omitempty"`
 	// Consumers is how many deployment environments are bound to it.
 	Consumers int `json:"consumers"`
-	// LastBackup is when the newest dump of it was taken; nil for never.
+	// LastBackup is when it was last backed up from here, by hand or by a
+	// backup job (lastBackup); nil for never.
 	LastBackup *time.Time `json:"lastBackup,omitempty"`
 }
 
@@ -122,6 +123,9 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	bindings, _ := s.bindingCounts(ctx)
+	// One read of the backup runs for every row. Runs that cannot be read
+	// leave each row the answer of its dump directory alone.
+	jobDumps, _ := s.modules.backupStore.LastDatabaseDumps(ctx)
 
 	out := fleetResponse{Connections: make([]fleetEntry, len(conns)), Unreachable: []unreachableServer{},
 		NeedsCredentials: []credentialServer{}, CheckedAt: time.Now().UTC()}
@@ -137,7 +141,7 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			entry := fleetEntry{dbConnection: conn, Exposure: "remote", Consumers: bindings[conn.ID]}
-			s.fillFleetEntry(ctx, view, &entry)
+			s.fillFleetEntry(ctx, view, &entry, jobDumps)
 			out.Connections[i] = entry
 		}(i, conn)
 	}
@@ -166,8 +170,9 @@ type fleetReadingKept struct {
 }
 
 // fillFleetEntry reads where a connection's server runs and, unless that says
-// it is down, dials it for the readings the fleet tile draws.
-func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetEntry) {
+// it is down, dials it for the readings the fleet tile draws. jobDumps is
+// LastDatabaseDumps' reading, taken once for the whole fleet.
+func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetEntry, jobDumps map[int64]time.Time) {
 	e.Flavor, e.ObjectWord = dbx.DefaultFlavor(e.Driver), fleetObjectWord(e.Driver)
 	if e.Broken {
 		// Listed, flagged, and never dialled: there is no DSN to dial with.
@@ -197,9 +202,7 @@ func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetE
 	if place.Unit != nil {
 		e.Unit = place.Unit.Name
 	}
-	if newest := s.newestDump(conn.Name); newest != nil {
-		e.LastBackup = newest
-	}
+	e.LastBackup = s.lastBackup(conn, jobDumps)
 	if place.Down != "" {
 		e.State = place.Down
 		// What it said it was the last time it answered still names it.
@@ -525,6 +528,19 @@ func (s *Server) newestDump(connName string) *time.Time {
 	}
 	t := entries[0].TakenAt
 	return &t
+}
+
+// lastBackup is when a connection was last backed up from here: its newest
+// dump in the dump directory or the newest backup job run that holds its dump
+// (jobDumps), whichever is later. The directory alone called a database a
+// nightly job protects never backed up, and the job alone would call one
+// dumped by hand since the job last ran older than it is.
+func (s *Server) lastBackup(conn *dbConnection, jobDumps map[int64]time.Time) *time.Time {
+	newest := s.newestDump(conn.Name)
+	if ran, ok := jobDumps[conn.ID]; ok && (newest == nil || ran.After(*newest)) {
+		return &ran
+	}
+	return newest
 }
 
 func intOf(v any) int {
