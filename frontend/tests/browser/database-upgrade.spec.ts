@@ -189,11 +189,19 @@ const UPGRADE_LINES = [
   line(7, "stdout", "shop_main: 21.4 MB copied"),
 ]
 
-/** A job read once while it runs, then as ended with its result line. */
+/** A job read while it runs, as many times as `running` says, then as ended with its result line. */
 const jobThatEnds =
-  (id: string, kind: string, title: string, lines: unknown[], result: unknown, done = () => {}) =>
+  (
+    id: string,
+    kind: string,
+    title: string,
+    lines: unknown[],
+    result: unknown,
+    done = () => {},
+    running = 1,
+  ) =>
   (call: number) => {
-    if (call === 0) return { job: job(id, kind, "running", title), lines }
+    if (call < running) return { job: job(id, kind, "running", title), lines }
     done()
     return {
       job: job(id, kind, "succeeded", title),
@@ -205,7 +213,7 @@ const jobThatEnds =
 async function mockUpgrade(
   page: Page,
   answers: Record<string, Answer>,
-  options: DatabaseMock & { capabilities?: string[] } = {},
+  options: DatabaseMock = {},
 ) {
   const mock = await mockDatabases(page, options)
   const calls = new Map<string, number>()
@@ -250,9 +258,19 @@ const section = (page: Page, id: string) => page.locator(`section#${id}`)
 const report_ = (page: Page) => page.getByRole("list", { name: "What the checks found" })
 const progress = (page: Page) => page.locator("[data-slot=transfer-progress]")
 const dialog = (page: Page) => page.getByRole("dialog")
+/**
+ * Waits for what is arriving on a surface to have arrived. A running job's
+ * beam and the wire of a server being copied loop for as long as the work
+ * runs, and are the state being shown rather than a frame caught mid-way.
+ */
 const settled = (surface: Locator) =>
   surface.evaluate((el) =>
-    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    ),
   )
 const noSideways = (page: Page) =>
   page.evaluate(() =>
@@ -365,6 +383,7 @@ test("an upgrade is confirmed with what it does, followed to its end, and leaves
       () => {
         state = KEPT
       },
+      3,
     ),
   })
   await visit(page, PAGE)
@@ -685,7 +704,7 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
   const upgrade = section(page, "upgrade")
   await upgrade.getByRole("button", { name: "Check PostgreSQL 17" }).click()
   await expect(report_(page)).toBeVisible()
-  await settled(page.locator("main"))
+  await settled(page.locator("[data-slot=page]").first())
   await page.screenshot({ path: shot("version-report-1440"), fullPage: true })
 
   // The upgrade asked for.
@@ -709,14 +728,14 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
     "data-verdict",
     "blocker",
   )
-  await settled(page.locator("main"))
+  await settled(page.locator("[data-slot=page]").first())
   await page.screenshot({ path: shot("version-blocked-1440"), fullPage: true })
 
   // Upgraded, with the old server kept.
   state = KEPT
   await visit(page, PAGE)
   await expect(section(page, "kept")).toBeVisible()
-  await settled(page.locator("main"))
+  await settled(page.locator("[data-slot=page]").first())
   await page.screenshot({ path: shot("version-kept-1440"), fullPage: true })
 
   // Reverting, asked with a dump of the new server first.
@@ -733,6 +752,6 @@ test("the Version page, in each of its states @shots", async ({ page }) => {
   await visit(page, PAGE)
   await section(page, "upgrade").getByRole("button", { name: "Check PostgreSQL 17" }).click()
   await expect(report_(page)).toBeVisible()
-  await settled(page.locator("main"))
+  await settled(page.locator("[data-slot=page]").first())
   await page.screenshot({ path: shot("version-report-390"), fullPage: true })
 })
