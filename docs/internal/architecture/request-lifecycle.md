@@ -20,6 +20,11 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   `httpx.RequireCapability` so adding a role later cannot silently widen an endpoint.
   `httpx.RequireSession` additionally blocks API tokens from human-only routes (password change,
   minting tokens, account management).
+- **A scoped API key** (`api_tokens.scope`, minted with `scope: "metrics.read"` on `POST /tokens` or
+  from Databases → Metrics export) holds one capability and nothing else. `Authenticate` refuses it
+  on every group with `403 key_scope`; `AuthenticateScoped` admits it for
+  `GET /api/v1/metrics/databases` alone, which sits outside the `/databases` tree for that reason and
+  also refuses a browser session (`httpx.RequireToken`, `403 token_required`).
 - **`httpx.AuditMutations`** records every state-changing request. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login

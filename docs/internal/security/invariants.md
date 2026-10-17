@@ -56,6 +56,13 @@ A change that weakens any of these has to say so explicitly.
      known gap rather than the boundary
      ([observability-security](../backend/observability-security.md))).
 
+   An API key can be narrowed to one capability, and that fails closed too. A key with a `scope`
+   (today only `metrics.read`, made by `CreateScopedAPIToken`, always on the read-only role) is
+   refused by `Authenticate` on every group with `403 key_scope` before any capability is asked;
+   the one group that admits it, `AuthenticateScoped` in `mountDatabaseMetricsExport`, also
+   requires a key rather than a session (`httpx.RequireToken`), and `Principal.Can` answers only
+   the scoped capability, so a route added to that group later cannot widen the key.
+
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
    is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until
