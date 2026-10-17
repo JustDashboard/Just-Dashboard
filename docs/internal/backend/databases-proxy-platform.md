@@ -62,15 +62,15 @@ depend on what a request carries are stated once in
   one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
   `ormTargets`, `exportFormats`, `importFormats`; empty and never null) or a word where a feature comes
   in more than one form and `false` where the engine has none (`rowIdentity`, `returnsChangedRow`,
-  `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`). Two names that look alike
+  `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`, `memoryBuffer`). Two names that look alike
   are two features: `cancel` stops what another session is running (`/activity/cancel`, `/mongo/killop`),
   `queryCancel` stops a run the editor itself started (`/query/cancel`). `TestCapabilitiesPerEngine`
   writes out who has each flag by hand, and `TestLiveCapabilityFlagsAnswerOnRealServers` holds a flag
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 116
+  flags (102 a yes or a no, eight a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -238,7 +238,9 @@ is connected by naming the instance found, not by typing its address again.
   server is a container, `container` also carries what it may use — `memoryLimit` in bytes, `cpuLimit` in
   processors, each absent where there is none, and `restartPolicy` — under the names the Docker page's
   own route uses, read for a stopped container too (one inspect; the listing inspects only the running
-  ones). It answers 200 for a stopped, unreachable or broken connection; those are states, not errors.
+  ones) — Home's *Runs as* draws them, with *Change* to Settings → Resources for an administrator where
+  compose does not own the container. It answers 200 for a stopped, unreachable or broken connection;
+  those are states, not errors.
 - **Where a server runs is read off the machine each time** (`dbHostView.place`), never stored: the
   container that publishes or answers at the address, then the
   process listening on the port and its unit, then a stopped container whose configuration publishes that
@@ -292,6 +294,38 @@ is connected by naming the instance found, not by typing its address again.
   one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
   preferred) in place of loopback, for pasting on another machine.
+- **What its container may use.** `GET /databases/{id}/resources` (read surface) reads the limits off the
+  container behind the connection — found as the summary finds it, stopped ones included — as
+  `limits.memoryBytes` and `limits.cpus` (zero for none), with `usedBytes` (one stats read, while it runs),
+  `oomKilled` (the kernel stopped it last time for going past its limit), this machine as Docker sees it
+  (`host`, `dockerx.HostCapacity`) and, from a server that is not known to be down, the engine's own
+  buffer: `buffer: {setting, bytes}` from `dbx.SQLMemoryBuffer`, `RedisMemoryBuffer` or
+  `MongoMemoryBuffer` — `shared_buffers`, `innodb_buffer_pool_size`, `max_server_memory_usage`,
+  `maxmemory` (zero where it is not set) or the WiredTiger cache — named by the `memoryBuffer`
+  capability, a word and `false` for SQL Server, Oracle, SQLite and the forks whose memory is something
+  else's (CockroachDB, YugabyteDB, TiDB, FerretDB); `bufferError` where a server that runs did not
+  answer. `editable` is a container that is the engine's own (not one found only by its port with
+  another image) and that compose does not own, because compose would put its file's limits back on the
+  next recreate; anything else — compose, another machine, a systemd unit, nothing found — carries a
+  `refusal` sentence instead. `PUT /databases/{id}/resources` (`system.admin`) takes `memoryMb` and
+  `cpus`, either left out to keep it and zero to lift it, held to Docker's floor (6 MiB, 0.01 of a core)
+  and to the machine (`dbLimitsProblem`), and refuses a memory limit under what a running container uses
+  now, which the kernel would meet by killing the engine. A new or changed limit is `docker update`
+  (`dockerx.UpdateResources`): in place, nothing restarted, a stopped container keeping it for its next
+  start. Docker cannot take a limit away, so lifting one replaces the container through `dockerx.Recreate`
+  with the same configuration and no limit — the access route's park-and-restore path, on the same named
+  volume, the connection's pool closed and its reading dropped, `inFlight` held as a `restart` until it
+  answers — and is refused (`409 container_stopped`) for a container that is not running, since a
+  replacement is started. That is the destructive kind of the request, decided from what the container
+  holds, so the handler asks for `destructive` and spends `destrLim` by hand. Audited as
+  `database.resources.change` with the container, the limits before and after, `replaced`, what was
+  lifted and Docker's warnings. The limits live in the container's configuration and nowhere else: every
+  replacement this dashboard makes (a change of exposure, the Docker page's Recreate) reads it back
+  through `SpecOf`, so it keeps them, and a copy in the store would be a second answer the first change
+  on the Docker page made wrong. The page is Settings → Resources (`ops/settings-resources.tsx`): the two
+  limits as the Runtime page's `LimitField`, each with its peak in the last hour and what the machine has,
+  the buffer beside the memory limit — with what a limit under it does, said as a fact — and one save bar;
+  a draft that lifts a limit says it replaces the container and Save asks first, with the container named.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -1484,7 +1518,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 227 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1508,9 +1542,9 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  29 open, 12 by content, 20 preview only, 61 refused.
+  30 open, 12 by content, 20 preview only, 61 refused.
 
-**Every database** (19)
+**Every database** (20)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1529,12 +1563,13 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
 | `GET` | `/databases/orm/targets` | read | — | — | — |
 | `POST` | `/databases/provision` | `system.admin` | — | `database.server.provision` | — |
+| `GET` | `/databases/provision/capacity` | `system.admin` | — | — | — |
 | `GET` | `/databases/provision/options` | `system.admin` | — | — | — |
 | `POST` | `/databases/sync` | `system.admin` | — | `database.connection.sync` | — |
 | `POST` | `/databases/test` | `system.admin` | — | — | — |
 | `GET` | `/databases/topology` | read | — | — | — |
 
-**One connection** (13)
+**One connection** (15)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1548,6 +1583,8 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/overview` | read | — | — | — |
 | `GET` | `/databases/{id}/ping` | read | — | — | — |
 | `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
+| `GET` | `/databases/{id}/resources` | read | — | — | — |
+| `PUT` | `/databases/{id}/resources` | `system.admin` | by content: a lifted limit | `database.resources.change` | open |
 | `GET` | `/databases/{id}/schemas` | read | — | — | — |
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
@@ -1810,7 +1847,15 @@ Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explic
 draws its engines from the same `GET /databases/provision/options` the add flow reads, so the two offer
 one list of templates. A project's Databases settings reuses the same two reads for a linked connection:
 `/ping` behind its Test connection verb, and `?target=container` behind Copy application URL, which stays
-admin-only and audited there as everywhere else. Quick setup provisions with `exposure: local`, so those
+admin-only and audited there as everywhere else. The add flow can also limit what the new container may
+use: *Limit the memory and processors it may use* fills in the template's `defaultLimits` (1 GiB and a
+core; 512 MiB for a key–value server, 2 GiB and two cores for ClickHouse), kept to half this machine's
+memory and its processors as `GET /databases/provision/capacity` (`system.admin`) reads them, and sends
+`memoryMb` and `cpus`; a request that names neither starts with none, as before. `/provision` holds them to
+the same rules as a change on Settings → Resources, and to the template's `minMemoryMb`: MySQL's first start
+loads its time zone tables into a temporary server before it makes the account, and under 512 MiB the
+kernel stops it part way, leaving a data directory the next start does not initialise and a server with no
+account to sign in with. Quick setup provisions with `exposure: local`, so those
 ports are published to host loopback only, which is also what a request that names no exposure gets (see
 the inventory section above). The data volume is named `<container>-data`. With no name supplied,
 provisioning reserves the first available `jd-<engine>`, `jd-<engine>-2`, etc., checking both containers
