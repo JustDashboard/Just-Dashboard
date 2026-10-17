@@ -934,7 +934,12 @@ stays editable on a protected connection.
   never one execution: the list is on the read surface and a literal is somebody's e-mail address.
   PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
   and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
-  leaves the package. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  leaves the package. It also drops comments: a comment is whatever the application wrote (a request id,
+  a user), and Oracle stores the text with its line breaks turned into spaces, so a `--` comment cannot be
+  told from the code after it and takes the rest of the statement with it. An optimizer hint (`/*+ .. */`,
+  `--+`) is kept with its literals shaped, and SQL Server's nested block comments are read as it reads them.
+  `TestLiveAPIOracleStatementsCarryNoLiterals` (INSERT, INSERT ALL, MERGE, a PL/SQL block, comments, hints)
+  and its SQL Server and MySQL siblings read `/statements` as a viewer and look for what was run. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
