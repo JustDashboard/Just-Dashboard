@@ -5,7 +5,12 @@ import {
   DATABASE_NAME,
   PROVISION_PASSWORD,
 } from "@/components/database/connect/rules"
-import type { DbProvisionRequest, DbProvisionTemplate } from "@/components/database/fleet/types"
+import type {
+  DbHostCapacity,
+  DbProvisionRequest,
+  DbProvisionTemplate,
+} from "@/components/database/fleet/types"
+import { limitProblems } from "@/components/database/kit/limits"
 
 /**
  * Starting a new database, decided apart from its drawing: which shelf an
@@ -39,6 +44,15 @@ export type ProvisionDraft = {
   password: string
   /** Reachable from anywhere: the port on every interface and the firewall opened. */
   shared: boolean
+  /**
+   * Whether its container is limited, and to what: MiB and cores, zero for
+   * no limit on one of them. Off is Docker's default, no limit at all.
+   */
+  limited: boolean
+  memoryMb: number
+  cpus: number
+  /** Log the plans of slow statements, where the template offers it. */
+  autoExplain: boolean
 }
 
 export const EMPTY_PROVISION: ProvisionDraft = {
@@ -48,14 +62,30 @@ export const EMPTY_PROVISION: ProvisionDraft = {
   user: "",
   password: "",
   shared: false,
+  limited: false,
+  memoryMb: 0,
+  cpus: 0,
+  autoExplain: false,
 }
 
-/** The rules the server will hold the answers to, as one message per field that breaks one. */
+type ProvisionField = "name" | "database" | "user" | "password" | "memory" | "cpus"
+
+/**
+ * The rules the server will hold the answers to, as one message per field
+ * that breaks one. `host` is this machine, which a limit is held to once it
+ * has been read.
+ */
 export function provisionProblems(
   template: DbProvisionTemplate,
   draft: ProvisionDraft,
-): Partial<Record<"name" | "database" | "user" | "password", string>> {
-  const problems: Partial<Record<"name" | "database" | "user" | "password", string>> = {}
+  host?: DbHostCapacity,
+): Partial<Record<ProvisionField, string>> {
+  const problems: Partial<Record<ProvisionField, string>> = draft.limited
+    ? limitProblems(draft, host)
+    : {}
+  if (draft.limited && draft.memoryMb > 0 && draft.memoryMb < template.minMemoryMb) {
+    problems.memory = `${template.label} needs at least ${template.minMemoryMb} MiB the first time it starts.`
+  }
   const name = draft.name.trim()
   if (name && !CONTAINER_NAME.test(name)) {
     problems.name =
@@ -95,6 +125,9 @@ export function provisionRequest(
     user: template.defaultUser ? draft.user.trim() || undefined : undefined,
     password: draft.password || undefined,
     exposure: draft.shared ? "public" : "local",
+    memoryMb: draft.limited && draft.memoryMb > 0 ? draft.memoryMb : undefined,
+    cpus: draft.limited && draft.cpus > 0 ? draft.cpus : undefined,
+    autoExplain: template.autoExplain && draft.autoExplain ? true : undefined,
   }
 }
 

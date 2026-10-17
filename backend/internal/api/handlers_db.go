@@ -72,6 +72,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/host/grant", s.handle(s.handleDBHostGrant))
 			r.Method(http.MethodPost, "/sync", s.handle(s.handleDBSync))
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
+			r.Method(http.MethodGet, "/provision/capacity", s.handle(s.handleDBProvisionCapacity))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
 			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
@@ -80,6 +81,13 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// different port binding, which is the Docker page's Recreate
 			// under another name and sits in the same group.
 			r.Method(http.MethodGet, "/{id}/access", s.handle(s.handleDBAccess))
+			// What its container may use. A new or changed limit is applied in
+			// place; lifting one replaces the container, so the handler asks
+			// for destructive and spends its budget by hand when the body does.
+			r.Method(http.MethodPut, "/{id}/resources", s.handle(s.handleDBResourcesUpdate))
+			// What a change would do — the gateway's rules, the recreate,
+			// the firewall's plan — without doing any of it.
+			r.Method(http.MethodPost, "/{id}/access/preview", s.handle(s.handleDBAccessPreview))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
 				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))
@@ -91,7 +99,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/fleet", s.handle(s.handleDBFleet))
 		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
 		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
+		r.Method(http.MethodGet, "/{id}/resources", s.handle(s.handleDBResources))
 		s.mountDatabaseAdminRoutes(r)
+		s.mountDatabasePoolerRoutes(r)
 		r.Method(http.MethodGet, "/{id}/ping", s.handle(s.handleDBPing))
 		r.Method(http.MethodGet, "/{id}/stats", s.handle(s.handleDBStats))
 		r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleDBStatsHistory))
@@ -136,6 +146,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		s.mountDatabaseOpsRoutes(r)
 		s.mountDatabaseTransferRoutes(r)
 		s.mountDatabasePITRRoutes(r)
+		s.mountDatabaseAlertRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/query", s.handle(s.handleDBQuery))

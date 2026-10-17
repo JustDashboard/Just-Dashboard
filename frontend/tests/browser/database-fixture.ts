@@ -184,10 +184,14 @@ export type DatabaseMock = {
   logSources?: unknown
   /** What `GET /databases/{id}/querylog` answers. */
   queryLog?: unknown
+  /** What `GET /databases/alerts` answers; no rule at all when absent. */
+  alerts?: unknown
   /** The lines `GET /logs/search` answers with, for every question. */
   logLines?: { text: string; level?: string; timestamp?: string; [key: string]: unknown }[]
   /** What `GET /databases/{id}/pitr` answers, by id. */
   pitr?: Record<number, unknown>
+  /** What `GET /databases/{id}/resources` answers, by id; `resourcesOf` unless given. */
+  resources?: Record<number, unknown>
 }
 
 /**
@@ -209,6 +213,45 @@ export function pitrOff(conn: MockConnection, over: Record<string, unknown> = {}
       retentionDays: 7,
       directory: "/var/backups/just-dashboard/wal",
     },
+    ...over,
+  }
+}
+
+const MIB = 1024 * 1024
+
+/** The buffer each engine keeps for itself, as a fresh server of it has it. */
+const BUFFERS: Record<string, { setting: string; bytes: number }> = {
+  postgres: { setting: "shared_buffers", bytes: 128 * MIB },
+  mysql: { setting: "innodb_buffer_pool_size", bytes: 128 * MIB },
+  redis: { setting: "maxmemory", bytes: 0 },
+  mongodb: { setting: "wiredTigerCacheSizeGB", bytes: 256 * MIB },
+}
+
+/**
+ * `GET /databases/{id}/resources` for one connection: a container the
+ * dashboard may change, limited to 1 GiB and one and a half cores, on a
+ * machine of 16 GiB and eight; a file has no server to limit.
+ */
+export function resourcesOf(conn: MockConnection, over: Record<string, unknown> = {}) {
+  const host = { memoryBytes: 16 * 1024 * MIB, cpus: 8 }
+  if (conn.driver === "sqlite") {
+    return {
+      editable: false,
+      refusal: "A SQLite database is a file; there is no server to limit.",
+      running: false,
+      limits: { memoryBytes: 0, cpus: 0 },
+      host,
+      ...over,
+    }
+  }
+  return {
+    container: `${conn.name}-db`,
+    editable: true,
+    running: true,
+    limits: { memoryBytes: 1024 * MIB, cpus: 1.5 },
+    usedBytes: 412 * MIB,
+    host,
+    buffer: BUFFERS[conn.driver],
     ...over,
   }
 }
@@ -282,6 +325,12 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
     }
     if (path === "/databases/") return json(route, list())
     if (path === "/databases/drivers") return json(route, DRIVERS)
+    if (path === "/databases/alerts") {
+      return json(
+        route,
+        options.alerts ?? { rules: [], subjects: [], events: [], everySeconds: 30 },
+      )
+    }
     if (path === "/databases/fleet") {
       return json(route, {
         connections: list().map((conn) => fleetEntry(conn, options.fleet?.[conn.id])),
@@ -304,6 +353,9 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       return json(route, summaryOf(conn, options.summaries?.[conn.id]))
     }
     if (rest === "/ping") return json(route, { ok: true })
+    if (rest === "/resources" && route.request().method() === "GET") {
+      return json(route, options.resources?.[conn.id] ?? resourcesOf(conn))
+    }
     if (rest === "/stats/history")
       return json(route, { samples: [], everySeconds: 30, retentionHours: 168 })
     if (rest === "/access") {
@@ -314,7 +366,10 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
         exposure: "local",
         port: Number(conn.port),
         publicAddresses: ["203.0.113.7"],
-        firewall: { active: true, open: false, editable: true },
+        firewall: { active: true, open: false, allowed: [], editable: true },
+        allow: [],
+        gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+        addresses: [],
       })
     }
     if (rest === "/url") {
@@ -370,7 +425,9 @@ export const DATABASE_SURFACES = [
   "/databases/1/logs",
   "/databases/1/access",
   "/databases/1/backups",
+  "/databases/1/alerts",
   "/databases/1/settings",
+  "/databases/1/settings/resources",
   "/databases/4",
   "/databases/4/data",
   "/databases/4/query",

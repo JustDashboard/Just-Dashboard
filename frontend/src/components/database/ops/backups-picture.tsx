@@ -16,7 +16,7 @@ import { EngineGlyph } from "@/components/database/kit"
 import type { DbBackups } from "@/components/database/ops/backups-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
-/** The schedule as one line: its name, then when it runs next or that it is paused. */
+/** The schedule as one line: its name, when it runs next or that it is paused, and whether it encrypts. */
 export function scheduleWords(schedule: BackupJob | undefined): string {
   if (!schedule) return "No scheduled backup job"
   const when = schedule.enabled
@@ -24,7 +24,7 @@ export function scheduleWords(schedule: BackupJob | undefined): string {
       ? `Next ${timestamp(schedule.nextRun)}`
       : "Scheduled"
     : "Paused"
-  return `${schedule.name} · ${when}`
+  return `${schedule.name} · ${when}${schedule.encrypt ? " · encrypted" : ""}`
 }
 
 /**

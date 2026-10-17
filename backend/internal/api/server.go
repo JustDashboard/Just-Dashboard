@@ -258,6 +258,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
+	s.modules.poolers.Start(ctx)
 	return nil
 }
 
@@ -288,6 +289,7 @@ func (s *Server) Shutdown() {
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
+	s.modules.poolers.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.

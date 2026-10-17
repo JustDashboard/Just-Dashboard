@@ -179,7 +179,7 @@ func (r *Runner) VerifyRestore(ctx context.Context, runID int64) (record *Restor
 			return nil, errors.New("an interrupted restore check needs cleanup before another can start")
 		}
 	}
-	run, path, release, err := r.localArtifact(ctx, runID)
+	run, file, release, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,9 +245,12 @@ func (r *Runner) VerifyRestore(ctx context.Context, runID int64) (record *Restor
 		return record, err
 	}
 	// Copy and re-hash into private staging. A replaced local artifact cannot
-	// change the bytes tested after its initial integrity check.
-	archive := filepath.Join(workspace, "archive.tar.gz")
-	if err := copyRecoveryArtifact(ctx, path, archive, record.ArtifactDigest, job.Recovery.MaxBytes); err != nil {
+	// change the bytes tested after its initial integrity check. An encrypted
+	// archive is copied as it is stored and decrypted only while it is
+	// extracted, so the workspace holds no second plaintext copy of it.
+	archive := file
+	archive.Path = filepath.Join(workspace, "archive")
+	if err := copyRecoveryArtifact(ctx, file.Path, archive.Path, record.ArtifactDigest, job.Recovery.MaxBytes); err != nil {
 		record.Detail = "the backup artifact changed or could not be read"
 		return record, err
 	}

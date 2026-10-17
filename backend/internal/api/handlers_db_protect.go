@@ -64,11 +64,14 @@ type protectedRoute struct {
 
 var protectedRoutesAllowed = []protectedRoute{
 	// The connection's own record. Editing it is how protection is taken off
-	// again; forgetting it and changing where its server is reachable from
-	// leave what is in the database alone, as starting and stopping it do.
+	// again; forgetting it, changing where its server is reachable from and
+	// what its container may use leave what is in the database alone, as
+	// starting and stopping it do.
 	{http.MethodPut, "", nil},
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
+	{http.MethodPut, "/resources", nil},
+	{http.MethodPost, "/access/preview", nil},
 	{http.MethodPost, "/power", nil},
 	// A dump reads the database and writes a file on this machine. One made
 	// elsewhere and added to the list, and one deleted from it, are files on

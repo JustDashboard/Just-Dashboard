@@ -57,20 +57,20 @@ depend on what a request carries are stated once in
   answer from the interfaces their dialects implement (`OpsCapabilities`, `ExplainForms`) and Redis and
   MongoDB are named beside them; the ones that belong to one surface are registered beside its code from
   an `init` (`RegisterCapabilities`, in `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`,
-  `redis_`, `mongo_`, `transfer_` and `orm_capabilities.go`). A registration replaces a row of the same
+  `redis_`, `mongo_`, `transfer_`, `orm_` and `alert_capabilities.go`). A registration replaces a row of the same
   name for every engine, so a flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses
   one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
-  `ormTargets`, `exportFormats`, `importFormats`; empty and never null) or a word where a feature comes
+  `ormTargets`, `exportFormats`, `importFormats`, `alertKinds`; empty and never null) or a word where a feature comes
   in more than one form and `false` where the engine has none (`rowIdentity`, `returnsChangedRow`,
-  `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`). Two names that look alike
+  `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`, `memoryBuffer`). Two names that look alike
   are two features: `cancel` stops what another session is running (`/activity/cancel`, `/mongo/killop`),
   `queryCancel` stops a run the editor itself started (`/query/cancel`). `TestCapabilitiesPerEngine`
   writes out who has each flag by hand, and `TestLiveCapabilityFlagsAnswerOnRealServers` holds a flag
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 118
-  flags (105 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
+  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -205,6 +205,23 @@ is connected by naming the instance found, not by typing its address again.
   refused rather than escaped three ways. A password the request did not supply is generated and never
   returned. Every template's every release has to be one `dbx.Detect` recognises and reads the same
   account back from (`TestProvisionTemplatesAreCoherent`), or the adopt that follows cannot connect it.
+  **A PostgreSQL server counts its statements from its first start.** Every PostgreSQL template
+  (pgvector, PostGIS and TimescaleDB among them; `initdb` on the template) is created with a constant
+  script in the image's `/docker-entrypoint-initdb.d` (`postgresFirstBoot`), written into the
+  container between its creation and its start through `dockerx.ContainerSpec.Files` — a field with
+  no JSON name, so no request to the Docker page can carry one — and run once by the image as it
+  initialises the data directory. It adds `pg_stat_statements` to `shared_preload_libraries` through
+  `ALTER SYSTEM`, after whatever the image already preloads (TimescaleDB's image names its own
+  library in `postgresql.conf`, and the list is built by the server with `\gexec`, so it is kept),
+  and creates the extension in the new database. The list goes into `postgresql.auto.conf` and never
+  onto the container's command line: a `-c` there outranks every configuration file, and a library
+  added later from the Parameters page would be stored and silently not loaded. `autoExplain: true`
+  adds `auto_explain` with a one-second `log_min_duration`, `log_analyze` and `log_buffers` on and
+  `log_timing` off — each step's actual rows, without the per-node timing that costs every statement —
+  and every one of them is an ordinary parameter afterwards. The options say which templates do
+  either (`statements`, `autoExplain`); any other engine refuses `autoExplain`. Both are in the
+  `database.server.provision` audit detail. `TestLiveTemplatesCountStatementsFromTheFirstStart`
+  starts each PostgreSQL template under `JD_TEST_STATEMENTS_CONTAINER`.
   The Redis-protocol engines that do not read a password from their environment are started through a
   constant bootstrap (`passwordProvisionBootstrap`) that writes a private configuration and removes it
   first: the kernel refuses to reopen a file in `/tmp` that was handed to the server's account
@@ -238,7 +255,9 @@ is connected by naming the instance found, not by typing its address again.
   server is a container, `container` also carries what it may use — `memoryLimit` in bytes, `cpuLimit` in
   processors, each absent where there is none, and `restartPolicy` — under the names the Docker page's
   own route uses, read for a stopped container too (one inspect; the listing inspects only the running
-  ones). It answers 200 for a stopped, unreachable or broken connection; those are states, not errors.
+  ones) — Home's *Runs as* draws them, with *Change* to Settings → Resources for an administrator where
+  compose does not own the container. It answers 200 for a stopped, unreachable or broken connection;
+  those are states, not errors.
 - **Where a server runs is read off the machine each time** (`dbHostView.place`), never stored: the
   container that publishes or answers at the address, then the
   process listening on the port and its unit, then a stopped container whose configuration publishes that
@@ -276,22 +295,152 @@ is connected by naming the instance found, not by typing its address again.
   ends as `unreachable` with nothing in flight. An action that was refused or failed leaves none.
   Reading is what ends a change, so nothing has to wake up to do it, and the fleet does not keep a
   failed dial of a connection whose change is still held.
-- **Where a database is reachable from is a reading and a switch, not a trip through three pages.** `GET
+- **Where a database is reachable from is a reading and four answers, not a trip through three pages.** `GET
   /databases/{id}/access` (admin) reports the container behind a connection, whether the server is one
   the sync would connect on its own (`detected`), whether this route can change the binding (`managed`: a
   container that is not compose's and publishes the engine's port), its exposure read off the port
-  binding (`local`, `public`, `private`, `remote`), the machine's public addresses and the firewall's
-  part of the answer (present, on, an allow rule for the port from anywhere, editable). `PUT
-  /databases/{id}/access` with `exposure: local|public` recreates the container through
-  `dockerx.Recreate` with the one host address changed — the park-and-restore path the Docker page uses,
-  on the same named volume — then adds a `tcp` allow rule for the port where the firewall is on and
-  writable, or removes only the rule this dashboard wrote (matched by its comment). It sits in the
-  destructive group beside the Docker page's Recreate, is refused for a compose-owned container, and
-  audits as `database.access.change` with the binding before and after and what the firewall did.
-  Publishing a database port to every interface is the operator's explicit, audited decision, the same
-  one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
+  binding (`local`, `private` with the bound `address`, `public`, `remote`, and `allowlist` for every
+  interface with the gateway keeping the port to a list), the machine's public addresses, the host
+  addresses the port can be published on alone (`addresses`: tailnet, VPN, private and uplink ones,
+  graded by `netsec.HostNetwork.Place`, tailnet first; loopback, public, bridge and link-local ones are
+  not offered), the list (`allow`), the gateway's part (`gateway`: whether nftables is there to keep a
+  list, the networks every drop in the table lets through first — the dashboard's allowlist ranges and the
+  addresses kept on the Protection page — whether the kernel holds the port's rules and how many attempts
+  they refused), the firewall's part (present, on, an allow rule for the port from anywhere, the sources
+  other allow rules name, editable) and the request's own address (`client`, the SSH session's behind a
+  tunnel), which the list's form offers.
+  `PUT /databases/{id}/access` takes `exposure: local|private|allowlist|public`, with `address` (one of
+  `addresses`, checked again against the host) or `allow` (up to 16 IPv4/IPv6 addresses or networks,
+  normalised by `netx.NormalizePortSources`: masked, merged with any they lie inside, IPv4 first; every
+  address, a range wider than /8 or /16, loopback, multicast and unspecified are refused). The change is
+  planned first (`planDBAccess`, `accessSteps` in `db_reach.go`) and runs in the order that never leaves
+  the port open to more than both ends allow: the gateway's list is kept before the binding can widen; the
+  container is recreated through `dockerx.Recreate` only when its configured host address does not
+  already give the reach (any every-interface binding serves Anywhere and an IPv4 list; a list naming
+  IPv6 needs both families, which Docker spells as no address; a binding Docker was given once per
+  family is folded into one); the host firewall is then reconciled; the list is released last. A list
+  that cannot be kept stops the change before anything else; a recreate that fails puts the list back as
+  it was (`gateway: restored`); a firewall or a release that cannot follow is reported beside the change
+  (`firewallError`, `gatewayError`). **The gateway is what keeps the port to the list.** Docker's NAT
+  rules forward a published port before the host firewall's input chain, so a ufw or firewalld rule from
+  one address restricts nothing for a container; `netx.SetPortAllowlist` puts the list in the gateway
+  table's prerouting chain, where the connection is still addressed to this host and not yet translated
+  ([kept ports](network.md#gateway-and-protection)). The host firewall is given the rules the reach
+  wants (`dbFirewallWant`): one from anywhere for Anywhere, one per listed network for a list, none for
+  this server or one address. They are worked out against its rules (`dbFirewallPlan`: an add for each
+  wanted source no rule admits yet, then a removal for each rule of this route's nothing wants; a rule
+  is this route's by its comment `just-dashboard database <port>`, or on firewalld, which keeps none, by
+  being exactly the rule written for a listed network; ufw's IPv6 copy goes with the rule beside it) and
+  applied as netsec firewall plans of at most `netsec.MaxPlanOperations`, adds before removals, inside
+  `protectFirewall` with the request's access context, each step filed in the firewall history.
+  `POST /databases/{id}/access/preview` (admin, not audited) plans the same request and changes nothing:
+  the gateway's exact rules, whether the container is recreated, the firewall plan's steps as netsec
+  reviews them, and what the firewall would refuse. The change sits in the destructive group beside the
+  Docker page's Recreate, is refused for a compose-owned container, and audits as `database.access.change`
+  with the exposure and binding before and after, the list before and after, the address and its
+  interface, what the gateway and the firewall did and each firewall step. Publishing a database port is
+  the operator's explicit, audited decision, the same one the Docker page already allows; invariant 7 is
+  about what the dashboard itself binds. The summary and the fleet read the same exposure (`listed` on
+  the host view upgrades a public binding the gateway keeps to `allowlist`, from the spec alone). Removing
+  the container from the danger zone releases its list, which would otherwise go on refusing whatever
+  published that port next; removing it from the Docker page does not, and the next database to keep
+  that port to a list takes the leftover away first (`releaseOrphanedDBPort`: a `database:` owner whose
+  container Docker no longer has). `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
-  preferred) in place of loopback, for pasting on another machine.
+  preferred) in place of loopback, for pasting on another machine — or the bound address, for a port
+  published on one of the host's own.
+- **A connection pooler is the database's, and goes where it goes.** `PUT /databases/{id}/pooler`
+  runs PgBouncer (`edoburu/pgbouncer`, pinned by version and digest in `dbx.PoolerImage`, run with every capability dropped and a 256 MiB limit) in a container
+  `<database container>-pgbouncer`, on a private bridge `jd-pool-<id>` it shares with the database, which it
+  reaches by the container's name (`api/database_pooler.go`, `api/handlers_db_pooler.go`, `dbx/pooler.go`).
+  It is offered where the capability table says `pooler`: PostgreSQL and TimescaleDB, not CockroachDB or
+  YugabyteDB, for a container that is running, not compose's and on a bridge network. A request says
+  `poolMode` (`transaction` or `session`), `poolSize` (per database and account), `maxClientConn` and
+  `authMode`, and is the same call to turn it on and to change it: `ensurePooler` makes the container,
+  network and files match the record and is safe to run again.
+  - *Two files, no secret in the environment.* `pgbouncer.ini` and `userlist.txt` are rendered by `dbx` from
+    the settings and the connection's credentials, copied into the container before it starts, and
+    reread by `SIGHUP` (`dockerx.Signal`) so a changed setting or password does not drop a client. The
+    userlist is mode 0600 and owned by the PgBouncer account (uid 70); the configuration holds no password. The
+    image's own entrypoint, which writes its configuration from environment variables, is bypassed for that
+    reason. Only a change of `authMode` restarts it: PgBouncer keeps the accounts it loaded from the userlist
+    through a reload and then asks them the wrong way. `userlist` authenticates the connection's own account
+    from its password, written as it is because PgBouncer must log in to the database as it. `auth_query`
+    adds, in the connection's database and in one transaction, an account `jd_pgbouncer` that can only
+    call one `SECURITY DEFINER` function `jd_pgbouncer.get_auth` (search path `pg_catalog`, revoked from
+    `PUBLIC`), owned by the connection's superuser. The account is created from a SCRAM verifier computed in
+    Go, so its password is in neither the server's log nor its statement statistics. The function reads
+    `pg_authid`, answers only for accounts that may log in, returns no hash for one whose password has
+    expired, and answers for superusers too: signing in through the pooler takes the same password as signing
+    in directly. It is made when the mode is entered and never altered after: a role or schema of those
+    names that is already there is refused (`409 pooler_auth_taken`), and so is a connection that does not
+    sign in as a superuser. Whatever fails after they are made removes them, and so does leaving the mode,
+    turning the pooler off, and forgetting the connection (best effort, reported in the audit entry, and not
+    for a protected connection). Dropping the connection's database takes the function with it and leaves
+    the role, which is the server's: that is removed from the admin database, where PostgreSQL refuses it
+    while anything elsewhere still depends on it. Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
+    the dashboard reads the console and which can only `SHOW`.
+  - *Kept in step.* `db_poolers` keeps a digest of the files last written (`config_sha`). `poolerKeeper`
+    compares it with the files the connection's current credentials make every twenty seconds and writes
+    them again when they differ, which covers a password changed through the adopt that re-seals it, an
+    edit of the connection and an account reset alike; `GET …/pooler` reports `inSync`.
+  - *Where it is published.* On loopback, always, when it is made or made again and whatever the
+    database's exposure is. Only `PUT …/access` moves it: whenever that route is called, the pooler is
+    brought to the address it names (every interface or loopback), whether or not the database itself had
+    to move, the firewall rule for its port is opened or closed by the same comment-marked rule, and both
+    are recorded in `database.access.change` and returned as `pooler`. That is the one road by which it
+    leaves loopback, so it fails closed: a move to loopback that cannot be made removes the container and
+    closes the rule, and the reply says so (`removed`); one to anywhere that cannot be made leaves the
+    pooler where it was. `PUT …/pooler` keeps whatever address the container has and never widens it.
+    One request at a time changes a connection's pooler (`lockPooler`), the keeper included.
+    A database container has one pooler: a second connection to it, or a container or network of the name that
+    is not this connection's, is refused (`409`) before the database or Docker is written to. Its name is `db-<id>-pool.jd.internal`, joined
+    to a linked environment's network by the same binding pass that joins the database
+    (`attachPooler` in `deployment_database_network.go`), and `${{database.<id>.pooled}}` — with the same
+    shape suffixes as the plain reference — resolves to that name and port 6432 (or to the loopback port
+    for a host-network workload).
+  - *Lifecycle.* `POST /power` start and stop carry the pooler with the database (`pooler` in the reply and
+    the audit entry); a restart leaves it, since PgBouncer reconnects by itself. Forgetting the connection,
+    dropping its container and `DELETE …/pooler` remove the container, the network (only if it carries the
+    connection's mark) and the firewall rule, and keep the database.
+    On a protected connection every change to the pooler is refused: one mode writes to the database.
+  - `GET …/pooler/stats` answers `SHOW VERSION`, `SHOW POOLS` and `SHOW STATS` from the console on the
+    published port (`dbx.ReadPooler`); the `pgbouncer` pseudo-database is left out. `GET /{id}/url?pooled=1`
+    is the connection string through the pooler for the same `target`s, audited as a reveal like the direct
+    one. `TestLivePooler` (`JD_POOLER_LIVE=1`) runs the whole of it against a PostgreSQL and a PgBouncer
+    container of its own.
+- **What its container may use.** `GET /databases/{id}/resources` (read surface) reads the limits off the
+  container behind the connection — found as the summary finds it, stopped ones included — as
+  `limits.memoryBytes` and `limits.cpus` (zero for none), with `usedBytes` (one stats read, while it runs),
+  `oomKilled` (the kernel stopped it last time for going past its limit), this machine as Docker sees it
+  (`host`, `dockerx.HostCapacity`) and, from a server that is not known to be down, the engine's own
+  buffer: `buffer: {setting, bytes}` from `dbx.SQLMemoryBuffer`, `RedisMemoryBuffer` or
+  `MongoMemoryBuffer` — `shared_buffers`, `innodb_buffer_pool_size`, `max_server_memory_usage`,
+  `maxmemory` (zero where it is not set) or the WiredTiger cache — named by the `memoryBuffer`
+  capability, a word and `false` for SQL Server, Oracle, SQLite and the forks whose memory is something
+  else's (CockroachDB, YugabyteDB, TiDB, FerretDB); `bufferError` where a server that runs did not
+  answer. `editable` is a container that is the engine's own (not one found only by its port with
+  another image) and that compose does not own, because compose would put its file's limits back on the
+  next recreate; anything else — compose, another machine, a systemd unit, nothing found — carries a
+  `refusal` sentence instead. `PUT /databases/{id}/resources` (`system.admin`) takes `memoryMb` and
+  `cpus`, either left out to keep it and zero to lift it, held to Docker's floor (6 MiB, 0.01 of a core)
+  and to the machine (`dbLimitsProblem`), and refuses a memory limit under what a running container uses
+  now, which the kernel would meet by killing the engine. A new or changed limit is `docker update`
+  (`dockerx.UpdateResources`): in place, nothing restarted, a stopped container keeping it for its next
+  start. Docker cannot take a limit away, so lifting one replaces the container through `dockerx.Recreate`
+  with the same configuration and no limit — the access route's park-and-restore path, on the same named
+  volume, the connection's pool closed and its reading dropped, `inFlight` held as a `restart` until it
+  answers — and is refused (`409 container_stopped`) for a container that is not running, since a
+  replacement is started. That is the destructive kind of the request, decided from what the container
+  holds, so the handler asks for `destructive` and spends `destrLim` by hand. Audited as
+  `database.resources.change` with the container, the limits before and after, `replaced`, what was
+  lifted and Docker's warnings. The limits live in the container's configuration and nowhere else: every
+  replacement this dashboard makes (a change of exposure, the Docker page's Recreate) reads it back
+  through `SpecOf`, so it keeps them, and a copy in the store would be a second answer the first change
+  on the Docker page made wrong. The page is Settings → Resources (`ops/settings-resources.tsx`): the two
+  limits as the Runtime page's `LimitField`, each with its peak in the last hour and what the machine has,
+  the buffer beside the memory limit — with what a limit under it does, said as a fact — and one save bar;
+  a draft that lifts a limit says it replaces the container and Save asks first, with the container named.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -311,7 +460,8 @@ is connected by naming the instance found, not by typing its address again.
   every session that connected under `dbx.ApplicationName`, on other engines the asking pool), where it
   runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
   summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
-  bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
+  bound to it, and when it was last backed up (`lastBackup`, below under *The dumps on disk*). Each
+  entry also carries the summary's own `power`
   (which of start, stop and restart the power route would take now, or the reason for none),
   `managed` (whether the access route can change the port's reach) and `inFlight`, read off the
   placement the entry already needed — no second look at the machine and no dial — so a card
@@ -450,7 +600,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
     extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
     profiler, a statistics reset.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
-  calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
+  calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
+  the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
+  server. Restoring a backup
   run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
   answer: `handleBackupRestoreDatabase` refuses a protected connection with the same `409`, and the
   adapter behind it (`backupDatabaseDumper.RestoreDatabase`) refuses again whoever calls it.
@@ -504,6 +656,46 @@ line comment, a NUL, `--x` on MySQL, Oracle's `q'[…]'`, a `$` or a typographic
 refusal classifies as destructive. A statement is sent from its first token to its last, so the
 comments around it never reach the engine.
 
+Where a statement ends is each engine's own reading too, made the way its client reads a script
+(`dbx/statement_split.go`), because the body of a stored program holds semicolons that end nothing.
+Splitting at every semicolon used to cut a MySQL procedure, a SQLite trigger, a PL/SQL block or a
+T-SQL batch into pieces no engine accepts.
+- *PostgreSQL*, as psql: a semicolon inside parentheses, or inside the `BEGIN … END` of a `CREATE
+  FUNCTION` or `PROCEDURE` written in SQL (`BEGIN ATOMIC`), ends nothing; a dollar-quoted body is one
+  token already.
+- *MySQL and MariaDB*, as the mysql client: `DELIMITER`, where a statement would begin, names what
+  ends one from the next line on (`END$$` ends at its `$$`), and while that is not `;` a semicolon
+  ends nothing. With the plain `;` the blocks of a stored program's body are followed — `BEGIN … END`,
+  `IF … END IF`, `CASE`, `LOOP`, `WHILE`, `REPEAT`, a handler's `BEGIN` — so a procedure written the
+  way `SHOW CREATE PROCEDURE` prints it, with no `DELIMITER`, is one statement, and so is MariaDB's
+  `BEGIN NOT ATOMIC`. `BEGIN` on its own is still a transaction, `IF(…)` a function and `IF [NOT]
+  EXISTS` DDL's.
+- *SQLite*: `CREATE TRIGGER … BEGIN … END`.
+- *SQL Server*, as sqlcmd: `GO` alone on a line ends a batch and `GO n` runs it `n` times, so its
+  statements are in the script as many times as they run, inside the 500-statement bound. A `BEGIN …
+  END` block (not `BEGIN TRAN`), `TRY` and `CATCH`, and `IF … ; ELSE …` are one statement each, and the
+  body of a `CREATE`/`ALTER PROCEDURE`, `FUNCTION` or `TRIGGER` runs to the end of its batch, or to the
+  `;` after its outermost `BEGIN … END`.
+- *Oracle*, as SQL*Plus: a PL/SQL unit — a `DECLARE` or `BEGIN` block, `<<label>>`, a query that
+  declares functions of its own (`WITH FUNCTION`), a `CREATE PROCEDURE`, `FUNCTION`, `PACKAGE [BODY]`,
+  `TRIGGER` or `TYPE` — runs to a line holding only `/`, or to the end of the text, and is sent with
+  the semicolon after its `END`, which PL/SQL needs. A `/` line ends a plain statement too, and a `/`
+  after a statement that already ended is not a second run of it.
+
+A separator that cannot be read is refused like any other text: `DELIMITER` naming nothing, or a
+delimiter that is not punctuation (a quote, a backslash, a letter, a comment's opener), a `GO` count
+below one or past the bound. The editor reads a script the same way, rule for rule (`readScript` in
+`query/sql-text.ts`), to pick the statement under the cursor, mark it and send it, and both readings
+are held to one file of scripts (`dbx/testdata/statement-splits.json`, read by
+`TestScriptsSplitWhereTheirEngineReadsThem` and by `sql-text.test.js`): the statement Run sends from
+the cursor is one the server reads as one. Run everything sends the client's separators with the
+statements — the `DELIMITER` lines, the count of a last `GO` — and a statement sent on its own from a
+batch `GO` repeats runs once. The strip beside Run names the lines the statement under the cursor runs
+over, and says so when its separator did not end it: a PL/SQL unit with no `/` line after it runs to
+the end of the text, and a SQL Server routine that went on past its `BEGIN … END` takes in what
+follows, up to the next `GO`. Format lays out the plain statements of such a script and leaves its
+separators and its bodies as written, line breaks included.
+
 Below "high" a statement must be one whose leading verb is fully known: a read, an `INSERT`, or a
 `CREATE` of a table, index, view, schema, sequence or type — what the row and schema forms offer at
 the same capability. Merely containing `INTO`, `CREATE` or `INSERT` buys nothing: `VACUUM INTO`,
@@ -520,11 +712,37 @@ Classification is per statement and keeps the strongest verdict. The shape (lead
 `RETURNING`) comes from the tokens; the *verbs* are looked for in the statement's raw text, quoted
 text and comments included, so no disagreement about where a quote ends can put one out of sight —
 it over-reports instead (`SELECT 'delete'` is destructive), which is the direction it may be wrong in.
-A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
+A dollar-quoted body is at least `high`, and so is any statement that holds statements of its own —
+a stored program's definition, a block, whatever was cut as one piece across a semicolon — whatever
+word leads it: `WITH FUNCTION` leads with a query and can write through an autonomous transaction, and
+the one place this package and the engine might disagree about where a statement ends must not be a
+way past the verdict of any piece of it. A protected connection refuses all of them, and neither kind
+is taken for a plan. Inside a body each `DELETE` and `UPDATE` is scoped by its own statement's
+`WHERE`, not by another's. SQL Server needs no separator between statements, so there
 any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read. What
 replaces rather than adds (`REPLACE INTO`, `… OR REPLACE`), what creates an account, and a PostgreSQL
-function that acts on the server (`pg_terminate_backend`, `lo_export`, `dblink`…) are `high` too: the
+function that acts on the server (`pg_terminate_backend`, `lo_export`, `set_config`…) are `high` too: the
 console must not be a cheaper way to do what the kill and drop routes charge for.
+
+A `SELECT` is not a read when what it calls runs other SQL or acts past the transaction it runs in
+(`callRules`, `dbx/statement_calls.go`). Calls are found in the raw text like the verbs, by exact name or
+prefix, quoted or not. A function handed SQL as text is never a read, whatever it is given: the text can
+be built by concatenation (`'select pg_terminate_'||'backend(…)'`), so nothing that reads the statement
+knows what it runs, and such a function is the only way to put a function's name together from pieces.
+On PostgreSQL that is the `query_to_xml`, `cursor_to_xml` and `table_to_xml` families, `ts_stat`,
+`ts_rewrite`, `crosstab`, `connectby` and `xpath_table` (the last two write their arguments into a query
+unquoted), and anything named `dblink…` or `pg_background…`; on Oracle `DBMS_XMLGEN`, `DBMS_XMLQUERY`,
+`DBMS_XMLSTORE`, `DBMS_SQL` and `EXECUTE IMMEDIATE`. The rest outlive the rollback a read ends in, on a
+pooled connection that the next request is handed (found live: an advisory lock and a `dblink`
+connection are both still there): PostgreSQL's advisory locks, statistics resets (`pg_…_reset…`, not the
+`pg_stat_get_…` that say when one happened), and its replication-origin, slot, WAL-replay and
+`heap_force_…` functions; MySQL's and MariaDB's named locks (`GET_LOCK`, the locking service) and a `:=`
+assignment; a sequence's next value on every engine (`nextval`, `setval`, `NEXT VALUE FOR`, Oracle's
+`.NEXTVAL`), which SQL Server's rolled-back transaction and Oracle's query-only scope do not give back;
+and Oracle's packages that reach outside the database or leave state behind (`UTL_HTTP`, `UTL_INADDR`,
+`HTTPURITYPE`, `DBMS_PIPE`, `DBMS_LOCK`…). Each is `high`, with the call named in its reason. What runs a
+string at the statement level — MySQL's `PREPARE`/`EXECUTE`, a `sys.` procedure through `CALL`, SQL
+Server's `EXEC(@sql)` and `sp_executesql`, an Oracle block — does not lead with a read and was never one.
 
 A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
 verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
@@ -544,6 +762,15 @@ read alike, so the server is asked which (`clickhouseReadScope`): an account it 
 runs under that limit, and one whose profile pins `readonly` at writable has no scope, so a statement
 called a read is not run on it at all. The scope each engine gives is the capability `readOnlyScope`
 (`enforced`, or `rollback` on SQL Server).
+
+A block that runs as it is sent — a PL/SQL block, T-SQL's `BEGIN … END`, `IF` and `WHILE`, MariaDB's
+compound statements — manages a transaction by what is in it, not by its `BEGIN`: a script run as one
+transaction refuses it only when it commits, rolls back or sets a savepoint itself. On SQL Server and
+MariaDB it goes through the driver's query path, so the rows of the query in it are shown (the first
+that returns any). Oracle keeps a stored program it could not compile, marked invalid, and answers the
+`CREATE` with a warning go-ora does not pass on, so the runner reads `ALL_ERRORS` for that program on
+the same connection straight after (`compileChecker`), and the statement fails with the compiler's
+lines instead of the program failing wherever it is first called.
 
 Anything that is not a read runs on a connection of its own that is closed afterwards rather than
 pooled, because a pooled connection carries a `SET`, an open transaction or a temporary table into
@@ -814,7 +1041,9 @@ stays editable on a protected connection.
   engine outage. Home offers 1h, 6h, 24h and 7d ranges and derives rates from stored totals; negative
   counter deltas and recording gaps longer than 90 seconds are never drawn as continuous rates.
   History begins when this version of the dashboard starts; past activity cannot be reconstructed
-  from engine totals.
+  from engine totals. Each pass ends by handing what it read to the
+  [alerts](#alerts-told-when-a-server-or-its-backups-go-wrong), which have it read a server's disk
+  and replication as well only while a rule watches that server for them.
 
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
@@ -930,11 +1159,56 @@ stays editable on a protected connection.
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
   `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
-  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
-  never one execution: the list is on the read surface and a literal is somebody's e-mail address.
-  PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
-  and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
-  leaves the package. - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  with the grant the account lacks (`reason`). On PostgreSQL `enable` says how far the module is from
+  loaded: `configured` when the list the next start loads names it and the running list does not —
+  that list is the last line the configuration files hold for it, read from `pg_file_settings` by a
+  superuser, whatever the server says of that line now, since a line waiting for a restart is marked
+  as not applied —, `preload`, the exact `ALTER SYSTEM` that adds it after every library in that
+  list, where the account is a superuser and the value is not set on the command line, and `blocked`
+  with the reason where it is. Nothing is offered where the module is not installed: a server told
+  to load a library it cannot find does not start. `POST /{id}/statements/preload` (`system.admin`,
+  refused on a protected connection) runs that statement and `pg_reload_conf()`, answers as a
+  parameter change does with `restartRequired`, stores nothing when the list already names the
+  module, and is audited as `database.statements.preload` with the value stored. The restart that
+  loads it is the power route's and the extension the extensions route's, so the page's guided setup
+  (`ops/statements-setup.tsx`, opened by *Turn on statement statistics* in Performance → Statements
+  and in Home's busiest-statements block) takes them as three steps, each its own press: the
+  statement shown before it runs; the restart, confirmed with what it does to the sessions on the
+  server and offered only where the summary's `power.restart` and the role allow it — elsewhere the
+  reader is told where it is restarted and the setup resumes from the page once it is back —; and
+  the extension once the server answers again. The dialog is drawn by a host above the page's switch
+  between a server that answers and one that is down, which the restart fires. The capability is
+  `statementsSetup`: PostgreSQL and TimescaleDB, not CockroachDB (no module) nor YugabyteDB (it
+  loads the module itself and refuses `ALTER SYSTEM`).
+  `TestLiveStatementsSetupKeepsTheLibrariesAServerLoads` runs the three steps on a server of its own
+  that loads `auto_explain`, and checks both libraries are loaded after.
+  The text returned is a statement's shape on every engine,
+  never one execution: the list is on the read surface and a literal is somebody's e-mail address, or in
+  a `CREATE ROLE` a password. MySQL and MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to
+  (`normalizeQuery`), and for SQL Server and Oracle `dbx.statementShape` replaces every string and number
+  literal with `?` before the text leaves the package. It also drops comments: a comment is whatever the application wrote (a request id,
+  a user), and Oracle stores the text with its line breaks turned into spaces, so a `--` comment cannot be
+  told from the code after it and takes the rest of the statement with it. An optimizer hint (`/*+ .. */`,
+  `--+`) is kept with its literals shaped, and SQL Server's nested block comments are read as it reads them.
+  `TestLiveAPIOracleStatementsCarryNoLiterals` (INSERT, INSERT ALL, MERGE, a PL/SQL block, comments, hints)
+  and its SQL Server and MySQL siblings read `/statements` as a viewer and look for what was run. PostgreSQL's text is shaped in the package as
+  well, by `pgStatementShape` (`dbx/statements_shape.go`): `pg_stat_statements` writes `$n` over the
+  constants of the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`) and keeps every
+  utility statement as it was sent while `pg_stat_statements.track_utility` is on, its default —
+  `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE`, `SET`, `COMMENT`, a column `DEFAULT`, a `DO` body. The
+  pass reads the text by PostgreSQL's own lexical rules (dollar quoting; `E''`, `U&''`, `N''`, `B''` and
+  `X''` strings; block comments that nest; numbers in every base 16 takes, underscores included), keeps
+  the `$n` markers the Statements panel asks a value for, and replaces every literal with `?`. That is
+  every literal, not every value the extension missed: a type's modifiers and an `ORDER BY` position read
+  `?` too. In a statement the extension keeps as it came, two values that need no quotes are masked
+  however they are written, a bare word included: whatever follows a role's `PASSWORD` (`CREATE`/`ALTER`
+  `ROLE`, `USER`, `GROUP`, a user mapping), and a setting's value after `SET … TO`/`=` (`SET`, `ALTER
+  ROLE`/`DATABASE`/`SYSTEM … SET`, a function's `SET` clause). Whether a backslash escapes in a plain
+  `'…'` string depends on `standard_conforming_strings` in the session that sent it, which the text does
+  not record, so the text is read both ways and what is a literal in either reading is masked: the wrong
+  reading can only hide more. Comments and quoted names are kept. `/activity` and `/querylog` are not
+  shaped: they return what the server recorded, as below.
+- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
@@ -943,15 +1217,23 @@ stays editable on a protected connection.
   `s.destructive`, refused for the account the connection signs in with), `databases` (create,
   and `/connect` to save a sibling connection to another database on the same server under the
   same credentials, probed before it is stored; the list of what the server holds is
-  `GET /databases/{id}/schemas`, below), `extensions` (list; create and drop for
-  Postgres, listed only for MySQL's plugins) and `settings` (the short list an operator asks
-  about; the full one is `/databases/{id}/settings`, above). Identifiers go through the dialect's
+  `GET /databases/{id}/schemas`, below), `extensions` (the list and `/{name}` detail on the read
+  surface; create, update and drop for Postgres, below; listed only for MySQL's plugins), `preload`
+  (a library added to what Postgres loads at start, below) and `settings` (the short list an
+  operator asks about; the full one is `/databases/{id}/settings`, above). Identifiers go through the dialect's
   `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
   (`GrantNeedsDatabase`) through a pool opened for that one request; a password is the one value
   no engine binds in `CREATE ROLE`/`CREATE USER`, so it is refused if it carries a control
-  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
+  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`). On
+  PostgreSQL a create or an alter that carries one runs with `pg_stat_statements.track_utility` off
+  for its transaction (`SET LOCAL`, `pgExecRole`) where the connection's account is a superuser, the
+  account that may change the setting, so the extension keeps no copy of the statement for its readers
+  (a member of `pg_read_all_stats`, a monitoring role's usual grant, reads every account's); for any
+  other account it is recorded as sent and the statement list shapes it. It is not sent as a SCRAM secret hashed here, which the server would store
+  as given: a password check the server runs on a new password (`passwordcheck`, `credcheck`) cannot
+  judge a hash, and `credcheck` refuses one.
   Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
-  `database.connection.sibling`, `database.extension.create/drop`.
+  `database.connection.sibling`, `database.extension.create/update/drop/preload`.
   - *What else the server holds.* `GET /databases/{id}/schemas` (read surface) is the list the
     engine's picker is filled with, as `[{name, size?, owner?, encoding?}]`: the server's databases
     on PostgreSQL (templates left out), MySQL/MariaDB (each schema, with its tables' size), SQL
@@ -965,6 +1247,57 @@ stays editable on a protected connection.
     answer is no. ClickHouse can make a database and cannot be pointed at it by a connection
     string, so a create that asks for `connect` there is refused before the database is made; it
     used to be made and then answered as a failure.
+  - *Extensions* (`dbx/extensions.go`, `dbx/extension_catalogue.go`, `api/handlers_db_extensions.go`).
+    `dbx.ExtensionManager` is an optional half of `Admin` that only the Postgres dialect implements,
+    and `editable` on the list is whether the engine has one: MySQL lists its plugins and changes
+    none, CockroachDB and TiDB have no `extensions` flag. The list is `pg_available_extensions`
+    joined to what is installed, with the default version's `superuser`/`trusted` (`superuserOnly`,
+    from 13 where `trusted` exists), laid over a curated catalogue: a category and a sentence for
+    about ninety common extensions, the library each needs at start, a row for each *module* — a
+    library with no extension, `auto_explain`, `passwordcheck`, `pg_partman_bgw` — listed when its
+    file is in the server's library directory or it is loaded, and a row marked `unavailable` for
+    each extension that is somebody else's and not in the image (pgvector, PostGIS, TimescaleDB,
+    pg_cron…; PostgreSQL's own contrib is never listed as missing, because a release left it out).
+    `GET …/server/extensions/{name}` is what a dialog reads before it acts: the versions shipped
+    newest first, each with `requires` and the requirements the database lacks (`missing`), the
+    versions the installed one has an update path to (`pg_extension_update_paths`, asked only here
+    because it works out every pair), the schemas the account may create in and `current_schema()`,
+    what it added by kind, what outside it depends on it and the two drop statements. Every option
+    of a create, an update and a drop is checked against that catalogue before a statement is written
+    — a version the server ships, a schema that exists, the schema a control file fixes, an update
+    target with a path — and the three routes end in `runDDL`, so `?preview=1` plans without running
+    and is not audited, and the statement shown is the one that runs. A create keeps
+    `IF NOT EXISTS` and refuses an extension already installed; the version is a literal the server
+    listed. The dependents are `pg_depend` walked the way the engine walks it rather than a trial
+    `DROP` in a rolled-back transaction, which would lock everything it would remove and fire event
+    triggers from a read: what goes with the extension by itself (members, and what is internal to or
+    automatically dropped with one), every object depending on that normally and what depends on
+    those, each named as the object a reader knows (a member of another extension is that extension,
+    a view's rewrite rule its view) and with whatever is carried by another entry left out — the same
+    five objects the engine's own refusal names, up to a hundred. `DELETE …/{name}?cascade=1` is the
+    one way to `CASCADE`, chosen by the reader in the dialog after the list.
+  - *Libraries loaded at start* (`dbx/preload.go`). `dbx.Preloader` reads `shared_preload_libraries`
+    as loaded and as the configuration files name it (`pg_file_settings`, a superuser's; the last
+    line naming it, which is `postgresql.auto.conf`'s after an `ALTER SYSTEM`), and whether it can be
+    changed from this connection: not on YugabyteDB or CockroachDB, not where the value comes from the
+    command line (`-c` outranks `ALTER SYSTEM`, and the shared Postgres fixture is started that way),
+    not for an account that is not a superuser. `POST …/server/preload {library}` takes a library or
+    the extension it is loaded for from the catalogue's closed list, never a name from the request,
+    and refuses one already on the list or one whose file is not in any `dynamic_library_path`
+    directory (`pg_stat_file` beside `pg_config`'s `PKGLIBDIR`), because a server told to load a
+    missing library does not start. The new list is the files' list — so a change not yet restarted
+    for is kept — with the library appended (`citus` first) and every entry kept in its order,
+    written as one literal per library (`pgSettingLiteral`), then the parameters the library is
+    pointless without where nobody has set them (`cron.database_name` and `pg_partman_bgw.dbname` to
+    the connection's database, `auto_explain.log_min_duration` to `1s`) — on 17 and later, which take
+    an unknown dotted parameter as a placeholder; before that the plan says to set it in Parameters
+    after the restart — and `pg_reload_conf()`. It runs on one connection, `?preview=1` shows it, the
+    reply carries the list the next start loads and a note per parameter, and it is audited as
+    `database.extension.preload`. Nothing here restarts the server: that is `POST …/power`, with its
+    own capability and audit, and the create route makes the extension once the library is loaded.
+    The route and the dialog that walks the three steps (`components/database/ops/extension-preload.tsx`)
+    take any library in the catalogue, pg_stat_statements included, so another page's guided action
+    for one extension is the same two pieces opened on it.
   - *An alter changes what was sent and nothing else.* `roleRequest`'s attributes are pointers and
     `RoleSpec` carries a `Set*` beside each shared flag, so a body with only a password renders
     `ALTER ROLE … WITH PASSWORD …` and leaves `SUPERUSER`/`CREATEDB`/`CREATEROLE` as they were (the
@@ -1069,7 +1402,80 @@ stays editable on a protected connection.
   shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
-  `/activity` and `/statements`, it returns statement text with its literals at read capability.
+  `/activity`, and unlike `/statements`, it returns statement text with its literals at read capability.
+
+### Alerts: told when a server or its backups go wrong
+
+A database's **Alerts** page (`/databases/{id}/alerts`, in the rail under Operate) holds rules that
+tell the deployments' notification channels — webhook, Discord, Slack, Telegram and e-mail, through
+`deploy.AutomationStore.DeliverNotification`, so a channel is configured once on
+`/deploy/notifications` and nowhere else — when something is wrong with a database, and when it is
+over. There is no second delivery system and no second poll: the server kinds are judged on the
+recorder's own thirty-second pass (`api/database_metrics.go` hands `dbAlerts.Evaluate` what it read),
+and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
+
+- **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
+  database of an engine can be watched for, and the create route refuses a rule for one database
+  whose engine lacks the kind. A server can be `down` (it did not answer the recorder; a SQL pool
+  whose snapshot was refused is pinged to tell a refusal from a server that went away), fill its
+  `disk`, run near its `connections` limit (the snapshot's sessions against `max_connections` less
+  the superuser reserve, Redis `connected_clients` against `maxclients` — now recorded with the
+  counters — and MongoDB `current` against `current + available`), and fall behind in
+  `replication`; every engine, SQLite included, can have a backup job that failed
+  (`backup_failed`: the job's newest finished run failed) or was missed (`backup_missed`: a scheduled,
+  enabled job has had no successful run since the time its schedule was next due after its last
+  success — `backups.NextScheduled`, in the zone the scheduler fires in — plus the rule's grace, and
+  no run is in flight). Connections are not offered on CockroachDB, TiDB or FerretDB, whose
+  snapshots count none; replication is offered exactly where the replication view is.
+- **What is read, and only when a rule needs it.** The recorder reads disk and replication only
+  for a server an enabled rule watches for them. Replication (`dbx.ReadReplicationLag`,
+  `MongoReplicationLag`, `RedisReplicationLag`) is the worst lag a server can see: a PostgreSQL
+  standby's replay delay, counted as nothing once it has replayed all it received (an idle primary
+  is not lag), or a primary's `replay_lag`; a MySQL or MariaDB replica's `Seconds_Behind_Source`, a
+  stopped thread being a stop without the engine's error, which quotes rows; every secondary of a
+  MongoDB set against its primary, a member not answering or no primary being a stop; a Redis
+  replica's seconds since it heard from its primary, or a primary's slowest replica. A MySQL primary
+  cannot see its replicas' lag and says so rather than reading zero. The disk is the engine's own
+  answer where it gives one, which also covers a server on another machine (ClickHouse
+  `system.disks`, SQL Server `sys.dm_os_volume_stats`, MongoDB `dbStats`' `fsUsedSize` and
+  `fsTotalSize`); otherwise the server is placed the way its summary places it — a container's mount
+  under the data directory the engine names (`data_directory`, `@@datadir`, Redis `CONFIG GET dir`)
+  or under its image's usual one (`dbx.DataDirHints`), Docker's own disk when no mount holds it; a
+  server on this machine's data directory, else the root disk — and that filesystem measured through
+  `/host` as `df` would (`statDisk`). A server elsewhere that does not report its disk is not judged,
+  and says why. The place is kept five minutes per connection and DSN.
+- **Hold, hysteresis and cooldown** (`stepDBAlert`, one pure function). A server reading must be
+  over the line on two passes in a row and for the rule's minutes before it fires; it recovers once
+  it has been under a clearing line — five points under a percentage, a fifth under a lag — on two
+  passes, and between the line and the clearing line it stays firing. A backup run is a fact, so one
+  reading fires it and one recovers it. The cooldown keeps a subject that fires again soon after its
+  last message from being told again until the cooldown has passed, and tells it then if it is still
+  firing; a recovery whose firing was kept back is not told either, and a rule may tell firings only
+  (`notifyRecovery`). A reading that could not be taken — the server down, the disk unreadable, the
+  pass out of time — keeps the subject where it was rather than recovering it. A subject the rule no
+  longer reaches (a job that stopped dumping the database) leaves, told it is over if it was firing.
+- **State is the store's.** `db_alert_rules` (a `connection_id` of NULL watches every database),
+  `db_alert_state` (one row per rule and subject: a database, or `job:<id>`) and `db_alert_events`
+  (the newest thousand, with how many channels were told and what was kept back and why) are new
+  tables; rules and events of a forgotten connection go with it. A rule's `revision` moves on every
+  edit and a pass writes a subject only while the revision it read still holds, so an edit made while
+  a pass was deciding is never overwritten and nothing decided on its old terms is told. An edit to
+  the kind, the line, the minutes or the database, or a pause, starts the rule over; its channels,
+  cooldown and recovery setting do not.
+- **The messages.** `database.alert.firing` and `database.alert.recovered` carry a `database` block
+  in the webhook envelope (rule, kind, connection or job, label, the reading in words with its line,
+  since when, `test`), and the providers render it as "Database disk filling up — shop" with the
+  reading as the summary; the link opens the database's Alerts page, or its Backups page (the
+  server's, for a rule over every database) for a backup kind. A test sends the rule's message,
+  marked `[test]`, to its channels and counts the delivered, failed and paused ones. The reading of a
+  server that is down is the driver's error with the connection's secrets scrubbed (`connectError`).
+- **Who may.** Reading the rules, their subjects and their events is the read surface, as the
+  database's other readings are; creating a rule and sending its test need `system.admin`, and
+  editing (which is also how a rule is paused) and removing one sit in `s.destructive` as well, as
+  the proxy's alert rules do, because both stop somebody being told. Every mutation is audited as
+  `database.alert.create`, `.update`, `.delete` or `.test`, with the rule's terms and never a reading.
+  The routes are not under `/{id}`: a rule can watch every database, and one rule for one database
+  is the dashboard's own state, which a protected connection does not refuse.
 
 ### Redis
 
@@ -1133,13 +1539,18 @@ is the surface itself.
     none of the fields is there, and `400 unsupported` on a server that keeps none. Both are
     `service.control`, refused on a protected connection, and audited as
     `database.redis.field.expire` / `.persist` with the key and how many fields — a field's name is
-    data and is not recorded.
+    data and is not recorded. A hash row's expiry on the key browser is set and removed through
+    them; it used to send `HEXPIRE` and `HPERSIST` down the console's route.
   - *Claiming.* `POST /keys/stream/claim {key, group, consumer, ids, minIdleMs?}` hands a group's
     pending entries to one of its consumers (`XCLAIM … JUSTID`), and with `auto: true` whatever has
     been pending for `minIdleMs`, a page at a time by `cursor` and `count` (`XAUTOCLAIM`,
     `features.streamAutoClaim`; `400 unsupported` without it). Only ids travel, in both
     directions. `service.control`, as the console classes both commands; refused on a protected
-    connection; audited as `database.redis.stream.claim`.
+    connection; audited as `database.redis.stream.claim`. A group's pending list claims through it:
+    *Claim…* hands one entry over, and *Claim idle entries…*, drawn only where the server has
+    `XAUTOCLAIM`, hands whatever has been pending past a number of minutes to one consumer, a
+    hundred a press, saying how many moved and whether more remain. The page used to send `XCLAIM`
+    down the console's route.
   - *A whole member.* `GET /keys/raw` also streams one member of a set or a sorted set. A member
     has no name but itself and the reader holds only its start, so it is asked for by that:
     `member` (or `memberB64`) is how it begins and `bytes` its size, both as the page reported
@@ -1333,7 +1744,9 @@ the detail of each classifier is below, with the surface it guards.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
   learn a backup was never possible. `dump_sql.go` writes SQL over the open connection; `dump_nosql.go`
-  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A native
+  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A Redis
+  dump is always this one — a header line, then each key's `DUMP` payload — and not an RDB file: only the
+  dashboard restores it, and the Backups form and every description of it say so. A native
   tool that *fails* falls through to the built-in rather than to an error; one that was *stopped* does
   not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
   is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
@@ -1428,22 +1841,32 @@ the detail of each classifier is below, with the surface it guards.
   (`resolveRestoreSource`), by name or by the path the listing reports, and through `files.Resolve` only
   for a file elsewhere; it used to hold every dump to the roots, so narrowing them stopped the dashboard
   restoring what it could still download.
-- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
-  newest first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there
-  to dump again) removes one, contained against that directory exactly as the download is. The fleet
-  reads the same listing for "last backup", and `GET /databases/backups/summary` is every connection's
-  newest dump in one read that dials nothing. What a dump holds — the options it was taken with, the
-  tool and version that wrote it, how long it took, a note, who asked — is in a small file beside it
-  (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed. Beside it rather
-  than in a table because the directory is what gets copied off the machine. A file with no
-  description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
-  (`service.control`) streams a dump made elsewhere into the directory through the scoped
-  `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory newest
+  first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there to dump
+  again) removes one, contained against that directory exactly as the download is. The fleet and a
+  connection's summary say when it was last backed up (`lastBackup`) from the same listing and from the
+  backup jobs: the later of the newest dump here and the start of the newest successful job run whose
+  archive holds the connection's native dump (`backups.Store.LastDatabaseDumps`, by the `CoversDatabase`
+  test a restore applies, read once per fleet request). The listing alone called a database a nightly
+  job protects never backed up. `GET /databases/backups/summary` is every connection's newest dump in
+  the directory in one read that dials nothing, polled every few seconds while a dump runs, so the
+  control center takes the later of its answer and the fleet's. What a dump holds — the options it was
+  taken with, the tool and version that wrote it, how long it took, a note, who asked — is in a small
+  file beside it (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed.
+  Beside it rather than in a table because the directory is what gets copied off the machine. A file
+  with no description is listed with what its first bytes say it is.
+  `POST /databases/{id}/backups/upload` (`service.control`) streams a dump made elsewhere into the
+  directory through the scoped `files.Service`, under a validated name, capped by
+  `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
   A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
   one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
   process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
   exclusive create before renaming onto it. So the listing never holds a file that is still being
   written, and of two uploads of one name — or two dumps in one second — neither lands on the other.
+  These dumps are not encrypted: they are files on this server, beside the key that would open them. A
+  backup job that dumps the connection may seal its archive to the server's backup key
+  ([archive encryption](git-backups-users.md#archive-encryption)); the page's picture then names the
+  schedule with *encrypted*, and its restore decrypts on the way to `dbx.Restore`.
 - **A dump, a restore and a copy are jobs** (`handlers_db_transfer.go`). `POST /{id}/backup` and
   `/restore` answer `202` with a `jobs.Job`; the page watches `/jobs/{id}` and its stream, where the
   lines are the tool's own, and stops it with `/jobs/{id}/cancel`. The last line, on stream `result`,
@@ -1578,12 +2001,16 @@ per-area browser specs are in
   standard port: an engine is named by its variable or skipped. The Oracle cases that use the JSON and
   BOOLEAN types need 23ai, and the two that watch another session (`v$session`) need
   `JD_TEST_ORACLE_ADMIN_DSN`. On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database
-  of the run's own; every table these tests make is named `jdwb_…`.
+  of the run's own; every table these tests make is named `jdwb_…`. `dbx/live_script_bodies_test.go`
+  writes a stored program in the console the way each engine's client takes one — `DELIMITER` and none
+  on MariaDB and MySQL 8, `GO` and `GO n` on SQL Server, `/` lines, a package and a procedure that does
+  not compile on Oracle, `BEGIN ATOMIC` beside a dollar-quoted body on PostgreSQL, a trigger on SQLite
+  — and creates, calls and reads it back; its objects are named `jdt_script_splitter_…`.
 
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the ten it calls): 233 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the eleven it calls): 240 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1607,9 +2034,9 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  36 open, 12 by content, 20 preview only, 62 refused.
+  37 open, 12 by content, 20 preview only, 64 refused.
 
-**Every database** (19)
+**Every database** (20)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1628,12 +2055,23 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
 | `GET` | `/databases/orm/targets` | read | — | — | — |
 | `POST` | `/databases/provision` | `system.admin` | — | `database.server.provision` | — |
+| `GET` | `/databases/provision/capacity` | `system.admin` | — | — | — |
 | `GET` | `/databases/provision/options` | `system.admin` | — | — | — |
 | `POST` | `/databases/sync` | `system.admin` | — | `database.connection.sync` | — |
 | `POST` | `/databases/test` | `system.admin` | — | — | — |
 | `GET` | `/databases/topology` | read | — | — | — |
 
-**One connection** (13)
+**Alerts** (5)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/alerts?connection=` | read | — | — | — |
+| `POST` | `/databases/alerts/rules` | `system.admin` | — | `database.alert.create` | — |
+| `PUT` | `/databases/alerts/rules/{rule}` | `system.admin` + `destructive` | yes | `database.alert.update` | — |
+| `DELETE` | `/databases/alerts/rules/{rule}` | `system.admin` + `destructive` | yes | `database.alert.delete` | — |
+| `POST` | `/databases/alerts/rules/{rule}/test` | `system.admin` | — | `database.alert.test` | — |
+
+**One connection** (15)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1642,11 +2080,18 @@ and `protectReadOnlyConnections`.
 | `DELETE` | `/databases/{id}` | `system.admin` + `destructive` | yes | `database.connection.delete` | open |
 | `GET` | `/databases/{id}/access` | `system.admin` | — | — | — |
 | `PUT` | `/databases/{id}/access` | `system.admin` + `destructive` | yes | `database.access.change` | open |
+| `POST` | `/databases/{id}/access/preview` | `system.admin` | — | — | open |
 | `GET` | `/databases/{id}/consumers` | read | — | — | — |
 | `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
 | `GET` | `/databases/{id}/overview` | read | — | — | — |
 | `GET` | `/databases/{id}/ping` | read | — | — | — |
+| `GET` | `/databases/{id}/pooler` | read | — | — | — |
+| `PUT` | `/databases/{id}/pooler` | `system.admin` | — | `database.pooler.enable` / `database.pooler.update` | refused |
+| `DELETE` | `/databases/{id}/pooler` | `system.admin` + `destructive` | yes | `database.pooler.disable` | refused |
+| `GET` | `/databases/{id}/pooler/stats` | read | — | — | — |
 | `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
+| `GET` | `/databases/{id}/resources` | read | — | — | — |
+| `PUT` | `/databases/{id}/resources` | `system.admin` | by content: a lifted limit | `database.resources.change` | open |
 | `GET` | `/databases/{id}/schemas` | read | — | — | — |
 | `GET` | `/databases/{id}/stats` | read | — | — | — |
 | `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
@@ -1712,7 +2157,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
 
-**Operations** (21)
+**Operations** (22)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1734,10 +2179,11 @@ and `protectReadOnlyConnections`.
 | `PUT` | `/databases/{id}/settings` | `system.admin` | — | `database.setting.set`, `.reset` | refused |
 | `GET` | `/databases/{id}/sqlite/file` | read | — | — | — |
 | `GET` | `/databases/{id}/statements` | read | — | — | — |
+| `POST` | `/databases/{id}/statements/preload` | `system.admin` | — | `database.statements.preload` | refused |
 | `POST` | `/databases/{id}/statements/reset` | `destructive` | yes | `database.statements.reset` | refused |
 | `GET` | `/databases/{id}/tablestats` | read | — | — | — |
 
-**The server behind a connection** (16)
+**The server behind a connection** (19)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1745,8 +2191,11 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/server/databases/connect` | `system.admin` | — | `database.connection.sibling` | refused |
 | `GET` | `/databases/{id}/server/extensions` | read | — | — | — |
 | `POST` | `/databases/{id}/server/extensions` | `system.admin` | — | `database.extension.create` | refused |
+| `GET` | `/databases/{id}/server/extensions/{name}` | read | — | — | — |
+| `PATCH` | `/databases/{id}/server/extensions/{name}` | `system.admin` | — | `database.extension.update` | refused |
 | `DELETE` | `/databases/{id}/server/extensions/{name}` | `system.admin` + `destructive` | yes | `database.extension.drop` | refused |
 | `GET` | `/databases/{id}/server/grants` | read | — | — | — |
+| `POST` | `/databases/{id}/server/preload` | `system.admin` | — | `database.extension.preload` | refused |
 | `GET` | `/databases/{id}/server/privileges` | read | — | — | — |
 | `GET` | `/databases/{id}/server/roles` | read | — | — | — |
 | `POST` | `/databases/{id}/server/roles` | `system.admin` | — | `database.role.create` | refused |
@@ -1927,7 +2376,15 @@ Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explic
 draws its engines from the same `GET /databases/provision/options` the add flow reads, so the two offer
 one list of templates. A project's Databases settings reuses the same two reads for a linked connection:
 `/ping` behind its Test connection verb, and `?target=container` behind Copy application URL, which stays
-admin-only and audited there as everywhere else. Quick setup provisions with `exposure: local`, so those
+admin-only and audited there as everywhere else. The add flow can also limit what the new container may
+use: *Limit the memory and processors it may use* fills in the template's `defaultLimits` (1 GiB and a
+core; 512 MiB for a key–value server, 2 GiB and two cores for ClickHouse), kept to half this machine's
+memory and its processors as `GET /databases/provision/capacity` (`system.admin`) reads them, and sends
+`memoryMb` and `cpus`; a request that names neither starts with none, as before. `/provision` holds them to
+the same rules as a change on Settings → Resources, and to the template's `minMemoryMb`: MySQL's first start
+loads its time zone tables into a temporary server before it makes the account, and under 512 MiB the
+kernel stops it part way, leaving a data directory the next start does not initialise and a server with no
+account to sign in with. Quick setup provisions with `exposure: local`, so those
 ports are published to host loopback only, which is also what a request that names no exposure gets (see
 the inventory section above). The data volume is named `<container>-data`. With no name supplied,
 provisioning reserves the first available `jd-<engine>`, `jd-<engine>-2`, etc., checking both containers
@@ -4351,6 +4808,17 @@ runs the two tests; it refuses before touching anything if the changelog does no
 version, and prints the skeleton. **`CHANGELOG.md` is generated — never edit it by hand.** The ordering
 is the point: a version bumped with no changelog entry is a release nobody is told about, and a changelog
 entry with no version bump is every install permanently offering itself an update it already has.
+
+A note added to a release whose version is already bumped — every change merged into an open patch
+branch after its release was cut — is in `changelog.json`, and so in every install's notice, but not
+in `CHANGELOG.md` until the markdown is generated again. Nothing fails meanwhile:
+`TestRootChangelogMentionsThisRelease` checks only that the release has a section there, not what the
+section says. Run `scripts/release.sh` with the version the branch already carries (`0.7.5` on
+`patch/0.7.5`): the version files are rewritten with the values they hold, so the only file that
+changes is `CHANGELOG.md`. Its first step alone does the same without the tests:
+`cd backend && go run ./scripts/gen-changelog.go -expect 0.7.5 -out ../CHANGELOG.md`, which refuses
+unless the changelog's newest release is the version named. Do it last before the branch is merged into
+`main`, because the GitHub release takes its notes from that section.
 
 A release is cut on its patch branch (`patch/0.7.2`) and reaches installs when that branch is merged into
 `main`. The GitHub release follows on its own: `.github/workflows/release.yml` runs after Verify passes on
