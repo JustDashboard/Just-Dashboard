@@ -122,7 +122,11 @@ start. Cleanup removes only objects carrying its run's label and verifies none r
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about
   what is legal but probably unintended (a port on every interface, no memory limit, an anonymous volume,
   a writable bind mount of a sensitive path). `SpecOf` reads a container back into that shape, which is
-  what makes duplicate, edit-and-recreate and "save as a stack" possible.
+  what makes duplicate, edit-and-recreate and "save as a stack" possible. `Files` are written into a
+  container between its creation and its start — in every container a port-conflict retry makes —
+  and a container they could not be written into is removed rather than left to be started without
+  them; it is how a provisioned PostgreSQL gets its first-boot script. The field has no JSON name, so
+  a spec decoded from a request cannot carry one, and one read back has none.
 - **`Recreate` is the verb Docker lacks.** Editing means destroy-and-recreate, which is fine until the
   create fails and the operator has nothing where their service was — so the old container is renamed
   aside (`<name>_jd_replaced_<random>`), restored if anything later fails, and removed only once the replacement

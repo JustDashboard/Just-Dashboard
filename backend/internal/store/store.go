@@ -238,6 +238,30 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   PRIMARY KEY (connection_id, schema_name)
 );
 
+-- The connection pooler (PgBouncer) the dashboard runs beside a PostgreSQL
+-- connection's container: where it is, which database container it forwards to
+-- and by what name, how it was asked to behave, and a digest of the two files
+-- it was last given so a changed password is noticed.
+-- The accounts PgBouncer signs in and reads statistics with are sealed
+-- (secrets_enc); the connection's own password is read from the connection.
+CREATE TABLE IF NOT EXISTS db_poolers (
+  connection_id   INTEGER PRIMARY KEY REFERENCES db_connections(id) ON DELETE CASCADE,
+  container_name  TEXT NOT NULL,
+  container_id    TEXT NOT NULL DEFAULT '',
+  network_name    TEXT NOT NULL,
+  host_port       INTEGER NOT NULL DEFAULT 0,
+  server_name     TEXT NOT NULL,
+  server_port     INTEGER NOT NULL,
+  pool_mode       TEXT NOT NULL,
+  pool_size       INTEGER NOT NULL,
+  max_client_conn INTEGER NOT NULL,
+  auth_mode       TEXT NOT NULL,
+  secrets_enc     TEXT NOT NULL,
+  config_sha      TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+
 -- Databases found on this machine that the operator said to leave alone. The
 -- key is the inventory's own (docker:<container>, compose:<project>/<service>,
 -- host:<unit>, file:<path>), not a connection id: the point of the row is to

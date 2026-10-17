@@ -195,6 +195,10 @@ export type DbProvisionTemplate = {
   defaultUser: string
   /** False: there is no initial database to name. */
   database: boolean
+  /** The server counts its statements from the first start (pg_stat_statements). */
+  statements?: boolean
+  /** It can be asked to log the plans of its slow statements as well (`autoExplain`). */
+  autoExplain?: boolean
 }
 
 export type DbProvisionRequest = {
@@ -205,6 +209,7 @@ export type DbProvisionRequest = {
   version?: string
   user?: string
   password?: string
+  autoExplain?: boolean
 }
 
 export type DbProvisionResponse = {

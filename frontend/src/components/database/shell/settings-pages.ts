@@ -1,5 +1,6 @@
 import {
   Globe,
+  Layers,
   Puzzle,
   SettingsGear,
   SettingsSliders,
@@ -10,7 +11,8 @@ import type { Capability } from "@/lib/types"
 import type { Engine } from "@/components/database/engine"
 
 /** One page of a database's Settings, as its address and the rail name it. */
-export type SettingsPageKey = "general" | "network" | "parameters" | "extensions" | "danger"
+export type SettingsPageKey =
+  "general" | "network" | "pooling" | "parameters" | "extensions" | "danger"
 
 export type SettingsPage = {
   key: SettingsPageKey
@@ -25,7 +27,7 @@ export type SettingsPage = {
 /**
  * The pages a database's Settings has, in the order a reader goes through
  * them: what the dashboard calls it and how it dials it, where it can be
- * reached from, the server's own parameters, what it is extended with, and
+ * reached from, the pooler in front of it, the server's own parameters, what it is extended with, and
  * the acts that end it. What else the server holds is Home's: it changes
  * nothing about this connection, so it is not a setting.
  *
@@ -44,6 +46,7 @@ export function settingsPages(engine: Engine): SettingsPage[] {
   const pages: (SettingsPage | false)[] = [
     { key: "general", title: "General", path: "", icon: SettingsGear },
     server && { key: "network", title: "Network", path: "network", icon: Globe },
+    engine.can("pooler") && { key: "pooling", title: "Pooling", path: "pooling", icon: Layers },
     engine.can("settings") &&
       engine.kind !== "document" && {
         key: "parameters",

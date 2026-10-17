@@ -6,7 +6,7 @@ import { get } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
-import type { DbAccess } from "@/lib/types"
+import type { DbAccess, DbPooler } from "@/lib/types"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
@@ -22,6 +22,7 @@ import {
   connectTargets,
   holdsSecret,
   maskedParts,
+  pooledTargets,
   revealedParts,
   type ConnectTargetId,
 } from "@/components/database/shell/connection-string"
@@ -51,9 +52,10 @@ export function ConnectPopover({ className }: { className?: string }) {
   const { copy, copied } = useCopy()
   const [open, setOpen] = useState(false)
   const [from, setFrom] = useState<ConnectTargetId>("host")
+  const [through, setThrough] = useState<"direct" | "pooler">("direct")
   const [format, setFormat] = useSessionState("databases.connect.format", "url")
   // The real string per target, once shown; pressing again hides it.
-  const [shown, setShown] = useState<Partial<Record<ConnectTargetId, string>>>({})
+  const [shown, setShown] = useState<Partial<Record<string, string>>>({})
   const [busy, setBusy] = useState(false)
 
   // Where the server is published is an administrator's reading, asked for
@@ -65,13 +67,26 @@ export function ConnectPopover({ className }: { className?: string }) {
     { enabled: open && admin && engine.can("server") },
   )
 
-  const targets = connectTargets(conn, engine, access.data)
+  // The pooler is any role's to read; a database without one has one string.
+  const pooler = usePoll(
+    (signal) => get<DbPooler>(`/databases/${conn.id}/pooler`, undefined, signal),
+    0,
+    [conn.id],
+    { enabled: open && engine.can("pooler") },
+  )
+  const pooled = pooler.data?.enabled ? pooler.data : undefined
+  const pooledNow = through === "pooler" && pooled !== undefined
+  const targets =
+    pooledNow && pooled
+      ? pooledTargets(conn, pooled, access.data)
+      : connectTargets(conn, engine, access.data)
   const target = targets.find((t) => t.id === from) ?? targets[0]
+  const shownKey = `${pooledNow ? "pooler" : "direct"}:${target.id}`
   const formats = connectFormats(engine)
   const shape = formats.some((f) => f.id === format) ? format : "url"
 
   const masked = maskedParts(conn, engine, target)
-  const real = shown[target.id]
+  const real = shown[shownKey]
   const text = connectSnippet(engine, real ? revealedParts(masked, engine, real) : masked, shape)
   const secret = holdsSecret(connectSnippet(engine, masked, shape))
 
@@ -84,19 +99,22 @@ export function ConnectPopover({ className }: { className?: string }) {
   /** The real string, or `null` when the popover closed while it was being read. */
   const read = async () => {
     const asked = opening.current
-    const { url } = await get<{ url: string }>(`/databases/${conn.id}/url`, { target: target.id })
+    const { url } = await get<{ url: string }>(`/databases/${conn.id}/url`, {
+      target: target.id,
+      pooled: pooledNow ? 1 : undefined,
+    })
     return asked === opening.current ? url : null
   }
 
   const reveal = async () => {
     if (real) {
-      setShown((s) => ({ ...s, [target.id]: undefined }))
+      setShown((s) => ({ ...s, [shownKey]: undefined }))
       return
     }
     setBusy(true)
     try {
       const url = await read()
-      if (url !== null) setShown((s) => ({ ...s, [target.id]: url }))
+      if (url !== null) setShown((s) => ({ ...s, [shownKey]: url }))
     } catch (err) {
       notify.error("Could not read the connection string", err)
     } finally {
@@ -160,6 +178,19 @@ export function ConnectPopover({ className }: { className?: string }) {
             </p>
           </div>
         </div>
+
+        {pooled && (
+          <Segments
+            label="Connect through"
+            value={through}
+            onChange={setThrough}
+            options={[
+              { value: "direct", label: "The database" },
+              { value: "pooler", label: "The pooler" },
+            ]}
+            fill
+          />
+        )}
 
         {targets.length > 1 && (
           <Segments

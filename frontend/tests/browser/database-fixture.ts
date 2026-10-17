@@ -297,7 +297,10 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
         exposure: "local",
         port: Number(conn.port),
         publicAddresses: ["203.0.113.7"],
-        firewall: { active: true, open: false, editable: true },
+        firewall: { active: true, open: false, allowed: [], editable: true },
+        allow: [],
+        gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+        addresses: [],
       })
     }
     if (rest === "/url") {

@@ -35,6 +35,8 @@ const postgres = {
   port: 5432,
   defaultUser: "jd",
   database: true,
+  statements: true,
+  autoExplain: true,
 }
 const redis = {
   engine: "redis",
@@ -99,6 +101,18 @@ describe("what the start form sends", () => {
       password: "abcDEF12",
       exposure: "public",
     })
+  })
+
+  test("slow plans are asked for only when chosen, and only of a template that offers them", () => {
+    expect(provisionRequest(postgres, EMPTY_PROVISION).autoExplain).toBeUndefined()
+    expect(provisionRequest(postgres, { ...EMPTY_PROVISION, autoExplain: true }).autoExplain).toBe(
+      true,
+    )
+    // A draft carried over from PostgreSQL to an engine with no plans to log
+    // sends nothing the server would refuse.
+    expect(
+      provisionRequest(redis, { ...EMPTY_PROVISION, autoExplain: true }).autoExplain,
+    ).toBeUndefined()
   })
 
   test("a field the engine has no use for is never sent, and an unknown version is the default", () => {
