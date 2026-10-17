@@ -397,7 +397,9 @@ func TestProvisionMountsTheVolumeWhereEachMajorKeepsItsData(t *testing.T) {
 
 // The full template is never pulled: until its image has been built here from
 // the current recipe, a request is refused before anything is created. Once
-// it has, the server starts with the libraries its extensions need loaded.
+// it has, the server starts like any other, on the image's own command: the
+// image loads what its extensions need, where the Parameters page can change
+// it afterwards.
 func TestTheFullTemplateStartsOnlyFromTheImageBuiltHere(t *testing.T) {
 	s, router := dbTestRouter(t)
 	built := map[string]map[string]string{"jd-postgres-full:17": {recipeLabel: "a1b2c3d4e5f6"}}
@@ -421,26 +423,31 @@ func TestTheFullTemplateStartsOnlyFromTheImageBuiltHere(t *testing.T) {
 		t.Fatalf("%d containers were created", len(*created))
 	}
 	spec := (*created)[0]
-	want := "postgres -c shared_preload_libraries=pg_cron,pgaudit -c cron.database_name=orders"
-	if spec.Image != "jd-postgres-full:18" || strings.Join(spec.Cmd, " ") != want ||
-		spec.HostConfig.Mounts[0].Target != "/var/lib/postgresql" {
-		t.Errorf("full template spec: image %s, command %q, mounts %+v", spec.Image, spec.Cmd, spec.HostConfig.Mounts)
-	}
-	// The database's name is one argument of its own, and only ever one the
-	// name rule allows: there is no shell between it and the server.
-	if rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"postgres-full","database":"x -c log_statement=all"}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("a database name carrying a setting = %d %s", rec.Code, rec.Body.String())
+	if spec.Image != "jd-postgres-full:18" || len(spec.Cmd) != 0 || spec.HostConfig.Mounts[0].Target != "/var/lib/postgresql" ||
+		!strings.Contains(strings.Join(spec.Env, "\n"), "POSTGRES_DB=orders") {
+		t.Errorf("full template spec: image %s, command %q, env %q, mounts %+v", spec.Image, spec.Cmd, spec.Env, spec.HostConfig.Mounts)
 	}
 }
 
 // The recipe is the official image and the PostgreSQL project's packages of
 // the extensions the template says it carries, and it labels what it builds
-// with the digest the readiness check compares.
+// with the digest the readiness check compares. The libraries two of them
+// need loaded at start are named in the configuration a new cluster is made
+// from, never on the command line, where they would outrank every change
+// made from the Parameters page.
 func TestTheFullRecipeIsTheOfficialImageAndItsOwnRepository(t *testing.T) {
 	recipe := postgresFullRecipe
 	if !strings.Contains(recipe, "FROM postgres:${PG_MAJOR}-trixie") ||
 		!strings.Contains(recipe, `LABEL io.just-dashboard.recipe="${JD_RECIPE}"`) || recipeLabel != "io.just-dashboard.recipe" {
 		t.Errorf("the recipe does not start from the official image or does not label its build:\n%s", recipe)
+	}
+	if !strings.Contains(recipe, `\1 = 'pg_cron,pgaudit'/" /usr/share/postgresql/postgresql.conf.sample`) ||
+		!strings.Contains(recipe, "ALTER SYSTEM SET cron.database_name = %L', current_database()") ||
+		!strings.Contains(recipe, "> /docker-entrypoint-initdb.d/") {
+		t.Errorf("the recipe does not preload pg_cron and pgaudit in the sample configuration, or does not point pg_cron at the server's database:\n%s", recipe)
+	}
+	if strings.Contains(recipe, "CMD") || strings.Contains(recipe, "ENTRYPOINT") || len(provisionTemplates["postgres-full"].bootstrap) != 0 {
+		t.Error("the full template replaces the official image's command")
 	}
 	packages := map[string]string{
 		"vector": "pgvector", "postgis": "postgis-3", "pg_cron": "cron", "pg_partman": "partman",
@@ -460,7 +467,7 @@ func TestTheFullRecipeIsTheOfficialImageAndItsOwnRepository(t *testing.T) {
 			t.Errorf("the recipe fetches from outside the image's own repository: %q", line)
 		}
 	}
-	for _, library := range tmpl.preload {
+	for _, library := range []string{"pg_cron", "pgaudit"} {
 		if !slices.Contains(tmpl.extensions, library) {
 			t.Errorf("%s is preloaded and not carried", library)
 		}

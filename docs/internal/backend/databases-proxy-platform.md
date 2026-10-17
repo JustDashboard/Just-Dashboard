@@ -264,11 +264,13 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   is built again, and `POST /databases/provision` refuses the template with `409 image_not_built`
   until it is ready rather than letting Docker try to pull a name that is this server's own. The name
   is bare (`jd-postgres-full:18`), which resolves to Docker's official `library` namespace, where
-  nobody can publish an image a pull could mistake for it. The server starts with
-  `postgres -c shared_preload_libraries=pg_cron,pgaudit -c cron.database_name=<database>`
-  (`postgresCommand`, one argument each, the database already held to the name rule), so the two
-  extensions that need preloading are ready to enable on the Extensions page like the rest; nothing is
-  created in the database until the operator enables it. `dbx` recognises the image by name
+  nobody can publish an image a pull could mistake for it. The image names `pg_cron,pgaudit` in the
+  `postgresql.conf.sample` every new cluster is made from, the way TimescaleDB's image names its own
+  library, and a first-boot script it carries points `cron.database_name` at the database the server
+  is created for (`ALTER SYSTEM`, through `\gexec`); the container runs the official command, so both
+  stay ordinary parameters the Parameters page can change — on the command line they would outrank
+  every file. The two extensions that need preloading are then ready to enable on the Extensions page
+  like the rest; nothing is created in the database until the operator enables it. `dbx` recognises the image by name
   (`jd-postgres-full`, variant `full`). The add flow builds first when the chosen release is not built,
   drawing *Build the image* as the first stage and the job console with the build's output, and
   quick setup in a project's sheet offers the template only once its image is built.

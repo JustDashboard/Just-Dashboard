@@ -455,7 +455,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
 | `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
 | `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
-| `JD_TEST_POSTGRES_FULL_DSN` | a server started from the full template's image (`jd-postgres-full`, built from `backend/internal/api/recipes/postgres-full`) with the template's command line, as an account that may create databases, connected to the database it was created with; the test makes and drops one database of its own and leaves `pg_cron` as it found it | `TestLivePostgresFullCarriesItsExtensions` |
+| `JD_TEST_POSTGRES_FULL_DSN` | a server started from the full template's image (`jd-postgres-full`, built from `backend/internal/api/recipes/postgres-full`) on its own command, as an account that may create databases, connected to the database it was created with; the test makes and drops one database of its own and leaves `pg_cron` as it found it | `TestLivePostgresFullCarriesItsExtensions` |
 
 Some tests reach past a database to the machine and run only when asked:
 

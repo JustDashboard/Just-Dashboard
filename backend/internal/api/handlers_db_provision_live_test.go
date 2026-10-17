@@ -13,9 +13,10 @@ import (
 
 // TestLivePostgresFullCarriesItsExtensions holds a server started from the
 // full template to what the template says of it: the libraries it loads at
-// start are loaded, pg_cron works in the database the server was created
-// for, and every extension it carries can be created — the two that need
-// preloading included, which is the part a wrong command line breaks.
+// start are loaded, from its configuration rather than its command line,
+// pg_cron works in the database the server was created for, and every
+// extension it carries can be created — the two that need preloading
+// included, which is the part a wrong configuration breaks.
 //
 // JD_TEST_POSTGRES_FULL_DSN is an account that may create databases on such a
 // server, connected to the database it was created with. The test makes a
@@ -46,13 +47,18 @@ func TestLivePostgresFullCarriesItsExtensions(t *testing.T) {
 	db := open(dsn)
 	ctx := t.Context()
 
-	var preloaded, cronDatabase, current string
-	if err := db.QueryRowContext(ctx, `SELECT current_setting('shared_preload_libraries'), current_setting('cron.database_name'), current_database()`).
-		Scan(&preloaded, &cronDatabase, &current); err != nil {
+	var preloaded, source, cronDatabase, current string
+	if err := db.QueryRowContext(ctx, `SELECT setting, source, current_setting('cron.database_name'), current_database()
+		FROM pg_settings WHERE name = 'shared_preload_libraries'`).Scan(&preloaded, &source, &cronDatabase, &current); err != nil {
 		t.Fatal(err)
 	}
+	// A file, which ALTER SYSTEM and the Parameters page can override; a
+	// command line could not be.
+	if source != "configuration file" {
+		t.Errorf("shared_preload_libraries comes from %q", source)
+	}
 	loaded := strings.Split(strings.ReplaceAll(preloaded, " ", ""), ",")
-	for _, library := range tmpl.preload {
+	for _, library := range []string{"pg_cron", "pgaudit"} {
 		if !slices.Contains(loaded, library) {
 			t.Errorf("%s is not loaded: shared_preload_libraries = %q", library, preloaded)
 		}

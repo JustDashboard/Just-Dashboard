@@ -29,4 +29,20 @@ RUN set -eux; \
 		"postgresql-${PG_MAJOR}-repack"; \
 	rm -rf /var/lib/apt/lists/*
 
+# pg_cron and pgaudit can be created only in a server that loaded them at
+# start. They are named in the configuration every new cluster is made from,
+# the way TimescaleDB's image names its own library, rather than on the
+# container's command line: a setting given there outranks every file, and the
+# list could never be changed again from the server's own parameters.
+#
+# pg_cron's scheduler works in one database, and it is the one the server is
+# created for: written once, when the cluster is initialised, by a script the
+# image's entrypoint runs in that database. ALTER SYSTEM cannot run in a
+# transaction, so psql runs the statement the query builds (\gexec).
+RUN set -eux; \
+	sed -ri "s/^#?(shared_preload_libraries)\s*=\s*'[^']*'/\1 = 'pg_cron,pgaudit'/" /usr/share/postgresql/postgresql.conf.sample; \
+	grep -qF "shared_preload_libraries = 'pg_cron,pgaudit'" /usr/share/postgresql/postgresql.conf.sample; \
+	printf '%s\n' "SELECT format('ALTER SYSTEM SET cron.database_name = %L', current_database())" '\gexec' \
+		> /docker-entrypoint-initdb.d/jd-full-cron-database.sql
+
 LABEL io.just-dashboard.recipe="${JD_RECIPE}"

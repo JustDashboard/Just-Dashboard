@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"regexp"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -983,9 +982,6 @@ type provisionTemplate struct {
 	// read its password from the environment. It is a constant script: the
 	// secret reaches it through the environment, never through its text.
 	bootstrap string
-	// preload is the libraries a PostgreSQL server is started with, for the
-	// extensions it carries that cannot be created without them.
-	preload []string
 	// recipe is the Dockerfile a template's image is built from on this
 	// server, for a template no published image serves; empty for one that is
 	// pulled. extensions is what that image adds to the official one.
@@ -1089,16 +1085,16 @@ var provisionTemplates = map[string]provisionTemplate{
 	// image's layout and contract. The image is built here from a recipe in
 	// this repository (recipes/postgres-full) rather than pulled, under a bare
 	// name: one with no namespace resolves to Docker's own library, where
-	// nobody can publish an image a pull could mistake for this one. pg_cron
-	// and pgaudit only load at start, and pg_cron's scheduler works in one
-	// database, which is the one the server is created for.
+	// nobody can publish an image a pull could mistake for this one. The image
+	// itself loads pg_cron and pgaudit at start and points pg_cron at the
+	// database the server is created for, so it is started like any other.
 	"postgres-full": {
 		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL, full", image: "jd-postgres-full:18",
 		versions: []provisionVersion{
 			postgresRelease("18", "jd-postgres-full:18"), postgresRelease("17", "jd-postgres-full:17"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
-		env: postgresProvisionEnv, preload: []string{"pg_cron", "pgaudit"},
+		env:        postgresProvisionEnv,
 		recipe:     postgresFullRecipe,
 		extensions: []string{"vector", "postgis", "pg_cron", "pg_partman", "pgaudit", "hypopg", "pg_repack"},
 	},
@@ -1279,6 +1275,10 @@ type provisionBuild struct {
 
 func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
+	// The catalogue is the page's first read; a Docker that is slow to say
+	// whether an image is here costs the build state, not the page.
+	ctx, cancel := timeoutCtx(r, 5*time.Second)
+	defer cancel()
 	now := time.Now()
 	out := []provisionOption{}
 	for _, key := range provisionOrder {
@@ -1298,7 +1298,7 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 				one.EndOfLife = eol
 			}
 			if t.recipe != "" {
-				one.Build = s.recipeBuild(r.Context(), t, v)
+				one.Build = s.recipeBuild(ctx, t, v)
 			}
 			option.Versions = append(option.Versions, one)
 			if v.image == t.image {
@@ -1326,18 +1326,6 @@ type provisionRequest struct {
 	// sent back to it.
 	User     string `json:"user"`
 	Password string `json:"password"`
-}
-
-// postgresCommand is the server's own command line with the libraries it has
-// to load at start. Each setting is one argument handed to the image's
-// entrypoint, which passes them to the server it initialises with as well as
-// the one it runs, so an init script can already create these extensions.
-func postgresCommand(preload []string, database string) []string {
-	command := []string{"postgres", "-c", "shared_preload_libraries=" + strings.Join(preload, ",")}
-	if slices.Contains(preload, "pg_cron") {
-		command = append(command, "-c", "cron.database_name="+database)
-	}
-	return command
 }
 
 // provisionBinding turns the requested exposure into the host address the
@@ -1516,9 +1504,6 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	}
 	if tmpl.bootstrap != "" {
 		spec.Command = []string{"sh", "-c", tmpl.bootstrap}
-	}
-	if len(tmpl.preload) > 0 {
-		spec.Command = postgresCommand(tmpl.preload, database)
 	}
 	created, err := s.modules.docker.Create(ctx, spec, nil)
 	if err != nil {
