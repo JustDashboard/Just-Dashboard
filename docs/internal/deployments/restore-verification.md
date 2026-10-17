@@ -79,8 +79,11 @@ capture protocol. Other files retain ordinary filesystem capture and its changed
 
 Native dumps of saved PostgreSQL/MySQL/MongoDB/Redis connections are supported through the Databases
 owner and recorded manifests, including jobs with no filesystem source; see
-[deployment backup coverage](backup-coverage.md). Multi-container restore orchestration,
-external-service recovery and PITR remain outside this implementation. Copying live database data
+[deployment backup coverage](backup-coverage.md). Multi-container restore orchestration and
+external-service recovery remain outside this implementation. Point-in-time recovery of a PostgreSQL
+server is not part of it either: it is the database Backups page's own archive of the write-ahead log,
+recovered into a new container, described in
+[Databases → Point-in-time recovery](../backend/databases-proxy-platform.md#point-in-time-recovery). Copying live database data
 directories is not promoted to an application-consistent backup by this feature. Application checker
 coverage and actual production RPO/RTO must be established for each supported workload.
 

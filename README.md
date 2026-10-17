@@ -122,6 +122,7 @@ free.
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, accounts, grants and a live map
+- Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
 
 </td>
 </tr>
