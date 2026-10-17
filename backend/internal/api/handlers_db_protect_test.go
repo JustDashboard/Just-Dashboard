@@ -43,6 +43,8 @@ var protectedRouteVerdicts = map[string]string{
 	"PUT /access":          staysOpen,
 	"POST /access/preview": staysOpen,
 	"PUT /resources":       staysOpen,
+	"PUT /tls":             staysOpen,
+	"POST /tls/renew":      staysOpen,
 	"POST /power":          staysOpen,
 	"PUT /settings":        isRefused,
 	// A pooler is a container and, in one mode, an account in the database.

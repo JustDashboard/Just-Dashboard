@@ -2,8 +2,10 @@ package dbx
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -206,8 +208,15 @@ func redisRefusedDatabase(err error) bool {
 // redisOptions reads a connection string. The error is the parser's own
 // sentence without the string it was given, which holds the password.
 func redisOptions(dsn string) (*redis.Options, error) {
+	roots, dsn, err := redisServerCA(dsn)
+	if err != nil {
+		return nil, err
+	}
 	opt, err := redis.ParseURL(dsn)
 	if err == nil {
+		if roots != nil && opt.TLSConfig != nil {
+			opt.TLSConfig.RootCAs = roots
+		}
 		return opt, nil
 	}
 	if strings.Contains(dsn, "://") {
@@ -221,6 +230,31 @@ func redisOptions(dsn string) (*redis.Options, error) {
 	// A bare host:port is the form people paste out of a compose file, and
 	// rejecting it because it lacks a scheme would be pedantry.
 	return &redis.Options{Addr: dsn}, nil
+}
+
+// redisServerCA takes the dashboard authority's file out of a connection string
+// before go-redis, which has no such parameter, reads it, and returns the roots
+// it holds for the TLS configuration to verify against.
+func redisServerCA(dsn string) (*x509.CertPool, string, error) {
+	if !strings.Contains(dsn, serverCAParam+"=") {
+		return nil, dsn, nil
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, dsn, nil
+	}
+	q := u.Query()
+	file := q.Get(serverCAParam)
+	if file == "" {
+		return nil, dsn, nil
+	}
+	roots, err := serverRoots(file)
+	if err != nil {
+		return nil, "", fmt.Errorf("the certificate authority file for this connection could not be read: %w", err)
+	}
+	q.Del(serverCAParam)
+	u.RawQuery = q.Encode()
+	return roots, u.String(), nil
 }
 
 // RedisDatabases reports the numbered logical databases. Redis has a fixed set

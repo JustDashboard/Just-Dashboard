@@ -1587,7 +1587,7 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 // being drawn.
 var gatedCapabilities = []string{
 	// connections and discovery
-	"server", "provision", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
+	"server", "provision", "serverTLS", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
 	"serverDatabaseCreate", "serverDatabaseConnect",
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",

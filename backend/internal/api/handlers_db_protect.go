@@ -70,6 +70,8 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPut, "", nil},
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
+	{http.MethodPut, "/tls", nil},
+	{http.MethodPost, "/tls/renew", nil},
 	{http.MethodPut, "/resources", nil},
 	{http.MethodPost, "/access/preview", nil},
 	{http.MethodPost, "/power", nil},

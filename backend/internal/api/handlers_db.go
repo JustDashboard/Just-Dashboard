@@ -81,6 +81,10 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// different port binding, which is the Docker page's Recreate
 			// under another name and sits in the same group.
 			r.Method(http.MethodGet, "/{id}/access", s.handle(s.handleDBAccess))
+			// The certificate the server speaks TLS with, and the authority it
+			// comes from. Switching it recreates the container like the access
+			// change does; renewing replaces the files under the running server.
+			r.Method(http.MethodGet, "/{id}/tls", s.handle(s.handleDBTLS))
 			// What its container may use. A new or changed limit is applied in
 			// place; lifting one replaces the container, so the handler asks
 			// for destructive and spends its budget by hand when the body does.
@@ -89,13 +93,20 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// the firewall's plan — without doing any of it.
 			r.Method(http.MethodPost, "/{id}/access/preview", s.handle(s.handleDBAccessPreview))
 			s.destructive(r, func(r chi.Router) {
+				// A renewal asks the engine to read the new files and restarts
+				// the container where it cannot, so it sits with the change.
+				r.Method(http.MethodPost, "/{id}/tls/renew", s.handle(s.handleDBTLSRenew))
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
 				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))
+				r.Method(http.MethodPut, "/{id}/tls", s.handle(s.handleDBTLSUpdate))
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.
 		// The fleet and the topology are every connection at once — the
 		// section's landing page and its map of what talks to what.
+		// The authority's certificate is public, and a client needs it to check the
+		// server it is given a connection string for.
+		r.Method(http.MethodGet, "/tls/authority", s.handle(s.handleDBTLSAuthority))
 		r.Method(http.MethodGet, "/fleet", s.handle(s.handleDBFleet))
 		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
 		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
@@ -492,6 +503,9 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	// unseals is exactly the one somebody needs to be able to forget.
 	conn, err := s.storedConnection(r.Context(), id)
 	if err != nil {
+		return err
+	}
+	if err := s.refuseWhileTLS(r.Context(), id); err != nil {
 		return err
 	}
 	// No typed phrase: this forgets a connection string, it does not touch the

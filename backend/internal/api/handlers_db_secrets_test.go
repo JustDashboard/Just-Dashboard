@@ -90,7 +90,7 @@ func TestNoRouteQuotesAConnectionStringsPassword(t *testing.T) {
 				case rest == "/redis/monitor" || rest == "/redis/subscribe":
 					// A WebSocket upgrade cannot be asked through a recorder.
 					continue
-				case rt.method != http.MethodGet && (rest == "/access" || rest == "/resources" || rest == "/power"):
+				case rt.method != http.MethodGet && (rest == "/access" || rest == "/resources" || rest == "/power" || rest == "/tls" || rest == "/tls/renew"):
 					// These act on the machine and not on the connection.
 					continue
 				}

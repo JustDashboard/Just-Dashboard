@@ -135,6 +135,13 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 			return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before dropping this linked database")
 		}
 	}
+	if sameDatabase(conn, target) && !req.RemoveContainer {
+		// The connection goes with its database, and the server would keep its
+		// certificate with nothing left to renew it.
+		if err := s.refuseWhileTLS(r.Context(), id); err != nil {
+			return err
+		}
+	}
 	// Let go of our own connections first. Postgres refuses to drop a database
 	// while anything is attached to it, and the pool this dashboard has been
 	// browsing with is one of the things attached.
@@ -403,6 +410,9 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 // directConnectionURL is the saved string for the place a program will run.
 func (s *Server) directConnectionURL(ctx context.Context, conn *dbConnection, dsn, target string) (string, error) {
 	switch target {
+	case "", "host":
+		// Pasted into another program, which has no copy of the authority's file.
+		return s.applicationDSN(ctx, conn, dsn), nil
 	case "container":
 		return s.databaseApplicationURL(ctx, conn, dsn)
 	case "public":
@@ -410,7 +420,7 @@ func (s *Server) directConnectionURL(ctx context.Context, conn *dbConnection, ds
 		// was: what gets pasted on a laptop. A connection that already names
 		// another machine is handed back as it is — that address is the one
 		// everybody else uses too.
-		return s.publicDatabaseURL(ctx, conn, dsn)
+		return s.publicDatabaseURL(ctx, conn, s.applicationDSN(ctx, conn, dsn))
 	}
 	return dsn, nil
 }

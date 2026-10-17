@@ -268,6 +268,17 @@ func validContainerName(name string) bool {
 // silent multi-minute wait with no progress anywhere. `progress` may be nil
 // when the caller has nowhere to show it.
 func (c *Client) Create(ctx context.Context, spec ContainerSpec, progress chan<- PullProgress) (*CreateResult, error) {
+	return c.create(ctx, spec, progress, nil)
+}
+
+// BeforeStart runs once a container exists and has not been started, with its
+// id. A file written to it now is there when the process begins, which is the
+// only way to hand a server a certificate it reads at startup without a first
+// start that fails for want of it. An error leaves the container created and
+// unstarted, as a start that fails does.
+type BeforeStart func(ctx context.Context, id string) error
+
+func (c *Client) create(ctx context.Context, spec ContainerSpec, progress chan<- PullProgress, before BeforeStart) (*CreateResult, error) {
 	defer c.forgetDiskUsage()
 	cli, err := c.api()
 	if err != nil {
@@ -337,6 +348,11 @@ func (c *Client) Create(ctx context.Context, spec ContainerSpec, progress chan<-
 		}
 
 		res := &CreateResult{ID: created.ID, Name: spec.Name, Warnings: warnings}
+		if before != nil {
+			if err := before(ctx, created.ID); err != nil {
+				return res, fmt.Errorf("created %s but could not prepare it: %w", ShortID(created.ID), err)
+			}
+		}
 		if spec.Start {
 			if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 				if portalloc.IsConflict(err) && len(hostCfg.PortBindings) > 0 && attempt < 3 {
@@ -838,6 +854,8 @@ type RecreateOptions struct {
 	// reusing it. This is "edit a running container", which Docker does not
 	// support and which every operator assumes exists.
 	Spec *ContainerSpec `json:"spec,omitempty"`
+	// BeforeStart is run on the replacement before it is started.
+	BeforeStart BeforeStart `json:"-"`
 }
 
 // Recreate replaces a container with a new one from the same (or an edited)
@@ -948,7 +966,7 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 			return nil, restore(fmt.Errorf("could not stop %s: %w", name, err), nil)
 		}
 	}
-	res, err := c.Create(ctx, *spec, progress)
+	res, err := c.create(ctx, *spec, progress, opts.BeforeStart)
 	if err != nil {
 		return nil, restore(err, res)
 	}
