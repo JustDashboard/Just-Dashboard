@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 118
+  flags (105 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -292,6 +292,49 @@ is connected by naming the instance found, not by typing its address again.
   one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
   preferred) in place of loopback, for pasting on another machine.
+- **A connection pooler is the database's, and goes where it goes.** `PUT /databases/{id}/pooler`
+  runs PgBouncer (`edoburu/pgbouncer`, pinned by version in `dbx.PoolerImage`) in a container
+  `<database container>-pgbouncer`, on a private bridge `jd-pool-<id>` it shares with the database, which it
+  reaches by the container's name (`api/database_pooler.go`, `api/handlers_db_pooler.go`, `dbx/pooler.go`).
+  It is offered where the capability table says `pooler`: PostgreSQL and TimescaleDB, not CockroachDB or
+  YugabyteDB, for a container that is running, not compose's and on a bridge network. A request says
+  `poolMode` (`transaction` or `session`), `poolSize` (per database and account), `maxClientConn` and
+  `authMode`, and is the same call to turn it on and to change it: `ensurePooler` makes the container,
+  network and files match the record and is safe to run again.
+  - *Two files, no secret in the environment.* `pgbouncer.ini` and `userlist.txt` are rendered by `dbx` from
+    the settings and the connection's credentials, copied into the container before it starts, and
+    reread by `SIGHUP` (`dockerx.Signal`) so a changed setting or password does not drop a client. The
+    image's own entrypoint, which writes its configuration from environment variables, is bypassed for that
+    reason. Only a change of `authMode` restarts it: PgBouncer keeps the accounts it loaded from the userlist
+    through a reload and then asks them the wrong way. `userlist` authenticates the connection's own account
+    from its password, written as it is because PgBouncer must log in to the database as it. `auth_query`
+    adds, in the connection's database, an account `jd_pgbouncer` that can only call one `SECURITY
+    DEFINER` function `jd_pgbouncer.get_auth`, owned by the connection's superuser, and removes both when
+    the mode is left or the pooler turned off; it is refused for a connection that does not sign in as a
+    superuser. Both modes also list `jd_pooler_stats`, whose sealed password (`db_poolers.secrets_enc`) is how
+    the dashboard reads the console and which can only `SHOW`.
+  - *Kept in step.* `db_poolers` keeps a digest of the files last written (`config_sha`). `poolerKeeper`
+    compares it with the files the connection's current credentials make every twenty seconds and writes
+    them again when they differ, which covers a password changed through the adopt that re-seals it, an
+    edit of the connection and an account reset alike; `GET …/pooler` reports `inSync`.
+  - *Where it is published.* On the host address its database is bound to: loopback unless the access
+    switch has opened the database (or a private address was chosen on the Docker page). The same
+    `PUT …/access` that recreates the database recreates the pooler with it, opens or closes the
+    firewall for the pooler's port by the same comment-marked rule, and records both in
+    `database.access.change`. Nothing else makes it public. Its name is `db-<id>-pool.jd.internal`, joined
+    to a linked environment's network by the same binding pass that joins the database
+    (`attachPooler` in `deployment_database_network.go`), and `${{database.<id>.pooled}}` — with the same
+    shape suffixes as the plain reference — resolves to that name and port 6432 (or to the loopback port
+    for a host-network workload).
+  - *Lifecycle.* `POST /power` start and stop carry the pooler with the database (`pooler` in the reply and
+    the audit entry); a restart leaves it, since PgBouncer reconnects by itself. Forgetting the connection,
+    dropping its container and `DELETE …/pooler` remove the container and the network and keep the database.
+    On a protected connection every change to the pooler is refused: one mode writes to the database.
+  - `GET …/pooler/stats` answers `SHOW VERSION`, `SHOW POOLS` and `SHOW STATS` from the console on the
+    published port (`dbx.ReadPooler`); the `pgbouncer` pseudo-database is left out. `GET /{id}/url?pooled=1`
+    is the connection string through the pooler for the same `target`s, audited as a reveal like the direct
+    one. `TestLivePooler` (`JD_POOLER_LIVE=1`) runs the whole of it against a PostgreSQL and a PgBouncer
+    container of its own.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -1484,7 +1527,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the ten it calls): 228 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1547,6 +1590,10 @@ and `protectReadOnlyConnections`.
 | `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
 | `GET` | `/databases/{id}/overview` | read | — | — | — |
 | `GET` | `/databases/{id}/ping` | read | — | — | — |
+| `GET` | `/databases/{id}/pooler` | read | — | — | — |
+| `PUT` | `/databases/{id}/pooler` | `system.admin` | — | `database.pooler.enable` / `database.pooler.update` | refused |
+| `DELETE` | `/databases/{id}/pooler` | `system.admin` + `destructive` | yes | `database.pooler.disable` | refused |
+| `GET` | `/databases/{id}/pooler/stats` | read | — | — | — |
 | `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
 | `GET` | `/databases/{id}/schemas` | read | — | — | — |
 | `GET` | `/databases/{id}/stats` | read | — | — | — |

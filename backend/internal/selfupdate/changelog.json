@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Run PgBouncer in front of a PostgreSQL database from its Pooling settings",
+          "detail": "A one-click connection pooler in its own container on a private network with the database, published where the database is and on this server only by default. Choose transaction or session pooling, the pool size and the client limit, and authenticate through a userlist kept in step with the connection's password or through auth_query. Connect shows the pooled string beside the direct one, a deployment variable can hold the pooled reference ${{database.ID.pooled}}, and the page reads the pools and statistics. The pooler starts, stops and is removed with its database."
         }
       ]
     },

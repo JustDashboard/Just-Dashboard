@@ -18,6 +18,12 @@ keeps the shape its previous reference asked for. Quick setup also offers Postgr
 x86-64, the one architecture that image is published for), which Databases already recognises, and
 refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
 
+A PostgreSQL connection that has a [connection pooler](../backend/databases-proxy-platform.md) also has
+`${{database.5.pooled}}` (and `5.pooled.jdbc`, `5.pooled.url.app_cache`, …): the same string with the host
+`db-5-pool.jd.internal` and port 6432. The pooler joins the environment's network in the same pass that joins
+the database, under that name, and the pooled reference fails with a sentence of its own when the connection
+has no pooler. Relinking a variable never carries `.pooled` over to another database.
+
 Creation stages entered variables in the draft's encrypted environment column before preflight and
 commits them with the initial project transaction. A required connection can therefore be satisfied by
 a managed database reference or an external provider URL before the first run. The browser receives
