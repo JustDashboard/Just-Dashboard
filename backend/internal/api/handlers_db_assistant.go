@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -171,11 +170,10 @@ func assistantCheckFailed(err error) error {
 	if !ok {
 		return httpx.Err(http.StatusBadGateway, "assistant_check_failed", "the provider could not be asked: "+err.Error()).Retry()
 	}
-	out := &httpx.APIError{
+	return &httpx.APIError{
 		Status: http.StatusBadRequest, Code: "assistant_check_failed", Message: pe.Message,
 		Field: pe.Field, Raw: pe.Raw, Retryable: pe.Retryable,
 	}
-	return out
 }
 
 // handleAssistantRemove turns the assistant off and forgets the key.
@@ -207,7 +205,7 @@ type assistantRequest struct {
 }
 
 // assistantTurn is the turn deadline: a question that has not been answered
-// in five minutes is not going to be.
+// in five minutes is not going to be. assistantFailure says it in words.
 const assistantTurn = 5 * time.Minute
 
 // handleDBAssistant asks the assistant one question, or answers the calls it
@@ -431,7 +429,7 @@ func assistantFailure(request, turn context.Context, err error) (string, string)
 	case request.Err() != nil:
 		return "the answer was stopped", "cancelled"
 	case errors.Is(turn.Err(), context.DeadlineExceeded):
-		return fmt.Sprintf("the answer took longer than %s and was stopped", assistantTurn), "failed"
+		return "the answer took longer than five minutes and was stopped", "failed"
 	case errors.Is(err, assistant.ErrMalformedCall):
 		return err.Error() + "; ask again", "failed"
 	}

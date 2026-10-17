@@ -13,9 +13,10 @@ import (
 )
 
 // OpenAI's chat completions, which OpenAI, the gateways and every local model
-// server speak: Ollama, LM Studio, vLLM, llama.cpp. Only what all of them
-// accept is sent — the model, the messages and the stream — so no field one
-// of them does not know turns the request down. The answer's length is left
+// server speak: Ollama, LM Studio, vLLM, llama.cpp. What is sent is what all of
+// them take — the model, the messages, the stream, and the ask for the usage
+// in the last chunk, which a server that does not know it ignores — so no
+// field one of them lacks turns the request down. The answer's length is left
 // to the server, whose context the dashboard does not know.
 
 type openAIClient struct {
