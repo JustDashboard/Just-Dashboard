@@ -13,6 +13,13 @@
           "detail": "A new database can be limited when it is created, with sizes filled in for its engine and held to this server's memory and processors. Settings → Resources changes the limits of a container the dashboard may change, in place and without a restart, beside its peak in the last hour and the engine's own buffer (shared_buffers, innodb_buffer_pool_size, maxmemory and their kind), saying what a limit under that buffer does. Lifting a limit replaces the container after asking, keeping its data. Every change is audited, and a replacement made by the dashboard keeps the limits."
         },
         {
+        },
+        {
+          "kind": "added",
+          "text": "Recover a PostgreSQL server to any moment, not only to its last dump",
+          "detail": "Databases → Backups can archive the write-ahead log of a PostgreSQL server the dashboard runs with WAL-G, into a directory, S3 or Backblaze B2 — or a backup job's destination — encrypted to a key only a recovery opens, beside base backups on a schedule and as many days kept as asked. The page shows the moments it can go back to, how archiving is going and WAL-G's own words when it fails. A recovery to the latest moment, a moment to the second or a named restore point starts a new server beside the old one, which is never touched; keep both, or switch the copy in for the server, and archiving carries on into an archive of its own."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."

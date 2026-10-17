@@ -483,8 +483,10 @@ Some tests reach past a database to the machine and run only when asked:
 | `JD_TEST_STATEMENTS_CONTAINER=<name>` | starts PostgreSQL servers of its own, one at a time, as `<name>-postgres`, `-pgvector`, `-postgis`, `-timescaledb` and `-setup` with a `-data` volume each: every PostgreSQL template counting its statements from its first start (`TestLiveTemplatesCountStatementsFromTheFirstStart`), and the preload, restart and extension on a server that never loaded the module (`TestLiveStatementsSetupKeepsTheLibrariesAServerLoads`); it removes each container and volume when its part is done |
 | `JD_TEST_PRELOAD_POSTGRES_DSN` | a PostgreSQL in a container of its own, with `preload` in its name and nothing on its command line about the libraries it loads, signed in to as a superuser: the test adds libraries to `shared_preload_libraries`, restarts it through the power route, creates the extensions and puts it back as it was (`TestLivePreloadRestartAndCreate`); pg_cron is used where the image has it |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
+| `JD_TEST_WALG=<path>` | a WAL-G release binary, the one `backend/Dockerfile` pins: provisions a PostgreSQL 17 through the route, archives it into a directory, recovers copies to a moment and to a restore point, switches one in, turns archiving off and deletes an archive (`TestLivePointInTimeRecoveryIntoADirectory`); it creates and removes its own `jdt-pitr-postgres-…` containers, volumes and directory |
+| `JD_TEST_PITR_S3=http://key:secret@host:port/bucket` | with `JD_TEST_WALG`, the same through an S3 store the run owns — a MinIO container on Docker's network, so the server's container reaches it — including a recovery while the server is stopped and one past the end of the archive (`TestLivePointInTimeRecoveryIntoS3`) |
 
-The ones that need Docker (the inventory, provisioning, power, preload and statements tests) read
+The ones that need Docker (the inventory, provisioning, power, preload, statements and point-in-time recovery tests) read
 `JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
 
 ### Fixtures

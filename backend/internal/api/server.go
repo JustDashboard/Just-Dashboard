@@ -88,7 +88,10 @@ type Server struct {
 	// (handlers_procs.go).
 	procContainers containerNames
 
-	dbConns        dbConnState
+	dbConns dbConnState
+	// Point-in-time recovery's readings and base backup schedule
+	// (database_pitr.go).
+	pitr           pitrState
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
@@ -177,6 +180,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	s.sweepPITR(cleanupCtx)
 	// Before the engine resumes any run: a release task this process's
 	// predecessor was running has nobody reading its output or its exit.
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
@@ -231,6 +235,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupSched.Start(ctx); err != nil {
 		return err
 	}
+	s.startPITRSchedule(ctx)
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	s.ingressStop, s.ingressDone = stopIngress, make(chan struct{})
 	go func() {
@@ -308,6 +313,7 @@ func (s *Server) Shutdown() {
 		s.Log.Warn("remote desktop runtime client shutdown failed", "err", err)
 	}
 	s.modules.backupSched.Stop()
+	s.stopPITRSchedule()
 	s.modules.deploySchedule.Stop()
 	s.modules.selfUpdate.Stop()
 	s.modules.certKeeper.Stop()

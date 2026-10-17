@@ -14,7 +14,7 @@ capability table below), never by a page.
 discovery, dumps. `internal/api` is the routes. `handlers_db.go` mounts `/databases` behind the
 protected-connection guard, and each surface registers its own routes from its own file —
 `mountDatabaseAdminRoutes`, `…RedisRoutes`, `…MongoRoutes`, `…InventoryRoutes`, `…ConnectionRoutes`,
-`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes` and `…TransferRoutes` — grouped by the capability
+`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes`, `…TransferRoutes` and `…PITRRoutes` — grouped by the capability
 it needs. [Routes](#routes) lists every one with its capability, whether it is destructive, the
 action it is audited as and what a protected connection does with it. The pages over them are the
 `/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 116
-  flags (103 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
+  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -1885,6 +1885,105 @@ the detail of each classifier is below, with the surface it guards.
   renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
   (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
 
+### Point-in-time recovery
+
+A dump is the database at one moment. A PostgreSQL server this dashboard runs can also hand every
+finished segment of its write-ahead log to WAL-G, beside base backups taken on a schedule, and be
+recovered as it was at any second the archive covers. It is the Backups page's second panel, offered
+where the capability table says `pitr` (PostgreSQL and TimescaleDB; not CockroachDB or YugabyteDB,
+which keep no such log) and the server is one this feature can archive: a container that is not
+compose's, running one of the provisioning list's PostgreSQL images, with its cluster on a named volume
+and the server's own command (`pitrServerOf`, `database_pitr.go`). Anything else is read with the
+reason and offered nothing. The engine-side half — settings, WAL-G's configuration, what its listings
+say, the window, the base backup a recovery starts from, retention — is `dbx/pitr.go`.
+
+- **WAL-G runs inside the server's own image, never in this process.** The dashboard's image carries a
+  pinned WAL-G release (`backend/Dockerfile`, checked against its digest); `dbx.LoadWALGTool` packs it
+  with the ELF loader and libraries it was linked against, read from the dashboard's own filesystem,
+  and a constant wrapper (`/jd-pitr/wal-g`) that starts it through that loader — most of the images are
+  Alpine's and have no glibc. The tool and WAL-G's configuration (`walg.json`, mode 0600, the server's
+  account's) are copied into a volume per archive (`<stream>-pitr`) through a created, never-started
+  container of the server's image, and mounted read-only at `/jd-pitr`. While the server runs, every
+  WAL-G command is a `docker exec` in it as `postgres` (`dockerx.ExecStream`); while it does not, a
+  one-shot container of its image (`RunToCompletion`, 512 MiB). A directory destination is only ever a
+  bind mount of the operator's path, resolved through `files.Resolve`, handed to the server's account
+  by a constant `chown` in a container — so what WAL-G writes is read back by the account that wrote it.
+- **Archiving is set up with a restart.** `POST /{id}/pitr` tests the destination as a backup job's is
+  tested, makes an OpenPGP key pair (`dbx.NewWALKey`), installs the tool, proves from inside the server's
+  image that the destination takes a file (`st put` of the tool's digest), records the archive and
+  recreates the container with `archive_mode=on`, `archive_command=/jd-pitr/wal-g wal-push %p` and
+  `archive_timeout=60` on its command line (`dbx.PostgresCommandSettings` keeps every other flag;
+  `wal_level` is raised only from `minimal`), after a `CHECKPOINT` and the power route's 90-second
+  grace. The settings are on the command line rather than in `postgresql.auto.conf` so that a copy
+  restored from a base backup does not archive into its source's archive. `preview: true` answers the
+  plan — the command line, the mounts and the location — and changes nothing; the form shows it. The
+  first base backup follows in the same job.
+- **The destinations are a backup job's**: a directory on this server (default
+  `JD_BACKUP_DIR/wal`), S3 or Backblaze B2, each archive a folder of its own (`<container>-<UTC
+  stamp>`). `fromJob` takes an existing backup job's destination and sealed keys, so a bucket's keys
+  are not typed twice. Keys are sealed with `JD_MASTER_KEY` like a job's and never returned.
+- **Encrypted with WAL-G's own OpenPGP**, to a key made for the archive. The server is given only the
+  public half, which is all encrypting needs: a server, or a superuser reading `walg.json` through
+  `pg_read_file`, cannot read its own archive back. The private half is sealed in the store and written
+  only into a recovery's own volume, which is removed once the copy has recovered.
+- **Base backups and retention.** `POST /{id}/pitr/backup` (and each firing of the archive's cron
+  schedule, `database_pitr_schedule.go`, the backup jobs' parser) runs `backup-push` in the server.
+  Retention by time follows: `dbx.WALRetentionKeep` keeps the newest base backup that finished before
+  the window began — the moments at its start are replayed from it — and `delete before FIND_FULL`
+  removes what is older; the newest backup is never deleted. `PUT /{id}/pitr` changes the schedule and
+  the days kept.
+- **What the panel reads.** `GET /{id}/pitr` is the archive (destination, key fingerprint, schedule,
+  days kept, the kept listing of its base backups and newest segment), `pg_stat_archiver` read over the
+  connection (last archived segment and when, failures, the `.ready` queue where the account may list
+  it), WAL-G's own last error out of the server's log when archiving is failing, the recoverable window
+  (from the end of the oldest base backup to the newest archived segment, or the archiver's later
+  report), the next base backup, the restore points and the recovered copies. The destination is listed
+  again at most once a minute, and only through the running server: a read never starts a container.
+  `drift` is an archive whose container was made again without its settings.
+- **Recovery is into a new container, never over the running one.** `POST /{id}/pitr/restore` takes
+  `latest`, a time or a restore point's name (`preview: true` answers the base backup, the copy's name,
+  its loopback port and its recovery settings). The job fetches the base backup into `<copy>-data` in a
+  one-shot container, creates the copy from the server's spec — its own volume and port, Docker's
+  default network, no deployment labels, restart policy `no` while it recovers, in the image the archive
+was written by (a server since moved to a newer major cannot start the older cluster) — with `recovery.signal`
+  and `restore_command`/`recovery_target_*` on its command line, follows its log into the job and waits
+  for it to leave recovery. A time later than every commit archived ends PostgreSQL's recovery with
+  "recovery ended before configured recovery target was reached"; every commit before it is then all
+  there is, so the copy is started again to the end of the log. Finally the copy is recreated without
+  the recovery settings or the archive's mounts, its key volume removed, and saved as a connection of
+  its own (`docker:<copy>`). A port held by a stopped container is never given to a copy: the server
+  being recovered is often the stopped one. Anything a recovery made is removed if it does not finish.
+- **Then keep both or switch.** `POST /{id}/pitr/restores/{rid}/switch` stops the server, renames it
+  `<name>-replaced-<stamp>` with restart policy `no` (kept, with its volume and its archive's tool), and
+  recreates the copy under the server's name with its ports, networks and labels, in the copy's own image — so applications,
+  saved connections and the deployment network reconciler reach the copy without being told. A server
+  that archived goes on archiving into a new archive with the same destination and key, since the copy's
+  history parted from the old one; the old archive ends and stays listed under *Earlier archives*, the
+  only place the moments before the switch are, until `DELETE /{id}/pitr/archives/{aid}` deletes it.
+  A switch that fails puts both containers back.
+- **Restore points.** `POST /{id}/pitr/restore-points` runs `pg_create_restore_point` and `pg_switch_wal`
+  (so the name reaches the archive now) and records the name and LSN for the recovery form.
+- **Turning it off** (`DELETE /{id}/pitr`) restarts the server without the settings and keeps the archive
+  unless `deleteArchive` is set; the tool volume, which holds the destination's keys, is removed.
+- **Jobs and audit.** Every operation is a job under `database.pitr.<container>.`, one at a time per
+  server and refused while a dump or restore runs against the connection; the page watches it as it
+  watches a dump. Each request is audited when answered and each job's ending as `….finish` (a
+  scheduled base backup as the `system` actor). Setting up, turning off, switching and deleting an
+  archive are destructive (`s.destructive`, or by hand for setting up, whose plan shares the path;
+  ordinary confirmation); recovery into a new container is `system.admin`; a base backup and a restore point are `service.control`. On a protected connection
+  only the switch is refused, since it replaces what the connection reaches.
+- **What an interrupted job leaves is swept at start** (`sweepPITR`), judged by the role label every
+  container and volume of the feature carries (`io.just-dashboard.pitr.role`) and by the records, never
+  by a name: the containers and volumes made for one command or one install, a copy recorded as
+  `recovering` — a recovery is recorded before it makes anything — with its data and the volume holding
+  the archive's private key, a recovery's key volume nothing mounts, and an archive's tool volume no
+  archive was ever recorded for, which holds a destination's keys. A copy that finished recovering is
+  a database of its own and is never touched, and its record outlives the archive it came from. The
+  schedule ends an archive whose server's container is gone, and keeps the archive.
+- **Limits.** One server's archive is one cluster's timeline: after a major-version upgrade, turn
+  point-in-time recovery off and on again. An install whose dashboard image predates WAL-G, or an
+  architecture WAL-G publishes no build for, is told so and offered nothing.
+
 ### Tests
 
 Which variables name which fixture, which tests fall back to a standard port and which never do, and the
@@ -1911,7 +2010,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the ten it calls): 231 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the eleven it calls): 240 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1935,7 +2034,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  30 open, 12 by content, 20 preview only, 63 refused.
+  37 open, 12 by content, 20 preview only, 64 refused.
 
 **Every database** (20)
 
@@ -2126,6 +2225,20 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
 | `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
 
+**Point-in-time recovery** (9)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/pitr` | read | — | — | — |
+| `POST` | `/databases/{id}/pitr` | `system.admin` | by content: not a `preview` | `database.pitr.enable`, `.finish` | open |
+| `PUT` | `/databases/{id}/pitr` | `system.admin` | — | `database.pitr.update` | open |
+| `DELETE` | `/databases/{id}/pitr` | `system.admin` + `destructive` | yes | `database.pitr.disable`, `.finish` | open |
+| `DELETE` | `/databases/{id}/pitr/archives/{aid}` | `system.admin` + `destructive` | yes | `database.pitr.archive.delete`, `.finish` | open |
+| `POST` | `/databases/{id}/pitr/backup` | `service.control` | — | `database.pitr.backup`, `.finish` | open |
+| `POST` | `/databases/{id}/pitr/restore` | `system.admin` | — | `database.pitr.restore`, `.finish` | open |
+| `POST` | `/databases/{id}/pitr/restore-points` | `service.control` | — | `database.pitr.restore_point` | open |
+| `POST` | `/databases/{id}/pitr/restores/{rid}/switch` | `system.admin` + `destructive` | yes | `database.pitr.switch`, `.finish` | refused |
+
 **Redis** (43)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
@@ -2240,6 +2353,10 @@ What the table cannot say in a cell:
 - A `/ddl/*` route in the `service.control` group needs the destructive capability when its plan
   rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for a preview as
   much as for a run.
+- `POST …/pitr` and `POST …/pitr/restore` take `preview: true`, which answers the plan and runs
+  nothing. The setup form reads the plan as it is filled in, so `POST …/pitr` asks for the destructive
+  capability and spends `destrLim` by hand (`requireDestructive`) only for a request that is not a
+  preview; a form filled in key by key would otherwise have spent the budget its real request needs.
 - The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
 - `GET /databases/inventory`, `GET /databases/fleet` are `read` and answer more
   for `system.admin`; the sections above say what.

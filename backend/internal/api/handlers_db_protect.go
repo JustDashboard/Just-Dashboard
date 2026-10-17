@@ -80,6 +80,18 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/backup", nil},
 	{http.MethodPost, "/backups/upload", nil},
 	{http.MethodDelete, "/backups", nil},
+	// Archiving the log, a base backup and a named moment in it leave what is
+	// in the database alone, as a dump does; so does recovering a copy into a
+	// container of its own, and deleting an archive the server no longer
+	// writes. Switching a copy in for the server replaces what the connection
+	// reaches, which is a restore, and is not on this list.
+	{http.MethodPost, "/pitr", nil},
+	{http.MethodPut, "/pitr", nil},
+	{http.MethodDelete, "/pitr", nil},
+	{http.MethodPost, "/pitr/backup", nil},
+	{http.MethodPost, "/pitr/restore-points", nil},
+	{http.MethodPost, "/pitr/restore", nil},
+	{http.MethodDelete, "/pitr/archives/{aid}", nil},
 	// The dashboard's own state about the connection.
 	{http.MethodPost, "/queries", nil},
 	{http.MethodPut, "/queries/{qid}", nil},

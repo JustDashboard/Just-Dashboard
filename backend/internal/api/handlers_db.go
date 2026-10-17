@@ -145,6 +145,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		s.mountDatabaseSchemaRoutes(r)
 		s.mountDatabaseOpsRoutes(r)
 		s.mountDatabaseTransferRoutes(r)
+		s.mountDatabasePITRRoutes(r)
 		s.mountDatabaseAlertRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))

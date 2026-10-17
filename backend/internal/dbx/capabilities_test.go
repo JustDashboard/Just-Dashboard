@@ -168,6 +168,8 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"restoreNewDatabase": "postgres mysql sqlserver mongodb redis",
 		"copy":               "postgres mysql sqlserver mongodb redis",
 		"copyStructureOnly":  "postgres mysql sqlserver",
+		// The write-ahead log WAL-G archives.
+		"pitr": "postgres -cockroachdb -yugabytedb",
 	}
 
 	has := func(words string, d Driver, flavor string) bool {

@@ -273,6 +273,75 @@ CREATE TABLE IF NOT EXISTS db_inventory_ignored (
   ignored_by TEXT NOT NULL DEFAULT ''
 );
 
+-- Point-in-time recovery: a PostgreSQL server's write-ahead log archived by
+-- WAL-G into a backup destination, beside scheduled base backups. One row per
+-- archive: the server it is for, by container name (which survives the
+-- container being recreated), the folder inside the destination it writes,
+-- the destination with its keys sealed as a backup job's are, and the key
+-- pair the archive is encrypted with — the public half in the clear, because
+-- that is all a server is handed, and the private half sealed. A server
+-- writes into at most one archive (ended_at = 0). The others are kept for as
+-- long as what they hold is: a moment from before a switch is only in the
+-- archive the server had then. reading is the archive's last listing, so the
+-- page can say what it covers without asking the destination on every poll.
+CREATE TABLE IF NOT EXISTS db_wal_archives (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  container         TEXT NOT NULL,
+  connection_id     INTEGER NOT NULL DEFAULT 0,
+  stream            TEXT NOT NULL,
+  target_kind       TEXT NOT NULL,
+  target_cfg        TEXT NOT NULL DEFAULT '{}',
+  secrets_enc       TEXT NOT NULL DEFAULT '',
+  public_key        TEXT NOT NULL,
+  private_key_enc   TEXT NOT NULL,
+  schedule          TEXT NOT NULL DEFAULT '',
+  retention_days    INTEGER NOT NULL DEFAULT 7,
+  image             TEXT NOT NULL DEFAULT '',
+  tool              TEXT NOT NULL DEFAULT '',
+  created_at        INTEGER NOT NULL,
+  created_by        TEXT NOT NULL DEFAULT '',
+  ended_at          INTEGER NOT NULL DEFAULT 0,
+  reading           TEXT NOT NULL DEFAULT '',
+  read_at           INTEGER NOT NULL DEFAULT 0,
+  last_backup_at    INTEGER NOT NULL DEFAULT 0,
+  last_backup_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_archives_container ON db_wal_archives(container, ended_at);
+
+-- Moments named in an archive's log with pg_create_restore_point, so a
+-- recovery can be asked to stop at one by the name it was given here.
+CREATE TABLE IF NOT EXISTS db_wal_restore_points (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_id INTEGER NOT NULL REFERENCES db_wal_archives(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  lsn        TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_restore_points_archive ON db_wal_restore_points(archive_id, created_at DESC);
+
+-- A copy recovered from an archive into a container of its own, and what
+-- became of it: kept beside the server, or switched in for it, with the name
+-- the server it replaced was set aside under. A copy is a database of its own
+-- once it has recovered, so its record outlives the archive it came from.
+CREATE TABLE IF NOT EXISTS db_wal_restores (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  archive_id    INTEGER NOT NULL DEFAULT 0,
+  source        TEXT NOT NULL,
+  container     TEXT NOT NULL,
+  connection_id INTEGER NOT NULL DEFAULT 0,
+  port          INTEGER NOT NULL DEFAULT 0,
+  target        TEXT NOT NULL DEFAULT '{}',
+  base_backup   TEXT NOT NULL DEFAULT '',
+  recovered_to  INTEGER NOT NULL DEFAULT 0,
+  state         TEXT NOT NULL DEFAULT 'ready',
+  replaced      TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  created_by    TEXT NOT NULL DEFAULT '',
+  switched_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_db_wal_restores_archive ON db_wal_restores(archive_id, created_at DESC);
+
 -- Boards live with the dashboard's other durable state, including embedded
 -- Excalidraw image data. Revision guards prevent a stale tab overwriting a
 -- newer save. The preview is derived from the scene on every save so the list
