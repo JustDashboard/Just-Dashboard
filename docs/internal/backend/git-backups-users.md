@@ -205,7 +205,8 @@ artifact digest and use the run's original destination even after job edits. Leg
 but cannot prove deployment coverage. Jobs may explicitly select SQLite files for native `VACUUM INTO`
 capture, with snapshot digests in the manifest and live sidecars omitted. Jobs may also name saved
 database connections (`database_dumps`): each run asks the Databases owner for a native dump of every
-one (`dbx.Dump`: pg_dump, mysqldump, mongodump, Redis, or the built-in driver dump) into `database-NNNN/`
+one (`dbx.Dump`: pg_dump, mysqldump, mongodump, or the built-in driver dump, which for Redis is gzipped
+JSON Lines of each key's `DUMP` payload and not an RDB file) into `database-NNNN/`
 inside the archive and records connection, engine, method, file, digest and size in the manifest; a
 failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, ordinary
 confirmation) extracts one recorded dump bounded by its manifest size,
