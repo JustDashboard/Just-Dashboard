@@ -2646,7 +2646,7 @@ test("an empty list is explained by what the server counted, and by nothing it d
   await expect(dialog).toContainText("1 candidate is on a table that cannot be proposed for")
   await expect(dialog.getByRole("radio")).toHaveCount(0)
   await expect(dialog.getByRole("button", { name: "Try it" })).toHaveCount(0)
-  await dialog.getByRole("button", { name: "Close" }).click()
+  await dialog.getByRole("button", { name: "Close" }).first().click()
 
   // Nothing counted: only what the reader of the plan could not find is said.
   await mockAdvice(page, {
@@ -2666,7 +2666,7 @@ test("a refused question is said in the engine's words, and the dialog stays usa
   await results(page).getByRole("button", { name: "What if?" }).click()
   const dialog = whatIfDialog(page)
   await expect(dialog.getByRole("alert")).toContainText('syntax error at or near "selec"')
-  await dialog.getByRole("button", { name: "Close" }).click()
+  await dialog.getByRole("button", { name: "Close" }).first().click()
   await expect(dialog).toHaveCount(0)
   expect(advice.candidates).toHaveLength(1)
 
@@ -2784,7 +2784,7 @@ test("Missing indexes says when there is none, when the login may not read them,
   await results(page).getByRole("button", { name: "Missing indexes" }).click()
   const dialog = missingDialog(page)
   await expect(dialog).toContainText("The optimizer has wished for no index")
-  await dialog.getByRole("button", { name: "Close" }).click()
+  await dialog.getByRole("button", { name: "Close" }).first().click()
 
   await mockAdvice(page, {
     missing: {
@@ -2796,7 +2796,7 @@ test("Missing indexes says when there is none, when the login may not read them,
   await results(page).getByRole("button", { name: "Missing indexes" }).click()
   await expect(dialog).toContainText("The missing indexes cannot be read")
   await expect(dialog).toContainText("they need VIEW SERVER STATE")
-  await dialog.getByRole("button", { name: "Close" }).click()
+  await dialog.getByRole("button", { name: "Close" }).first().click()
 
   await mockAdvice(page, { missing: 502 })
   await results(page).getByRole("button", { name: "Missing indexes" }).click()
@@ -2876,7 +2876,7 @@ test("index advice, state by state @shots", async ({ page }) => {
   await dialog.getByText("Tried as a hypothetical index").scrollIntoViewIfNeeded()
   await settled(dialog)
   await page.screenshot({ path: `${shots}/whatif-result-390.png` })
-  await dialog.getByRole("button", { name: "Close" }).click()
+  await dialog.getByRole("button", { name: "Close" }).first().click()
 
   // A server without the extension.
   await page.setViewportSize({ width: 1440, height: 900 })
