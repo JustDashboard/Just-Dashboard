@@ -475,10 +475,11 @@ Some tests reach past a database to the machine and run only when asked:
 | `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
 | `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
+| `JD_TEST_STATEMENTS_CONTAINER=<name>` | starts PostgreSQL servers of its own, one at a time, as `<name>-postgres`, `-pgvector`, `-postgis`, `-timescaledb` and `-setup` with a `-data` volume each: every PostgreSQL template counting its statements from its first start (`TestLiveTemplatesCountStatementsFromTheFirstStart`), and the preload, restart and extension on a server that never loaded the module (`TestLiveStatementsSetupKeepsTheLibrariesAServerLoads`); it removes each container and volume when its part is done |
 | `JD_TEST_PRELOAD_POSTGRES_DSN` | a PostgreSQL in a container of its own, with `preload` in its name and nothing on its command line about the libraries it loads, signed in to as a superuser: the test adds libraries to `shared_preload_libraries`, restarts it through the power route, creates the extensions and puts it back as it was (`TestLivePreloadRestartAndCreate`); pg_cron is used where the image has it |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
 
-The ones that need Docker (the inventory, provisioning, power and preload tests) read
+The ones that need Docker (the inventory, provisioning, power, preload and statements tests) read
 `JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
 
 ### Fixtures

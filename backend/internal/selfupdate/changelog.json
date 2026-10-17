@@ -86,6 +86,11 @@
           "kind": "security",
           "text": "A SELECT that runs other SQL or outlives its rollback is no longer a read",
           "detail": "PostgreSQL's query_to_xml, cursor_to_xml and table_to_xml families, ts_stat, crosstab, connectby and every dblink function run text they are handed as SQL, which can spell a function's name in pieces that no reading of the statement sees. Advisory locks, statistics resets, replication and WAL functions, MySQL and MariaDB named locks and := assignments, sequence values on every engine, and Oracle's DBMS_XMLGEN, DBMS_SQL, UTL_HTTP and similar packages act past the read-only transaction a read runs in. All of these now ask for the destructive capability and a confirmation in the query editor, and are refused on a protected connection."
+        },
+        {
+          "kind": "added",
+          "text": "Count a new PostgreSQL server's statements from its first start, and turn the statistics on for one that never loaded them",
+          "detail": "Every PostgreSQL template, pgvector, PostGIS and TimescaleDB among them, now starts with pg_stat_statements loaded and the extension created in its new database, so Performance ranks statements at once; TimescaleDB keeps its own library beside it, and the list stays one the Parameters page can change. Logging the plan of every statement slower than a second (auto_explain) is a choice when the database is created. On a server that never loaded the module, Turn on statement statistics adds it to the libraries the server loads at start, keeping the ones it has, then asks before restarting the server and creates the extension once it answers again; where the dashboard cannot restart the server, it says where that happens instead."
         }
       ]
     },

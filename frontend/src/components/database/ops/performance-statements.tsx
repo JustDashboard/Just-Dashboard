@@ -52,6 +52,8 @@ import {
   RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { StatementPlan } from "@/components/database/ops/performance-plan"
+import { useStatementsSetup } from "@/components/database/ops/statements-setup"
+import { setupStart } from "@/components/database/ops/statements-setup-model"
 import type {
   DbStatement,
   DbStatementSort,
@@ -101,6 +103,7 @@ export function StatementsView() {
     limit,
   ])
   const data = statements.data
+  const openSetup = useStatementsSetup(statements.refresh)
   // A row is addressed by a key no other row has: the engine's digest names
   // a statement twice when it ran in two schemas.
   const keyed = useMemo(() => {
@@ -214,6 +217,15 @@ export function StatementsView() {
                 data={answer}
                 enabling={enabling}
                 onEnable={can("system.admin") && !readOnly ? enable : undefined}
+                onSetup={
+                  openSetup && engine.can("statementsSetup") && can("system.admin") && !readOnly
+                    ? () => {
+                        if (!answer.enable) return
+                        focus.remember()
+                        openSetup({ enable: answer.enable, onClose: focus.restore })
+                      }
+                    : undefined
+                }
               />
             </div>
           ) : (
@@ -375,20 +387,32 @@ function sentence(text: string | undefined): string {
 /**
  * The statistics are off, or closed to this account. What would turn them on
  * is said in the server's own words, and where one statement is enough — an
- * extension to create — an administrator is offered it.
+ * extension to create — an administrator is offered it. Where the module is
+ * not loaded yet, the same words open the guided setup (`StatementsSetup`):
+ * the library, the restart, the extension. Where the library list cannot be
+ * changed from here, the server's reason is said beside what to do.
  */
 function NotCounting({
   data,
   enabling,
   onEnable,
+  onSetup,
 }: {
   data: DbStatements
   enabling: boolean
   onEnable?: (extension: string) => void
+  onSetup?: () => void
 }) {
   const { engine } = useDatabase()
   const enable = data.enable
   const extension = enable?.sql ? enable.extension : undefined
+  const guided = setupStart(enable) !== undefined
+  const reason = [
+    sentence(enable?.note ?? data.reason),
+    enable?.blocked ? sentence(enable.blocked) : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
   return (
     <NotAvailable
       title={
@@ -396,13 +420,19 @@ function NotCounting({
           ? `This server is not counting its ${engine.nouns.statements}`
           : `The ${engine.nouns.statements} this server has run cannot be read`
       }
-      reason={sentence(enable?.note ?? data.reason)}
+      reason={reason}
       action={
-        extension &&
-        onEnable && (
+        extension && onEnable ? (
           <Button size="sm" pending={enabling} onClick={() => onEnable(extension)}>
             Turn on statement statistics
           </Button>
+        ) : (
+          guided &&
+          onSetup && (
+            <Button size="sm" onClick={onSetup}>
+              Turn on statement statistics
+            </Button>
+          )
         )
       }
     />

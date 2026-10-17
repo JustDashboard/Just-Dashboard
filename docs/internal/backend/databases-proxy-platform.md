@@ -205,6 +205,23 @@ is connected by naming the instance found, not by typing its address again.
   refused rather than escaped three ways. A password the request did not supply is generated and never
   returned. Every template's every release has to be one `dbx.Detect` recognises and reads the same
   account back from (`TestProvisionTemplatesAreCoherent`), or the adopt that follows cannot connect it.
+  **A PostgreSQL server counts its statements from its first start.** Every PostgreSQL template
+  (pgvector, PostGIS and TimescaleDB among them; `initdb` on the template) is created with a constant
+  script in the image's `/docker-entrypoint-initdb.d` (`postgresFirstBoot`), written into the
+  container between its creation and its start through `dockerx.ContainerSpec.Files` — a field with
+  no JSON name, so no request to the Docker page can carry one — and run once by the image as it
+  initialises the data directory. It adds `pg_stat_statements` to `shared_preload_libraries` through
+  `ALTER SYSTEM`, after whatever the image already preloads (TimescaleDB's image names its own
+  library in `postgresql.conf`, and the list is built by the server with `\gexec`, so it is kept),
+  and creates the extension in the new database. The list goes into `postgresql.auto.conf` and never
+  onto the container's command line: a `-c` there outranks every configuration file, and a library
+  added later from the Parameters page would be stored and silently not loaded. `autoExplain: true`
+  adds `auto_explain` with a one-second `log_min_duration`, `log_analyze` and `log_buffers` on and
+  `log_timing` off — each step's actual rows, without the per-node timing that costs every statement —
+  and every one of them is an ordinary parameter afterwards. The options say which templates do
+  either (`statements`, `autoExplain`); any other engine refuses `autoExplain`. Both are in the
+  `database.server.provision` audit detail. `TestLiveTemplatesCountStatementsFromTheFirstStart`
+  starts each PostgreSQL template under `JD_TEST_STATEMENTS_CONTAINER`.
   The Redis-protocol engines that do not read a password from their environment are started through a
   constant bootstrap (`passwordProvisionBootstrap`) that writes a private configuration and removes it
   first: the kernel refuses to reopen a file in `/tmp` that was handed to the server's account
@@ -1013,7 +1030,30 @@ stays editable on a protected connection.
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
   `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
-  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
+  with the grant the account lacks (`reason`). On PostgreSQL `enable` says how far the module is from
+  loaded: `configured` when the list the next start loads names it and the running list does not —
+  that list is the last line the configuration files hold for it, read from `pg_file_settings` by a
+  superuser, whatever the server says of that line now, since a line waiting for a restart is marked
+  as not applied —, `preload`, the exact `ALTER SYSTEM` that adds it after every library in that
+  list, where the account is a superuser and the value is not set on the command line, and `blocked`
+  with the reason where it is. Nothing is offered where the module is not installed: a server told
+  to load a library it cannot find does not start. `POST /{id}/statements/preload` (`system.admin`,
+  refused on a protected connection) runs that statement and `pg_reload_conf()`, answers as a
+  parameter change does with `restartRequired`, stores nothing when the list already names the
+  module, and is audited as `database.statements.preload` with the value stored. The restart that
+  loads it is the power route's and the extension the extensions route's, so the page's guided setup
+  (`ops/statements-setup.tsx`, opened by *Turn on statement statistics* in Performance → Statements
+  and in Home's busiest-statements block) takes them as three steps, each its own press: the
+  statement shown before it runs; the restart, confirmed with what it does to the sessions on the
+  server and offered only where the summary's `power.restart` and the role allow it — elsewhere the
+  reader is told where it is restarted and the setup resumes from the page once it is back —; and
+  the extension once the server answers again. The dialog is drawn by a host above the page's switch
+  between a server that answers and one that is down, which the restart fires. The capability is
+  `statementsSetup`: PostgreSQL and TimescaleDB, not CockroachDB (no module) nor YugabyteDB (it
+  loads the module itself and refuses `ALTER SYSTEM`).
+  `TestLiveStatementsSetupKeepsTheLibrariesAServerLoads` runs the three steps on a server of its own
+  that loads `auto_explain`, and checks both libraries are loaded after.
+  The text returned is a statement's shape on every engine,
   never one execution: the list is on the read surface and a literal is somebody's e-mail address, or in
   a `CREATE ROLE` a password. MySQL and MariaDB keep it that way (`DIGEST_TEXT`), ClickHouse is asked to
   (`normalizeQuery`), and for SQL Server and Oracle `dbx.statementShape` replaces every string and number
@@ -1782,7 +1822,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
 
-**Operations** (21)
+**Operations** (22)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1804,6 +1844,7 @@ and `protectReadOnlyConnections`.
 | `PUT` | `/databases/{id}/settings` | `system.admin` | — | `database.setting.set`, `.reset` | refused |
 | `GET` | `/databases/{id}/sqlite/file` | read | — | — | — |
 | `GET` | `/databases/{id}/statements` | read | — | — | — |
+| `POST` | `/databases/{id}/statements/preload` | `system.admin` | — | `database.statements.preload` | refused |
 | `POST` | `/databases/{id}/statements/reset` | `destructive` | yes | `database.statements.reset` | refused |
 | `GET` | `/databases/{id}/tablestats` | read | — | — | — |
 

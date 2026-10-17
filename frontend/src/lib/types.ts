@@ -1892,6 +1892,7 @@ export type DbCapabilityFlag =
   | "privileges" // role detail, grants, grant and revoke
   | "statements"
   | "statementsReset"
+  | "statementsSetup" // POST /statements/preload: the library loaded at start, then a restart
   | "queryLog"
   | "clickhouseViews" // parts, merges, mutations, running queries
   | "sqliteFile"
