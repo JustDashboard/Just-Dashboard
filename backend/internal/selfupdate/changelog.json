@@ -66,6 +66,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Enable, update and disable PostgreSQL extensions with their options, and load the ones that need it at start",
+          "detail": "Databases → Settings → Extensions lists extensions by what they are for, with what the server's image does not ship and which have a newer version, searchable and filtered by category. Enabling one chooses its version, its schema and CASCADE for what it needs; an update goes to the server's default or another version it ships; disabling lists what depends on the extension before CASCADE can drop it too. Each shows its statement before it runs. An extension such as pg_cron, pg_stat_statements, TimescaleDB or auto_explain, which works only once the server loads its library at start, is enabled in one dialog: the library is added to shared_preload_libraries with every library already there kept, the server is restarted when you say so, then the extension is created."
         }
       ]
     },

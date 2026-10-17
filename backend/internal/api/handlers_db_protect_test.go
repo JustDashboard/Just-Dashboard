@@ -110,7 +110,9 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /server/databases":                      isRefused,
 	"POST /server/databases/connect":              isRefused,
 	"POST /server/extensions":                     isRefused,
+	"PATCH /server/extensions/{name}":             isRefused,
 	"DELETE /server/extensions/{name}":            isRefused,
+	"POST /server/preload":                        isRefused,
 	// Redis: the console runs a read, the bulk action counts, a client can be
 	// disconnected. Keys, streams, accounts and configuration are writes.
 	"POST /redis/classify":       staysOpen,

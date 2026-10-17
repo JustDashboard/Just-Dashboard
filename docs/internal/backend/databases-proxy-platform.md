@@ -952,15 +952,16 @@ stays editable on a protected connection.
   `s.destructive`, refused for the account the connection signs in with), `databases` (create,
   and `/connect` to save a sibling connection to another database on the same server under the
   same credentials, probed before it is stored; the list of what the server holds is
-  `GET /databases/{id}/schemas`, below), `extensions` (list; create and drop for
-  Postgres, listed only for MySQL's plugins) and `settings` (the short list an operator asks
-  about; the full one is `/databases/{id}/settings`, above). Identifiers go through the dialect's
+  `GET /databases/{id}/schemas`, below), `extensions` (the list and `/{name}` detail on the read
+  surface; create, update and drop for Postgres, below; listed only for MySQL's plugins), `preload`
+  (a library added to what Postgres loads at start, below) and `settings` (the short list an
+  operator asks about; the full one is `/databases/{id}/settings`, above). Identifiers go through the dialect's
   `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
   (`GrantNeedsDatabase`) through a pool opened for that one request; a password is the one value
   no engine binds in `CREATE ROLE`/`CREATE USER`, so it is refused if it carries a control
   character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
   Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
-  `database.connection.sibling`, `database.extension.create/drop`.
+  `database.connection.sibling`, `database.extension.create/update/drop/preload`.
   - *What else the server holds.* `GET /databases/{id}/schemas` (read surface) is the list the
     engine's picker is filled with, as `[{name, size?, owner?, encoding?}]`: the server's databases
     on PostgreSQL (templates left out), MySQL/MariaDB (each schema, with its tables' size), SQL
@@ -974,6 +975,57 @@ stays editable on a protected connection.
     answer is no. ClickHouse can make a database and cannot be pointed at it by a connection
     string, so a create that asks for `connect` there is refused before the database is made; it
     used to be made and then answered as a failure.
+  - *Extensions* (`dbx/extensions.go`, `dbx/extension_catalogue.go`, `api/handlers_db_extensions.go`).
+    `dbx.ExtensionManager` is an optional half of `Admin` that only the Postgres dialect implements,
+    and `editable` on the list is whether the engine has one: MySQL lists its plugins and changes
+    none, CockroachDB and TiDB have no `extensions` flag. The list is `pg_available_extensions`
+    joined to what is installed, with the default version's `superuser`/`trusted` (`superuserOnly`,
+    from 13 where `trusted` exists), laid over a curated catalogue: a category and a sentence for
+    about ninety common extensions, the library each needs at start, a row for each *module* — a
+    library with no extension, `auto_explain`, `passwordcheck`, `pg_partman_bgw` — listed when its
+    file is in the server's library directory or it is loaded, and a row marked `unavailable` for
+    each extension that is somebody else's and not in the image (pgvector, PostGIS, TimescaleDB,
+    pg_cron…; PostgreSQL's own contrib is never listed as missing, because a release left it out).
+    `GET …/server/extensions/{name}` is what a dialog reads before it acts: the versions shipped
+    newest first, each with `requires` and the requirements the database lacks (`missing`), the
+    versions the installed one has an update path to (`pg_extension_update_paths`, asked only here
+    because it works out every pair), the schemas the account may create in and `current_schema()`,
+    what it added by kind, what outside it depends on it and the two drop statements. Every option
+    of a create, an update and a drop is checked against that catalogue before a statement is written
+    — a version the server ships, a schema that exists, the schema a control file fixes, an update
+    target with a path — and the three routes end in `runDDL`, so `?preview=1` plans without running
+    and is not audited, and the statement shown is the one that runs. A create keeps
+    `IF NOT EXISTS` and refuses an extension already installed; the version is a literal the server
+    listed. The dependents are `pg_depend` walked the way the engine walks it rather than a trial
+    `DROP` in a rolled-back transaction, which would lock everything it would remove and fire event
+    triggers from a read: what goes with the extension by itself (members, and what is internal to or
+    automatically dropped with one), every object depending on that normally and what depends on
+    those, each named as the object a reader knows (a member of another extension is that extension,
+    a view's rewrite rule its view) and with whatever is carried by another entry left out — the same
+    five objects the engine's own refusal names, up to a hundred. `DELETE …/{name}?cascade=1` is the
+    one way to `CASCADE`, chosen by the reader in the dialog after the list.
+  - *Libraries loaded at start* (`dbx/preload.go`). `dbx.Preloader` reads `shared_preload_libraries`
+    as loaded and as the configuration files name it (`pg_file_settings`, a superuser's; the last
+    line naming it, which is `postgresql.auto.conf`'s after an `ALTER SYSTEM`), and whether it can be
+    changed from this connection: not on YugabyteDB or CockroachDB, not where the value comes from the
+    command line (`-c` outranks `ALTER SYSTEM`, and the shared Postgres fixture is started that way),
+    not for an account that is not a superuser. `POST …/server/preload {library}` takes a library or
+    the extension it is loaded for from the catalogue's closed list, never a name from the request,
+    and refuses one already on the list or one whose file is not in any `dynamic_library_path`
+    directory (`pg_stat_file` beside `pg_config`'s `PKGLIBDIR`), because a server told to load a
+    missing library does not start. The new list is the files' list — so a change not yet restarted
+    for is kept — with the library appended (`citus` first) and every entry kept in its order,
+    written as one literal per library (`pgSettingLiteral`), then the parameters the library is
+    pointless without where nobody has set them (`cron.database_name` and `pg_partman_bgw.dbname` to
+    the connection's database, `auto_explain.log_min_duration` to `1s`) — on 17 and later, which take
+    an unknown dotted parameter as a placeholder; before that the plan says to set it in Parameters
+    after the restart — and `pg_reload_conf()`. It runs on one connection, `?preview=1` shows it, the
+    reply carries the list the next start loads and a note per parameter, and it is audited as
+    `database.extension.preload`. Nothing here restarts the server: that is `POST …/power`, with its
+    own capability and audit, and the create route makes the extension once the library is loaded.
+    The route and the dialog that walks the three steps (`components/database/ops/extension-preload.tsx`)
+    take any library in the catalogue, pg_stat_statements included, so another page's guided action
+    for one extension is the same two pieces opened on it.
   - *An alter changes what was sent and nothing else.* `roleRequest`'s attributes are pointers and
     `RoleSpec` carries a `Set*` beside each shared flag, so a body with only a password renders
     `ALTER ROLE … WITH PASSWORD …` and leaves `SUPERUSER`/`CREATEDB`/`CREATEROLE` as they were (the
@@ -1503,7 +1555,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 227 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1527,7 +1579,7 @@ and `protectReadOnlyConnections`.
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
   `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
-  29 open, 12 by content, 20 preview only, 61 refused.
+  29 open, 12 by content, 20 preview only, 63 refused.
 
 **Every database** (19)
 
@@ -1657,7 +1709,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/statements/reset` | `destructive` | yes | `database.statements.reset` | refused |
 | `GET` | `/databases/{id}/tablestats` | read | — | — | — |
 
-**The server behind a connection** (16)
+**The server behind a connection** (19)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1665,8 +1717,11 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/server/databases/connect` | `system.admin` | — | `database.connection.sibling` | refused |
 | `GET` | `/databases/{id}/server/extensions` | read | — | — | — |
 | `POST` | `/databases/{id}/server/extensions` | `system.admin` | — | `database.extension.create` | refused |
+| `GET` | `/databases/{id}/server/extensions/{name}` | read | — | — | — |
+| `PATCH` | `/databases/{id}/server/extensions/{name}` | `system.admin` | — | `database.extension.update` | refused |
 | `DELETE` | `/databases/{id}/server/extensions/{name}` | `system.admin` + `destructive` | yes | `database.extension.drop` | refused |
 | `GET` | `/databases/{id}/server/grants` | read | — | — | — |
+| `POST` | `/databases/{id}/server/preload` | `system.admin` | — | `database.extension.preload` | refused |
 | `GET` | `/databases/{id}/server/privileges` | read | — | — | — |
 | `GET` | `/databases/{id}/server/roles` | read | — | — | — |
 | `POST` | `/databases/{id}/server/roles` | `system.admin` | — | `database.role.create` | refused |

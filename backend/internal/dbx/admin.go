@@ -258,6 +258,19 @@ type Extension struct {
 	Installed        bool   `json:"installed"`
 	Schema           string `json:"schema,omitempty"`
 	Comment          string `json:"comment,omitempty"`
+	// Category, About and Library are the catalogue's (extension_catalogue.go):
+	// what it is for, in a sentence, and the library the server has to load
+	// at start before it works.
+	Category string `json:"category,omitempty"`
+	About    string `json:"about,omitempty"`
+	Library  string `json:"library,omitempty"`
+	// Module is a library with no extension to create; Installed is then
+	// whether the running server loaded it.
+	Module bool `json:"module,omitempty"`
+	// Unavailable is a catalogue entry this server's image does not ship.
+	Unavailable bool `json:"unavailable,omitempty"`
+	// SuperuserOnly is an extension only a superuser may create.
+	SuperuserOnly bool `json:"superuserOnly,omitempty"`
 }
 
 // Setting is one server parameter, with what the engine says about it: what
@@ -317,9 +330,10 @@ type Admin interface {
 	// target database rather than to whichever one the connection opens.
 	GrantNeedsDatabase() bool
 	CreateDatabase(ctx context.Context, db *sql.DB, name, owner string) error
+	// Extensions lists what the server can be extended with. Creating,
+	// updating and dropping one is ExtensionManager's, for the engines that
+	// can do that from a session.
 	Extensions(ctx context.Context, db *sql.DB) ([]Extension, error)
-	CreateExtension(ctx context.Context, db *sql.DB, name string) error
-	DropExtension(ctx context.Context, db *sql.DB, name string) error
 	Settings(ctx context.Context, db *sql.DB) ([]Setting, error)
 }
 
@@ -814,47 +828,6 @@ func (d postgresDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, o
 	return err
 }
 
-func (postgresDialect) Extensions(ctx context.Context, db *sql.DB) ([]Extension, error) {
-	rows, err := db.QueryContext(ctx, `
-	  SELECT a.name, COALESCE(e.extversion, ''), COALESCE(a.default_version, ''),
-	         e.oid IS NOT NULL, COALESCE(n.nspname, ''), COALESCE(a.comment, '')
-	  FROM pg_available_extensions a
-	  LEFT JOIN pg_extension e ON e.extname = a.name
-	  LEFT JOIN pg_namespace n ON n.oid = e.extnamespace
-	  ORDER BY (e.oid IS NULL), a.name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Extension{}
-	for rows.Next() {
-		var e Extension
-		if err := rows.Scan(&e.Name, &e.Version, &e.AvailableVersion, &e.Installed, &e.Schema, &e.Comment); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-func (d postgresDialect) CreateExtension(ctx context.Context, db *sql.DB, name string) error {
-	q, err := d.QuoteIdent(name)
-	if err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS "+q)
-	return err
-}
-
-func (d postgresDialect) DropExtension(ctx context.Context, db *sql.DB, name string) error {
-	q, err := d.QuoteIdent(name)
-	if err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, "DROP EXTENSION "+q)
-	return err
-}
-
 // The parameters an operator actually looks for, rather than all 350. Each is
 // the answer to a question that gets asked: how many connections may I have,
 // how much memory is it using, is it listening beyond loopback, is SSL on,
@@ -1175,9 +1148,6 @@ func (mysqlDialect) Extensions(ctx context.Context, db *sql.DB) ([]Extension, er
 	return out, rows.Err()
 }
 
-func (mysqlDialect) CreateExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
-func (mysqlDialect) DropExtension(context.Context, *sql.DB, string) error   { return ErrUnsupported }
-
 var mysqlSettingNames = []string{
 	"version", "version_comment", "datadir", "port", "bind_address", "skip_networking",
 	"max_connections", "max_user_connections", "innodb_buffer_pool_size", "innodb_log_file_size",
@@ -1320,10 +1290,6 @@ func (d clickhouseDialect) CreateDatabase(ctx context.Context, db *sql.DB, name,
 func (clickhouseDialect) Extensions(context.Context, *sql.DB) ([]Extension, error) {
 	return nil, ErrUnsupported
 }
-func (clickhouseDialect) CreateExtension(context.Context, *sql.DB, string) error {
-	return ErrUnsupported
-}
-func (clickhouseDialect) DropExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
 
 // The server settings an operator looks for first, out of the few hundred.
 var clickhouseSettingNames = []string{
@@ -1582,8 +1548,6 @@ func (d mssqlDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, _ st
 func (mssqlDialect) Extensions(context.Context, *sql.DB) ([]Extension, error) {
 	return nil, ErrUnsupported
 }
-func (mssqlDialect) CreateExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
-func (mssqlDialect) DropExtension(context.Context, *sql.DB, string) error   { return ErrUnsupported }
 
 var mssqlSettingNames = []string{
 	"user connections", "max server memory (MB)", "min server memory (MB)", "max degree of parallelism",
