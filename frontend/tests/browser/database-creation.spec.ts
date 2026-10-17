@@ -65,6 +65,8 @@ for (const path of CREATION_PAGES) {
     await expect(
       panel.getByRole("switch", { name: "Limit the memory and processors it may use" }),
     ).not.toBeChecked()
+    await expect(panel.getByRole("switch", { name: /every interface/ })).not.toBeChecked()
+    await expect(panel.getByRole("switch", { name: /plan of every statement/ })).not.toBeChecked()
     await panel.getByRole("button", { name: "Create", exact: true }).click()
     const progress = panel.locator("[data-slot=database-progress]")
     const current = progress.locator('[aria-current="step"]')

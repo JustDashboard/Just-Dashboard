@@ -199,6 +199,10 @@ export type DbProvisionTemplate = {
   defaultLimits: DbProvisionLimits
   /** The smallest memory limit its first start survives, in MiB. */
   minMemoryMb: number
+  /** The server counts its statements from the first start (pg_stat_statements). */
+  statements?: boolean
+  /** It can be asked to log the plans of its slow statements as well (`autoExplain`). */
+  autoExplain?: boolean
 }
 
 /** What a new server's container may use: MiB and cores, zero for no limit. */
@@ -218,6 +222,7 @@ export type DbProvisionRequest = {
   /** Left out: no limit. */
   memoryMb?: number
   cpus?: number
+  autoExplain?: boolean
 }
 
 export type DbProvisionResponse = {

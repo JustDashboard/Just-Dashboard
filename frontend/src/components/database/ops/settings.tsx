@@ -14,6 +14,7 @@ import { AddressSection, ConnectionForm } from "@/components/database/ops/settin
 import { DangerSection } from "@/components/database/ops/settings-danger"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
+import { PoolingSections } from "@/components/database/ops/settings-pooling"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
 import { ResourcesSection } from "@/components/database/ops/settings-resources"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
@@ -30,6 +31,7 @@ const MISSING: Record<SettingsPageKey, string> = {
   general: "settings",
   network: "network to configure",
   resources: "resources to limit",
+  pooling: "connection pooling",
   parameters: "parameters to change here",
   extensions: "extensions",
   danger: "danger zone",
@@ -136,6 +138,14 @@ export function SettingsResources() {
   return (
     <SettingsFrame page="resources">
       {(confirm) => <ResourcesSection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsPooling() {
+  return (
+    <SettingsFrame page="pooling">
+      {(confirm) => <PoolingSections confirm={confirm} />}
     </SettingsFrame>
   )
 }

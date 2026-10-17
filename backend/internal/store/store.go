@@ -124,6 +124,73 @@ CREATE TABLE IF NOT EXISTS db_metric_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_db_metric_samples_at ON db_metric_samples(at);
 
+-- Database alerts. A rule watches one database, or every database when
+-- connection_id is NULL, for one kind of trouble (the server down, its disk,
+-- its connections, its replication, a backup failed or missed) against a
+-- line — threshold in the kind's unit, minutes it must hold or a backup's
+-- grace — and tells the notification channels it names, every enabled one
+-- when channels = '[]'. revision moves on every edit, so a verdict reached
+-- on the old terms is never written over the new ones.
+CREATE TABLE IF NOT EXISTS db_alert_rules (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id    INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL,
+  threshold        REAL NOT NULL DEFAULT 0,
+  minutes          INTEGER NOT NULL DEFAULT 0,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 0,
+  notify_recovery  INTEGER NOT NULL DEFAULT 1,
+  channels         TEXT NOT NULL DEFAULT '[]',
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  revision         INTEGER NOT NULL DEFAULT 1,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_db_alert_rules_conn ON db_alert_rules(connection_id);
+-- One subject a rule watches — a database, or a backup job that dumps one —
+-- as the evaluator last read it. since is when the condition began to hold,
+-- fired_at when it had held long enough to be an alert, notified_at when
+-- that was told (0 while the cooldown keeps it back), told_at the last time
+-- this subject's firing was told at all, which the cooldown counts from.
+-- seen and clear count the passes in a row over the line and under its
+-- clearing line. unknown says why the last pass could not judge it.
+CREATE TABLE IF NOT EXISTS db_alert_state (
+  rule_id       INTEGER NOT NULL REFERENCES db_alert_rules(id) ON DELETE CASCADE,
+  subject       TEXT NOT NULL,
+  connection_id INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  job_id        INTEGER NOT NULL DEFAULT 0,
+  label         TEXT NOT NULL DEFAULT '',
+  reading       REAL NOT NULL DEFAULT 0,
+  detail        TEXT NOT NULL DEFAULT '',
+  unknown       TEXT NOT NULL DEFAULT '',
+  seen          INTEGER NOT NULL DEFAULT 0,
+  clear         INTEGER NOT NULL DEFAULT 0,
+  since         INTEGER NOT NULL DEFAULT 0,
+  fired_at      INTEGER NOT NULL DEFAULT 0,
+  notified_at   INTEGER NOT NULL DEFAULT 0,
+  told_at       INTEGER NOT NULL DEFAULT 0,
+  checked_at    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (rule_id, subject)
+);
+-- What each pass told, or kept back and why (kept: 'cooldown', 'recovery'
+-- for a rule that does not tell recoveries), for the Alerts page. The rule
+-- may since be gone; the newest 1000 are kept.
+CREATE TABLE IF NOT EXISTS db_alert_events (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_id       INTEGER NOT NULL,
+  connection_id INTEGER REFERENCES db_connections(id) ON DELETE CASCADE,
+  job_id        INTEGER NOT NULL DEFAULT 0,
+  kind          TEXT NOT NULL,
+  subject       TEXT NOT NULL,
+  label         TEXT NOT NULL DEFAULT '',
+  event         TEXT NOT NULL,
+  detail        TEXT NOT NULL DEFAULT '',
+  delivered     INTEGER NOT NULL DEFAULT 0,
+  failed        INTEGER NOT NULL DEFAULT 0,
+  kept          TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_db_alert_events_conn ON db_alert_events(connection_id, id);
+
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
 -- connection it runs against carries the secret. A NULL connection_id would be
@@ -169,6 +236,30 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   layout        TEXT NOT NULL,
   updated_at    INTEGER NOT NULL,
   PRIMARY KEY (connection_id, schema_name)
+);
+
+-- The connection pooler (PgBouncer) the dashboard runs beside a PostgreSQL
+-- connection's container: where it is, which database container it forwards to
+-- and by what name, how it was asked to behave, and a digest of the two files
+-- it was last given so a changed password is noticed.
+-- The accounts PgBouncer signs in and reads statistics with are sealed
+-- (secrets_enc); the connection's own password is read from the connection.
+CREATE TABLE IF NOT EXISTS db_poolers (
+  connection_id   INTEGER PRIMARY KEY REFERENCES db_connections(id) ON DELETE CASCADE,
+  container_name  TEXT NOT NULL,
+  container_id    TEXT NOT NULL DEFAULT '',
+  network_name    TEXT NOT NULL,
+  host_port       INTEGER NOT NULL DEFAULT 0,
+  server_name     TEXT NOT NULL,
+  server_port     INTEGER NOT NULL,
+  pool_mode       TEXT NOT NULL,
+  pool_size       INTEGER NOT NULL,
+  max_client_conn INTEGER NOT NULL,
+  auth_mode       TEXT NOT NULL,
+  secrets_enc     TEXT NOT NULL,
+  config_sha      TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
 );
 
 -- Databases found on this machine that the operator said to leave alone. The
@@ -234,6 +325,7 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
   retention_days INTEGER NOT NULL DEFAULT 0,
   pause_containers TEXT NOT NULL DEFAULT '[]',
   revision    INTEGER NOT NULL DEFAULT 1,
+  encrypt     INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
 );
 
@@ -1269,6 +1361,9 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"backup_jobs", "revision", "INTEGER NOT NULL DEFAULT 1"},
+	// Backup jobs learned to encrypt their archives. A job that predates the
+	// setting keeps writing what it always wrote until somebody turns it on.
+	{"backup_jobs", "encrypt", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
 	// A preview started from the dashboard's "Test this pull request" rather
 	// than from a webhook remembers where it came from, the pull request's

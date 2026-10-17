@@ -51,6 +51,8 @@ export type ProvisionDraft = {
   limited: boolean
   memoryMb: number
   cpus: number
+  /** Log the plans of slow statements, where the template offers it. */
+  autoExplain: boolean
 }
 
 export const EMPTY_PROVISION: ProvisionDraft = {
@@ -63,6 +65,7 @@ export const EMPTY_PROVISION: ProvisionDraft = {
   limited: false,
   memoryMb: 0,
   cpus: 0,
+  autoExplain: false,
 }
 
 type ProvisionField = "name" | "database" | "user" | "password" | "memory" | "cpus"
@@ -124,6 +127,7 @@ export function provisionRequest(
     exposure: draft.shared ? "public" : "local",
     memoryMb: draft.limited && draft.memoryMb > 0 ? draft.memoryMb : undefined,
     cpus: draft.limited && draft.cpus > 0 ? draft.cpus : undefined,
+    autoExplain: template.autoExplain && draft.autoExplain ? true : undefined,
   }
 }
 

@@ -261,7 +261,10 @@ const ACCESS = {
   exposure: "local",
   port: 5432,
   publicAddresses: ["203.0.113.7"],
-  firewall: { backend: "ufw", active: true, open: false, editable: true },
+  firewall: { backend: "ufw", active: true, open: false, allowed: [], editable: true },
+  allow: [],
+  gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+  addresses: [],
 }
 
 const CONSUMERS = {
@@ -1714,39 +1717,6 @@ test("a key–value server's parameters are its own configuration, and a secret 
   await visit(page, "/databases/4/settings/extensions")
   await expect(section(page, "extensions").getByRole("heading", { level: 3 })).toHaveText("Modules")
   await expect(section(page, "extensions")).toContainText("ReJSON")
-})
-
-test("an extension is enabled with one press and disabled after being asked", async ({ page }) => {
-  const server = await mockOperate(page, {
-    answers: {
-      "POST 1/server/extensions": { ok: true },
-      "DELETE 1/server/extensions/pg_stat_statements": { ok: true },
-    },
-  })
-  await visit(page, "/databases/1/settings/extensions")
-  const extensions = section(page, "extensions")
-  // A row you read: the name, its version, and the whole sentence that says what it is.
-  const enabled = extensions.locator("[data-extension=pg_stat_statements]")
-  await expect(enabled).toContainText("1.10")
-  await expect(enabled).toContainText(
-    "track planning and execution statistics of all SQL statements executed",
-  )
-  // Nothing here is taken, so nothing here is a card. It ships with PostgreSQL, so it is
-  // drawn as PostgreSQL's.
-  await expect(extensions.locator("[data-slot=choice-row]")).toHaveCount(0)
-  await expect(enabled.locator("img")).toHaveAttribute("src", "/logos/postgresql.svg")
-  await extensions.getByRole("button", { name: "Disable pg_stat_statements" }).click()
-  await expect(dialog(page)).toContainText("pg_stat_statements")
-  await dialog(page).getByRole("button", { name: "Disable", exact: true }).click()
-  await expect
-    .poll(() => server.sent.map((one) => one.request))
-    .toContain("DELETE 1/server/extensions/pg_stat_statements")
-
-  await extensions.getByRole("button", { name: /^Available/ }).click()
-  await extensions.getByRole("button", { name: "Enable pgcrypto" }).click()
-  await expect
-    .poll(() => server.sent.find((one) => one.request === "POST 1/server/extensions")?.body)
-    .toEqual({ name: "pgcrypto" })
 })
 
 test("forgetting a linked connection is refused in the dialog, with the way to the deployment", async ({

@@ -1594,10 +1594,10 @@ var gatedCapabilities = []string{
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions",
+	"comments", "indexes", "extensions", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
-	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "queryLog", "clickhouseViews", "sqliteFile",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "queryLog", "clickhouseViews", "sqliteFile",
 	// Redis
 	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
 	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
@@ -1615,6 +1615,7 @@ var gatedCapabilities = []string{
 // feature, and never null.
 var listedCapabilities = []string{
 	"catalogGroups", "ddlOperations", "maintenanceActions", "ormTargets", "exportFormats", "importFormats",
+	"alertKinds",
 }
 
 // The flags that are a word where the feature comes in more than one form,

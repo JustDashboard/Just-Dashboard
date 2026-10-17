@@ -39,7 +39,10 @@ when its application check fails. Gate evidence includes the exact restore-test 
 ## Isolation, persistence and cleanup
 
 Backups pins retention while reading, copies and re-hashes the archive into private staging, and
-extracts without accepting skipped unsafe entries. Verification extraction limits entries to 200,000,
+extracts without accepting skipped unsafe entries. An encrypted archive is copied and re-hashed as it is
+stored and decrypted only while it is extracted, so the workspace never holds a second plaintext copy of
+it; the evidence's artifact digest is the ciphertext's
+([archive encryption](../backend/git-backups-users.md#archive-encryption)). Verification extraction limits entries to 200,000,
 enforces the configured byte limit and reserves 256 MiB of free space before each file. File ownership
 is restored when running as root, so a non-root image can access its own data. Source paths and local
 artifacts continue through the file resolver. Staging must be outside every backup source.

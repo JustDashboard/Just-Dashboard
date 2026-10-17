@@ -37,6 +37,8 @@ const postgres = {
   database: true,
   defaultLimits: { memoryMb: 1024, cpus: 1 },
   minMemoryMb: 6,
+  statements: true,
+  autoExplain: true,
 }
 const mysql = { ...postgres, engine: "mysql", label: "MySQL", minMemoryMb: 512 }
 const redis = {
@@ -102,6 +104,18 @@ describe("what the start form sends", () => {
       password: "abcDEF12",
       exposure: "public",
     })
+  })
+
+  test("slow plans are asked for only when chosen, and only of a template that offers them", () => {
+    expect(provisionRequest(postgres, EMPTY_PROVISION).autoExplain).toBeUndefined()
+    expect(provisionRequest(postgres, { ...EMPTY_PROVISION, autoExplain: true }).autoExplain).toBe(
+      true,
+    )
+    // A draft carried over from PostgreSQL to an engine with no plans to log
+    // sends nothing the server would refuse.
+    expect(
+      provisionRequest(redis, { ...EMPTY_PROVISION, autoExplain: true }).autoExplain,
+    ).toBeUndefined()
   })
 
   test("a field the engine has no use for is never sent, and an unknown version is the default", () => {

@@ -59,6 +59,10 @@ func gwFullSpec() (*Spec, []netip.Prefix, map[int][]netip.Prefix) {
 		{ID: 13, Name: "countries", Kind: "country", Countries: []string{"xx", "yy"}, Enabled: true, Count: 4, Made: made},
 		{ID: 14, Name: "feed", Kind: "feed", URL: "https://feed.example/list.txt", Enabled: false, Made: made},
 	}
+	sp.PortAllowlists = []PortAllowlistSpec{
+		{ID: 15, Name: "shop-db", Owner: "database:shop-db", Protocol: "tcp", Port: 5432,
+			Sources: []string{"198.51.100.0/24", "203.0.113.7", "2001:db8:5::/48"}, Made: made},
+	}
 	trusted := []netip.Prefix{
 		netip.MustParsePrefix("100.64.0.0/10"),
 		netip.MustParsePrefix("127.0.0.0/8"),

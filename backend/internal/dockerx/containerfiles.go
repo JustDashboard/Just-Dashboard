@@ -75,6 +75,13 @@ func (c *Client) ReadContainerFile(ctx context.Context, id, target string) ([]by
 // mode. The archive contains exactly one entry named after the file, so the
 // Engine cannot be asked to unpack anything else.
 func (c *Client) WriteContainerFile(ctx context.Context, id, target string, content []byte, mode int64) error {
+	return c.WriteContainerFileOwned(ctx, id, target, content, mode, 0, 0)
+}
+
+// WriteContainerFileOwned is WriteContainerFile for a file a non-root account
+// must own: a secret read by the one process that runs as that account, and by
+// nothing else in the container.
+func (c *Client) WriteContainerFileOwned(ctx context.Context, id, target string, content []byte, mode int64, uid, gid int) error {
 	if err := validContainerPath(target); err != nil {
 		return err
 	}
@@ -91,7 +98,7 @@ func (c *Client) WriteContainerFile(ctx context.Context, id, target string, cont
 	var archive bytes.Buffer
 	writer := tar.NewWriter(&archive)
 	if err := writer.WriteHeader(&tar.Header{
-		Name: path.Base(target), Mode: mode, Size: int64(len(content)),
+		Name: path.Base(target), Mode: mode, Size: int64(len(content)), Uid: uid, Gid: gid,
 		Typeflag: tar.TypeReg, ModTime: time.Now().UTC(),
 	}); err != nil {
 		return err

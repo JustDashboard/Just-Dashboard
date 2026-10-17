@@ -507,6 +507,8 @@ export const TEMPLATES = [
     database: true,
     defaultLimits: { memoryMb: 1024, cpus: 1 },
     minMemoryMb: 6,
+    statements: true,
+    autoExplain: true,
   },
   {
     engine: "timescaledb",
@@ -521,6 +523,8 @@ export const TEMPLATES = [
     database: true,
     defaultLimits: { memoryMb: 1024, cpus: 1 },
     minMemoryMb: 6,
+    statements: true,
+    autoExplain: true,
   },
   {
     engine: "mariadb",

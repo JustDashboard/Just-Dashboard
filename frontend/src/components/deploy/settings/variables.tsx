@@ -1462,32 +1462,47 @@ function ReferencePicker({
   value: string
   onChange: (value: string) => void
 }) {
-  const chosen = /^\$\{\{database\.(\d+)\}\}$/.exec(value.trim())?.[1] ?? ""
+  const match = /^\$\{\{database\.(\d+)(\.pooled)?\}\}$/.exec(value.trim())
+  const chosen = match?.[1] ?? ""
+  const pooled = Boolean(match?.[2])
+  const linked = links.find((link) => String(link.connectionId) === chosen)
   return (
     // The Reference toggle reveals it, so it rises in under the field.
-    <Field label="Linked database" htmlFor="variable-reference" className="animate-rise">
-      <Select value={chosen} onValueChange={(id) => onChange(`\${{database.${id}}}`)}>
-        <SelectTrigger id="variable-reference" className="w-full">
-          <SelectValue placeholder="Choose a linked database" />
-        </SelectTrigger>
-        <SelectContent>
-          {links.map((link) => (
-            <SelectItem
-              key={link.connectionId}
-              value={String(link.connectionId)}
-              hint={
-                <span aria-hidden className="font-mono">
-                  {link.hostname}
-                </span>
-              }
-            >
-              <ProductGlyph id={link.driver} />
-              {link.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
+    <div className="animate-rise space-y-3">
+      <Field label="Linked database" htmlFor="variable-reference">
+        <Select value={chosen} onValueChange={(id) => onChange(`\${{database.${id}}}`)}>
+          <SelectTrigger id="variable-reference" className="w-full">
+            <SelectValue placeholder="Choose a linked database" />
+          </SelectTrigger>
+          <SelectContent>
+            {links.map((link) => (
+              <SelectItem
+                key={link.connectionId}
+                value={String(link.connectionId)}
+                hint={
+                  <span aria-hidden className="font-mono">
+                    {link.hostname}
+                  </span>
+                }
+              >
+                <ProductGlyph id={link.driver} />
+                {link.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {linked?.pooler && (
+        <OptionList>
+          <OptionRow
+            title="Connect through the connection pooler"
+            hint="PgBouncer shares a few server connections between many clients. The variable holds the pooled reference."
+            checked={pooled}
+            onCheckedChange={(on) => onChange(`\${{database.${chosen}${on ? ".pooled" : ""}}}`)}
+          />
+        </OptionList>
+      )}
+    </div>
   )
 }
 

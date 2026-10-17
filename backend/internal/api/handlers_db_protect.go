@@ -71,6 +71,7 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
 	{http.MethodPut, "/resources", nil},
+	{http.MethodPost, "/access/preview", nil},
 	{http.MethodPost, "/power", nil},
 	// A dump reads the database and writes a file on this machine. One made
 	// elsewhere and added to the list, and one deleted from it, are files on
