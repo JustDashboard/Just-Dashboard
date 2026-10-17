@@ -41,7 +41,11 @@ const pitr = (over = {}) => ({
   window: { from: "2026-10-10T03:05:00Z", to: "2026-10-17T09:00:00Z" },
   restorePoints: [],
   restores: [],
-  defaults: { schedule: "0 3 * * *", retentionDays: 7, directory: "/var/backups/just-dashboard/wal" },
+  defaults: {
+    schedule: "0 3 * * *",
+    retentionDays: 7,
+    directory: "/var/backups/just-dashboard/wal",
+  },
   archiver: {
     archiveMode: "on",
     walLevel: "replica",
@@ -66,9 +70,18 @@ describe("archiving's health", () => {
   test("a failure after the last success is failing, with WAL-G's own words", () => {
     const failing = pitr({
       archiveError: "AccessDenied: Access Denied",
-      archiver: { ...pitr().archiver, failedCount: 2, lastFailed: "0000000100000000000000079", lastFailedAt: "2026-10-17T09:01:00Z" },
+      archiver: {
+        ...pitr().archiver,
+        failedCount: 2,
+        lastFailed: "0000000100000000000000079",
+        lastFailedAt: "2026-10-17T09:01:00Z",
+      },
     })
-    expect(archiveHealth(failing)).toMatchObject({ tone: "danger", word: "Failing", detail: "AccessDenied: Access Denied" })
+    expect(archiveHealth(failing)).toMatchObject({
+      tone: "danger",
+      word: "Failing",
+      detail: "AccessDenied: Access Denied",
+    })
     // A failure that has been followed by a success is history, not the state.
     const recovered = pitr({
       archiver: { ...pitr().archiver, failedCount: 2, lastFailedAt: "2026-10-17T08:00:00Z" },
@@ -81,7 +94,10 @@ describe("archiving's health", () => {
     expect(archiveHealth(behind).detail).toContain("4 finished segments are waiting")
   })
   test("a container made again without the settings is not archiving, whatever else is true", () => {
-    expect(archiveHealth(pitr({ drift: true }))).toMatchObject({ tone: "danger", word: "Not archiving" })
+    expect(archiveHealth(pitr({ drift: true }))).toMatchObject({
+      tone: "danger",
+      word: "Not archiving",
+    })
   })
   test("a stopped server writes nothing to archive", () => {
     expect(archiveHealth(pitr({ running: false, archiver: undefined })).word).toBe("Server stopped")
@@ -95,7 +111,9 @@ describe("what an archive is and covers", () => {
   })
   test("a location is where the operator would look", () => {
     expect(locationWords(archive())).toBe("s3://backups/servers/shop-db-20261010-030000")
-    expect(locationWords(archive({ target: { bucket: "/b/" } }))).toBe("s3://b/shop-db-20261010-030000")
+    expect(locationWords(archive({ target: { bucket: "/b/" } }))).toBe(
+      "s3://b/shop-db-20261010-030000",
+    )
     expect(
       locationWords(archive({ targetKind: "local", target: { path: "/var/backups/wal/" } })),
     ).toBe("/var/backups/wal/shop-db-20261010-030000")
@@ -113,7 +131,13 @@ describe("what an archive is and covers", () => {
 describe("what a form will run", () => {
   test("the command line quotes what a shell would split", () => {
     expect(
-      commandLine(["postgres", "-c", "archive_command=/jd-pitr/wal-g wal-push %p", "-c", "archive_mode=on"]),
+      commandLine([
+        "postgres",
+        "-c",
+        "archive_command=/jd-pitr/wal-g wal-push %p",
+        "-c",
+        "archive_mode=on",
+      ]),
     ).toBe("postgres -c 'archive_command=/jd-pitr/wal-g wal-push %p' -c archive_mode=on")
     expect(commandLine(["-c", "x=it's"])).toBe("-c 'x=it'\\''s'")
   })
@@ -134,12 +158,16 @@ describe("what a recovery may be asked for", () => {
   const window = { from: "2026-10-10T03:05:00Z", to: "2026-10-17T09:00:00Z" }
   const now = Date.parse("2026-10-17T09:00:30Z")
   test("a moment inside the window, the latest, and a named point are fine", () => {
-    expect(targetProblem({ kind: "time", time: "2026-10-12T00:00:00Z" }, window, now)).toBeUndefined()
+    expect(
+      targetProblem({ kind: "time", time: "2026-10-12T00:00:00Z" }, window, now),
+    ).toBeUndefined()
     expect(targetProblem({ kind: "latest" }, window, now)).toBeUndefined()
     expect(targetProblem({ kind: "name", name: "before-migration" }, window, now)).toBeUndefined()
   })
   test("before the archive, in the future, or no answer at all is refused", () => {
-    expect(targetProblem({ kind: "time", time: "2026-10-01T00:00:00Z" }, window, now)).toContain("no earlier")
+    expect(targetProblem({ kind: "time", time: "2026-10-01T00:00:00Z" }, window, now)).toContain(
+      "no earlier",
+    )
     expect(targetProblem({ kind: "time", time: "2026-10-18T00:00:00Z" }, window, now)).toBe(
       "That moment has not come yet.",
     )
@@ -176,7 +204,9 @@ describe("the setup form", () => {
     expect(setupProblem(form({ source: "s3" }))).toBe("Name the bucket.")
     expect(setupProblem(form({ source: "s3", bucket: "b" }))).toBeUndefined()
     expect(setupProblem(form({ source: "b2", bucket: "b" }))).toContain("endpoint")
-    expect(setupProblem(form({ source: "s3", bucket: "b", accessKey: "AKIA" }))).toContain("both keys")
+    expect(setupProblem(form({ source: "s3", bucket: "b", accessKey: "AKIA" }))).toContain(
+      "both keys",
+    )
     expect(setupProblem(form({ source: "job" }))).toBe("Choose the backup job.")
     expect(setupProblem(form({ source: "job", fromJob: 9 }))).toBeUndefined()
   })
