@@ -30,13 +30,31 @@ const LIMITS = ROW_LIMITS.map((limit) => ({
   label: limit.toLocaleString("en-US"),
 }))
 
-/** What Run would send, in a few words: "Selection", "Statement 2 of 5". */
-function standingWords(standing: Standing): string {
+/** What Run would send, in a few words: "Selection", "Statement 2 of 5, lines 4–14". */
+export function standingWords(standing: Standing): string {
   if (!standing.target) return ""
   if (standing.target.scope === "selection") return "Selection"
-  if (standing.of > 1) return `Statement ${standing.at} of ${standing.of}`
+  if (standing.of > 1) {
+    const [first, last] = standing.lines ?? [0, 0]
+    return `Statement ${standing.at} of ${standing.of}${last > first ? `, lines ${first}–${last}` : ""}`
+  }
   return ""
 }
+
+/**
+ * A body that runs on past where it looks as if it ends, said where Run is:
+ * what its engine ends one at, for the reader who did not mean it to.
+ */
+export const RUNS_ON = {
+  plsql: {
+    words: "Runs to the end: no / after it",
+    why: "A PL/SQL block, or a CREATE PROCEDURE, FUNCTION, PACKAGE, TRIGGER or TYPE, ends at a line holding only /. Nothing ends this one, so the rest of the text is part of it.",
+  },
+  routine: {
+    words: "Runs on past its END",
+    why: "SQL Server takes everything up to the next GO into the body of a procedure, function or trigger. End it with ; after its END, or with GO on a line of its own.",
+  },
+} as const
 
 /**
  * The editor's commands, between the statement and what it returns.
@@ -107,6 +125,7 @@ export function CommandStrip({
   const running = run?.phase === "running"
   const refused = verdict && !verdict.run ? verdict.why : undefined
   const words = standingWords(standing)
+  const runsOn = standing.runsOn ? RUNS_ON[standing.runsOn] : undefined
   return (
     <div
       data-slot="query-commands"
@@ -272,7 +291,7 @@ export function CommandStrip({
           "ml-auto flex min-w-0 items-center justify-end gap-2 text-hint text-muted-foreground",
           // A sentence takes what is left of the line and is cut there, rather
           // than dropping to a line of its own under the commands.
-          (!canRun || refused) && "flex-1 basis-40",
+          (!canRun || refused || runsOn) && "flex-1 basis-40",
         )}
       >
         {!canRun && (
@@ -286,6 +305,11 @@ export function CommandStrip({
           </span>
         )}
         {canRun && !refused && words && <span className="shrink-0 max-sm:hidden">{words}</span>}
+        {canRun && !refused && runsOn && (
+          <span data-slot="runs-on" className="min-w-0 truncate text-warning" title={runsOn.why}>
+            {runsOn.words}
+          </span>
+        )}
         {canRun && !refused && advice && (
           <Tag
             tone={
