@@ -78,9 +78,8 @@ func TestLiveIndexCandidatesNameTheColumnsAPlanFiltersAndJoinsOn(t *testing.T) {
 	if _, ok := found["jdt_index_advice_customers(id)"]; ok {
 		t.Error("an index was proposed on a primary key")
 	}
-	if c := found["jdt_index_advice_orders(status,total)"]; !strings.HasPrefix(c.Statement, "CREATE INDEX CONCURRENTLY ") ||
-		!strings.Contains(c.Statement, `("status", "total")`) {
-		t.Errorf("statement = %q", c.Statement)
+	if advice.Covered == 0 {
+		t.Error("the primary keys that already lead with id were not counted as covered")
 	}
 	if advice.HypoPG.State != HypoPGNotInstalled && advice.HypoPG.State != HypoPGReady {
 		t.Errorf("hypopg = %+v", advice.HypoPG)
@@ -114,6 +113,26 @@ func TestLiveIndexCandidatesNameTheColumnsAPlanFiltersAndJoinsOn(t *testing.T) {
 		t.Error("a candidate was proposed although an index already leads with its columns")
 	}
 
+	// A partition is not proposed for, and the answer says it left one out.
+	catalogExec(t, db,
+		`CREATE TABLE jdt_index_advice_events (id int, kind text) PARTITION BY LIST (kind)`,
+		`CREATE TABLE jdt_index_advice_events_a PARTITION OF jdt_index_advice_events FOR VALUES IN ('a')`,
+		`INSERT INTO jdt_index_advice_events SELECT g, 'a' FROM generate_series(1, 20000) g`,
+		`ANALYZE jdt_index_advice_events`,
+	)
+	t.Cleanup(func() { _, _ = db.ExecContext(ctx, `DROP TABLE IF EXISTS jdt_index_advice_events`) })
+	events, err := ExplainTarget(DriverPostgres, `SELECT id FROM jdt_index_advice_events WHERE kind = 'a' AND id = 5`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partitioned, err := IndexCandidates(ctx, db, DriverPostgres, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(partitioned.Candidates) != 0 || partitioned.Skipped == 0 {
+		t.Errorf("a partitioned table: %+v", partitioned)
+	}
+
 	if _, err := IndexCandidates(ctx, db, DriverMySQL, st); !errors.Is(err, ErrNoWhatIf) {
 		t.Errorf("another engine: %v", err)
 	}
@@ -134,6 +153,9 @@ func TestLiveHypotheticalIndexChangesThePlanAndNothingElse(t *testing.T) {
 	if advice.HypoPG.State != HypoPGReady || advice.HypoPG.Version == "" {
 		t.Fatalf("hypopg = %+v; run CREATE EXTENSION hypopg in the %s database", advice.HypoPG, env)
 	}
+	// One connection, so a session that was handed back to the pool with its
+	// hypothetical indexes would be the one the check below reads.
+	db.SetMaxOpenConns(1)
 	held := indexes("jdt_index_advice_orders")
 
 	got, err := TryIndex(ctx, db, DriverPostgres, st, WhatIfIndex{
@@ -150,6 +172,11 @@ func TestLiveHypotheticalIndexChangesThePlanAndNothingElse(t *testing.T) {
 	}
 	if after := indexes("jdt_index_advice_orders"); after != held {
 		t.Errorf("the table has %d indexes, had %d", after, held)
+	}
+	// pg_indexes never lists a hypothetical index; HypoPG does.
+	var hypothetical int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM hypopg_list_indexes`).Scan(&hypothetical); err != nil || hypothetical != 0 {
+		t.Errorf("hypothetical indexes left on the connection: %d, %v", hypothetical, err)
 	}
 
 	// An index nothing in the statement uses is reported as not used, with

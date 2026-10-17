@@ -6,6 +6,7 @@ import {
   costText,
   hypopgFact,
   missingColumnsText,
+  noCandidates,
   parseColumns,
   stepLines,
   usesText,
@@ -55,6 +56,22 @@ describe("candidates", () => {
   })
   test("a candidate is told apart by its table and columns", () => {
     expect(candidateKey(candidate)).toBe("public.orders(status,total)")
+  })
+})
+
+describe("noCandidates", () => {
+  test("says what the server counted", () => {
+    expect(noCandidates({ covered: 2, skipped: 0 })).toBe(
+      "2 candidates already have an index that leads with the same columns.",
+    )
+    expect(noCandidates({ covered: 1, skipped: 3 })).toBe(
+      "1 candidate already has an index that leads with the same columns. 3 candidates are on a table that cannot be proposed for: a partition, a view, a foreign table, or one past the first twelve.",
+    )
+  })
+  test("claims nothing when nothing was counted", () => {
+    const words = noCandidates({ covered: 0, skipped: 0 })
+    expect(words).toContain("plain column")
+    expect(words).not.toContain("already")
   })
 })
 

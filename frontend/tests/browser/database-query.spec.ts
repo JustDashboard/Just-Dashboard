@@ -2310,29 +2310,31 @@ const CANDIDATES = [
     table: "orders",
     columns: ["status", "total_cents"],
     uses: ["equality", "range"],
-    statement:
-      'CREATE INDEX CONCURRENTLY "orders_status_total_cents_idx" ON "public"."orders" ("status", "total_cents")',
   },
   {
     schema: "public",
     table: "orders",
     columns: ["customer_id"],
     uses: ["join"],
-    statement:
-      'CREATE INDEX CONCURRENTLY "orders_customer_id_idx" ON "public"."orders" ("customer_id")',
   },
   {
     schema: "public",
     table: "customers",
     columns: ["tier"],
     uses: ["equality"],
-    statement: 'CREATE INDEX CONCURRENTLY "customers_tier_idx" ON "public"."customers" ("tier")',
   },
 ]
 
 type AdviceMock = {
   /** What `POST /explain/index-candidates` answers; a number is an error status. */
-  advice?: { candidates: unknown[]; hypopg: { state: string; version?: string } } | number
+  advice?:
+    | {
+        candidates: unknown[]
+        covered?: number
+        skipped?: number
+        hypopg: { state: string; version?: string }
+      }
+    | number
   /** `POST /explain/what-if` answers this error. */
   whatIfFails?: string
   /** What `GET /missing-indexes` answers; a number is an error status. */
@@ -2360,7 +2362,7 @@ async function mockAdvice(page: Page, options: AdviceMock = {}) {
         advice,
       )
     }
-    return json(route, advice)
+    return json(route, { covered: 0, skipped: 0, ...advice })
   })
   await page.route("**/api/v1/databases/1/explain/what-if", async (route) => {
     const asked = route.request().postDataJSON() as Record<string, unknown>
@@ -2598,6 +2600,14 @@ test("a server without HypoPG says so once, and the candidates are still listed"
   await expect(dialog.getByRole("button", { name: "Try it" })).toBeDisabled()
   expect(advice.whatIf).toHaveLength(0)
 
+  // The candidates can still be created, as the notice says: no try is needed.
+  await dialog.getByRole("button", { name: "Create the real index…" }).click()
+  const create = page.getByRole("dialog", { name: "Create index" })
+  await expect(create).toContainText("CREATE INDEX CONCURRENTLY")
+  expect(advice.ddl.map((entry) => entry.preview)).toEqual([true])
+  await create.getByRole("button", { name: "Cancel" }).click()
+  expect(advice.ddl.map((entry) => entry.preview)).toEqual([true])
+
   await page.keyboard.press("Escape")
   await expect(dialog).toHaveCount(0)
 })
@@ -2614,19 +2624,37 @@ test("an extension that is there but not created in this database is said as tha
   )
 })
 
-test("a plan whose filters, joins and sorts all have an index has nothing to try", async ({
+test("an empty list is explained by what the server counted, and by nothing it did not", async ({
   page,
 }) => {
   await mockWork(page)
   await mockAdvice(page, {
-    advice: { candidates: [], hypopg: { state: "ready", version: "1.4.1" } },
+    advice: {
+      candidates: [],
+      covered: 2,
+      skipped: 1,
+      hypopg: { state: "ready", version: "1.4.1" },
+    },
   })
   await explained(page)
   await results(page).getByRole("button", { name: "What if?" }).click()
   const dialog = whatIfDialog(page)
-  await expect(dialog).toContainText("Every filter, join and sort here already has an index")
+  await expect(dialog).toContainText("No index to propose")
+  await expect(dialog).toContainText(
+    "2 candidates already have an index that leads with the same columns.",
+  )
+  await expect(dialog).toContainText("1 candidate is on a table that cannot be proposed for")
   await expect(dialog.getByRole("radio")).toHaveCount(0)
   await expect(dialog.getByRole("button", { name: "Try it" })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Close" }).click()
+
+  // Nothing counted: only what the reader of the plan could not find is said.
+  await mockAdvice(page, {
+    advice: { candidates: [], hypopg: { state: "ready", version: "1.4.1" } },
+  })
+  await results(page).getByRole("button", { name: "What if?" }).click()
+  await expect(dialog).toContainText("Nothing this plan's conditions test is a plain column")
+  await expect(dialog).not.toContainText("already")
 })
 
 test("a refused question is said in the engine's words, and the dialog stays usable", async ({

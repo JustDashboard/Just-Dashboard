@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import { planOf, planRows } from "@/components/database/query/plan"
 
 /**
@@ -16,7 +17,6 @@ export interface IndexCandidate {
   columns: string[]
   /** What each column does in the plan, in the order of `columns`. */
   uses: IndexUse[]
-  statement?: string
 }
 
 export interface HypoPG {
@@ -26,6 +26,10 @@ export interface HypoPG {
 
 export interface IndexAdvice {
   candidates: IndexCandidate[]
+  /** Candidates left out because an index already leads with their columns. */
+  covered: number
+  /** Candidates left out because their table could not be proposed for. */
+  skipped: number
   hypopg: HypoPG
 }
 
@@ -74,6 +78,27 @@ export function hypopgFact(hypopg: HypoPG): string | undefined {
     default:
       return undefined
   }
+}
+
+/**
+ * Why a list of candidates is empty, in what the server counted and nothing
+ * more: a condition it could not read proposes nothing and is in neither count.
+ */
+export function noCandidates(advice: Pick<IndexAdvice, "covered" | "skipped">): string {
+  const said: string[] = []
+  if (advice.covered > 0) {
+    said.push(
+      `${plural(advice.covered, "candidate")} already ${advice.covered === 1 ? "has" : "have"} an index that leads with the same columns.`,
+    )
+  }
+  if (advice.skipped > 0) {
+    said.push(
+      `${plural(advice.skipped, "candidate")} ${advice.skipped === 1 ? "is" : "are"} on a table that cannot be proposed for: a partition, a view, a foreign table, or one past the first twelve.`,
+    )
+  }
+  return said.length > 0
+    ? said.join(" ")
+    : "Nothing this plan's conditions test is a plain column compared with a value or another column."
 }
 
 const USE_WORD: Record<IndexUse, string> = {

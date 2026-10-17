@@ -23,6 +23,7 @@ import {
   costChange,
   costText,
   hypopgFact,
+  noCandidates,
   missingColumnsText,
   parseColumns,
   stepLines,
@@ -182,7 +183,7 @@ function WhatIfDialog({ sql, onClose }: { sql: string; onClose: () => void }) {
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
-            {mayCreate && answer?.result && (
+            {mayCreate && candidate && (answer?.result || advice?.hypopg.state !== "ready") && (
               <Button onClick={() => setCreating(true)} disabled={!real}>
                 Create the real index…
               </Button>
@@ -211,8 +212,8 @@ function WhatIfDialog({ sql, onClose }: { sql: string; onClose: () => void }) {
                 <EmptyState
                   className="py-8"
                   icon={ListOrdered}
-                  title="Every filter, join and sort here already has an index"
-                  description="No column this plan tests lacks an index that leads with it."
+                  title="No index to propose"
+                  description={noCandidates(advice)}
                 />
               ) : (
                 <fieldset className="min-w-0 space-y-1.5">

@@ -35,6 +35,9 @@ const (
 type HypoPG struct {
 	State   string `json:"state"`
 	Version string `json:"version,omitempty"`
+	// Schema is where the extension's functions live, so they are called by
+	// that name and not by whatever the session's search_path finds first.
+	Schema string `json:"-"`
 }
 
 // ErrNoWhatIf is returned for an engine the what-if action is not offered on.
@@ -51,8 +54,17 @@ func (e ErrHypoPGUnavailable) Error() string {
 }
 
 // IndexAdvice is the answer to "which indexes might this statement use?".
+//
+// Covered and Skipped say what became of the candidates that are not in the
+// list, so an empty list is explained by the owner and not guessed at: Covered
+// were left out because an index already leads with their columns, Skipped
+// because their table could not be proposed for — a partition, a view, a
+// foreign table, one whose catalogue could not be read, or one past the limit.
+// A condition the reader does not recognise proposes nothing and is in neither.
 type IndexAdvice struct {
 	Candidates []IndexCandidate `json:"candidates"`
+	Covered    int              `json:"covered"`
+	Skipped    int              `json:"skipped"`
 	HypoPG     HypoPG           `json:"hypopg"`
 }
 
@@ -65,15 +77,16 @@ const maxCandidates = 8
 func hypopgState(ctx context.Context, q queryer) (HypoPG, error) {
 	rows, err := q.QueryContext(ctx, `SELECT
 	  (SELECT extversion FROM pg_extension WHERE extname = 'hypopg'),
+	  (SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'hypopg'),
 	  EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'hypopg')`)
 	if err != nil {
 		return HypoPG{}, err
 	}
 	defer rows.Close()
-	var version sql.NullString
+	var version, schema sql.NullString
 	var available bool
 	if rows.Next() {
-		if err := rows.Scan(&version, &available); err != nil {
+		if err := rows.Scan(&version, &schema, &available); err != nil {
 			return HypoPG{}, err
 		}
 	}
@@ -82,7 +95,7 @@ func hypopgState(ctx context.Context, q queryer) (HypoPG, error) {
 	}
 	switch {
 	case version.Valid:
-		return HypoPG{State: HypoPGReady, Version: version.String}, nil
+		return HypoPG{State: HypoPGReady, Version: version.String, Schema: schema.String}, nil
 	case available:
 		return HypoPG{State: HypoPGNotCreated}, nil
 	}
@@ -117,11 +130,25 @@ func IndexCandidates(ctx context.Context, db *sql.DB, driver Driver, st *SQLStat
 	if !ok {
 		return nil, ErrExplainUnsupported
 	}
-	plan, err := planDocument(ctx, db, p, st, true)
+	// The plan is taken inside the engine's read-only scope, as TryIndex does:
+	// the route is open on a protected connection, and planning can evaluate
+	// stable and immutable functions.
+	sess, err := openSession(ctx, db, driver)
 	if err != nil {
 		return nil, err
 	}
-	state, err := hypopgState(ctx, db)
+	var plan any
+	var state HypoPG
+	err = sess.read(ctx, func(ctx context.Context, q queryer) error {
+		var err error
+		if plan, err = planDocument(ctx, q, p, st, true); err != nil {
+			return err
+		}
+		state, err = hypopgState(ctx, q)
+		return err
+	})
+	// Given back before the catalogue reads below ask the pool for theirs.
+	sess.close()
 	if err != nil {
 		return nil, err
 	}
@@ -130,43 +157,44 @@ func IndexCandidates(ctx context.Context, db *sql.DB, driver Driver, st *SQLStat
 	details := map[relationRef]*TableDetail{}
 	read := 0
 	for _, candidate := range candidatesFromUses(planColumnUses(plan)) {
-		relation := relationRef{candidate.Schema, candidate.Table}
-		detail, seen := details[relation]
-		if !seen {
-			if read == maxAdviceTables {
-				continue
-			}
-			read++
-			// A relation whose catalogue cannot be read proposes nothing: an
-			// index is not suggested for a table that was not looked at.
-			if detail, err = Detail(ctx, db, driver, candidate.Schema, candidate.Table); err != nil {
-				detail = nil
-			}
-			details[relation] = detail
-		}
-		if detail == nil || !indexable(detail, candidate) || covered(detail, candidate) {
-			continue
-		}
-		plan, err := PlanCreateIndex(ctx, db, driver, IndexSpec{
-			Schema: candidate.Schema, Table: candidate.Table, Columns: candidate.Columns, Concurrently: true,
-		})
-		if err != nil {
-			return nil, err
-		}
-		candidate.Statement = plan.String()
-		out.Candidates = append(out.Candidates, candidate)
 		if len(out.Candidates) == maxCandidates {
 			break
 		}
+		relation := relationRef{candidate.Schema, candidate.Table}
+		detail, seen := details[relation]
+		if !seen {
+			if read < maxAdviceTables {
+				read++
+				// A relation whose catalogue cannot be read proposes nothing: an
+				// index is not suggested for a table that was not looked at.
+				if detail, err = Detail(ctx, db, driver, candidate.Schema, candidate.Table); err != nil {
+					detail = nil
+				}
+			}
+			details[relation] = detail
+		}
+		if detail == nil || !indexable(detail, candidate) {
+			out.Skipped++
+			continue
+		}
+		if covered(detail, candidate) {
+			out.Covered++
+			continue
+		}
+		out.Candidates = append(out.Candidates, candidate)
 	}
 	return out, nil
 }
 
 // indexable is whether the candidate names columns of a table an index can be
-// made on. A partition is left to its parent, and a name the plan printed that
-// is not a column of the table (a parse of something else) is dropped.
+// made on. Only a table or a materialized view is: a partition's index belongs
+// to the parent, which a plan of a SELECT never names, and a view or a foreign
+// table takes none from HypoPG or from CREATE INDEX. A name the plan printed
+// that is not a column of the table (a parse of something else) is dropped.
 func indexable(detail *TableDetail, candidate IndexCandidate) bool {
-	if detail.Type == "partition" || detail.Type == "view" {
+	switch detail.Type {
+	case "", TableTypeTable, TableTypeMaterializedView:
+	default:
 		return false
 	}
 	held := map[string]bool{}
@@ -255,7 +283,11 @@ func TryIndex(ctx context.Context, db *sql.DB, driver Driver, st *SQLStatement, 
 		if out.Before, err = planDocument(ctx, q, p, st, false); err != nil {
 			return err
 		}
-		rows, err := q.QueryContext(ctx, `SELECT indexname FROM hypopg_create_index($1)`, out.Statement)
+		extension, err := d.QuoteIdent(state.Schema)
+		if err != nil {
+			return err
+		}
+		rows, err := q.QueryContext(ctx, `SELECT indexname FROM `+extension+`.hypopg_create_index($1)`, out.Statement)
 		if err != nil {
 			return err
 		}

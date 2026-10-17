@@ -34,8 +34,6 @@ type IndexCandidate struct {
 	Columns []string `json:"columns"`
 	// Uses says what each column does in the plan, in the order of Columns.
 	Uses []string `json:"uses"`
-	// Statement is the CREATE INDEX the dashboard would run for it.
-	Statement string `json:"statement,omitempty"`
 }
 
 // maxCandidateColumns is how many columns a proposed index leads with. Past

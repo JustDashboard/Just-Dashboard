@@ -581,13 +581,18 @@ on the Plan view, nothing is asked until one is pressed, and nothing is kept (`d
   column, proposes anything; an `OR`, an expression, a function of the column, `LIKE` and `<>` propose
   nothing, because a wrong suggestion costs every later write. Per table the candidates are the filters
   (equality columns, then one range column, else the sort) and the join columns, at most three columns
-  each, and one is dropped when an existing valid, non-partial b-tree already leads with the same
-  columns (the catalogue read is `Detail`, at most twelve tables). A partition is left to its parent.
-  The answer also carries the state of HypoPG (`ready`, `not_created` or `not_installed`), which the
-  page prints as a fact naming the extension, once, and the candidates stay listed.
+  each. One is dropped when an existing valid, non-partial b-tree already leads with the same columns
+  (`covered`), and a table that is a partition, a view or a foreign table, whose catalogue could not
+  be read, or that is past the twelfth the request reads (`Detail`), is `skipped`: a partition's index
+  belongs to the parent, which a plan of a SELECT never names, so a partitioned table gets no
+  candidate. The page words an empty list from those two counts and claims nothing else. The plan
+  and the HypoPG probe are read inside the engine's read-only scope. The answer also carries the
+  state of HypoPG (`ready`, `not_created` or `not_installed`), which the page prints as a fact naming
+  the extension, once; the candidates stay listed, and "Create the real index…" is offered for the
+  selected one without a try, previewed like any index.
   `POST …/explain/what-if` takes the statement and a table with its columns, builds the `CREATE INDEX`
   with `PlanCreateIndex` (so every name is quoted by the dialect), and on **one connection that is
-  discarded afterwards** plans the statement, calls `hypopg_create_index`, and plans it again, inside the
+  discarded afterwards** plans the statement, calls `hypopg_create_index` (by the schema `pg_extension` says the extension lives in, quoted), and plans it again, inside the
   engine's read-only transaction. It answers both plans, their total costs, the name the plan uses for
   the hypothetical index, and whether the planner chose it. Nothing is executed (`EXPLAIN` without
   `ANALYZE`; a hypothetical index lives in that connection's memory), so both routes sit on the read
