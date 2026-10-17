@@ -1,0 +1,631 @@
+[
+  {
+    "name": "a dollar-quoted body is one statement, as it always was",
+    "driver": "postgres",
+    "sql": "CREATE FUNCTION f() RETURNS int AS $fn$ BEGIN RETURN 1; END; $fn$ LANGUAGE plpgsql;\nSELECT f();",
+    "statements": [
+      {
+        "sql": "CREATE FUNCTION f() RETURNS int AS $fn$ BEGIN RETURN 1; END; $fn$ LANGUAGE plpgsql",
+        "line": 1
+      },
+      {
+        "sql": "SELECT f()",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "a function written in SQL keeps its BEGIN ATOMIC body",
+    "driver": "postgres",
+    "sql": "CREATE FUNCTION add_one(n int) RETURNS int\nLANGUAGE sql\nBEGIN ATOMIC\n  SELECT n + 1;\nEND;\nSELECT add_one(1);",
+    "statements": [
+      {
+        "sql": "CREATE FUNCTION add_one(n int) RETURNS int\nLANGUAGE sql\nBEGIN ATOMIC\n  SELECT n + 1;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "SELECT add_one(1)",
+        "line": 6
+      }
+    ]
+  },
+  {
+    "name": "a CASE inside a BEGIN ATOMIC body ends nothing",
+    "driver": "postgres",
+    "sql": "CREATE OR REPLACE PROCEDURE p() LANGUAGE sql BEGIN ATOMIC SELECT CASE WHEN true THEN 1 END; END; CALL p()",
+    "statements": [
+      {
+        "sql": "CREATE OR REPLACE PROCEDURE p() LANGUAGE sql BEGIN ATOMIC SELECT CASE WHEN true THEN 1 END; END",
+        "line": 1
+      },
+      {
+        "sql": "CALL p()",
+        "line": 1
+      }
+    ]
+  },
+  {
+    "name": "BEGIN on its own is a transaction, not a body",
+    "driver": "postgres",
+    "sql": "BEGIN;\nSELECT 1;\nCOMMIT;",
+    "statements": [
+      {
+        "sql": "BEGIN",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1",
+        "line": 2
+      },
+      {
+        "sql": "COMMIT",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a semicolon inside parentheses ends nothing, as psql reads it",
+    "driver": "postgres",
+    "sql": "CREATE RULE r AS ON INSERT TO t DO ALSO (INSERT INTO a VALUES (1); INSERT INTO b VALUES (2));\nSELECT 1",
+    "statements": [
+      {
+        "sql": "CREATE RULE r AS ON INSERT TO t DO ALSO (INSERT INTO a VALUES (1); INSERT INTO b VALUES (2))",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "DELIMITER names what ends a statement, inside a word too",
+    "driver": "mysql",
+    "sql": "DELIMITER $$\nCREATE PROCEDURE jdt_p(IN n INT)\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  WHILE i < n DO\n    SET i = i + 1;\n  END WHILE;\n  SELECT i;\nEND$$\nDELIMITER ;\nCALL jdt_p(3);",
+    "statements": [
+      {
+        "sql": "CREATE PROCEDURE jdt_p(IN n INT)\nBEGIN\n  DECLARE i INT DEFAULT 0;\n  WHILE i < n DO\n    SET i = i + 1;\n  END WHILE;\n  SELECT i;\nEND",
+        "line": 2
+      },
+      {
+        "sql": "CALL jdt_p(3)",
+        "line": 11
+      }
+    ]
+  },
+  {
+    "name": "a procedure as SHOW CREATE PROCEDURE prints it needs no DELIMITER",
+    "driver": "mysql",
+    "sql": "CREATE DEFINER=`root`@`%` PROCEDURE p()\nBEGIN\n  IF 1 THEN\n    SELECT 1;\n  ELSE\n    SELECT 2;\n  END IF;\nEND;\nSELECT 3;",
+    "statements": [
+      {
+        "sql": "CREATE DEFINER=`root`@`%` PROCEDURE p()\nBEGIN\n  IF 1 THEN\n    SELECT 1;\n  ELSE\n    SELECT 2;\n  END IF;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 3",
+        "line": 9
+      }
+    ]
+  },
+  {
+    "name": "a trigger whose body is one IF",
+    "driver": "mysql",
+    "sql": "CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW IF NEW.a < 0 THEN SET NEW.a = 0; END IF;\nINSERT INTO x VALUES (1);",
+    "statements": [
+      {
+        "sql": "CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW IF NEW.a < 0 THEN SET NEW.a = 0; END IF",
+        "line": 1
+      },
+      {
+        "sql": "INSERT INTO x VALUES (1)",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "a semicolon before the chosen delimiter is not sent",
+    "driver": "mysql",
+    "sql": "DELIMITER //\nCREATE FUNCTION f() RETURNS INT DETERMINISTIC\nBEGIN\n  RETURN 1;\nEND;\n//\nDELIMITER ;\nSELECT f();",
+    "statements": [
+      {
+        "sql": "CREATE FUNCTION f() RETURNS INT DETERMINISTIC\nBEGIN\n  RETURN 1;\nEND",
+        "line": 2
+      },
+      {
+        "sql": "SELECT f()",
+        "line": 8
+      }
+    ]
+  },
+  {
+    "name": "MariaDB's BEGIN NOT ATOMIC is one block",
+    "driver": "mysql",
+    "sql": "BEGIN NOT ATOMIC\n  SELECT 1;\n  SELECT 2;\nEND;\nSELECT 3",
+    "statements": [
+      {
+        "sql": "BEGIN NOT ATOMIC\n  SELECT 1;\n  SELECT 2;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 3",
+        "line": 5
+      }
+    ]
+  },
+  {
+    "name": "BEGIN on its own is a transaction",
+    "driver": "mysql",
+    "sql": "BEGIN;\nINSERT INTO t VALUES (1);\nCOMMIT;",
+    "statements": [
+      {
+        "sql": "BEGIN",
+        "line": 1
+      },
+      {
+        "sql": "INSERT INTO t VALUES (1)",
+        "line": 2
+      },
+      {
+        "sql": "COMMIT",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "the function IF and DDL's IF EXISTS open no block",
+    "driver": "mysql",
+    "sql": "DROP TABLE IF EXISTS t;\nSELECT IF(1, 2, 3);\nCREATE TABLE IF NOT EXISTS t (a INT);\nDO IF(1, 2, 3);",
+    "statements": [
+      {
+        "sql": "DROP TABLE IF EXISTS t",
+        "line": 1
+      },
+      {
+        "sql": "SELECT IF(1, 2, 3)",
+        "line": 2
+      },
+      {
+        "sql": "CREATE TABLE IF NOT EXISTS t (a INT)",
+        "line": 3
+      },
+      {
+        "sql": "DO IF(1, 2, 3)",
+        "line": 4
+      }
+    ]
+  },
+  {
+    "name": "labels, handlers, LOOP, REPEAT and the CASE statement",
+    "driver": "mysql",
+    "sql": "CREATE PROCEDURE p()\nBEGIN\n  DECLARE done INT DEFAULT 0;\n  DECLARE CONTINUE HANDLER FOR NOT FOUND BEGIN SET done = 1; END;\n  outer_loop: LOOP\n    REPEAT\n      SET done = done + 1;\n    UNTIL done > 3 END REPEAT;\n    CASE done\n      WHEN 4 THEN LEAVE outer_loop;\n      ELSE SET done = REPEAT('x', 0) + done;\n    END CASE;\n  END LOOP outer_loop;\nEND;\nCALL p();",
+    "statements": [
+      {
+        "sql": "CREATE PROCEDURE p()\nBEGIN\n  DECLARE done INT DEFAULT 0;\n  DECLARE CONTINUE HANDLER FOR NOT FOUND BEGIN SET done = 1; END;\n  outer_loop: LOOP\n    REPEAT\n      SET done = done + 1;\n    UNTIL done > 3 END REPEAT;\n    CASE done\n      WHEN 4 THEN LEAVE outer_loop;\n      ELSE SET done = REPEAT('x', 0) + done;\n    END CASE;\n  END LOOP outer_loop;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "CALL p()",
+        "line": 15
+      }
+    ]
+  },
+  {
+    "name": "an event's DO BEGIN … END",
+    "driver": "mysql",
+    "sql": "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN DELETE FROM log WHERE id < 0; END;\nSELECT 1",
+    "statements": [
+      {
+        "sql": "CREATE EVENT e ON SCHEDULE EVERY 1 DAY DO BEGIN DELETE FROM log WHERE id < 0; END",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "mysqldump's DELIMITER ;;",
+    "driver": "mysql",
+    "sql": "DELIMITER ;;\nCREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET NEW.a = 1; END ;;\nDELIMITER ;\nINSERT INTO x VALUES (2);",
+    "statements": [
+      {
+        "sql": "CREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN SET NEW.a = 1; END",
+        "line": 2
+      },
+      {
+        "sql": "INSERT INTO x VALUES (2)",
+        "line": 4
+      }
+    ]
+  },
+  {
+    "name": "under a delimiter of its own a semicolon ends nothing",
+    "driver": "mysql",
+    "sql": "DELIMITER $$\nSELECT 1; SELECT 2$$\nSELECT 3$$",
+    "statements": [
+      {
+        "sql": "SELECT 1; SELECT 2",
+        "line": 2
+      },
+      {
+        "sql": "SELECT 3",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a CASE outside a body opens no block, so a typo in one swallows nothing",
+    "driver": "mysql",
+    "sql": "SELECT CASE WHEN a THEN 1 FROM t;\nSELECT 2;",
+    "statements": [
+      {
+        "sql": "SELECT CASE WHEN a THEN 1 FROM t",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "a trigger's BEGIN … END, a CASE in it included",
+    "driver": "sqlite",
+    "sql": "CREATE TRIGGER notes_touch AFTER UPDATE ON notes\nBEGIN\n  UPDATE notes SET updated = CASE WHEN NEW.id > 0 THEN 1 ELSE 0 END WHERE id = NEW.id;\n  INSERT INTO log(note) VALUES (NEW.id);\nEND;\nUPDATE notes SET title = 'x' WHERE id = 1;",
+    "statements": [
+      {
+        "sql": "CREATE TRIGGER notes_touch AFTER UPDATE ON notes\nBEGIN\n  UPDATE notes SET updated = CASE WHEN NEW.id > 0 THEN 1 ELSE 0 END WHERE id = NEW.id;\n  INSERT INTO log(note) VALUES (NEW.id);\nEND",
+        "line": 1
+      },
+      {
+        "sql": "UPDATE notes SET title = 'x' WHERE id = 1",
+        "line": 6
+      }
+    ]
+  },
+  {
+    "name": "a temporary trigger with a CASE in its WHEN",
+    "driver": "sqlite",
+    "sql": "CREATE TEMP TRIGGER t AFTER INSERT ON n WHEN CASE WHEN NEW.id > 0 THEN 1 END BEGIN SELECT 1; END;\nSELECT 2",
+    "statements": [
+      {
+        "sql": "CREATE TEMP TRIGGER t AFTER INSERT ON n WHEN CASE WHEN NEW.id > 0 THEN 1 END BEGIN SELECT 1; END",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "BEGIN on its own is a transaction",
+    "driver": "sqlite",
+    "sql": "BEGIN;\nSELECT 1;\nCOMMIT",
+    "statements": [
+      {
+        "sql": "BEGIN",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1",
+        "line": 2
+      },
+      {
+        "sql": "COMMIT",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "GO ends a batch, and a procedure runs to it",
+    "driver": "sqlserver",
+    "sql": "CREATE OR ALTER PROCEDURE dbo.p @n int AS\nBEGIN\n  SET NOCOUNT ON;\n  SELECT @n * 2 AS doubled;\nEND\nGO\nEXEC dbo.p @n = 21;",
+    "statements": [
+      {
+        "sql": "CREATE OR ALTER PROCEDURE dbo.p @n int AS\nBEGIN\n  SET NOCOUNT ON;\n  SELECT @n * 2 AS doubled;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "EXEC dbo.p @n = 21",
+        "line": 7
+      }
+    ]
+  },
+  {
+    "name": "GO n runs its batch n times",
+    "driver": "sqlserver",
+    "sql": "INSERT INTO t DEFAULT VALUES;\nSELECT 1;\nGO 3\nSELECT 2",
+    "statements": [
+      {
+        "sql": "INSERT INTO t DEFAULT VALUES",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1",
+        "line": 2
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 4
+      }
+    ],
+    "runs": [
+      0,
+      1,
+      0,
+      1,
+      0,
+      1,
+      2
+    ]
+  },
+  {
+    "name": "IF … ; ELSE … is one statement",
+    "driver": "sqlserver",
+    "sql": "IF 1 = 1 SELECT 1; ELSE SELECT 2;\nSELECT 3;",
+    "statements": [
+      {
+        "sql": "IF 1 = 1 SELECT 1; ELSE SELECT 2",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 3",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "BEGIN TRAN is a statement, not a block",
+    "driver": "sqlserver",
+    "sql": "BEGIN TRAN;\nUPDATE t SET a = 1 WHERE id = 1;\nCOMMIT;",
+    "statements": [
+      {
+        "sql": "BEGIN TRAN",
+        "line": 1
+      },
+      {
+        "sql": "UPDATE t SET a = 1 WHERE id = 1",
+        "line": 2
+      },
+      {
+        "sql": "COMMIT",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "TRY and CATCH are blocks",
+    "driver": "sqlserver",
+    "sql": "BEGIN TRY\n  SELECT 1/0;\nEND TRY\nBEGIN CATCH\n  SELECT ERROR_MESSAGE();\nEND CATCH;\nSELECT 2;",
+    "statements": [
+      {
+        "sql": "BEGIN TRY\n  SELECT 1/0;\nEND TRY\nBEGIN CATCH\n  SELECT ERROR_MESSAGE();\nEND CATCH",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 7
+      }
+    ]
+  },
+  {
+    "name": "a body with no BEGIN runs to the end of its batch",
+    "driver": "sqlserver",
+    "sql": "CREATE PROCEDURE p AS SET NOCOUNT ON; SELECT 1;\nGO\nEXEC p",
+    "statements": [
+      {
+        "sql": "CREATE PROCEDURE p AS SET NOCOUNT ON; SELECT 1",
+        "line": 1
+      },
+      {
+        "sql": "EXEC p",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a ; after a procedure's BEGIN … END ends it",
+    "driver": "sqlserver",
+    "sql": "CREATE PROCEDURE p AS BEGIN SELECT 1; END;\nEXEC p;",
+    "statements": [
+      {
+        "sql": "CREATE PROCEDURE p AS BEGIN SELECT 1; END",
+        "line": 1
+      },
+      {
+        "sql": "EXEC p",
+        "line": 2
+      }
+    ]
+  },
+  {
+    "name": "END CONVERSATION ends no block",
+    "driver": "sqlserver",
+    "sql": "BEGIN\n  END CONVERSATION @h;\n  SELECT 1;\nEND;\nSELECT 2",
+    "statements": [
+      {
+        "sql": "BEGIN\n  END CONVERSATION @h;\n  SELECT 1;\nEND",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 5
+      }
+    ]
+  },
+  {
+    "name": "GO in a text or a comment separates nothing",
+    "driver": "sqlserver",
+    "sql": "SELECT 'a\nGO\nb';\n/* \nGO\n */ SELECT 2",
+    "statements": [
+      {
+        "sql": "SELECT 'a\nGO\nb'",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 6
+      }
+    ]
+  },
+  {
+    "name": "go in any case, with a comment after it",
+    "driver": "sqlserver",
+    "sql": "SELECT 1\ngo -- next batch\nSELECT 2",
+    "statements": [
+      {
+        "sql": "SELECT 1",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a CASE outside a block opens nothing; inside one its END is its own",
+    "driver": "sqlserver",
+    "sql": "SELECT CASE WHEN 1 = 1 THEN 1 FROM t;\nBEGIN SELECT CASE WHEN 1 = 1 THEN 1 END; END;\nSELECT 3",
+    "statements": [
+      {
+        "sql": "SELECT CASE WHEN 1 = 1 THEN 1 FROM t",
+        "line": 1
+      },
+      {
+        "sql": "BEGIN SELECT CASE WHEN 1 = 1 THEN 1 END; END",
+        "line": 2
+      },
+      {
+        "sql": "SELECT 3",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a PL/SQL block runs to its / and keeps its last semicolon",
+    "driver": "oracle",
+    "sql": "BEGIN\n  INSERT INTO t VALUES (1);\n  COMMIT;\nEND;\n/\nSELECT COUNT(*) FROM t;",
+    "statements": [
+      {
+        "sql": "BEGIN\n  INSERT INTO t VALUES (1);\n  COMMIT;\nEND;",
+        "line": 1
+      },
+      {
+        "sql": "SELECT COUNT(*) FROM t",
+        "line": 6
+      }
+    ]
+  },
+  {
+    "name": "CREATE PROCEDURE is PL/SQL, and / ends a plain statement too",
+    "driver": "oracle",
+    "sql": "CREATE OR REPLACE PROCEDURE jdt_p (n IN NUMBER) AS\n  v NUMBER;\nBEGIN\n  v := n * 2;\nEND jdt_p;\n/\nCALL jdt_p(21)\n/\n",
+    "statements": [
+      {
+        "sql": "CREATE OR REPLACE PROCEDURE jdt_p (n IN NUMBER) AS\n  v NUMBER;\nBEGIN\n  v := n * 2;\nEND jdt_p;",
+        "line": 1
+      },
+      {
+        "sql": "CALL jdt_p(21)",
+        "line": 7
+      }
+    ]
+  },
+  {
+    "name": "a PL/SQL block with no / runs to the end of the text",
+    "driver": "oracle",
+    "sql": "DECLARE\n  n NUMBER;\nBEGIN\n  n := 1;\nEND;\nSELECT 1 FROM dual;",
+    "statements": [
+      {
+        "sql": "DECLARE\n  n NUMBER;\nBEGIN\n  n := 1;\nEND;\nSELECT 1 FROM dual;",
+        "line": 1
+      }
+    ]
+  },
+  {
+    "name": "a / after a statement that ended is no second run of it",
+    "driver": "oracle",
+    "sql": "SELECT 1 FROM dual;\n/\nSELECT 2 FROM dual\n/\n",
+    "statements": [
+      {
+        "sql": "SELECT 1 FROM dual",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2 FROM dual",
+        "line": 3
+      }
+    ]
+  },
+  {
+    "name": "a package and its body",
+    "driver": "oracle",
+    "sql": "CREATE OR REPLACE PACKAGE jdt_pkg AS\n  FUNCTION twice(n NUMBER) RETURN NUMBER;\nEND jdt_pkg;\n/\nCREATE OR REPLACE PACKAGE BODY jdt_pkg AS\n  FUNCTION twice(n NUMBER) RETURN NUMBER IS\n  BEGIN\n    RETURN n * 2;\n  END;\nEND jdt_pkg;\n/\n",
+    "statements": [
+      {
+        "sql": "CREATE OR REPLACE PACKAGE jdt_pkg AS\n  FUNCTION twice(n NUMBER) RETURN NUMBER;\nEND jdt_pkg;",
+        "line": 1
+      },
+      {
+        "sql": "CREATE OR REPLACE PACKAGE BODY jdt_pkg AS\n  FUNCTION twice(n NUMBER) RETURN NUMBER IS\n  BEGIN\n    RETURN n * 2;\n  END;\nEND jdt_pkg;",
+        "line": 5
+      }
+    ]
+  },
+  {
+    "name": "a query that declares a function is PL/SQL",
+    "driver": "oracle",
+    "sql": "WITH FUNCTION twice(n NUMBER) RETURN NUMBER IS BEGIN RETURN n * 2; END;\nSELECT twice(2) FROM dual\n/",
+    "statements": [
+      {
+        "sql": "WITH FUNCTION twice(n NUMBER) RETURN NUMBER IS BEGIN RETURN n * 2; END;\nSELECT twice(2) FROM dual",
+        "line": 1
+      }
+    ]
+  },
+  {
+    "name": "a trigger",
+    "driver": "oracle",
+    "sql": "CREATE OR REPLACE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW\nBEGIN\n  :NEW.id := 1;\nEND;\n/",
+    "statements": [
+      {
+        "sql": "CREATE OR REPLACE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW\nBEGIN\n  :NEW.id := 1;\nEND;",
+        "line": 1
+      }
+    ]
+  },
+  {
+    "name": "a labelled block",
+    "driver": "oracle",
+    "sql": "<<outer>>\nBEGIN\n  NULL;\nEND outer;\n/\nSELECT 1 FROM dual",
+    "statements": [
+      {
+        "sql": "<<outer>>\nBEGIN\n  NULL;\nEND outer;",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 1 FROM dual",
+        "line": 6
+      }
+    ]
+  },
+  {
+    "name": "every semicolon ends a statement",
+    "driver": "clickhouse",
+    "sql": "SELECT 1; SELECT 2",
+    "statements": [
+      {
+        "sql": "SELECT 1",
+        "line": 1
+      },
+      {
+        "sql": "SELECT 2",
+        "line": 1
+      }
+    ]
+  }
+]

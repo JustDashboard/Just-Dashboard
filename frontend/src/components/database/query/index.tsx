@@ -248,6 +248,9 @@ export function SqlQuery() {
     setStanding((held) =>
       held.at === next.at &&
       held.of === next.of &&
+      held.lines?.[0] === next.lines?.[0] &&
+      held.lines?.[1] === next.lines?.[1] &&
+      held.runsOn === next.runsOn &&
       held.target?.sql === next.target?.sql &&
       held.target?.scope === next.target?.scope &&
       held.target?.offset === next.target?.offset
@@ -363,8 +366,13 @@ export function SqlQuery() {
         })
         return
       }
+      // A batch that GO repeats ran more statements than the text holds;
+      // each is found again by the line it began on.
       const spans = splitStatements(ran.sql, dialect)
-      const span = spans.length === ran.steps.length ? spans[step.index] : undefined
+      const span =
+        spans.length === ran.steps.length
+          ? spans[step.index]
+          : spans.find((one) => one.line === step.line - ran.line + 1)
       const start = span?.start ?? 0
       const text = span ? ran.sql.slice(span.start, span.end) : ran.sql
       // The engine's words often name what it tripped on; where they do, that

@@ -17,7 +17,9 @@ A change that weakens any of these has to say so explicitly.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
    - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
-     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes. Where a
+     statement ends is the engine's reading as well, a stored program's body included, and a statement
+     that holds statements of its own is never below `high`, so a protected connection refuses it;
    - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
      rows needs the destructive capability;
    - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,

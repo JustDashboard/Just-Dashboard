@@ -504,6 +504,46 @@ line comment, a NUL, `--x` on MySQL, Oracle's `q'[…]'`, a `$` or a typographic
 refusal classifies as destructive. A statement is sent from its first token to its last, so the
 comments around it never reach the engine.
 
+Where a statement ends is each engine's own reading too, made the way its client reads a script
+(`dbx/statement_split.go`), because the body of a stored program holds semicolons that end nothing.
+Splitting at every semicolon used to cut a MySQL procedure, a SQLite trigger, a PL/SQL block or a
+T-SQL batch into pieces no engine accepts.
+- *PostgreSQL*, as psql: a semicolon inside parentheses, or inside the `BEGIN … END` of a `CREATE
+  FUNCTION` or `PROCEDURE` written in SQL (`BEGIN ATOMIC`), ends nothing; a dollar-quoted body is one
+  token already.
+- *MySQL and MariaDB*, as the mysql client: `DELIMITER`, where a statement would begin, names what
+  ends one from the next line on (`END$$` ends at its `$$`), and while that is not `;` a semicolon
+  ends nothing. With the plain `;` the blocks of a stored program's body are followed — `BEGIN … END`,
+  `IF … END IF`, `CASE`, `LOOP`, `WHILE`, `REPEAT`, a handler's `BEGIN` — so a procedure written the
+  way `SHOW CREATE PROCEDURE` prints it, with no `DELIMITER`, is one statement, and so is MariaDB's
+  `BEGIN NOT ATOMIC`. `BEGIN` on its own is still a transaction, `IF(…)` a function and `IF [NOT]
+  EXISTS` DDL's.
+- *SQLite*: `CREATE TRIGGER … BEGIN … END`.
+- *SQL Server*, as sqlcmd: `GO` alone on a line ends a batch and `GO n` runs it `n` times, so its
+  statements are in the script as many times as they run, inside the 500-statement bound. A `BEGIN …
+  END` block (not `BEGIN TRAN`), `TRY` and `CATCH`, and `IF … ; ELSE …` are one statement each, and the
+  body of a `CREATE`/`ALTER PROCEDURE`, `FUNCTION` or `TRIGGER` runs to the end of its batch, or to the
+  `;` after its outermost `BEGIN … END`.
+- *Oracle*, as SQL*Plus: a PL/SQL unit — a `DECLARE` or `BEGIN` block, `<<label>>`, a query that
+  declares functions of its own (`WITH FUNCTION`), a `CREATE PROCEDURE`, `FUNCTION`, `PACKAGE [BODY]`,
+  `TRIGGER` or `TYPE` — runs to a line holding only `/`, or to the end of the text, and is sent with
+  the semicolon after its `END`, which PL/SQL needs. A `/` line ends a plain statement too, and a `/`
+  after a statement that already ended is not a second run of it.
+
+A separator that cannot be read is refused like any other text: `DELIMITER` naming nothing, or a
+delimiter that is not punctuation (a quote, a backslash, a letter, a comment's opener), a `GO` count
+below one or past the bound. The editor reads a script the same way, rule for rule (`readScript` in
+`query/sql-text.ts`), to pick the statement under the cursor, mark it and send it, and both readings
+are held to one file of scripts (`dbx/testdata/statement-splits.json`, read by
+`TestScriptsSplitWhereTheirEngineReadsThem` and by `sql-text.test.js`): the statement Run sends from
+the cursor is one the server reads as one. Run everything sends the client's separators with the
+statements — the `DELIMITER` lines, the count of a last `GO` — and a statement sent on its own from a
+batch `GO` repeats runs once. The strip beside Run names the lines the statement under the cursor runs
+over, and says so when its separator did not end it: a PL/SQL unit with no `/` line after it runs to
+the end of the text, and a SQL Server routine that went on past its `BEGIN … END` takes in what
+follows, up to the next `GO`. Format lays out the plain statements of such a script and leaves its
+separators and its bodies as written, line breaks included.
+
 Below "high" a statement must be one whose leading verb is fully known: a read, an `INSERT`, or a
 `CREATE` of a table, index, view, schema, sequence or type — what the row and schema forms offer at
 the same capability. Merely containing `INTO`, `CREATE` or `INSERT` buys nothing: `VACUUM INTO`,
@@ -520,7 +560,13 @@ Classification is per statement and keeps the strongest verdict. The shape (lead
 `RETURNING`) comes from the tokens; the *verbs* are looked for in the statement's raw text, quoted
 text and comments included, so no disagreement about where a quote ends can put one out of sight —
 it over-reports instead (`SELECT 'delete'` is destructive), which is the direction it may be wrong in.
-A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
+A dollar-quoted body is at least `high`, and so is any statement that holds statements of its own —
+a stored program's definition, a block, whatever was cut as one piece across a semicolon — whatever
+word leads it: `WITH FUNCTION` leads with a query and can write through an autonomous transaction, and
+the one place this package and the engine might disagree about where a statement ends must not be a
+way past the verdict of any piece of it. A protected connection refuses all of them, and neither kind
+is taken for a plan. Inside a body each `DELETE` and `UPDATE` is scoped by its own statement's
+`WHERE`, not by another's. SQL Server needs no separator between statements, so there
 any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read. What
 replaces rather than adds (`REPLACE INTO`, `… OR REPLACE`), what creates an account, and a PostgreSQL
 function that acts on the server (`pg_terminate_backend`, `lo_export`, `dblink`…) are `high` too: the
@@ -544,6 +590,15 @@ read alike, so the server is asked which (`clickhouseReadScope`): an account it 
 runs under that limit, and one whose profile pins `readonly` at writable has no scope, so a statement
 called a read is not run on it at all. The scope each engine gives is the capability `readOnlyScope`
 (`enforced`, or `rollback` on SQL Server).
+
+A block that runs as it is sent — a PL/SQL block, T-SQL's `BEGIN … END`, `IF` and `WHILE`, MariaDB's
+compound statements — manages a transaction by what is in it, not by its `BEGIN`: a script run as one
+transaction refuses it only when it commits, rolls back or sets a savepoint itself. On SQL Server and
+MariaDB it goes through the driver's query path, so the rows of the query in it are shown (the first
+that returns any). Oracle keeps a stored program it could not compile, marked invalid, and answers the
+`CREATE` with a warning go-ora does not pass on, so the runner reads `ALL_ERRORS` for that program on
+the same connection straight after (`compileChecker`), and the statement fails with the compiler's
+lines instead of the program failing wherever it is first called.
 
 Anything that is not a read runs on a connection of its own that is closed afterwards rather than
 pooled, because a pooled connection carries a `SET`, an open transaction or a temporary table into
@@ -1479,7 +1534,11 @@ per-area browser specs are in
   standard port: an engine is named by its variable or skipped. The Oracle cases that use the JSON and
   BOOLEAN types need 23ai, and the two that watch another session (`v$session`) need
   `JD_TEST_ORACLE_ADMIN_DSN`. On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database
-  of the run's own; every table these tests make is named `jdwb_…`.
+  of the run's own; every table these tests make is named `jdwb_…`. `dbx/live_script_bodies_test.go`
+  writes a stored program in the console the way each engine's client takes one — `DELIMITER` and none
+  on MariaDB and MySQL 8, `GO` and `GO n` on SQL Server, `/` lines, a package and a procedure that does
+  not compile on Oracle, `BEGIN ATOMIC` beside a dollar-quoted body on PostgreSQL, a trigger on SQLite
+  — and creates, calls and reads it back; its objects are named `jdt_script_splitter_…`.
 
 ### Routes
 

@@ -118,7 +118,8 @@ free.
 
 - A control center for every database on the server — even unconnected ones
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB, Redis
-- Table editor with staged, reviewed edits and a SQL editor with plans
+- Table editor with staged, reviewed edits and a SQL editor with plans and stored programs
+  (DELIMITER, GO and PL/SQL scripts)
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, accounts, grants and a live map
