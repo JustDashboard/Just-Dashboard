@@ -23,7 +23,10 @@ A change that weakens any of these has to say so explicitly.
    - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
      an index predicate, a USING conversion, a function default) calls anything `dbx` does not vouch
      for — either needs the destructive capability on a route that otherwise asks for
-     `service.control`, for a preview as much as for a run;
+     `service.control`, for a preview as much as for a run. The same owner holds the routes that store
+     code in the database (`POST …/ddl/routine` and `…/ddl/trigger`): the query runner classifies every
+     `CREATE FUNCTION`, `PROCEDURE` and `TRIGGER` as high risk, so the form asks for what the console
+     asks, on every request;
    - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
      application or can lose rows, and the body of the power route, where `stop` and `restart` are
      what make the request destructive;

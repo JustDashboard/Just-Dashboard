@@ -746,11 +746,11 @@ stays editable on a protected connection.
   foreign keys, comments, real type names with enum labels, and each index's method, predicate, included
   columns and size. SQLite and ClickHouse keep a table's check constraints nowhere but in the statement
   it was created with, so theirs are read out of that statement (`createTableItems`).
-- **A schema change is planned, then shown or run.** There are twenty `/databases/{id}/ddl/*` routes:
+- **A schema change is planned, then shown or run.** There are twenty-four `/databases/{id}/ddl/*` routes:
   create, truncate and drop a table; rename a table or a column; add, alter and drop a column; create and
   drop an index, a foreign key, a unique or check constraint, a view and a schema; comment on a table or
-  a column; create an enum type and add a label to one. What an engine takes of them is its
-  `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
+  a column; create an enum type and add a label to one; and make, replace and drop a function, a
+  procedure or a trigger (below). What an engine takes of them is its `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
   `runDDL` returns it for `?preview=1` or executes it, so the statement a dialog shows is the server's
   own and not a page's approximation of it. Each planner starts at `ddlDialect(driver, op)`, which
   refuses an operation the engine does not have in words that name the engine (`ddlRefusals`): SQLite
@@ -787,6 +787,38 @@ stays editable on a protected connection.
   refused for the capability it would need is recorded under the change's own action. No schema route
   takes a typed phrase, and dropping a schema never cascades: the engine's refusal of a schema that still
   holds something is the guard.
+- **Stored programs are written by a form, whole.** `ddlOperations` carries `functions`, `procedures`
+  and `triggers`: Postgres, MySQL/MariaDB, SQL Server and Oracle have all three, SQLite has triggers
+  only, and TiDB, CockroachDB and ClickHouse none (`ddlRefusals`, and a flavour check in
+  `DDLOperations`). `POST`/`DELETE /ddl/routine` take a function or a procedure (`kind`), and
+  `POST`/`DELETE /ddl/trigger` a trigger; `dbx/routine.go` renders each from a `RoutineSpec` or
+  `TriggerSpec` into **one statement** — a body is the tail of it (the dollar-quoted text on Postgres,
+  where the tag is chosen so the body does not contain it; everything after `AS`, `IS` or the header
+  elsewhere) and never reaches the console splitter, so a MySQL `BEGIN … END`, an Oracle block and a
+  SQLite trigger need no `DELIMITER` or `/`. The header is built from validated parts like every other
+  DDL form: names are quoted, types go through `validateType`, defaults and conditions through
+  `validateFragment`. **The capability is the console's:** the query runner classifies every
+  `CREATE FUNCTION`, `PROCEDURE` and `TRIGGER` as high risk, so these routes sit at `service.control`
+  only to let a preview be asked for as the form is filled in, and ask for `destructive` by hand on
+  every request (`programRisk`), a preview included; a run spends the budget, and the drops are in the
+  destructive group. They are audited as `database.ddl.save_routine`, `save_trigger`, `drop_routine`
+  and `drop_trigger`.
+  `GET /program?kind=&schema=&name=&signature=&table=` reads a program back as the same fields
+  (`dbx.ReadProgram`): `pg_proc`/`pg_trigger` on Postgres, `information_schema` on MySQL, and the text the
+  engine kept on SQL Server, Oracle and SQLite, read with the query runner's lexer. It refuses, by name,
+  anything the form could not write again — a Postgres `COST` or `SET`, a SQL Server `WITH ENCRYPTION`, an
+  Oracle `PIPELINED` or compound trigger, a quoted lower-case Oracle parameter — and answers
+  `editable: false` with the reason, so a save never silently drops an attribute.
+  An edit is whatever keeps the old definition if the new one is refused, and the plan says which in
+  `note`: `CREATE OR REPLACE` (Postgres when the parameters and return type are unchanged, MariaDB,
+  Oracle), `CREATE OR ALTER` (SQL Server), a `DROP` and `CREATE` in one transaction (a Postgres routine
+  whose signature changes, and Postgres and SQLite triggers; `DDLPlan.atomic`), or — MySQL, which commits
+  a `DROP` — a `DROP` and `CREATE` with the old definition put back from the text it was read as if the
+  `CREATE` is refused (`DDLPlan.undo`). Oracle accepts a routine that does not compile and keeps it
+  `INVALID`, so a plan checks `all_errors` afterwards (`DDLPlan.after`) and puts the old definition back,
+  or drops the new object, when there are errors. An undo only follows a statement that ran. Postgres
+  re-applies a comment the object carried when it drops and creates; a MySQL definer becomes the
+  connection's user, which the note says.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -1484,7 +1516,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 229 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1492,7 +1524,9 @@ and `protectReadOnlyConnections`.
 - **Destructive** is `yes` for a route inside `s.destructive`: the `destructive` capability, which
   the column before it lists, and the `destrLim` budget. `by content` is a route that serves routine
   requests too, so its handler asks for that capability and budget by hand when the body makes the
-  request destructive, and fails closed; the word after it is what decides.
+  request destructive, and fails closed; the word after it is what decides. `by hand: every request` is
+  a route that asks for it whatever the body says, and sits at `service.control` only so that a form can
+  preview it (the stored-program writes).
 - **Audited as** is the action the entry is recorded under. A `GET` writes none unless it is marked
   †: those record themselves, before the read runs or when the socket opens. A `POST` that only
   reads or only probes writes none either (`httpx.SkipAudit`). Every other mutating route names its
@@ -1580,7 +1614,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/table` | read | — | — | — |
 | `GET` | `/databases/{id}/tables` | read | — | — | — |
 
-**Schema** (28)
+**Schema** (33)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1598,10 +1632,14 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/ddl/index` | `service.control` | by content: plan | `database.ddl.create_index` | preview only |
 | `DELETE` | `/databases/{id}/ddl/index` | `destructive` | yes | `database.ddl.drop_index` | preview only |
 | `POST` | `/databases/{id}/ddl/rename` | `service.control` | by content: plan | `database.ddl.rename` | preview only |
+| `POST` | `/databases/{id}/ddl/routine` | `service.control` | by hand: every request | `database.ddl.save_routine` | preview only |
+| `DELETE` | `/databases/{id}/ddl/routine` | `destructive` | yes | `database.ddl.drop_routine` | preview only |
 | `POST` | `/databases/{id}/ddl/schema` | `service.control` | by content: plan | `database.ddl.create_schema` | preview only |
 | `DELETE` | `/databases/{id}/ddl/schema` | `destructive` | yes | `database.ddl.drop_schema` | preview only |
 | `POST` | `/databases/{id}/ddl/table` | `service.control` | by content: plan | `database.ddl.create_table` | preview only |
 | `DELETE` | `/databases/{id}/ddl/table` | `destructive` | yes | `database.ddl.drop_table` | preview only |
+| `POST` | `/databases/{id}/ddl/trigger` | `service.control` | by hand: every request | `database.ddl.save_trigger` | preview only |
+| `DELETE` | `/databases/{id}/ddl/trigger` | `destructive` | yes | `database.ddl.drop_trigger` | preview only |
 | `POST` | `/databases/{id}/ddl/truncate` | `destructive` | yes | `database.ddl.truncate` | preview only |
 | `POST` | `/databases/{id}/ddl/view` | `service.control` | by content: plan | `database.ddl.create_view` | preview only |
 | `DELETE` | `/databases/{id}/ddl/view` | `destructive` | yes | `database.ddl.drop_view` | preview only |
@@ -1611,6 +1649,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/graph` | read | — | — | — |
 | `GET` | `/databases/{id}/object` | read | — | — | — |
 | `GET` | `/databases/{id}/outline` | read | — | — | — |
+| `GET` | `/databases/{id}/program` | read | — | — | — |
 | `GET` | `/databases/{id}/relations` | read | — | — | — |
 
 **Operations** (21)

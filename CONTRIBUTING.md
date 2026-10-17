@@ -441,7 +441,7 @@ likely to be somebody's data as a fixture.
 | --- | --- | --- |
 | `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
 | `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
-| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts, stored programs |
 | `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop |
 | `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
@@ -527,7 +527,7 @@ Each area of the section has its own browser spec over one mocked server
 catalogue above, and `database-fleet-fixture.ts` for a machine with and without
 Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
 `database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
-`database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs
