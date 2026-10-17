@@ -44,6 +44,9 @@ type Spec struct {
 	// Exceptions let a network past the drops for a scope and a reason,
 	// optionally until a time the kernel itself enforces.
 	Exceptions []ExceptionSpec `json:"exceptions,omitempty"`
+	// PortAllowlists keep a port of this host to the networks they name
+	// (port_allowlist.go).
+	PortAllowlists []PortAllowlistSpec `json:"portAllowlists,omitempty"`
 	// Sysctls are the kernel settings set here, by key.
 	Sysctls map[string]string `json:"sysctls"`
 	// Firewall is the owned nftables table, present once it has been used

@@ -116,6 +116,21 @@ func (s *Scheduler) NextRun(jobID int64) *time.Time {
 
 var scheduleParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
+// NextScheduled is when a schedule fires next after t, read in the zone the
+// scheduler fires in. False for an empty or invalid expression, which never
+// fires at all.
+func NextScheduled(expr string, after time.Time) (time.Time, bool) {
+	if expr == "" {
+		return time.Time{}, false
+	}
+	schedule, err := scheduleParser.Parse(expr)
+	if err != nil {
+		return time.Time{}, false
+	}
+	next := schedule.Next(after.In(time.Local))
+	return next, !next.IsZero()
+}
+
 // ValidateSchedule is used by the API so a bad expression is rejected at save
 // time rather than silently never firing.
 func ValidateSchedule(expr string) error {

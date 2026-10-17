@@ -43,7 +43,10 @@ import (
 //     statement is a TRUNCATE the console holds to that capability, and the
 //     Redis slow log is cleared from the same group.
 //   - Changing a server parameter and granting or revoking a privilege are
-//     system.admin, beside creating an account.
+//     system.admin, beside creating an account. Adding the statistics module
+//     to the libraries a server loads at start is a parameter change, the one
+//     statement statistics wait on; the restart that loads it is the power
+//     route's, under its own capability.
 //
 // Nothing here takes SQL from the request. An action, a privilege, a sort and
 // a checkpoint mode are each one of a closed set; a table, a role and a
@@ -75,6 +78,7 @@ func (s *Server) mountDatabaseOpsRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/{id}/settings", s.handle(s.handleDBSettingChange))
+		r.Method(http.MethodPost, "/{id}/statements/preload", s.handle(s.handleDBStatementsPreload))
 		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges", s.handle(s.handleDBPrivilegeGrant))
 		r.Method(http.MethodPost, "/{id}/server/roles/{name}/privileges/revoke", s.handle(s.handleDBPrivilegeRevoke))
 	})
@@ -366,6 +370,45 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 	}
 	httpx.SetAudit(r, "database.statements.reset", conn.Name, map[string]any{"statement": statement})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "statement": statement})
+	return nil
+}
+
+// handleDBStatementsPreload is the first step of turning statement
+// statistics on where the module was never loaded: pg_stat_statements is
+// added to shared_preload_libraries beside every library already listed. The
+// parameter is read only at start, so the answer says a restart is needed;
+// restarting is the power route, and creating the extension once the module
+// is loaded is the extensions route — each the operator's own decision, under
+// its own capability and audit entry.
+func (s *Server) handleDBStatementsPreload(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	pool, conn, err := s.dbPool(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	change, err := dbx.PreloadStatements(ctx, pool, conn.Driver)
+	if errors.Is(err, dbx.ErrUnsupported) {
+		return httpx.BadRequest("%s loads no statistics library at start; there is nothing to add", conn.Driver)
+	}
+	var refused dbx.ErrSettingRequest
+	if errors.As(err, &refused) {
+		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"refused": err.Error()})
+		return httpx.BadRequest("%v", err)
+	}
+	if err != nil {
+		httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{"error": err.Error()})
+		return queryFailed(err)
+	}
+	httpx.SetAudit(r, "database.statements.preload", conn.Name, map[string]any{
+		"setting": change.Name, "value": change.Value, "statements": change.Statements,
+		"restartRequired": change.RestartRequired,
+	})
+	httpx.JSON(w, http.StatusOK, change)
 	return nil
 }
 

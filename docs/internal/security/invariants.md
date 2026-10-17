@@ -17,7 +17,9 @@ A change that weakens any of these has to say so explicitly.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
    - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
-     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes. Where a
+     statement ends is the engine's reading as well, a stored program's body included, and a statement
+     that holds statements of its own is never below `high`, so a protected connection refuses it;
    - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
      rows needs the destructive capability;
    - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
@@ -93,6 +95,12 @@ A change that weakens any of these has to say so explicitly.
    ([Stream mode](../backend/remote-desktop.md#stream-mode)). Nothing is sent on them without a
    stream negotiated over the bridge's WebSocket, which is behind the dashboard's session, and no
    block is published on a server off a tailnet.
+   A database's port published from its Network page — on one of the host's own addresses, on every
+   interface kept to a list, or to anywhere — is not the dashboard's socket either: it is the operator's
+   explicit choice, in the destructive group and audited as `database.access.change`. A list is kept by
+   the network module's gateway table, whose prerouting drop runs before Docker's translation, never by
+   a host firewall rule that a published port's traffic does not meet
+   ([databases](../backend/databases-proxy-platform.md)).
    `GET /security/boundary` reports both halves as observed — a dashboard socket other than Caddy's
    on a routable address, no Caddy on the configured port, or a preview port that is funnelled or
    serves anything but a loopback upstream is a broken boundary on the Security overview — but the

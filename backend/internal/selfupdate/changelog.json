@@ -39,6 +39,11 @@
         },
         {
           "kind": "fixed",
+          "text": "Count a backup job's run as a database's last backup",
+          "detail": "The Databases cards, table and Backups band, and the last dump a database's delete confirmation names, take the later of its newest dump and the newest successful backup job run that dumped it, so a database a nightly job protects is no longer shown as never backed up or a week old."
+        },
+        {
+          "kind": "fixed",
           "text": "Show a deployment as the reader of the database it reaches through a published port",
           "detail": "Databases → What they feed and the map now recognise a deployment whose connection string names this server's own address with the database's published port, and draw a deployment's release as its project. The dashboard's own PostgreSQL sessions are no longer drawn as this server reading every database."
         },
@@ -61,6 +66,64 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "security",
+          "text": "Keep passwords and other values out of PostgreSQL's statement list",
+          "detail": "Databases → Performance → Statements and the busiest statements on Home showed PostgreSQL's CREATE ROLE and ALTER ROLE with the password in clear, and SET, COMMENT, DEFAULT and DO statements with their values, to any account that may read. Every value in PostgreSQL's statement text is now replaced with a placeholder before it leaves the server, a password or a setting written without quotes included, and the $1 markers the server writes stay, so a statement's plan is still asked for with values put back in. A role created or changed from Access is no longer kept in pg_stat_statements at all when the connection signs in as a superuser."
+        },
+        {
+          "kind": "added",
+          "text": "Run PgBouncer in front of a PostgreSQL database from its Pooling settings",
+          "detail": "A one-click connection pooler in its own container on a private network with the database, published on this server only until the database is opened to anywhere under Network, which moves the pooler with it. Choose transaction or session pooling, the pool size and the client limit, and authenticate through a userlist kept in step with the connection's password or through auth_query. Connect shows the pooled string beside the direct one, a deployment variable can hold the pooled reference ${{database.ID.pooled}}, and the page reads the pools and statistics. The pooler starts, stops and is removed with its database."
+        },
+        {
+          "kind": "added",
+          "text": "Enable, update and disable PostgreSQL extensions with their options, and load the ones that need it at start",
+          "detail": "Databases → Settings → Extensions lists extensions by what they are for, with what the server's image does not ship and which have a newer version, searchable and filtered by category. Enabling one chooses its version, its schema and CASCADE for what it needs; an update goes to the server's default or another version it ships; disabling lists what depends on the extension before CASCADE can drop it too. Each shows its statement before it runs. An extension such as pg_cron, pg_stat_statements, TimescaleDB or auto_explain, which works only once the server loads its library at start, is enabled in one dialog: the library is added to shared_preload_libraries with every library already there kept, the server is restarted when you say so, then the extension is created."
+        },
+        {
+          "kind": "security",
+          "text": "A SELECT that runs other SQL or outlives its rollback is no longer a read",
+          "detail": "PostgreSQL's query_to_xml, cursor_to_xml and table_to_xml families, ts_stat, crosstab, connectby and every dblink function run text they are handed as SQL, which can spell a function's name in pieces that no reading of the statement sees. Advisory locks, statistics resets, replication and WAL functions, MySQL and MariaDB named locks and := assignments, sequence values on every engine, and Oracle's DBMS_XMLGEN, DBMS_SQL, UTL_HTTP and similar packages act past the read-only transaction a read runs in. All of these now ask for the destructive capability and a confirmation in the query editor, and are refused on a protected connection."
+        },
+        {
+          "kind": "added",
+          "text": "Count a new PostgreSQL server's statements from its first start, and turn the statistics on for one that never loaded them",
+          "detail": "Every PostgreSQL template, pgvector, PostGIS and TimescaleDB among them, now starts with pg_stat_statements loaded and the extension created in its new database, so Performance ranks statements at once; TimescaleDB keeps its own library beside it, and the list stays one the Parameters page can change. Logging the plan of every statement slower than a second (auto_explain) is a choice when the database is created. On a server that never loaded the module, Turn on statement statistics adds it to the libraries the server loads at start, keeping the ones it has, then asks before restarting the server and creates the extension once it answers again; where the dashboard cannot restart the server, it says where that happens instead."
+        },
+        {
+          "kind": "added",
+          "text": "Keep a database to a list of allowed addresses, or publish it on one address of the server",
+          "detail": "A database's Network settings offer four answers: this server only, one of the server's tailnet, VPN or local-network addresses, a list of allowed addresses, or anywhere. The list takes IPv4 and IPv6 addresses and networks, and the server's own gateway table refuses every other address before Docker forwards the connection, which a firewall rule alone cannot do for a published port. The firewall gets a rule for each listed address, the change is shown with the exact rules before it runs, the picture draws who may connect and who is refused, and every change is in the audit log."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Tell your notification channels when a database stops answering, fills its disk, runs out of connections, falls behind or misses a backup",
+          "detail": "A database's new Alerts page holds rules for that database or for every database: the server not answering, the disk its data is on, its connections against its limit, replication lag, and a backup job that failed or has not succeeded by its time. Each rule has its line, how long it must hold, a cooldown and whether its recovery is told, and reaches the webhook, Discord, Slack, Telegram and e-mail channels the deployments already use, with a test from the rule's menu. Rules are judged on the activity recorder's thirty-second reading and the backup runs, a reading must fall a margin under the line before it recovers, and the page lists what was told lately."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Run stored procedures, triggers and PL/SQL blocks from the query editor",
+          "detail": "The editor and the server now end a statement where its engine does: MySQL and MariaDB scripts with DELIMITER, or a procedure as SHOW CREATE prints it; SQLite triggers; SQL Server batches separated by GO, with GO 3 running a batch three times; Oracle PL/SQL blocks, procedures and packages ended by a / line; and PostgreSQL functions with BEGIN ATOMIC bodies. Running the statement under the cursor sends the whole body, the strip says which lines it covers and warns when a block runs on to the end of the text, Format leaves separators and bodies as written, and an Oracle procedure that does not compile fails with the compiler's errors. A statement with a body is never treated as a read, so a protected connection refuses it."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Claim a stream's idle pending entries in one step",
+          "detail": "Databases → Keys → a stream's consumer groups hands everything pending longer than a number of minutes to one consumer, a hundred entries a press, on servers with XAUTOCLAIM. A single entry's claim and a hash field's expiry now go through their own routes rather than the console's."
+        },
+        {
+          "kind": "fixed",
+          "text": "Describe the Redis backup as what it is",
+          "detail": "A Redis dump is the dashboard's own gzipped JSON Lines of each key's DUMP payload, which only the dashboard restores. The backup job form and the documentation no longer call it a snapshot or an RDB file."
+        },
+        {
         },
         {
           "kind": "security",
