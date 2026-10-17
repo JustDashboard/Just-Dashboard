@@ -104,7 +104,7 @@ function BodyEditor({
       role="group"
       aria-label={label}
       data-slot="program-body"
-      aria-invalid={invalid || undefined}
+      data-invalid={invalid || undefined}
       className={cn(
         "h-64 overflow-hidden rounded-md border bg-card",
         invalid ? "border-destructive" : "border-input",
