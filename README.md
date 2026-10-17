@@ -123,6 +123,7 @@ free.
 - Schema browser, diagram, code generation, performance
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, accounts, grants and a live map
+- Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 
 </td>
 </tr>

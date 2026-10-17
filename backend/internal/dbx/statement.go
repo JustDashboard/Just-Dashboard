@@ -222,19 +222,18 @@ var batchWords = []string{
 }
 
 // serverFunctions are the PostgreSQL functions that act on the server rather
-// than return something about it: end another session, write a file, run a
-// statement over a second connection. A SELECT is all it takes to call one, the
-// read-only transaction does not stop them, and the routes that do the same
-// things by name are in the destructive group — so calling one from the
-// console costs what those routes cost.
+// than return something about it: end another session, write a file, change a
+// setting. A SELECT is all it takes to call one, the read-only transaction does
+// not stop them, and the routes that do the same things by name are in the
+// destructive group — so calling one from the console costs what those routes
+// cost. The families named by a prefix (pg_create_…, pg_drop_…, dblink…) are
+// callRules.
 var serverFunctions = []string{
 	"pg_terminate_backend", "pg_cancel_backend", "pg_reload_conf", "pg_rotate_logfile",
-	"pg_promote", "pg_switch_wal", "pg_create_restore_point",
+	"pg_promote", "pg_switch_wal",
 	"pg_backup_start", "pg_backup_stop", "pg_start_backup", "pg_stop_backup",
-	"pg_drop_replication_slot", "pg_create_physical_replication_slot",
-	"pg_create_logical_replication_slot", "pg_replication_origin_drop",
 	"lo_import", "lo_export", "lo_unlink", "pg_file_write", "pg_file_unlink",
-	"pg_file_rename", "dblink", "dblink_exec", "dblink_connect", "set_config",
+	"pg_file_rename", "set_config",
 }
 
 // unicodeIdentRe finds PostgreSQL's U&"…" identifier form, quoted text and
@@ -443,6 +442,9 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 				break
 			}
 		}
+	}
+	for _, reason := range callReasons(driver, st.SQL, words, code) {
+		add("high", reason)
 	}
 	// REPLACE INTO and INSERT OR REPLACE delete the row that was in the way,
 	// and CREATE OR REPLACE discards the definition that was there — on

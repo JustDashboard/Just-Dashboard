@@ -39,6 +39,8 @@ export type ProvisionDraft = {
   password: string
   /** Reachable from anywhere: the port on every interface and the firewall opened. */
   shared: boolean
+  /** Log the plans of slow statements, where the template offers it. */
+  autoExplain: boolean
 }
 
 export const EMPTY_PROVISION: ProvisionDraft = {
@@ -48,6 +50,7 @@ export const EMPTY_PROVISION: ProvisionDraft = {
   user: "",
   password: "",
   shared: false,
+  autoExplain: false,
 }
 
 /** The rules the server will hold the answers to, as one message per field that breaks one. */
@@ -95,6 +98,7 @@ export function provisionRequest(
     user: template.defaultUser ? draft.user.trim() || undefined : undefined,
     password: draft.password || undefined,
     exposure: draft.shared ? "public" : "local",
+    autoExplain: template.autoExplain && draft.autoExplain ? true : undefined,
   }
 }
 

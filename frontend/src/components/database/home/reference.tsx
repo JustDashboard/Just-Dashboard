@@ -225,8 +225,14 @@ const EXPOSURE: Record<string, { word: string; sentence: string }> = {
     sentence: "It listens on loopback, so nothing outside this machine can reach it.",
   },
   private: {
-    word: "One private address",
-    sentence: "It listens on one address of this machine — a private network or a VPN.",
+    word: "One address of this machine",
+    sentence:
+      "It listens on one address of this machine — a tailnet, a VPN or a local network — and only that network reaches it.",
+  },
+  allowlist: {
+    word: "Allowed addresses",
+    sentence:
+      "It listens on every interface, and the gateway refuses every address that is not on its list.",
   },
   public: {
     word: "Anywhere",
@@ -292,10 +298,15 @@ export function ReachableFrom() {
             {access.data.publicAddresses.join(", ")}
           </FactRow>
         )}
+        {admin && access.data && access.data.exposure === "allowlist" && (
+          <FactRow label="Allowed" className="font-mono wrap-anywhere">
+            {access.data.allow.join(", ")}
+          </FactRow>
+        )}
         {admin && firewall && (
           <FactRow label="Firewall">
             {firewall.active
-              ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : "closed"}`
+              ? `${firewall.backend ?? "The firewall"} is on, and port ${access.data?.port ?? conn.port} is ${firewall.open ? "open" : firewall.allowed.length > 0 ? `open to ${plural(firewall.allowed.length, "listed address", "listed addresses")}` : "closed"}`
               : "No firewall is active on this machine"}
           </FactRow>
         )}
