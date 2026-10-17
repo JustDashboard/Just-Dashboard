@@ -8,6 +8,11 @@
       "summary": "Automatic attention panels and settings recommendations are removed from the dashboard and their advisory APIs are retired. Operational tools, updates, diagnostics and the checks required to apply changes safely remain available.",
       "changes": [
         {
+          "kind": "added",
+          "text": "Limit the memory and processors a database's container may use",
+          "detail": "A new database can be limited when it is created, with sizes filled in for its engine and held to this server's memory and processors. Settings → Resources changes the limits of a container the dashboard may change, in place and without a restart, beside its peak in the last hour and the engine's own buffer (shared_buffers, innodb_buffer_pool_size, maxmemory and their kind), saying what a limit under that buffer does. Lifting a limit replaces the container after asking, keeping its data. Every change is audited, and a replacement made by the dashboard keeps the limits."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."

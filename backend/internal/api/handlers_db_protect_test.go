@@ -36,12 +36,14 @@ const (
 // route that is on neither fails the test below: it is refused all the same,
 // and somebody still has to decide that it should be.
 var protectedRouteVerdicts = map[string]string{
-	// The connection's own record, its server's reach and its power.
-	"PUT ":          staysOpen,
-	"DELETE ":       staysOpen,
-	"PUT /access":   staysOpen,
-	"POST /power":   staysOpen,
-	"PUT /settings": isRefused,
+	// The connection's own record, its server's reach, what its container may
+	// use and its power.
+	"PUT ":           staysOpen,
+	"DELETE ":        staysOpen,
+	"PUT /access":    staysOpen,
+	"PUT /resources": staysOpen,
+	"POST /power":    staysOpen,
+	"PUT /settings":  isRefused,
 	// Dumps are files on this machine: taking one, adding one made elsewhere
 	// and deleting one. Loading one back, importing a file and copying into a
 	// new database write to a server.

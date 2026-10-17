@@ -1226,12 +1226,13 @@ test("settings are pages in the rail, each a form in sections, with only the pag
     expect(rail(page).getByRole("link")).toContainText(names, { useInnerText: true })
 
   await visit(page, "/databases/1/settings")
-  await listed(["General", "Network", "Parameters", "Extensions", "Danger zone"])
+  await listed(["General", "Network", "Resources", "Parameters", "Extensions", "Danger zone"])
   for (const id of ["address", "connection", "protection"]) {
     await expect(section(page, id)).toBeVisible()
   }
   for (const [path, id] of [
     ["network", "reachability"],
+    ["resources", "resources"],
     ["parameters", "parameters"],
     ["extensions", "extensions"],
     ["danger", "danger"],

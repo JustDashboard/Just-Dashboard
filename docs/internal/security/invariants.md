@@ -27,6 +27,8 @@ A change that weakens any of these has to say so explicitly.
    - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
      application or can lose rows, and the body of the power route, where `stop` and `restart` are
      what make the request destructive;
+   - `api.planDBLimits` for a change of a database container's limits, where lifting one replaces the
+     container;
    - `dbx.RedisClassify` for a Redis console command, and the body of the Redis bulk, rename and copy
      routes, where `action: delete|expire` and `overwrite` are what make the request destructive;
    - `dbx.MongoClassifyPipeline` and `dbx.MongoClassifyCommand` for a MongoDB pipeline and console

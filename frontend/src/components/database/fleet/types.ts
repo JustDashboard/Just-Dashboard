@@ -195,7 +195,17 @@ export type DbProvisionTemplate = {
   defaultUser: string
   /** False: there is no initial database to name. */
   database: boolean
+  /** What the form fills in once the reader chooses to limit the server. */
+  defaultLimits: DbProvisionLimits
+  /** The smallest memory limit its first start survives, in MiB. */
+  minMemoryMb: number
 }
+
+/** What a new server's container may use: MiB and cores, zero for no limit. */
+export type DbProvisionLimits = { memoryMb: number; cpus: number }
+
+/** This machine as Docker sees it (`GET /databases/provision/capacity`). */
+export type DbHostCapacity = { memoryBytes: number; cpus: number }
 
 export type DbProvisionRequest = {
   engine: string
@@ -205,6 +215,9 @@ export type DbProvisionRequest = {
   version?: string
   user?: string
   password?: string
+  /** Left out: no limit. */
+  memoryMb?: number
+  cpus?: number
 }
 
 export type DbProvisionResponse = {
