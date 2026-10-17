@@ -25,10 +25,12 @@ import (
 //
 // The text returned is the statement's shape, never one execution of it. The
 // list is on the read surface, and a literal in a WHERE clause is somebody's
-// e-mail address or a session token: PostgreSQL and MySQL hand back text with
-// the constants already replaced, ClickHouse is asked to do the same, and for
-// SQL Server and Oracle — which keep the text as it was sent — the constants
-// are replaced here before the text leaves this package.
+// e-mail address or a session token: MySQL hands back text with the constants
+// already replaced, ClickHouse is asked to do the same, and for SQL Server and
+// Oracle — which keep the text as it was sent — the constants are replaced
+// here before the text leaves this package. So are PostgreSQL's: the extension
+// replaces them only in the statements it plans, and keeps a CREATE ROLE …
+// PASSWORD as it came (statements_shape.go).
 
 type Statement struct {
 	ID      string  `json:"id"`
@@ -266,6 +268,7 @@ func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts Statemen
 		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
 			return nil, err
 		}
+		s.Query = pgStatementShape(s.Query)
 		out.Statements = append(out.Statements, s)
 	}
 	if err := rows.Err(); err != nil {
