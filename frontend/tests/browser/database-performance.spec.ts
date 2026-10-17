@@ -1452,10 +1452,45 @@ const PG_SHAPES = {
 const shapeRow = (page: Page, text: RegExp) =>
   region(page, "Statements").getByRole("row", { name: text })
 
+/** What the engine plans the first of those, with its values put back, as. */
+const ORDERS_PLAN = {
+  result: {
+    columns: ["QUERY PLAN"],
+    rows: [
+      ["Sort  (cost=48.21..48.29 rows=31 width=16)"],
+      ["  Sort Key: total"],
+      [
+        "  ->  Index Scan using orders_customer_id_idx on orders  (cost=0.29..47.44 rows=31 width=16)",
+      ],
+      ["        Index Cond: (customer_id = 42)"],
+    ],
+  },
+  format: "text",
+  analyzed: false,
+  rolledBack: false,
+}
+
+/**
+ * The statement's panel once it has slid in and its editor holds the text.
+ * Caught on the way in, the panel stood half off the window's edge with an
+ * empty editor in it.
+ */
+async function openedStatement(page: Page, text: string) {
+  const panel = dialog(page)
+  await expect(panel.locator("[data-slot=code-view]")).toContainText(text, { timeout: 15_000 })
+  await panel.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().map((animation) => animation.finished))
+  })
+  await expect(panel).toBeInViewport({ ratio: 1 })
+  return panel
+}
+
 test("a PostgreSQL statement is listed as its shape, with a ? where a password or a setting was", async ({
   page,
 }) => {
-  const ops = await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  const ops = await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
   await visit(page, "/databases/1/performance?view=statements")
   await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
   await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("NOCREATEROLE PASSWORD ?")
@@ -1466,7 +1501,7 @@ test("a PostgreSQL statement is listed as its shape, with a ? where a password o
 
   // A statement the extension kept whole is still a shape, and has no plan.
   await shapeRow(page, /CREATE ROLE app_reader/).click()
-  const panel = dialog(page)
+  const panel = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
   await expect(panel).toContainText("The statement, as a shape")
   await expect(panel).toContainText("Only a statement that reads or changes rows has a plan")
   await expect(panel.getByRole("textbox")).toHaveCount(0)
@@ -1475,10 +1510,11 @@ test("a PostgreSQL statement is listed as its shape, with a ? where a password o
 
   // One that was planned asks for the extension's $1 and for the ? beside it.
   await shapeRow(page, /SELECT id, total/).click()
+  await openedStatement(page, "customer_id = $1")
   await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
   await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
   await panel.getByRole("button", { name: "Explain with these values" }).click()
-  await expect(panel).toContainText("Seq Scan on order_items")
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
   expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
     query: "SELECT id, total\n  FROM orders\n WHERE customer_id = 42\n ORDER BY 2",
     format: "text",
@@ -1493,8 +1529,9 @@ test("an account that may only read is shown the shapes and offered nothing that
   await expect(shapeRow(page, /CREATE ROLE app_reader/)).toContainText("PASSWORD ?")
   await expect(page.getByRole("button", { name: "Reset statistics" })).toHaveCount(0)
   await shapeRow(page, /ALTER ROLE app_reader/).click()
-  await expect(dialog(page)).toContainText("The statement, as a shape")
-  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+  const panel = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(panel).toContainText("The statement, as a shape")
+  await expect(panel.getByRole("button", { name: "Open in Query" })).toHaveCount(0)
 })
 
 test("a PostgreSQL list with nothing counted yet says so", async ({ page }) => {
@@ -1541,29 +1578,33 @@ test("a PostgreSQL server's statements as shapes, for the record @shots", async 
   test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
   const shots = process.env.JD_SHOTS
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mockOps(page, { answers: { "GET 1/statements": PG_SHAPES } })
+  await mockOps(page, {
+    answers: { "GET 1/statements": PG_SHAPES, "POST 1/explain": ORDERS_PLAN },
+  })
   await visit(page, "/databases/1/performance?view=statements")
   await expect(region(page, "Statements").getByRole("row")).toHaveCount(7)
   await page.screenshot({ path: `${shots}/statements-shapes-1440.png` })
 
   await shapeRow(page, /CREATE ROLE app_reader/).click()
-  await expect(dialog(page)).toContainText("Only a statement that reads or changes rows has a plan")
+  const password = await openedStatement(page, "NOCREATEROLE PASSWORD ?")
+  await expect(password).toContainText("Only a statement that reads or changes rows has a plan")
   await page.screenshot({ path: `${shots}/statement-password-1440.png` })
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/statement=/)
 
   await shapeRow(page, /SELECT id, total/).click()
-  const panel = dialog(page)
+  const panel = await openedStatement(page, "customer_id = $1")
   await panel.getByRole("textbox", { name: "The value for $1, after customer_id =" }).fill("42")
   await panel.getByRole("textbox", { name: "The value for ?, after ORDER BY" }).fill("2")
   await panel.getByRole("button", { name: "Explain with these values" }).click()
-  await expect(panel).toContainText("Seq Scan on order_items")
+  await expect(panel).toContainText("Index Scan using orders_customer_id_idx on orders")
   await page.screenshot({ path: `${shots}/statement-planned-1440.png` })
 
   await page.unrouteAll({ behavior: "ignoreErrors" })
   await mockOps(page, { viewer: true, answers: { "GET 1/statements": PG_SHAPES } })
   await visit(page, "/databases/1/performance?view=statements&statement=p4")
-  await expect(dialog(page)).toContainText("The statement, as a shape")
+  const viewer = await openedStatement(page, "SET search_path = ?, ?")
+  await expect(viewer).toContainText("The statement, as a shape")
   await page.screenshot({ path: `${shots}/statements-viewer-1440.png` })
 
   await page.unrouteAll({ behavior: "ignoreErrors" })
