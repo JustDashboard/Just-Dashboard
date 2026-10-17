@@ -137,9 +137,7 @@ test.describe("the last backup the control center reads", () => {
     await expect(card(page, "cache")).toContainText(backedUp(2))
     expect(await scroller(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false)
     expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-      ),
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
     ).toBe(false)
   })
 
