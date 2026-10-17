@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  estimateNote,
   keepingSentence,
   scrapeConfig,
   shortens,
@@ -63,6 +64,16 @@ describe("retention sentences", () => {
   test("the thinning rule uses the server's numbers", () => {
     expect(keepingSentence(report)).toBe(
       "Readings are kept whole for 7 days. Older ones are thinned to the last of every 5 minutes.",
+    )
+  })
+
+  test("the estimate says what it stands on, or that it has nothing yet", () => {
+    expect(estimateNote(report)).toBe(
+      "Sizes are estimated for 2 servers at the average reading saved so far.",
+    )
+    expect(estimateNote({ connections: 1 })).toContain("for 1 server at")
+    expect(estimateNote({ connections: 0 })).toBe(
+      "The space each window takes appears once readings are saved.",
     )
   })
 })

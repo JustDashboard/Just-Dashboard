@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  estimateNote,
   keepingSentence,
   scrapeConfig,
   shortens,
@@ -192,25 +193,43 @@ function MetricsExportDialog({ admin, onClose }: { admin: boolean; onClose: () =
               <Field
                 label="Keep history for"
                 hint={
-                  admin
-                    ? keepingSentence(report)
-                    : "Only an administrator can change how long history is kept."
+                  !admin
+                    ? "Only an administrator can change how long history is kept."
+                    : report.retentionDays === 0
+                      ? "The saved retention is not one of these windows. Choose one to replace it."
+                      : keepingSentence(report)
                 }
               >
-                <Segments
-                  label="Keep history for"
-                  fill
-                  value={String(report.retentionDays)}
-                  disabled={!admin || saving}
-                  onChange={(value) => choose(Number(value))}
-                  options={report.options.map((option) => ({
-                    value: String(option.days),
-                    label: `${option.days} days`,
-                  }))}
-                />
+                <div className="space-y-1.5">
+                  <Segments
+                    label="Keep history for"
+                    fill
+                    value={String(report.retentionDays)}
+                    disabled={!admin || saving}
+                    onChange={(value) => choose(Number(value))}
+                    options={report.options.map((option) => ({
+                      value: String(option.days),
+                      label: `${option.days} days`,
+                    }))}
+                  />
+                  <ul
+                    aria-label="Space each window takes"
+                    className="numeric grid grid-cols-4 text-center text-hint text-muted-foreground"
+                  >
+                    {report.options.map((option) => {
+                      const weight = windowEstimate(report, option.days)
+                      return (
+                        <li key={option.days}>
+                          <span className="sr-only">{option.days} days: </span>
+                          {weight === null ? "—" : bytes(weight)}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
               </Field>
-              <p className="numeric text-hint text-muted-foreground">
-                {storedSentence(report)} {estimate(report)}
+              <p className="text-hint text-muted-foreground">
+                {storedSentence(report)} {estimateNote(report)}
               </p>
             </FormSection>
           </div>
@@ -219,14 +238,6 @@ function MetricsExportDialog({ admin, onClose }: { admin: boolean; onClose: () =
       {dialog}
     </>
   )
-}
-
-function estimate(report: DbMetricsExport) {
-  const weight = windowEstimate(report, report.retentionDays)
-  if (weight === null)
-    return "An estimate of the space a window takes appears once readings are saved."
-  const servers = report.connections === 1 ? "1 server" : `${report.connections} servers`
-  return `${report.retentionDays} days for ${servers} comes to about ${bytes(weight)}.`
 }
 
 function CopyButton({ label, text }: { label: string; text: string }) {

@@ -710,8 +710,12 @@ test("a saved long range falls back to the longest one still kept after retentio
   )
   await holdTime(page)
   await mockHome(page)
-  const longer = page.waitForRequest((request) => request.url().includes("stats/history?hours=2160"))
-  const fallback = page.waitForRequest((request) => request.url().includes("stats/history?hours=168"))
+  const longer = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=2160"),
+  )
+  const fallback = page.waitForRequest((request) =>
+    request.url().includes("stats/history?hours=168"),
+  )
   await visit(page, "/databases/1")
   await longer
   await fallback

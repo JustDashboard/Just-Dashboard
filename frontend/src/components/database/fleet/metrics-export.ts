@@ -45,3 +45,11 @@ export function windowEstimate(report: DbMetricsExport, days: number) {
 export function keepingSentence(report: Pick<DbMetricsExport, "rawDays" | "coarseMinutes">) {
   return `Readings are kept whole for ${plural(report.rawDays, "day")}. Older ones are thinned to the last of every ${report.coarseMinutes} minutes.`
 }
+
+/** What the figures under each window stand on, or why there are none yet. */
+export function estimateNote(report: Pick<DbMetricsExport, "connections">) {
+  if (report.connections === 0) {
+    return "The space each window takes appears once readings are saved."
+  }
+  return `Sizes are estimated for ${plural(report.connections, "server")} at the average reading saved so far.`
+}

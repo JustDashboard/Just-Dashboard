@@ -12,7 +12,7 @@ import { mockFleet, refusal, type FleetMock } from "./database-fleet-fixture"
  * longer window adds to.
  */
 
-const MB = 1_000_000
+const MB = 1_048_576
 const SECRET = "vpsd_Qm3xk9TzWc1RvB7dLhYe4NfAoUs2GjP8"
 
 function report(over: Record<string, unknown> = {}) {
@@ -82,6 +82,8 @@ async function mockExport(page: Page, options: ExportMock = {}) {
 
 const opener = (page: Page) => page.getByRole("button", { name: "Metrics export" })
 const dialogOf = (page: Page) => page.getByRole("dialog", { name: "Metrics export" })
+const sizeList = (dialog: Locator) => dialog.getByRole("list", { name: "Space each window takes" })
+const sizes = (dialog: Locator) => sizeList(dialog).getByRole("listitem")
 const retention = (dialog: Locator) => dialog.getByRole("radiogroup", { name: "Keep history for" })
 
 async function open(page: Page) {
@@ -140,7 +142,13 @@ test.describe("metrics export", () => {
     await expect(dialog).toContainText("Readings are kept whole for 7 days.")
     await expect(dialog).toContainText("Older ones are thinned to the last of every 5 minutes.")
     await expect(dialog).toContainText("About 93.0 MB in 55,240 saved readings so far.")
-    await expect(dialog).toContainText("7 days for 5 servers comes to about 171.0 MB.")
+    await expect(sizes(dialog)).toHaveText([
+      "7 days: 171.0 MB",
+      "14 days: 188.0 MB",
+      "30 days: 227.0 MB",
+      "90 days: 318.0 MB",
+    ])
+    await expect(dialog).toContainText("Sizes are estimated for 5 servers")
 
     // A longer window deletes nothing, so it is taken without a question.
     await choose.getByRole("radio", { name: "90 days" }).click()
@@ -149,7 +157,7 @@ test.describe("metrics export", () => {
       "true",
     )
     expect(server.puts).toEqual([{ retentionDays: 90 }])
-    await expect(dialog).toContainText("90 days for 5 servers comes to about 318.0 MB.")
+    await expect(sizeList(dialog)).toContainText("318.0 MB")
 
     // A shorter one names what it does and can be left alone.
     await choose.getByRole("radio", { name: "14 days" }).click()
@@ -186,8 +194,9 @@ test.describe("metrics export", () => {
     const dialog = await open(page)
     await expect(dialog).toContainText("Nothing is recorded yet.")
     await expect(dialog).toContainText(
-      "An estimate of the space a window takes appears once readings are saved.",
+      "The space each window takes appears once readings are saved.",
     )
+    await expect(sizes(dialog)).toHaveText(["7 days: —", "14 days: —", "30 days: —", "90 days: —"])
     await expect(dialog).not.toContainText("NaN")
   })
 
@@ -276,7 +285,7 @@ test.describe("metrics export", () => {
     await page.screenshot({ path: `${shots}/key-and-config-1440.png` })
 
     await retention(dialog).getByRole("radio", { name: "90 days" }).click()
-    await expect(dialog).toContainText("90 days for 5 servers comes to about 318.0 MB.")
+    await expect(sizeList(dialog)).toContainText("318.0 MB")
     await retention(dialog).scrollIntoViewIfNeeded()
     await page.screenshot({ path: `${shots}/retention-1440.png` })
 
