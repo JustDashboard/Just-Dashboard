@@ -150,7 +150,7 @@ func TestDatabaseMetricsScopeRetentionBucketsAndGaps(t *testing.T) {
 	if count != 3 {
 		t.Fatalf("retention kept %d samples", count)
 	}
-	for _, hours := range []string{"0", "169", "oops"} {
+	for _, hours := range []string{"0", "2161", "oops"} {
 		if reply := viewer.do(http.MethodGet, path+"?hours="+hours, "", nil); reply.Code != 400 {
 			t.Fatalf("invalid hours %q accepted: %d", hours, reply.Code)
 		}

@@ -131,6 +131,10 @@ func (s *Server) Routes() http.Handler {
 			s.mountRemoteDesktopRoutes(r)
 		})
 
+		if !s.Cfg.AgentMode {
+			s.mountDatabaseMetricsExport(r)
+		}
+
 		// Remote Desktop's stream bridge serves its own page, which posts
 		// without the CSRF header; the bridge group asks for a same-site
 		// Origin instead. An agent has no screen to stream to.

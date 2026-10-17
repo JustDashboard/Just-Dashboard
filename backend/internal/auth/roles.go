@@ -29,18 +29,19 @@ const (
 	CapTerminal       Capability = "terminal"        // PTY and container exec
 	CapDestructive    Capability = "destructive"     // remove, prune, kill, restore
 	CapSystemAdmin    Capability = "system.admin"    // linux users, firewall, dashboard accounts, tokens
+	CapMetricsRead    Capability = "metrics.read"    // scrape the recorded database metrics; the only one a scoped API key holds
 )
 
 var rolePermissions = map[Role]map[Capability]bool{
 	RoleAdmin: {
 		CapRead: true, CapServiceControl: true, CapFileWrite: true,
-		CapTerminal: true, CapDestructive: true, CapSystemAdmin: true,
+		CapTerminal: true, CapDestructive: true, CapSystemAdmin: true, CapMetricsRead: true,
 	},
 	RoleLimited: {
-		CapRead: true, CapServiceControl: true, CapFileWrite: true,
+		CapRead: true, CapServiceControl: true, CapFileWrite: true, CapMetricsRead: true,
 	},
 	RoleReadOnly: {
-		CapRead: true,
+		CapRead: true, CapMetricsRead: true,
 	},
 }
 
@@ -51,7 +52,7 @@ func (r Role) Can(c Capability) bool {
 // Capabilities lists what the role grants, for the frontend to hide controls
 // it must not offer. The API enforces the same set independently.
 func (r Role) Capabilities() []Capability {
-	all := []Capability{CapRead, CapServiceControl, CapFileWrite, CapTerminal, CapDestructive, CapSystemAdmin}
+	all := []Capability{CapRead, CapServiceControl, CapFileWrite, CapTerminal, CapDestructive, CapSystemAdmin, CapMetricsRead}
 	out := make([]Capability, 0, len(all))
 	for _, c := range all {
 		if r.Can(c) {
