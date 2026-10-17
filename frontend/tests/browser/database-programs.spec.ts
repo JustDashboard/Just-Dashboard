@@ -422,7 +422,7 @@ test("a Postgres function has the fields Postgres has", async ({ page }) => {
   await dialog.getByRole("button", { name: "Add parameter" }).click()
   const parameter = dialog.getByRole("group", { name: "Parameter 1" })
   await parameter.getByRole("combobox").click()
-  await page.getByRole("option", { name: "OUT" }).click()
+  await page.getByRole("option", { name: "OUT", exact: true }).click()
   await parameter.getByRole("textbox").nth(0).fill("total")
   await parameter.getByRole("textbox").nth(1).fill("numeric")
   await dialog.getByLabel("Name", { exact: true }).fill("sum_all")
