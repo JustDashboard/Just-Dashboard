@@ -18,6 +18,7 @@ export const TABLE_VIEWS = [
   "columns",
   "indexes",
   "keys",
+  "policies",
   "triggers",
   "definition",
   "statistics",

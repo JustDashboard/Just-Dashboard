@@ -248,6 +248,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   comments: false,
   indexes: false,
   extensions: false,
+  rowSecurity: false,
   stats: false,
   sessions: false,
   kill: false,

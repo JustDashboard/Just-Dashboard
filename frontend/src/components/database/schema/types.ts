@@ -1,4 +1,5 @@
 import type { DbCatalogObject } from "@/components/database/data/types"
+import type { QueryResult } from "@/components/database/query/types"
 
 /**
  * What the schema browser reads off the wire beyond what the table editor
@@ -77,6 +78,41 @@ export interface DdlAnswer {
   preview?: true
   /** Functions the request's own SQL calls that the server does not vouch for. */
   calls?: string[]
+}
+
+/** One policy of a table (`GET /{id}/rls`). */
+export interface DbPolicy {
+  name: string
+  command: "ALL" | "SELECT" | "INSERT" | "UPDATE" | "DELETE"
+  permissive: boolean
+  /** The roles it applies to; none is everybody. */
+  roles: string[]
+  using?: string
+  withCheck?: string
+}
+
+/** A table's row-level security (`GET /{id}/rls`). */
+export interface DbRowSecurity {
+  schema: string
+  table: string
+  enabled: boolean
+  /** The owner is held to the policies as well. */
+  forced: boolean
+  owner: string
+  /** Superusers and the roles with BYPASSRLS: no policy filters them. */
+  exempt: string[]
+  policies: DbPolicy[]
+}
+
+/** What a role saw (`POST /{id}/rls/test`). */
+export interface DbRoleTestResult {
+  result: QueryResult
+  /** The role the query ran as, as the server reported it. */
+  role: string
+  /** Every statement sent before the query, in order. */
+  setup: string[]
+  /** Why the rows may not be what the policies describe. */
+  notes: string[]
 }
 
 /** One table's figures (`GET /{id}/tablestats`). A count the engine does not keep is -1. */

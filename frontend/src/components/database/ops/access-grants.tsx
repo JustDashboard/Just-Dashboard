@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { Plus, UserPlus } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -12,6 +12,13 @@ import { Modal } from "@/components/modal"
 import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
@@ -48,12 +55,30 @@ const LEVEL_WORD: Record<ObjectLevel, { tab: string; one: string; every: string 
   schema: { tab: "Schemas", one: "schema", every: "Every schema" },
   table: { tab: "Tables", one: "table", every: "Every table" },
   sequence: { tab: "Sequences", one: "sequence", every: "Every sequence" },
+  function: { tab: "Functions", one: "function", every: "Every function" },
+  column: { tab: "Columns", one: "column", every: "Every column" },
 }
 
 /** The objects a level lists in one scope, by the catalogue's own groups. */
-const CATALOG_GROUPS: Record<"table" | "sequence", string[]> = {
+const CATALOG_GROUPS: Record<"table" | "sequence" | "function" | "column", string[]> = {
   table: ["tables", "views", "materializedViews"],
   sequence: ["sequences"],
+  function: ["functions", "procedures"],
+  // A column belongs to a table: the catalogue lists the tables to choose from.
+  column: ["tables", "views", "materializedViews"],
+}
+
+/** What a scope lists at a level: a name, and for a function the types it takes. */
+type Listed = { name: string; signature?: string; extension?: string }
+
+/** One row of the matrix: an object of the level on screen, and the cell its chips press. */
+type Entry = {
+  key: string
+  /** What the row is called. */
+  label: string
+  /** What a chip's name says it is on: the label, and the table for a column. */
+  aria: string
+  cell: Cell
 }
 
 /**
@@ -101,6 +126,7 @@ export function GrantsMatrix({
   onApplied: () => void
 }) {
   const { id, conn, engine } = useDatabase()
+  const tablePickerId = useId()
   const objectLevels = useMemo(
     () =>
       levels.filter(
@@ -118,6 +144,8 @@ export function GrantsMatrix({
   })
   const level = objectLevels.find((one) => one.level === view) ?? objectLevels[0]
   const [scope, setScope] = useState("")
+  // The table whose columns are listed, at the column level.
+  const [table, setTable] = useState("")
   const [wanted, setWanted] = useState<Wanted>({})
   const [members, setMembers] = useState<Membership[]>([])
   const [reviewing, setReviewing] = useState(false)
@@ -128,7 +156,12 @@ export function GrantsMatrix({
 
   // Which container an object of this level is named inside: a schema of the
   // connection's database, or a database of the server.
-  const scoped = level && (level.level === "table" || level.level === "sequence")
+  const scoped =
+    level &&
+    (level.level === "table" ||
+      level.level === "sequence" ||
+      level.level === "function" ||
+      level.level === "column")
   const byDatabase = Boolean(scoped && level.needs.includes("database"))
 
   const databases = usePoll(
@@ -164,25 +197,64 @@ export function GrantsMatrix({
   const currentScope =
     scope || (byDatabase ? conn.database : (catalog.data?.schema ?? schemas[0] ?? ""))
 
-  const listed: string[] = useMemo(() => {
+  // What the scope holds at this level, by the catalogue's own groups. At the
+  // column level these are the tables to choose from, and the rows are the
+  // chosen one's columns.
+  const listed = useMemo<Listed[]>(() => {
     if (!level) return []
-    if (level.level === "database") return (databases.data ?? []).map((one) => one.name)
-    if (level.level === "schema") return schemas
+    if (level.level === "database") return (databases.data ?? []).map((one) => ({ name: one.name }))
+    if (level.level === "schema") return schemas.map((name) => ({ name }))
     const groups = CATALOG_GROUPS[level.level]
     const held = catalog.data && catalog.data.schema === currentScope ? catalog.data.objects : {}
-    return groups.flatMap((group) => held[group] ?? []).map((one) => one.name)
+    // The functions an extension installed are its own, and dozens of them
+    // would bury the application's.
+    return groups
+      .flatMap((group) => held[group] ?? [])
+      .filter((one) => level.level !== "function" || !one.extension)
   }, [level, databases.data, schemas, catalog.data, currentScope])
+  const tables = level?.level === "column" ? listed.map((one) => one.name) : []
+  const chosenTable = tables.includes(table) ? table : (tables[0] ?? "")
+
+  const columns = usePoll(
+    (signal) =>
+      read<{ columns: { name: string }[] }>(
+        `/databases/${id}/table`,
+        (answer) => Array.isArray(answer.columns),
+        { schema: currentScope, table: chosenTable },
+        signal,
+      ),
+    0,
+    [id, currentScope, chosenTable],
+    { enabled: level?.level === "column" && chosenTable !== "" },
+  )
 
   if (!level) return null
 
-  const cellOf = (name: string): Cell =>
+  const cellOf = (name: string, signature?: string, column?: string): Cell =>
     level.level === "database"
       ? { level: "database", database: name }
       : level.level === "schema"
         ? { level: "schema", schema: name }
-        : byDatabase
-          ? { level: level.level, database: currentScope, table: name }
-          : { level: level.level, schema: currentScope, table: name }
+        : level.level === "column"
+          ? { level: "column", schema: currentScope, table: chosenTable, column }
+          : level.level === "function"
+            ? { level: "function", schema: currentScope, table: name, signature: signature ?? "" }
+            : byDatabase
+              ? { level: level.level, database: currentScope, table: name }
+              : { level: level.level, schema: currentScope, table: name }
+  const entries: Entry[] =
+    level.level === "column"
+      ? (columns.data?.columns ?? []).map((one) => ({
+          key: one.name,
+          label: one.name,
+          aria: `${chosenTable}.${one.name}`,
+          cell: cellOf("", undefined, one.name),
+        }))
+      : listed.map((one) => {
+          const signature = one.signature
+          const label = level.level === "function" ? `${one.name}(${signature ?? ""})` : one.name
+          return { key: label, label, aria: label, cell: cellOf(one.name, signature) }
+        })
   const holds = (cell: Cell): Held => {
     const of = levels.find((one) => one.level === cell.level) ?? level
     // A grant on a schema, a table or a sequence is listed for the connection's
@@ -192,26 +264,48 @@ export function GrantsMatrix({
   // What it holds something on comes first, then the connection's own
   // database, then the rest by name: a server has dozens of databases, and
   // the reader came for the ones this account can touch.
-  const rank = (name: string) => {
-    const held = holds(cellOf(name))
+  const rank = (entry: Entry) => {
+    const held = holds(entry.cell)
     if (held.privileges.length > 0 || held.other.length > 0) return 0
-    return name === conn.database ? 1 : 2
+    return entry.label === conn.database ? 1 : 2
   }
-  const objects = [...listed].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  // A table's columns stay in the order the table declares them.
+  const objects =
+    level.level === "column"
+      ? entries
+      : [...entries].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label))
   const domain = levelPrivileges(level)
-  const hasAll = level.privileges.some((one) => one.toUpperCase() === "ALL")
+  // A level with one privilege has no "all" to press beside it.
+  const hasAll = domain.length > 1 && level.privileges.some((one) => one.toUpperCase() === "ALL")
   const loading =
     level.level === "database"
       ? !databases.data && !databases.error
-      : !catalog.data && !catalog.error
-  const failed = level.level === "database" ? databases.error : catalog.error
+      : level.level === "column"
+        ? (!catalog.data && !catalog.error) ||
+          (chosenTable !== "" && !columns.data && !columns.error)
+        : !catalog.data && !catalog.error
+  const failed =
+    level.level === "database"
+      ? databases.error
+      : level.level === "column"
+        ? (catalog.error ?? columns.error)
+        : catalog.error
 
   // How many objects of each level it holds something on, for the strip.
   const heldCount = (name: ObjectLevel) =>
     new Set(
       detail.grants
         .filter((grant) => grant.level === name && !grant.future)
-        .map((grant) => [grant.database, grant.schema, grant.table].join("\u0000")),
+        .map((grant) =>
+          [
+            grant.database,
+            grant.schema,
+            grant.table,
+            grant.routine,
+            grant.arguments,
+            grant.column,
+          ].join("\u0000"),
+        ),
     ).size
 
   const press = (cell: Cell, privilege: string) =>
@@ -223,7 +317,7 @@ export function GrantsMatrix({
   // The whole scope at once: the privilege is wanted on every object, or on none.
   const pressEvery = (privilege: string) =>
     setWanted((held) => {
-      const cells = objects.map(cellOf)
+      const cells = objects.map((entry) => entry.cell)
       const everywhere = cells.every((cell) =>
         (held[cellKey(cell)]?.privileges ?? holds(cell).privileges).includes(privilege),
       )
@@ -337,6 +431,7 @@ export function GrantsMatrix({
               onClick={() => {
                 setView(one.level)
                 setScope("")
+                setTable("")
               }}
               className={cn(tabClasses(one.level === level.level, "h-9"), "gap-1.5")}
             >
@@ -367,6 +462,41 @@ export function GrantsMatrix({
             to it.
           </FormNote>
         )}
+        {level.level === "column" && tables.length > 0 && (
+          <div className="flex min-w-0 items-center gap-2">
+            <span id={`${tablePickerId}-label`} className="shrink-0 text-body font-medium">
+              Columns of
+            </span>
+            <Select value={chosenTable} onValueChange={setTable}>
+              <SelectTrigger
+                aria-labelledby={`${tablePickerId}-label`}
+                className="h-8 w-56 max-w-full font-mono text-xs"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {tables.map((name) => (
+                  <SelectItem key={name} value={name} className="font-mono text-xs">
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {level.level === "column" && (
+          <FormNote>
+            A privilege on the whole table covers every column of it. What is pressed here is held
+            on the column alone, and a revoke here takes only that.
+          </FormNote>
+        )}
+        {level.level === "function" && (
+          <FormNote>
+            A function can be run by every role until EXECUTE is taken from PUBLIC, so granting it
+            here changes nothing for a role while PUBLIC holds it. The functions an extension
+            installed are not listed.
+          </FormNote>
+        )}
 
         {loading ? (
           <div className="space-y-2.5 py-1" aria-hidden>
@@ -382,7 +512,12 @@ export function GrantsMatrix({
         ) : objects.length === 0 ? (
           <FormNote>
             There is no {LEVEL_WORD[level.level].one}
-            {scoped ? ` in ${currentScope}` : ""}.
+            {level.level === "column"
+              ? ` to list: ${chosenTable ? `${chosenTable} has none` : `${currentScope} has no table`}`
+              : scoped
+                ? ` in ${currentScope}`
+                : ""}
+            .
           </FormNote>
         ) : (
           <ul className="divide-y divide-hairline" aria-label={LEVEL_WORD[level.level].tab}>
@@ -403,8 +538,7 @@ export function GrantsMatrix({
                     </span>
                   )}
                   {domain.map((privilege) => {
-                    const everywhere = objects.every((name) => {
-                      const cell = cellOf(name)
+                    const everywhere = objects.every(({ cell }) => {
                       return (wanted[cellKey(cell)]?.privileges ?? holds(cell).privileges).includes(
                         privilege,
                       )
@@ -424,8 +558,7 @@ export function GrantsMatrix({
                 </span>
               </li>
             )}
-            {objects.map((name) => {
-              const cell = cellOf(name)
+            {objects.map(({ key: name, label, aria, cell }) => {
               const held = holds(cell)
               const want = wanted[cellKey(cell)]?.privileges
               const now = want ?? held.privileges
@@ -437,8 +570,8 @@ export function GrantsMatrix({
                   data-object={name}
                   className="flex min-w-0 flex-col gap-1.5 py-2 sm:flex-row sm:items-start sm:gap-3"
                 >
-                  <span className="w-40 shrink-0 truncate pt-1 font-mono text-xs" title={name}>
-                    {name}
+                  <span className="w-40 shrink-0 truncate pt-1 font-mono text-xs" title={label}>
+                    {label}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-1">
                     {editable ? (
@@ -447,7 +580,7 @@ export function GrantsMatrix({
                           <FilterChip
                             selected={full}
                             className={PRIVILEGE_CHIP}
-                            aria-label={`ALL on ${name}`}
+                            aria-label={`ALL on ${aria}`}
                             onClick={() => pressAll(cell)}
                           >
                             ALL
@@ -462,7 +595,7 @@ export function GrantsMatrix({
                               key={privilege}
                               selected={is}
                               disabled={owned}
-                              aria-label={`${privilege} on ${name}`}
+                              aria-label={`${privilege} on ${aria}`}
                               className={cn(
                                 PRIVILEGE_CHIP,
                                 was && !is && "line-through",
@@ -508,8 +641,8 @@ export function GrantsMatrix({
           !loading &&
           !failed &&
           objects.length > 0 &&
-          objects.every((name) => {
-            const held = holds(cellOf(name))
+          objects.every(({ cell }) => {
+            const held = holds(cell)
             return held.privileges.length === 0 && held.other.length === 0
           }) && (
             <FormNote>
@@ -563,7 +696,9 @@ export function GrantsMatrix({
               wanted,
               holds,
               levels,
-              scoped ? { [scopeKey(cellOf(""))]: objects } : {},
+              scoped && level.level !== "column"
+                ? { [scopeKey(cellOf(""))]: objects.map((entry) => entry.key) }
+                : {},
               members,
               { host: detail.host, ...options },
             )
@@ -634,7 +769,9 @@ function GrantsReview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [grantOption, future],
   )
-  const whole = planned.some((one) => one.body.table === "")
+  const whole = planned.some(
+    (one) => one.body.table === "" || (one.body.level === "function" && !one.body.routine),
+  )
   const path = (one: Planned) =>
     `/databases/${id}/server/roles/${encodeURIComponent(role.name)}/privileges${one.action === "revoke" ? "/revoke" : ""}`
 

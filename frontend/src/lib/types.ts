@@ -1875,6 +1875,7 @@ export type DbCapabilityFlag =
   | "comments"
   | "indexes"
   | "extensions"
+  | "rowSecurity" // GET /rls, the policy forms and the role tester
   // Watching and maintaining a server.
   | "stats" // GET /stats: one snapshot of counters and gauges
   | "sessions" // sessions, Redis clients, MongoDB operations

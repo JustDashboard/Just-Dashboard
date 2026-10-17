@@ -70,6 +70,17 @@ import {
 import { Facts } from "@/components/database/schema/facts"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import { ViewDialog, useViewReplace } from "@/components/database/schema/object-forms"
+import {
+  PolicyDialog,
+  Policies,
+  PoliciesPlaceholder,
+  RowSecurityDialog,
+  namedRoles,
+  useRoles,
+  useRowSecurity,
+} from "@/components/database/schema/policies"
+import { dropPolicyRequest } from "@/components/database/schema/policy"
+import { RoleTester } from "@/components/database/schema/role-test"
 import { selectStatement } from "@/components/database/schema/select"
 import { MaintenanceBand, TableStatistics } from "@/components/database/schema/statistics"
 import {
@@ -84,6 +95,7 @@ import {
 import type {
   DbCatalog,
   DbColumn,
+  DbPolicy,
   DbTableDetail,
   SchemaObject,
 } from "@/components/database/schema/types"
@@ -99,6 +111,9 @@ type Form =
   | { type: "add-index" }
   | { type: "add-foreign-key" }
   | { type: "add-constraint" }
+  | { type: "add-policy" }
+  | { type: "edit-policy"; policy: DbPolicy }
+  | { type: "row-security" }
   | { type: "replace-view" }
 
 const TOUCH = "max-sm:h-8"
@@ -147,7 +162,7 @@ export function TableView({
   onRenamed: (to: string) => void
   onDropped: () => void
 }) {
-  const { engine, href, goto, readOnly } = useDatabase()
+  const { id, engine, href, goto, readOnly } = useDatabase()
   const { can } = useAuth()
   const tabsId = useId()
   const tabs = useRef<HTMLDivElement>(null)
@@ -185,6 +200,13 @@ export function TableView({
     [catalog, name, schema, data?.schema],
   )
   const replace = useViewReplace(schema, kind === "view" && mayWrite && has("views"))
+  // Policies decide who sees which rows, as grants decide who sees which
+  // tables: changing them is an administrator's, and removing the filter or a
+  // policy is destructive besides.
+  const hasPolicies = isTable && engine.can("rowSecurity")
+  const mayPolicy = can("system.admin") && !readOnly && changeable
+  const security = useRowSecurity(id, schema, name, hasPolicies, asked)
+  const roleList = useRoles(id, hasPolicies && view === "policies")
 
   const primary = data?.indexes.find((index) => index.primary)
   const keyCount = data
@@ -197,6 +219,15 @@ export function TableView({
       : []),
     ...(isTable
       ? [{ id: "keys" as const, label: "Keys & constraints", count: data ? keyCount : undefined }]
+      : []),
+    ...(hasPolicies
+      ? [
+          {
+            id: "policies" as const,
+            label: "Row security",
+            count: security.data?.policies.length,
+          },
+        ]
       : []),
     ...(engine.capabilities.catalogGroups.includes("triggers") && kind !== "dictionary"
       ? [
@@ -332,6 +363,12 @@ export function TableView({
 
   const done = () => {
     onChanged()
+  }
+  // A policy or a switch changes what the table's own reading says of it
+  // ("Row-level security: enabled") as well as the policies.
+  const policiesDone = () => {
+    onChanged()
+    security.refresh()
   }
 
   const missing = !data && detail.error instanceof ApiError && detail.error.status === 404
@@ -553,6 +590,16 @@ export function TableView({
                       )}
                     </>
                   )}
+                  {open === "policies" && mayPolicy && security.data && (
+                    <Button
+                      size="xs"
+                      className={TOUCH}
+                      onClick={() => setForm({ type: "add-policy" })}
+                    >
+                      <Plus />
+                      Add policy
+                    </Button>
+                  )}
                   {open === "definition" && kind === "view" && mayWrite && has("views") && (
                     <Button
                       size="xs"
@@ -678,6 +725,46 @@ export function TableView({
                   })
                 }
               />
+            ) : open === "policies" ? (
+              security.data ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                  <Policies
+                    security={security.data}
+                    mayChange={mayPolicy}
+                    mayDrop={mayPolicy && mayDestroy}
+                    onSwitches={() => setForm({ type: "row-security" })}
+                    onEdit={(policy) => setForm({ type: "edit-policy", policy })}
+                    onDrop={(policy) =>
+                      void destroy({
+                        request: dropPolicyRequest(data.schema, data.name, policy.name),
+                        title: "Drop policy",
+                        subject: {
+                          name: policy.name,
+                          facts: (
+                            <FormFact label="On" mono>
+                              {full}
+                            </FormFact>
+                          ),
+                        },
+                        sentence:
+                          "Rows the policy let through are no longer let through by it, and rows it held back are no longer held back by it. The table's rows are untouched.",
+                        done: `Dropped ${policy.name}`,
+                        onDone: policiesDone,
+                      })
+                    }
+                  />
+                  {can("service.control") && (
+                    <RoleTester
+                      key={`${data.schema}.${data.name}`}
+                      detail={data}
+                      security={security.data}
+                      roles={namedRoles(roleList.data?.roles)}
+                    />
+                  )}
+                </div>
+              ) : (
+                <PoliciesPlaceholder error={security.error} onRetry={security.refresh} />
+              )
             ) : open === "triggers" ? (
               <Triggers triggers={triggers} read={catalog !== undefined} word={word} />
             ) : open === "definition" ? (
@@ -742,6 +829,32 @@ export function TableView({
       )}
       {data && form?.type === "add-constraint" && (
         <AddConstraintDialog detail={data} onClose={() => setForm(null)} onDone={done} />
+      )}
+      {data && form?.type === "add-policy" && (
+        <PolicyDialog
+          detail={data}
+          roles={namedRoles(roleList.data?.roles)}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
+      )}
+      {data && form?.type === "edit-policy" && (
+        <PolicyDialog
+          detail={data}
+          policy={form.policy}
+          roles={namedRoles(roleList.data?.roles)}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
+      )}
+      {data && security.data && form?.type === "row-security" && (
+        <RowSecurityDialog
+          detail={data}
+          security={security.data}
+          mayTurnOff={mayDestroy}
+          onClose={() => setForm(null)}
+          onDone={policiesDone}
+        />
       )}
       {data && form?.type === "replace-view" && (
         <ViewDialog
