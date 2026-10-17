@@ -172,6 +172,10 @@ type DumpOptions struct {
 	// table from the built-in dumper.
 	Progress func(line string)
 
+	// trace is what a copy between two servers watches the built-in dump by
+	// (copy_stream.go); nothing else sets it.
+	trace *dumpTrace
+
 	// builtIn skips the engine's own tool. The built-in path is the one that
 	// has to work on a machine with nothing installed, so it has to be
 	// testable on a machine that has everything.
