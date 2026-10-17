@@ -291,8 +291,8 @@ neighbouring connection on the same server that would reset the account it signs
 replace or drop the database it is on.
 
 The rule guards the dashboard's own controls and is exactly as strong as the classification: a
-`SELECT` that calls a function which writes is a read to anything that judges a statement by its
-text. An operator who needs the engine itself to refuse writes gives the connection an account that
+`SELECT` that calls a function of the operator's own which writes is a read to anything that judges
+a statement by its text. An operator who needs the engine itself to refuse writes gives the connection an account that
 cannot make them. The per-route answers, the neighbour rule and what it does not follow are in
 [Databases](../backend/databases-proxy-platform.md#protected-connections).
 

@@ -142,6 +142,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": true,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -376,6 +377,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": true,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -566,6 +568,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": true,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -750,6 +753,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -940,6 +944,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -1128,6 +1133,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -1354,6 +1360,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -1537,6 +1544,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -1718,6 +1726,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -1894,6 +1903,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -2078,6 +2088,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": false,
@@ -2283,6 +2294,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -2474,6 +2486,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": false,
@@ -2700,6 +2713,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -2884,6 +2898,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": false,
@@ -3054,6 +3069,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": true,
       "profiler": false,
       "provision": true,
@@ -3258,6 +3274,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": true,
           "profiler": false,
           "provision": true,
@@ -3444,6 +3461,7 @@
         "sql"
       ],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": false,
@@ -3659,6 +3677,7 @@
             "sql"
           ],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -3796,6 +3815,7 @@
       "orm": false,
       "ormTargets": [],
       "persistence": false,
+      "pooler": false,
       "privileges": false,
       "profiler": true,
       "provision": true,
@@ -3927,6 +3947,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": true,
           "provision": true,
@@ -4057,6 +4078,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": false,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": false,
@@ -4186,6 +4208,7 @@
       "orm": false,
       "ormTargets": [],
       "persistence": true,
+      "pooler": false,
       "privileges": false,
       "profiler": false,
       "provision": true,
@@ -4309,6 +4332,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4431,6 +4455,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4553,6 +4578,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
@@ -4675,6 +4701,7 @@
           "orm": false,
           "ormTargets": [],
           "persistence": true,
+          "pooler": false,
           "privileges": false,
           "profiler": false,
           "provision": true,
