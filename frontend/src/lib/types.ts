@@ -1891,6 +1891,7 @@ export type DbCapabilityFlag =
   | "privileges" // role detail, grants, grant and revoke
   | "statements"
   | "statementsReset"
+  | "statementHistory"
   | "queryLog"
   | "clickhouseViews" // parts, merges, mutations, running queries
   | "sqliteFile"

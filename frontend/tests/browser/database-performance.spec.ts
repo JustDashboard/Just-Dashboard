@@ -220,6 +220,240 @@ const STATEMENTS_OFF = {
   },
 }
 
+// ---- the statement history ------------------------------------------------
+
+const MINUTE = 60_000
+const iso = (ms: number) => new Date(ms).toISOString()
+
+/** Where each point of a window ending now ends, cut as the server cuts it: on whole multiples of its width. */
+function windowBuckets(now: number, hours: number, seconds: number) {
+  const width = seconds * 1000
+  const first = Math.floor((now - hours * 3_600_000) / width)
+  const last = Math.floor(now / width)
+  return Array.from({ length: last - first + 1 }, (_, index) =>
+    Math.min((first + index + 1) * width, now),
+  )
+}
+
+type Recorded = {
+  id: string
+  query: string
+  calls: number
+  totalMs: number
+  rows: number
+  rowsRead?: number
+  p50Ms?: number
+  p95Ms?: number
+  p99Ms?: number
+  /** Its time across the window, 0 to 1 of the way through. */
+  curve: (x: number) => number
+}
+
+/** A web shop's PostgreSQL over the last hour: one lookup is half the work, and a stock update has just begun to cost. */
+const SHOP_HISTORY: Recorded[] = [
+  {
+    id: "-4520113301",
+    query:
+      "SELECT o.id, o.total, o.status FROM orders o WHERE o.customer_id = $1 ORDER BY o.created_at DESC LIMIT $2",
+    calls: 18_412,
+    totalMs: 22_094,
+    rows: 183_920,
+    curve: (x) => 0.6 + 0.8 * x,
+  },
+  {
+    id: "7731904",
+    query: "UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2",
+    calls: 2_911,
+    totalMs: 12_540,
+    rows: 2_911,
+    curve: (x) => (x > 0.7 ? 2.6 : 0.35),
+  },
+  {
+    id: "193377",
+    query: "INSERT INTO page_views (path, referrer, viewed_at) VALUES ($1, $2, $3)",
+    calls: 40_220,
+    totalMs: 6_830,
+    rows: 40_220,
+    curve: (x) => 1 + 0.25 * Math.sin(x * 12),
+  },
+  {
+    id: "-88120045",
+    query: "SELECT count(*) FROM order_items WHERE order_id = ANY($1)",
+    calls: 96,
+    totalMs: 4_420,
+    rows: 96,
+    curve: (x) => (Math.round(x * 10) % 3 === 0 ? 1.8 : 0.3),
+  },
+  {
+    id: "5501",
+    query: "DELETE FROM sessions WHERE expires_at < $1",
+    calls: 12,
+    totalMs: 1_310,
+    rows: 4_380,
+    curve: (x) => (Math.round(x * 12) % 4 === 0 ? 1 : 0),
+  },
+]
+
+/** An analytics ClickHouse: real run times, so percentiles, and the rows each query read. */
+const ANALYTICS_HISTORY: Recorded[] = [
+  {
+    id: "14227355820374926633",
+    query:
+      "SELECT path, count() AS views FROM page_views WHERE viewed_at > now() - INTERVAL ? HOUR GROUP BY path ORDER BY views DESC LIMIT ?",
+    calls: 1_204,
+    totalMs: 96_320,
+    rows: 120_400,
+    rowsRead: 4_816_000_000,
+    p50Ms: 61,
+    p95Ms: 212,
+    p99Ms: 487,
+    curve: (x) => 0.8 + 0.4 * x,
+  },
+  {
+    id: "3390412281605321",
+    query: "INSERT INTO page_views (path, referrer, viewed_at, session_id) VALUES",
+    calls: 3_610,
+    totalMs: 21_660,
+    rows: 0,
+    rowsRead: 0,
+    p50Ms: 5,
+    p95Ms: 13,
+    p99Ms: 22.6,
+    curve: () => 1,
+  },
+  {
+    id: "902211873340115",
+    query: "SELECT uniqExact(session_id) FROM events WHERE event_date = today() AND kind = ?",
+    calls: 58,
+    totalMs: 14_790,
+    rows: 58,
+    rowsRead: 812_000_000,
+    p50Ms: 241,
+    p95Ms: 402,
+    p99Ms: 431,
+    curve: (x) => (x > 0.5 ? 1.5 : 0.5),
+  },
+]
+
+const historyBucket = (hours: number) =>
+  hours === 1 ? 300 : hours === 6 ? 900 : hours === 24 ? 3600 : 25_200
+const chartBucket = (hours: number) => (hours <= 6 ? 300 : hours === 24 ? 600 : 3600)
+/** A longer window holds more of the same work. */
+const scaleOf = (hours: number) => (hours === 1 ? 1 : hours * 0.8)
+
+function historyFacts(hours: number, bucketSeconds: number, recorded: Recorded[], now: number) {
+  const scale = scaleOf(hours)
+  const intervals = hours * 12 - 1
+  return {
+    supported: true,
+    hours,
+    everySeconds: 300,
+    retentionHours: 168,
+    keptPerInterval: 50,
+    bucketSeconds,
+    from: iso(now - hours * 3_600_000),
+    until: iso(now),
+    intervals,
+    recordedSeconds: intervals * 300,
+    firstAt: iso(now - (hours * 60 - 3) * MINUTE),
+    totalMs: Math.round(recorded.reduce((sum, r) => sum + r.totalMs, 0) * 1.02 * scale),
+    rowsRead: recorded.some((r) => r.rowsRead !== undefined),
+    percentiles: recorded.some((r) => r.p95Ms !== undefined),
+    resets: [],
+    reading: { at: iso(now - 2 * MINUTE - 13_000), supported: true },
+    nextAt: iso(now + 2 * MINUTE + 47_000),
+  }
+}
+
+function historyEntry(r: Recorded, hours: number, total: number) {
+  const scale = scaleOf(hours)
+  const { curve, ...figures } = r
+  void curve
+  return {
+    ...figures,
+    calls: Math.round(r.calls * scale),
+    totalMs: r.totalMs * scale,
+    meanMs: r.totalMs / r.calls,
+    rows: Math.round(r.rows * scale),
+    ...(r.rowsRead === undefined ? {} : { rowsRead: Math.round(r.rowsRead * scale) }),
+    share: (r.totalMs * scale) / total,
+  }
+}
+
+const HISTORY_ORDER: Record<string, (r: ReturnType<typeof historyEntry>) => number> = {
+  total: (r) => r.totalMs,
+  calls: (r) => r.calls,
+  mean: (r) => r.meanMs,
+  rows: (r) => r.rows,
+  rowsRead: (r) => r.rowsRead ?? -1,
+  p95: (r) => r.p95Ms ?? -1,
+}
+
+/** `GET /{id}/statements/history`, ordered as asked, over the window asked for. */
+const statementHistory =
+  (recorded: Recorded[], over: Record<string, unknown> = {}) =>
+  (_call: number, url: URL) => {
+    const now = Date.now()
+    const hours = Number(url.searchParams.get("hours") ?? 1)
+    const sort = url.searchParams.get("sort") ?? "total"
+    const facts = historyFacts(hours, historyBucket(hours), recorded, now)
+    const buckets = windowBuckets(now, hours, facts.bucketSeconds)
+    const statements = recorded
+      .map((r) => ({
+        ...historyEntry(r, hours, facts.totalMs),
+        trend: buckets.map((_, index) =>
+          index === 0
+            ? null
+            : Math.round(
+                ((r.totalMs * scaleOf(hours)) / buckets.length) * r.curve(index / buckets.length),
+              ),
+        ),
+      }))
+      .sort((a, b) => HISTORY_ORDER[sort](b) - HISTORY_ORDER[sort](a))
+    return { ...facts, sort, buckets, statements, ...over }
+  }
+
+/** `GET /{id}/statements/history/{statement}`: its points, the first before recording began. */
+const statementHistoryOf = (recorded: Recorded[], r: Recorded) => (_call: number, url: URL) => {
+  const now = Date.now()
+  const hours = Number(url.searchParams.get("hours") ?? 1)
+  const facts = historyFacts(hours, chartBucket(hours), recorded, now)
+  const at = windowBuckets(now, hours, facts.bucketSeconds)
+  const entry = historyEntry(r, hours, facts.totalMs)
+  const points = at.map((ts, index) => {
+    if (index === 0) return { at: ts, recorded: false, calls: 0, totalMs: 0, rows: 0 }
+    const weight = r.curve(index / at.length) / at.length
+    const calls = Math.max(1, Math.round(entry.calls * weight))
+    const totalMs = entry.totalMs * weight
+    return {
+      at: ts,
+      recorded: true,
+      calls,
+      totalMs,
+      meanMs: totalMs / calls,
+      rows: Math.round(entry.rows * weight),
+      ...(r.rowsRead === undefined ? {} : { rowsRead: Math.round((entry.rowsRead ?? 0) * weight) }),
+      ...(r.p95Ms === undefined
+        ? {}
+        : {
+            p50Ms: r.p50Ms! * (0.9 + 0.2 * weight * at.length),
+            p95Ms: r.p95Ms * (0.9 + 0.2 * weight * at.length),
+            p99Ms: r.p99Ms! * (0.9 + 0.2 * weight * at.length),
+          }),
+    }
+  })
+  return { ...facts, statement: entry, points }
+}
+
+const NO_HISTORY_YET = (_call: number, url: URL) => ({
+  ...statementHistory(SHOP_HISTORY)(0, url),
+  intervals: 0,
+  recordedSeconds: 0,
+  firstAt: undefined,
+  totalMs: 0,
+  statements: [],
+})
+
 const table = (schema: string, name: string, extra: Record<string, unknown> = {}) => ({
   schema,
   table: name,
@@ -761,6 +995,13 @@ const ANSWERS: Record<string, unknown> = {
   "GET 1/activity": ACTIVITY,
   "GET 1/locks": LOCKS,
   "GET 1/statements": STATEMENTS,
+  "GET 1/statements/history": statementHistory(SHOP_HISTORY),
+  ...Object.fromEntries(
+    SHOP_HISTORY.map((r) => [
+      `GET 1/statements/history/${r.id}`,
+      statementHistoryOf(SHOP_HISTORY, r),
+    ]),
+  ),
   "GET 1/tablestats": TABLESTATS,
   "GET 1/indexstats": INDEXSTATS,
   "GET 1/maintenance": POSTGRES_ACTIONS,
@@ -835,6 +1076,13 @@ const ANSWERS: Record<string, unknown> = {
   "GET 7/advisor": { ...ADVISOR, silences: [], endOfLife: undefined, findings: [] },
   "GET 2/stats": CLICKHOUSE_STATS,
   "GET 2/clickhouse/queries": CH_QUERIES,
+  "GET 2/statements/history": statementHistory(ANALYTICS_HISTORY),
+  ...Object.fromEntries(
+    ANALYTICS_HISTORY.map((r) => [
+      `GET 2/statements/history/${r.id}`,
+      statementHistoryOf(ANALYTICS_HISTORY, r),
+    ]),
+  ),
   "GET 2/clickhouse/parts": CH_PARTS,
   "GET 2/clickhouse/merges": CH_MERGES,
   "GET 2/clickhouse/mutations": CH_MUTATIONS,
@@ -979,6 +1227,7 @@ test("the page opens on recorded activity and offers the views its engine has", 
     /^Sessions/,
     /^Locks/,
     /^Statements$/,
+    /^Statement history$/,
     /^Tables$/,
     /^Indexes$/,
     /^Replication$/,
@@ -1672,6 +1921,7 @@ test("an analytic engine is read by its queries, parts and merges", async ({ pag
     /^Overview$/,
     /^Running queries/,
     /^Statements$/,
+    /^Statement history$/,
     /^Tables$/,
     /^Indexes$/,
     /^Parts$/,
@@ -1905,6 +2155,255 @@ test("a statement with more placeholders than a form is quick for is handed to Q
   await expect(dialog(page)).toContainText("This shape has 20 placeholders")
   await expect(dialog(page).getByRole("textbox")).toHaveCount(0)
   await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
+})
+
+// ---------------------------------------------------------------------------
+// Statement history
+// ---------------------------------------------------------------------------
+
+const historyView = (page: Page) => region(page, "Statement history")
+
+/** Waits for a sheet to finish opening, so what is read or drawn is the sheet at rest. */
+async function settled(page: Page) {
+  const sheet = dialog(page)
+  await expect(sheet).toBeVisible()
+  await sheet.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  )
+}
+
+test("statement history ranks a window's statements by the column pressed, each with its trend, and one opens its charts", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  const history = historyView(page)
+  const rows = history.getByRole("row")
+  await expect(rows).toHaveCount(SHOP_HISTORY.length + 1)
+  await expect(rows.nth(1)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
+  await expect(rows.nth(1)).toContainText("46%")
+  // Each row draws its time across the window.
+  await expect(history.getByRole("img", { name: "Its time over the last hour" })).toHaveCount(
+    SHOP_HISTORY.length,
+  )
+  await expect(history).toContainText("of statement time recorded over the last hour")
+  // What the figures are made from, in the engine's own terms.
+  await expect(history).toContainText("pg_stat_statements keeps running totals for each statement")
+  await expect(history).toContainText("so there are no percentiles")
+  // PostgreSQL keeps no run times and counts no rows read: neither column is drawn.
+  await expect(history.getByRole("columnheader", { name: "p95" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "Rows read" })).toHaveCount(0)
+  await expect(history.getByRole("columnheader", { name: "Of runtime" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  )
+
+  // Another order is asked of the server, which ranks the whole window.
+  const asked = page.waitForRequest((request) =>
+    /\/statements\/history\?.*sort=calls/.test(request.url()),
+  )
+  await history.getByRole("button", { name: "Calls" }).click()
+  await asked
+  await expect(page).toHaveURL(/sort=calls/)
+  await expect(history.getByRole("columnheader", { name: "Calls" })).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  )
+  await expect(rows.nth(1)).toContainText("INSERT INTO page_views")
+
+  await history.getByRole("textbox", { name: "Filter the statement history" }).fill("inventory")
+  await expect(rows).toHaveCount(2)
+  await history.getByRole("textbox", { name: "Filter the statement history" }).fill("")
+
+  await history.getByRole("row", { name: /UPDATE inventory/ }).click()
+  await expect(page).toHaveURL(/statement=7731904/)
+  await settled(page)
+  const panel = dialog(page)
+  for (const chart of ["Time spent", "Calls", "Time per call", "Rows"]) {
+    await expect(panel.getByRole("heading", { name: chart, exact: true })).toBeVisible()
+  }
+  await expect(panel).toContainText("A point for every 5 minutes.")
+  await expect(panel).toContainText("UPDATE inventory SET reserved = reserved + $1 WHERE sku = $2")
+  await expect(panel.getByRole("button", { name: "Open in Query" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/statement=/)
+  await expect(history.getByRole("row", { name: /UPDATE inventory/ })).toBeFocused()
+})
+
+test("statement history is read over the Overview's window, and a range pressed in it is asked for", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  const history = historyView(page)
+  await expect(history.getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  const asked = page.waitForRequest((request) =>
+    /\/statements\/history\?.*hours=24/.test(request.url()),
+  )
+  await history.getByRole("radio", { name: "24 hours" }).click()
+  await asked
+  await expect(history).toContainText("of statement time recorded over the last 24 hours")
+  await view(page, /^Overview$/).click()
+  await expect(page.getByRole("radio", { name: "24 hours" })).toBeChecked()
+})
+
+test("statement history before its second reading says when the first point comes", async ({
+  page,
+}) => {
+  await mockOps(page, { answers: { "GET 1/statements/history": NO_HISTORY_YET } })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("No statement history yet")).toBeVisible()
+  await expect(page.getByText(/the next is in about 3 minutes/)).toBeVisible()
+  await expect(page.getByText(/kept for 7 days/)).toBeVisible()
+})
+
+test("statement history a server cannot give says why, with the way to the view that turns it on", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) => ({
+        ...NO_HISTORY_YET(call, url),
+        reading: {
+          at: iso(Date.now() - 3 * MINUTE),
+          supported: false,
+          reason: "pg_stat_statements is not enabled in this database",
+        },
+      }),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("The statements this server runs cannot be recorded")).toBeVisible()
+  await expect(page.getByText("pg_stat_statements is not enabled in this database")).toBeVisible()
+  await page.getByRole("button", { name: "Open Statements" }).click()
+  await expect(page).toHaveURL(/view=statements/)
+  await expect(page.getByText("This server is not counting its statements")).toHaveCount(0)
+})
+
+test("statement history that could not be read says so and is tried again", async ({ page }) => {
+  let down = true
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) =>
+        down ? failing("database is locked", 500) : statementHistory(SHOP_HISTORY)(call, url),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("Could not read the statement history")).toBeVisible()
+  down = false
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+})
+
+test("a role that may only read reads the statement history and is offered nothing to run", async ({
+  page,
+}) => {
+  await mockOps(page, { viewer: true })
+  await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[0].id}`)
+  await settled(page)
+  await expect(dialog(page).getByRole("heading", { name: "Time spent", exact: true })).toBeVisible()
+  await expect(dialog(page)).toContainText("SELECT o.id, o.total, o.status FROM orders o")
+  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toHaveCount(0)
+})
+
+test("an engine that keeps run times gives the history its percentiles and the rows each query read", async ({
+  page,
+}) => {
+  await mockOps(page, AS_CLICKHOUSE)
+  await visit(page, "/databases/2/performance?view=history")
+  const history = historyView(page)
+  await expect(history.getByRole("row")).toHaveCount(ANALYTICS_HISTORY.length + 1)
+  await expect(history.getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await expect(history.getByRole("columnheader", { name: "Rows read" })).toBeVisible()
+  await expect(history.getByRole("row").nth(1)).toContainText("212 ms")
+  await expect(history).toContainText("ClickHouse's query log holds every finished query")
+  await history.getByRole("row").nth(1).click()
+  await settled(page)
+  const panel = dialog(page)
+  await expect(panel.getByText("p99", { exact: true }).first()).toBeVisible()
+  await expect(panel).toContainText("487 ms")
+  await expect(panel).toContainText("40K for each returned")
+})
+
+test("a file has no statement history to offer", async ({ page }) => {
+  const ops = await mockOps(page)
+  await visit(page, "/databases/7/performance")
+  await expect(view(page, /^File$/)).toBeVisible()
+  await expect(view(page, /^Statement history$/)).toHaveCount(0)
+  expect(ops.seen.filter((request) => request.includes("/statements/history"))).toEqual([])
+})
+
+test("statement history fits a phone, its list and its charts", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  const sideways = () =>
+    page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(await sideways()).toBe(false)
+  await historyView(page).getByRole("row").nth(1).click()
+  await settled(page)
+  await expect(dialog(page).getByRole("heading", { name: "Rows", exact: true })).toBeVisible()
+  expect(await sideways()).toBe(false)
+  const wide = await dialog(page).evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+  expect(wide).toBe(false)
+})
+
+test("statement history screenshots @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names where the screenshots go")
+  test.setTimeout(120_000)
+  const dir = process.env.JD_SHOTS
+  const shot = (name: string) => page.screenshot({ path: `${dir}/${name}.png` })
+  let empty = false
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockOps(page, {
+    ...AS_CLICKHOUSE,
+    answers: {
+      "GET 1/statements/history": (call: number, url: URL) =>
+        empty ? NO_HISTORY_YET(call, url) : statementHistory(SHOP_HISTORY)(call, url),
+    },
+  })
+
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  await page.waitForLoadState("networkidle")
+  await shot("history-list-1440")
+
+  await historyView(page)
+    .getByRole("row", { name: /UPDATE inventory/ })
+    .click()
+  await settled(page)
+  await expect(
+    dialog(page).getByRole("heading", { name: "Time per call", exact: true }),
+  ).toBeVisible()
+  await shot("history-statement-1440")
+  await dialog(page).getByRole("heading", { name: "Rows", exact: true }).scrollIntoViewIfNeeded()
+  await shot("history-statement-charts-1440")
+  await page.keyboard.press("Escape")
+
+  await visit(page, "/databases/2/performance?view=history")
+  await expect(historyView(page).getByRole("columnheader", { name: "p95" })).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  await shot("history-percentiles-1440")
+  await historyView(page).getByRole("row").nth(1).click()
+  await settled(page)
+  await dialog(page)
+    .getByRole("heading", { name: "Time per call", exact: true })
+    .scrollIntoViewIfNeeded()
+  await shot("history-percentiles-statement-1440")
+  await page.keyboard.press("Escape")
+
+  empty = true
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(page.getByText("No statement history yet")).toBeVisible()
+  await shot("history-empty-1440")
+
+  empty = false
+  await page.setViewportSize({ width: 390, height: 844 })
+  await visit(page, "/databases/1/performance?view=history")
+  await expect(historyView(page).getByRole("row")).toHaveCount(SHOP_HISTORY.length + 1)
+  await page.waitForLoadState("networkidle")
+  await shot("history-list-390")
 })
 
 test("a read that does not come back says what it is waiting for, and a failure after a long silence says it was one", async ({
@@ -2465,6 +2964,7 @@ for (const [label, viewport] of [
       "sessions",
       "locks",
       "statements",
+      "history",
       "tables",
       "indexes",
       "replication",
@@ -2483,7 +2983,7 @@ for (const [label, viewport] of [
     await visit(page, "/databases/7/performance")
     await expect(region(page, "Maintenance").getByRole("button").first()).toBeVisible()
     await keepsTheRules(page, "a file's performance page")
-    for (const name of ["", "sessions", "parts", "merges"]) {
+    for (const name of ["", "sessions", "history", "parts", "merges"]) {
       await visit(page, `/databases/2/performance${name ? `?view=${name}` : ""}`)
       await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await page.waitForLoadState("networkidle")
@@ -2507,6 +3007,9 @@ for (const [label, viewport] of [
     await expect(dialog(page)).toContainText("Of runtime")
     await expect(dialog(page).getByRole("textbox")).toHaveCount(2)
     await keepsTheRules(page, "a statement's panel", true)
+    await visit(page, `/databases/1/performance?view=history&statement=${SHOP_HISTORY[1].id}`)
+    await expect(dialog(page)).toContainText("Time per call")
+    await keepsTheRules(page, "a statement's history", true)
     await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
     await expect(dialog(page)).toContainText("Session 40,77")
     await keepsTheRules(page, "a session's panel", true)
