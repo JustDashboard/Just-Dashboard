@@ -138,13 +138,17 @@ const PLAN = {
   mounts: ["shop-db-20261017-090000-pitr:/jd-pitr:ro"],
 }
 
+const TITLES: Record<string, string> = {
+  enable: "Set up point-in-time recovery for shop-db",
+  restore: "Recover shop-db into shop-db-restored-20261017-090500",
+  switch: "Switch shop-db to shop-db-restored-20261017-085500",
+  disable: "Turn point-in-time recovery off for shop-db",
+}
+
 const job = (id: string, what: string, status: string, over: Record<string, unknown> = {}) => ({
   id,
   kind: `database.pitr.shop-db.${what}`,
-  title:
-    what === "restore"
-      ? "Recover shop-db into shop-db-restored-20261017-090500"
-      : "Set up point-in-time recovery for shop-db",
+  title: TITLES[what],
   target: "shop-db",
   status,
   exitCode: 0,
@@ -233,7 +237,9 @@ async function momentAgo(page: Page, minutes: number) {
   }, minutes)
 }
 
-const panel = (page: Page) => page.getByRole("region", { name: "Point-in-time recovery" })
+// Exact: a job's console is a region too, and its name begins with the job's title.
+const panel = (page: Page) =>
+  page.getByRole("region", { name: "Point-in-time recovery", exact: true })
 const dialog = (page: Page) => page.getByRole("dialog")
 const progress = (page: Page) => panel(page).locator("[data-slot=transfer-progress]")
 

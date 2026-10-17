@@ -290,8 +290,9 @@ type pitrRestore struct {
 	Target       dbx.RecoveryTarget `json:"target"`
 	BaseBackup   string             `json:"baseBackup"`
 	RecoveredTo  *time.Time         `json:"recoveredTo,omitempty"`
-	// State is "ready" — a server of its own beside the one it was recovered
-	// from — or "switched", in that server's place.
+	// State is "recovering" while its job runs, "ready" — a server of its own
+	// beside the one it was recovered from — or "switched", in that server's
+	// place.
 	State      string     `json:"state"`
 	Replaced   string     `json:"replaced,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
@@ -361,12 +362,24 @@ func (s *Server) insertPITRRestore(ctx context.Context, r *pitrRestore) (int64, 
 	}
 	res, err := s.Store.DB.ExecContext(ctx, `INSERT INTO db_wal_restores(archive_id, source, container, connection_id, port,
 		target, base_backup, recovered_to, state, created_at, created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ArchiveID, r.Source, r.Container, r.ConnectionID, r.Port, string(target), r.BaseBackup, recovered, "ready",
+		r.ArchiveID, r.Source, r.Container, r.ConnectionID, r.Port, string(target), r.BaseBackup, recovered, r.State,
 		time.Now().Unix(), r.CreatedBy)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// finishPITRRestore records what a recovery came to: the moment the copy
+// stopped at, that it is ready, and its connection once there is one.
+func (s *Server) finishPITRRestore(ctx context.Context, r *pitrRestore) error {
+	recovered := int64(0)
+	if r.RecoveredTo != nil {
+		recovered = r.RecoveredTo.Unix()
+	}
+	_, err := s.Store.DB.ExecContext(ctx, `UPDATE db_wal_restores SET state = ?, recovered_to = ?, connection_id = ? WHERE id = ?`,
+		r.State, recovered, r.ConnectionID, r.ID)
+	return err
 }
 
 func (s *Server) markPITRRestoreSwitched(ctx context.Context, id int64, container, replaced string) error {

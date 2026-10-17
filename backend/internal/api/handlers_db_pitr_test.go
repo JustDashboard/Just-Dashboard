@@ -54,6 +54,8 @@ var (
 		{http.MethodPost, "/pitr/restore-points", `{"name":"before-migration"}`},
 	}
 	pitrSystemAdmin = []pitrRoute{
+		// The plan the setup form reads as it is filled in.
+		{http.MethodPost, "/pitr", `{"targetKind":"local","target":{"path":"/tmp"},"preview":true}`},
 		{http.MethodPut, "/pitr", `{"schedule":"0 4 * * *"}`},
 		{http.MethodPost, "/pitr/restore", `{"target":{"kind":"latest"}}`},
 	}
@@ -105,7 +107,7 @@ func TestPITRRoutesAskForTheirCapability(t *testing.T) {
 // none of them has had no capability decided for it.
 func TestEveryPITRRouteIsInACapabilityList(t *testing.T) {
 	listed := map[string]bool{}
-	for _, list := range [][]pitrRoute{pitrReadSurface, pitrServiceControl, pitrSystemAdmin, pitrDestructive} {
+	for _, list := range [][]pitrRoute{pitrReadSurface, pitrServiceControl, pitrSystemAdmin, pitrDestructive[1:]} {
 		for _, rt := range list {
 			path := strings.NewReplacer("/restores/1/", "/restores/{rid}/", "/archives/1", "/archives/{aid}").Replace(rt.path)
 			listed[rt.method+" "+path] = true
@@ -129,6 +131,27 @@ func TestEveryPITRRouteIsInACapabilityList(t *testing.T) {
 	}
 	if found != len(listed) {
 		t.Errorf("%d point-in-time recovery routes are mounted and %d are listed", found, len(listed))
+	}
+}
+
+// Setting up is destructive unless it only asks for the plan, and the plan
+// spends nothing of the destructive budget a form filled in key by key would
+// otherwise run through before its one real request.
+func TestPITRSetupIsDestructiveUnlessItIsAPreview(t *testing.T) {
+	s, router := pitrRouterAs(t, auth.RoleAdmin)
+	s.destrLim = httpx.NewLimiter(1, 1)
+	preview := pitrRoute{http.MethodPost, "/pitr", `{"targetKind":"local","target":{"path":"/tmp"},"preview":true}`}
+	for range 5 {
+		if rec := pitrDo(router, preview); rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("a preview spent the destructive budget: %s", rec.Body.String())
+		}
+	}
+	setup := pitrRoute{http.MethodPost, "/pitr", `{"targetKind":"local","target":{"path":"/tmp"}}`}
+	if rec := pitrDo(router, setup); rec.Code == http.StatusTooManyRequests {
+		t.Fatalf("the first setup was turned away: %s", rec.Body.String())
+	}
+	if rec := pitrDo(router, setup); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("a second setup inside the budget's minute = %d, want 429", rec.Code)
 	}
 }
 
@@ -353,9 +376,18 @@ func TestPITRArchiveRecordsSealWhatIsSecret(t *testing.T) {
 		t.Errorf("restore points %+v %v", points, err)
 	}
 	restore := &pitrRestore{ArchiveID: a.ID, Source: "jd-postgres", Container: "jd-postgres-restored-1", Port: 5434,
-		Target: dbx.RecoveryTarget{Kind: "latest"}, BaseBackup: "base_1"}
+		Target: dbx.RecoveryTarget{Kind: "latest"}, BaseBackup: "base_1", State: "recovering"}
 	if restore.ID, err = s.insertPITRRestore(ctx, restore); err != nil {
 		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+	restore.State, restore.RecoveredTo, restore.ConnectionID = "ready", &at, 12
+	if err := s.finishPITRRestore(ctx, restore); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.pitrRestoreByID(ctx, restore.ID); err != nil || got.State != "ready" || got.ConnectionID != 12 ||
+		got.RecoveredTo == nil || !got.RecoveredTo.Equal(at) {
+		t.Fatalf("a finished recovery reads %+v %v", got, err)
 	}
 	if err := s.markPITRRestoreSwitched(ctx, restore.ID, "jd-postgres", "jd-postgres-replaced-1"); err != nil {
 		t.Fatal(err)

@@ -51,8 +51,9 @@ func TestWALArchiveSettingsRaiseOnlyAMinimalLevel(t *testing.T) {
 }
 
 func TestReadPostgresCommandSettingsLastOneWins(t *testing.T) {
-	got := ReadPostgresCommandSettings([]string{"postgres", "-c", "port=5433", "--port=5434", "-c", "Archive_Mode=on"})
-	if got["port"] != "5434" || got["archive_mode"] != "on" {
+	got := ReadPostgresCommandSettings([]string{"postgres", "-c", "port=5433", "--port=5434", "-c", "Archive_Mode=on",
+		"--archive-command=/jd-pitr/wal-g wal-push %p"})
+	if got["port"] != "5434" || got["archive_mode"] != "on" || got["archive_command"] != "/jd-pitr/wal-g wal-push %p" {
 		t.Errorf("settings read as %v", got)
 	}
 	if !IsPostgresServerCommand([]string{"-c", "port=1"}) || !IsPostgresServerCommand(nil) ||

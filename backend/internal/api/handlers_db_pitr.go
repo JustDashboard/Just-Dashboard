@@ -26,7 +26,10 @@ import (
 // are routine, as a dump is. Setting archiving up or down restarts the
 // server, switching a copy in replaces it, and deleting an archive throws
 // away the moments it held, so those four are destructive; a recovery into a
-// new container is an administrator's, as starting a server is.
+// new container is an administrator's, as starting a server is. Setting up
+// shares its path with the plan the form reads as it is filled in, which
+// changes nothing, so that one asks for the destructive capability and its
+// budget by hand, for the request that is not a preview.
 func (s *Server) mountDatabasePITRRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/pitr", s.handle(s.handleDBPITR))
 	r.Group(func(r chi.Router) {
@@ -36,10 +39,10 @@ func (s *Server) mountDatabasePITRRoutes(r chi.Router) {
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodPost, "/{id}/pitr", s.handle(s.handleDBPITREnable))
 		r.Method(http.MethodPut, "/{id}/pitr", s.handle(s.handleDBPITRUpdate))
 		r.Method(http.MethodPost, "/{id}/pitr/restore", s.handle(s.handleDBPITRRestore))
 		s.destructive(r, func(r chi.Router) {
-			r.Method(http.MethodPost, "/{id}/pitr", s.handle(s.handleDBPITREnable))
 			r.Method(http.MethodDelete, "/{id}/pitr", s.handle(s.handleDBPITRDisable))
 			r.Method(http.MethodPost, "/{id}/pitr/restores/{rid}/switch", s.handle(s.handleDBPITRSwitch))
 			r.Method(http.MethodDelete, "/{id}/pitr/archives/{aid}", s.handle(s.handleDBPITRArchiveDelete))
@@ -186,6 +189,10 @@ func (s *Server) readDBPITR(ctx context.Context, conn *dbConnection, dsn string)
 		return nil, httpx.Internal(err)
 	}
 	for _, restore := range restores {
+		// A copy still recovering is its job's, shown as the job.
+		if restore.State == "recovering" {
+			continue
+		}
 		// A copy kept beside the server is a database of its own, and is
 		// removed like one; once it is gone it is not listed here.
 		if restore.State == "ready" {
@@ -333,6 +340,11 @@ func (s *Server) handleDBPITREnable(w http.ResponseWriter, r *http.Request) erro
 	var req pitrSetupRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	if !req.Preview {
+		if err := s.requireDestructive(r, "pitr", "setting point-in-time recovery up restarts the server, which"); err != nil {
+			return err
+		}
 	}
 	srv, err := s.pitrRequestServer(r)
 	if err != nil {

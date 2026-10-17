@@ -1521,7 +1521,8 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
   `latest`, a time or a restore point's name (`preview: true` answers the base backup, the copy's name,
   its loopback port and its recovery settings). The job fetches the base backup into `<copy>-data` in a
   one-shot container, creates the copy from the server's spec — its own volume and port, Docker's
-  default network, no deployment labels, restart policy `no` while it recovers — with `recovery.signal`
+  default network, no deployment labels, restart policy `no` while it recovers, in the image the archive
+was written by (a server since moved to a newer major cannot start the older cluster) — with `recovery.signal`
   and `restore_command`/`recovery_target_*` on its command line, follows its log into the job and waits
   for it to leave recovery. A time later than every commit archived ends PostgreSQL's recovery with
   "recovery ended before configured recovery target was reached"; every commit before it is then all
@@ -1531,7 +1532,7 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
   being recovered is often the stopped one. Anything a recovery made is removed if it does not finish.
 - **Then keep both or switch.** `POST /{id}/pitr/restores/{rid}/switch` stops the server, renames it
   `<name>-replaced-<stamp>` with restart policy `no` (kept, with its volume and its archive's tool), and
-  recreates the copy under the server's name with its ports, networks and labels — so applications,
+  recreates the copy under the server's name with its ports, networks and labels, in the copy's own image — so applications,
   saved connections and the deployment network reconciler reach the copy without being told. A server
   that archived goes on archiving into a new archive with the same destination and key, since the copy's
   history parted from the old one; the old archive ends and stays listed under *Earlier archives*, the
@@ -1545,15 +1546,17 @@ say, the window, the base backup a recovery starts from, retention — is `dbx/p
   server and refused while a dump or restore runs against the connection; the page watches it as it
   watches a dump. Each request is audited when answered and each job's ending as `….finish` (a
   scheduled base backup as the `system` actor). Setting up, turning off, switching and deleting an
-  archive are destructive (`s.destructive`, ordinary confirmation); recovery into a new container is
-  `system.admin`; a base backup and a restore point are `service.control`. On a protected connection
+  archive are destructive (`s.destructive`, or by hand for setting up, whose plan shares the path;
+  ordinary confirmation); recovery into a new container is `system.admin`; a base backup and a restore point are `service.control`. On a protected connection
   only the switch is refused, since it replaces what the connection reaches.
-- **What an interrupted job leaves is swept at start** (`sweepPITR`): the containers made for one WAL-G
-  command or to fill a volume, the volumes made for one command, and a copy that still mounts its key
-  volume and has no record — one whose recovery never finished — with that volume. Only what carries
-  the feature's `io.just-dashboard.pitr` label is considered; a recorded copy is a database of its own,
-  and its record outlives the archive it came from. The schedule ends an archive whose server's
-  container is gone, and keeps the archive.
+- **What an interrupted job leaves is swept at start** (`sweepPITR`), judged by the role label every
+  container and volume of the feature carries (`io.just-dashboard.pitr.role`) and by the records, never
+  by a name: the containers and volumes made for one command or one install, a copy recorded as
+  `recovering` — a recovery is recorded before it makes anything — with its data and the volume holding
+  the archive's private key, a recovery's key volume nothing mounts, and an archive's tool volume no
+  archive was ever recorded for, which holds a destination's keys. A copy that finished recovering is
+  a database of its own and is never touched, and its record outlives the archive it came from. The
+  schedule ends an archive whose server's container is gone, and keeps the archive.
 - **Limits.** One server's archive is one cluster's timeline: after a major-version upgrade, turn
   point-in-time recovery off and on again. An install whose dashboard image predates WAL-G, or an
   architecture WAL-G publishes no build for, is told so and offered nothing.
@@ -1778,7 +1781,7 @@ and `protectReadOnlyConnections`.
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/databases/{id}/pitr` | read | — | — | — |
-| `POST` | `/databases/{id}/pitr` | `system.admin` + `destructive` | yes | `database.pitr.enable`, `.finish` | open |
+| `POST` | `/databases/{id}/pitr` | `system.admin` | by content: not a `preview` | `database.pitr.enable`, `.finish` | open |
 | `PUT` | `/databases/{id}/pitr` | `system.admin` | — | `database.pitr.update` | open |
 | `DELETE` | `/databases/{id}/pitr` | `system.admin` + `destructive` | yes | `database.pitr.disable`, `.finish` | open |
 | `DELETE` | `/databases/{id}/pitr/archives/{aid}` | `system.admin` + `destructive` | yes | `database.pitr.archive.delete`, `.finish` | open |
@@ -1902,8 +1905,9 @@ What the table cannot say in a cell:
   rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for a preview as
   much as for a run.
 - `POST …/pitr` and `POST …/pitr/restore` take `preview: true`, which answers the plan and runs
-  nothing. The first sits in the destructive group, so its preview needs the destructive capability and
-  spends `destrLim`, as a DDL preview does.
+  nothing. The setup form reads the plan as it is filled in, so `POST …/pitr` asks for the destructive
+  capability and spends `destrLim` by hand (`requireDestructive`) only for a request that is not a
+  preview; a form filled in key by key would otherwise have spent the budget its real request needs.
 - The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
 - `GET /databases/inventory`, `GET /databases/fleet` are `read` and answer more
   for `system.admin`; the sections above say what.

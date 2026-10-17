@@ -258,11 +258,23 @@ func (s *Server) preparePITRDirectory(ctx context.Context, image string, a *pitr
 	return err
 }
 
+// removePITRDirectory takes an archive's folder in a directory destination
+// away again where it holds nothing, after a setup that did not finish. Only
+// what is empty goes: an archive that holds anything is left as it is.
+func (s *Server) removePITRDirectory(ctx context.Context, image string, a *pitrArchive) {
+	if a.TargetKind != backups.TargetLocal {
+		return
+	}
+	_, _ = s.runAsRoot(context.WithoutCancel(ctx), image, a.Container, []dockerx.MountSpec{
+		{Type: "bind", Source: strings.TrimRight(a.Target.Path, "/"), Target: "/jd-pitr-root"},
+	}, []string{"find", "/jd-pitr-root/" + a.Stream, "-depth", "-empty", "-delete"})
+}
+
 func (s *Server) runAsRoot(ctx context.Context, image, owner string, mounts []dockerx.MountSpec, cmd []string) (int, error) {
 	code, removed, err := s.modules.docker.RunToCompletion(ctx, dockerx.ContainerSpec{
 		Name: owner + "-pitr-prepare-" + randomSuffix(), Image: image, User: "root",
 		Entrypoint: cmd[:1], Command: cmd[1:], Mounts: mounts, NetworkMode: "none",
-		Labels: []dockerx.LabelSpec{{Name: pitrLabel, Value: owner}},
+		Labels: pitrLabelSpecs(owner, pitrRoleRun),
 	}, nil)
 	if err == nil && !removed {
 		err = errors.New("the container that prepared the archive could not be removed")
@@ -297,7 +309,7 @@ func (s *Server) enablePITR(ctx context.Context, srv *pitrServer, a *pitrArchive
 	}
 	volume := pitrToolVolume(a.Stream)
 	out.Status("Installing WAL-G into the volume %s", volume)
-	if a.tool, err = s.installWALG(ctx, volume, srv.image, srv.name, cfg, true); err != nil {
+	if a.tool, err = s.installWALG(ctx, volume, pitrRoleTool, srv.image, srv.name, cfg, true); err != nil {
 		return err
 	}
 	cleanVolume, marked := true, false
@@ -312,6 +324,7 @@ func (s *Server) enablePITR(ctx context.Context, srv *pitrServer, a *pitrArchive
 			_, _ = s.runWALG(context.WithoutCancel(ctx), srv.image, srv.name, pitrMounts(volume, a, false),
 				[]string{"st", "rm", "jd-pitr/tool.sha256"}, nil)
 		}
+		s.removePITRDirectory(ctx, srv.image, a)
 		s.removeContainerAndVolumes(ctx, "", volume)
 	}()
 	if a.TargetKind == backups.TargetLocal {
@@ -491,7 +504,7 @@ func pitrCopySpec(srv *pitrServer, a *pitrArchive, name, toolVolume string, port
 			labels = append(labels, l)
 		}
 	}
-	spec.Labels = append(labels, dockerx.LabelSpec{Name: pitrLabel, Value: srv.name})
+	spec.Labels = append(labels, pitrLabelSpecs(srv.name, pitrRoleCopy)...)
 	mounts := []dockerx.MountSpec{}
 	for _, m := range spec.Mounts {
 		if m.Target == dbx.PostgresDataDir {
@@ -509,18 +522,37 @@ func pitrCopySpec(srv *pitrServer, a *pitrArchive, name, toolVolume string, port
 }
 
 // restorePITR recovers an archive into a new container and saves a
-// connection to it. Whatever it made is removed again if it does not finish;
-// the server it recovered from is never touched.
+// connection to it. The copy is recorded as recovering before anything is
+// made, so that a recovery this process does not live to finish is swept at
+// its next start; whatever a recovery made is removed again if it fails
+// before the copy runs on its own. The server it recovered from is never
+// touched.
 func (s *Server) restorePITR(ctx context.Context, srv *pitrServer, a *pitrArchive, plan pitrRestorePlan, target dbx.RecoveryTarget, by string, out jobs.Emitter) (*pitrRestore, error) {
 	docker := s.modules.docker
 	name := plan.Container
 	dataVolume, toolVolume := name+"-data", name+"-pitr-restore"
+	// The release the archive was written by reads it back: a server since
+	// moved to a newer major cannot start a cluster an older one wrote.
+	image := a.Image
+	if image == "" {
+		image = srv.image
+	}
+	restore := &pitrRestore{
+		ArchiveID: a.ID, Source: srv.name, Container: name, Port: plan.Port, Target: target,
+		BaseBackup: plan.Backup, State: "recovering", CreatedBy: by,
+	}
+	id, err := s.insertPITRRestore(ctx, restore)
+	if err != nil {
+		return nil, err
+	}
+	restore.ID = id
 	created := ""
 	finished := false
 	defer func() {
 		if !finished {
 			out.Status("Removing what the recovery made")
 			s.removeContainerAndVolumes(ctx, created, dataVolume, toolVolume)
+			_ = s.deletePITRRestore(context.WithoutCancel(ctx), id)
 		}
 	}()
 
@@ -533,18 +565,22 @@ func (s *Server) restorePITR(ctx context.Context, srv *pitrServer, a *pitrArchiv
 		return nil, err
 	}
 	out.Status("Installing WAL-G and the archive's key into %s", toolVolume)
-	if _, err := s.installWALG(ctx, toolVolume, srv.image, name, cfg, true); err != nil {
+	if _, err := s.installWALG(ctx, toolVolume, pitrRoleRestore, image, name, cfg, true); err != nil {
+		return nil, err
+	}
+	if _, err := docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: dataVolume, Labels: pitrLabels(srv.name, pitrRoleCopyData)}); err != nil {
 		return nil, err
 	}
 	out.Status("Fetching the base backup %s into %s", plan.Backup, dataVolume)
 	fetchMounts := append(pitrMounts(toolVolume, a, true),
 		dockerx.MountSpec{Type: "volume", Source: dataVolume, Target: dbx.PostgresDataDir})
-	if _, err := s.runWALG(ctx, srv.image, name, fetchMounts,
+	if _, err := s.runWALG(ctx, image, name, fetchMounts,
 		[]string{"backup-fetch", dbx.PostgresDataDir, plan.Backup}, walgProgress(out)); err != nil {
 		return nil, err
 	}
 
 	spec := pitrCopySpec(srv, a, name, toolVolume, plan.Port, target)
+	spec.Image = image
 	res, err := docker.Create(ctx, *spec, nil)
 	if err != nil {
 		return nil, fmt.Errorf("the copy's container could not be made: %w", err)
@@ -583,28 +619,25 @@ func (s *Server) restorePITR(ctx context.Context, srv *pitrServer, a *pitrArchiv
 	}
 	created = recreated.ID
 	s.removeContainerAndVolumes(ctx, "", toolVolume)
-	if err := s.waitForPostgres(ctx, created, srv.account, 2*time.Minute); err != nil {
-		return nil, err
-	}
 
-	connectionID, err := s.saveCopyConnection(ctx, srv, name, plan.Port)
-	if err != nil {
-		out.Status("The copy runs, and a connection to it could not be saved: %v", err)
-	}
-	restore := &pitrRestore{
-		ArchiveID: a.ID, Source: srv.name, Container: name, ConnectionID: connectionID, Port: plan.Port,
-		Target: target, BaseBackup: plan.Backup, CreatedBy: by,
-	}
+	// From here the copy is a database of its own, whatever else goes wrong.
+	finished = true
+	record := context.WithoutCancel(ctx)
 	if !recoveredTo.IsZero() {
 		restore.RecoveredTo = &recoveredTo
 	}
-	id, err := s.insertPITRRestore(context.WithoutCancel(ctx), restore)
-	if err != nil {
-		return nil, err
+	restore.State = "ready"
+	if err := s.finishPITRRestore(record, restore); err != nil {
+		return restore, err
 	}
-	restore.ID = id
-	finished = true
-	return restore, nil
+	if err := s.waitForPostgres(ctx, created, srv.account, 2*time.Minute); err != nil {
+		return restore, err
+	}
+	if restore.ConnectionID, err = s.saveCopyConnection(ctx, srv, name, plan.Port); err != nil {
+		out.Status("The copy runs, and a connection to it could not be saved: %v", err)
+		return restore, nil
+	}
+	return restore, s.finishPITRRestore(record, restore)
 }
 
 // recoverySignal is the empty file a server recovers on, as an archive to
@@ -771,11 +804,14 @@ func (s *Server) switchPITR(ctx context.Context, srv *pitrServer, copyRow *pitrR
 	}
 	spec.Mounts = mounts
 	spec.Command = dbx.WithoutWALSettings(srv.spec.Command)
+	// The copy's release, which is the one its data was written by.
+	spec.Image = copySpec.Image
 	var next *pitrArchive
 	walLevel := s.pitrWALLevel(ctx, srv)
 	switched := false
 	defer func() {
 		if next != nil && !switched {
+			s.removePITRDirectory(ctx, copySpec.Image, next)
 			s.removeContainerAndVolumes(ctx, "", pitrToolVolume(next.Stream))
 		}
 	}()
@@ -783,7 +819,7 @@ func (s *Server) switchPITR(ctx context.Context, srv *pitrServer, copyRow *pitrR
 		next = &pitrArchive{
 			Container: srv.name, ConnectionID: srv.conn.ID, Stream: dbx.WALStreamName(srv.name, time.Now()),
 			TargetKind: active.TargetKind, Target: active.Target, Schedule: active.Schedule,
-			RetentionDays: active.RetentionDays, Image: srv.image, CreatedBy: active.CreatedBy,
+			RetentionDays: active.RetentionDays, Image: copySpec.Image, CreatedBy: active.CreatedBy,
 			secretsEnc: active.secretsEnc, publicKey: active.publicKey, privateKeyEnc: active.privateKeyEnc,
 		}
 		cfg, err := s.pitrConfig(next, next.publicKey, srv.account)
@@ -791,11 +827,11 @@ func (s *Server) switchPITR(ctx context.Context, srv *pitrServer, copyRow *pitrR
 			return "", err
 		}
 		out.Status("Installing WAL-G for the archive %s will write next", srv.name)
-		if next.tool, err = s.installWALG(ctx, pitrToolVolume(next.Stream), srv.image, srv.name, cfg, true); err != nil {
+		if next.tool, err = s.installWALG(ctx, pitrToolVolume(next.Stream), pitrRoleTool, copySpec.Image, srv.name, cfg, true); err != nil {
 			return "", err
 		}
 		if next.TargetKind == backups.TargetLocal {
-			if err := s.preparePITRDirectory(ctx, srv.image, next); err != nil {
+			if err := s.preparePITRDirectory(ctx, copySpec.Image, next); err != nil {
 				return "", err
 			}
 		}

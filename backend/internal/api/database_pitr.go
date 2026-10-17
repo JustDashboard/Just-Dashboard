@@ -54,8 +54,21 @@ const (
 	pitrDefaultSchedule = "0 3 * * *"
 	pitrDefaultDays     = 7
 	// pitrLabel marks every volume and container this feature makes, with
-	// the server it was made for, so one can always be traced back.
-	pitrLabel = "io.just-dashboard.pitr"
+	// the server it was made for, so one can always be traced back, and
+	// pitrRoleLabel says what it is for — what decides whether a start of
+	// this process may sweep it away (sweepPITR). The names are the
+	// operator's to choose and decide nothing.
+	pitrLabel     = "io.just-dashboard.pitr"
+	pitrRoleLabel = "io.just-dashboard.pitr.role"
+	// A container or volume made for one command or one install.
+	pitrRoleRun = "run"
+	// An archive's tool and configuration.
+	pitrRoleTool = "tool"
+	// A recovery's tool and configuration, with the archive's private key.
+	pitrRoleRestore = "restore"
+	// A recovered copy and its data.
+	pitrRoleCopy     = "copy"
+	pitrRoleCopyData = "copy-data"
 )
 
 // pitrJobPrefix is the kind every point-in-time recovery job of one server
@@ -261,9 +274,9 @@ func (s *Server) pitrAccount(ctx context.Context, container string) (uid, gid in
 // container of the server's image that is created and never started: the
 // files land with the ownership the archive needs, and the image's own
 // accounts are read from it. It answers the build of WAL-G it installed.
-func (s *Server) installWALG(ctx context.Context, volume, image, owner string, cfg map[string]string, withTool bool) (string, error) {
+func (s *Server) installWALG(ctx context.Context, volume, role, image, owner string, cfg map[string]string, withTool bool) (string, error) {
 	docker := s.modules.docker
-	if _, err := docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: volume, Labels: map[string]string{pitrLabel: owner}}); err != nil {
+	if _, err := docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: volume, Labels: pitrLabels(owner, role)}); err != nil {
 		if exists, xerr := docker.VolumeExists(ctx, volume); xerr != nil || !exists {
 			return "", err
 		}
@@ -271,7 +284,7 @@ func (s *Server) installWALG(ctx context.Context, volume, image, owner string, c
 	helper, err := docker.Create(ctx, dockerx.ContainerSpec{
 		Name: volume + "-setup-" + randomSuffix(), Image: image, Entrypoint: []string{"true"},
 		Mounts: []dockerx.MountSpec{{Type: "volume", Source: volume, Target: dbx.WALGMount}},
-		Labels: []dockerx.LabelSpec{{Name: pitrLabel, Value: owner}}, RestartPolicy: "no",
+		Labels: pitrLabelSpecs(owner, pitrRoleRun), RestartPolicy: "no",
 	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("a container to install WAL-G with could not be made: %w", err)
@@ -310,6 +323,14 @@ func (s *Server) installWALG(ctx context.Context, volume, image, owner string, c
 		return "", fmt.Errorf("WAL-G's configuration could not be written into %s: %w", volume, err)
 	}
 	return digest, nil
+}
+
+func pitrLabels(owner, role string) map[string]string {
+	return map[string]string{pitrLabel: owner, pitrRoleLabel: role}
+}
+
+func pitrLabelSpecs(owner, role string) []dockerx.LabelSpec {
+	return []dockerx.LabelSpec{{Name: pitrLabel, Value: owner}, {Name: pitrRoleLabel, Value: role}}
 }
 
 func randomSuffix() string {
@@ -391,7 +412,7 @@ func (s *Server) runWALG(ctx context.Context, image, owner string, mounts []dock
 	code, removed, err := s.modules.docker.RunToCompletion(ctx, dockerx.ContainerSpec{
 		Name: owner + "-walg-" + randomSuffix(), Image: image, User: "postgres",
 		Entrypoint: []string{dbx.WALGCommand}, Command: args, Mounts: mounts,
-		Labels: []dockerx.LabelSpec{{Name: pitrLabel, Value: owner}},
+		Labels: pitrLabelSpecs(owner, pitrRoleRun),
 		// WAL-G streams what it moves; its memory does not grow with the
 		// database, and a run of it is not allowed to take the host's.
 		Limits: dockerx.ResourceLimits{MemoryMB: 512},
@@ -420,8 +441,11 @@ func (s *Server) walgFor(ctx context.Context, srv *pitrServer, a *pitrArchive, a
 	if active && srv.running {
 		return s.execWALG(ctx, srv.id, args, progress)
 	}
+	// The image the archive was written with: a server since moved to
+	// another release still has the account and the shell WAL-G needs, and
+	// so does the one it had.
 	image := a.Image
-	if srv != nil && srv.image != "" {
+	if image == "" && srv != nil {
 		image = srv.image
 	}
 	if active {
@@ -434,7 +458,7 @@ func (s *Server) walgFor(ctx context.Context, srv *pitrServer, a *pitrArchive, a
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.installWALG(ctx, volume, image, a.Container, cfg, true); err != nil {
+	if _, err := s.installWALG(ctx, volume, pitrRoleRun, image, a.Container, cfg, true); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -542,61 +566,79 @@ func (s *Server) removeContainerAndVolumes(ctx context.Context, container string
 }
 
 // sweepPITR removes what a job of this feature left behind when the process
-// that ran it stopped part-way: the containers made for one WAL-G command or
-// to fill a volume, the volumes made for one command, and a copy whose
-// recovery never finished — with the volume holding the archive's private
-// key, which is the reason this runs at all. A copy that was recorded is a
-// database of its own and is never touched; neither is anything this feature
-// did not label.
+// that ran it stopped part-way: the containers and volumes made for one
+// command or one install, a copy whose recovery was recorded as under way
+// and never finished — with its data and the volume holding the archive's
+// private key, which is the reason this runs at all — and an archive's tool
+// volume no archive was ever recorded for, which holds a destination's keys.
+// What is swept is decided by the role label and the records, never by a
+// name; a copy that finished recovering is a database of its own and is never
+// touched, and neither is anything this feature did not label.
 func (s *Server) sweepPITR(ctx context.Context) {
 	docker := s.modules.docker
 	if docker == nil {
 		return
 	}
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, container FROM db_wal_restores WHERE state = 'recovering'`)
+	if err != nil {
+		return
+	}
+	unfinished := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var name string
+		if rows.Scan(&id, &name) == nil {
+			unfinished[id] = name
+		}
+	}
+	rows.Close()
+	for id, name := range unfinished {
+		if detail, err := docker.Inspect(ctx, name); err == nil && detail.Labels[pitrRoleLabel] != pitrRoleCopy {
+			// Something else has taken the name since: not this feature's.
+			_ = s.deletePITRRestore(ctx, id)
+			continue
+		}
+		s.removeContainerAndVolumes(ctx, name, name+"-data", name+"-pitr-restore")
+		_ = s.deletePITRRestore(ctx, id)
+		s.Log.Info("removed a copy whose recovery was interrupted", "container", name)
+	}
+
 	containers, err := docker.ListContainers(ctx, true)
 	if err != nil {
 		return
 	}
 	for _, c := range containers {
-		if c.Labels[pitrLabel] == "" {
-			continue
-		}
-		transient := strings.Contains(c.Name, "-walg-") || strings.Contains(c.Name, "-setup-") ||
-			strings.Contains(c.Name, "-pitr-prepare-")
-		// A copy that finished recovering was started again without the
-		// volume holding the key; one that still mounts it never finished.
-		unfinished := false
-		if !transient && strings.Contains(c.Name, "-restored-") {
-			keyed := false
-			for _, m := range c.Mounts {
-				keyed = keyed || m.Name == c.Name+"-pitr-restore"
-			}
-			var recorded bool
-			err := s.Store.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM db_wal_restores WHERE container = ?)`, c.Name).Scan(&recorded)
-			unfinished = keyed && err == nil && !recorded
-		}
-		if !transient && !unfinished {
+		if c.Labels[pitrLabel] == "" || c.Labels[pitrRoleLabel] != pitrRoleRun {
 			continue
 		}
 		if err := docker.RemoveContainer(ctx, c.ID, true, true); err != nil {
 			s.Log.Warn("a container an interrupted point-in-time recovery job left could not be removed", "container", c.Name, "err", err)
-			continue
 		}
-		if unfinished {
-			s.removeContainerAndVolumes(ctx, "", c.Name+"-data")
+	}
+	streams := map[string]bool{}
+	if rows, err := s.Store.DB.QueryContext(ctx, `SELECT stream FROM db_wal_archives`); err == nil {
+		for rows.Next() {
+			var stream string
+			if rows.Scan(&stream) == nil {
+				streams[pitrToolVolume(stream)] = true
+			}
 		}
-		s.Log.Info("removed what an interrupted point-in-time recovery job left", "container", c.Name)
+		rows.Close()
 	}
 	volumes, err := docker.ListVolumes(ctx)
 	if err != nil {
 		return
 	}
 	for _, v := range volumes {
-		if v.Labels[pitrLabel] == "" || !(strings.HasPrefix(v.Name, "jd-pitr-run-") || strings.HasSuffix(v.Name, "-pitr-restore")) {
+		if v.Labels[pitrLabel] == "" {
 			continue
 		}
-		if err := docker.RemoveVolume(ctx, v.Name, false); err == nil {
-			s.Log.Info("removed a volume an interrupted point-in-time recovery job left", "volume", v.Name)
+		switch role := v.Labels[pitrRoleLabel]; {
+		case role == pitrRoleRun, role == pitrRoleRestore, role == pitrRoleTool && !streams[v.Name]:
+			// A volume a container still mounts is refused by Docker, and kept.
+			if err := docker.RemoveVolume(ctx, v.Name, false); err == nil {
+				s.Log.Info("removed a volume an interrupted point-in-time recovery job left", "volume", v.Name)
+			}
 		}
 	}
 }

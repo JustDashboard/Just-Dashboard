@@ -1580,6 +1580,8 @@ var gatedCapabilities = []string{
 	"orm", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
 	"importReplace", "importCreateTable", "dumpSchemaOnly", "dumpDataOnly", "dumpTables", "dumpCompression",
 	"dumpDatabases", "dumpUpload", "restoreNewDatabase", "copy", "copyStructureOnly",
+	// point-in-time recovery
+	"pitr",
 }
 
 // The flags that are a list of words: empty for an engine without the

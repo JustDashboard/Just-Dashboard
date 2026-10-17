@@ -134,7 +134,10 @@ func postgresSettingAt(cmd []string, i int) (string, int) {
 	case strings.HasPrefix(arg, "-c") && len(arg) > 2 && strings.Contains(arg, "="):
 		return arg[2:], 0
 	case strings.HasPrefix(arg, "--") && strings.Contains(arg, "="):
-		return strings.ReplaceAll(arg[2:], "-", "_"), 0
+		// The server reads dashes in the name as underscores; the value is
+		// the value.
+		name, value, _ := strings.Cut(arg[2:], "=")
+		return strings.ReplaceAll(name, "-", "_") + "=" + value, 0
 	}
 	return "", 0
 }
