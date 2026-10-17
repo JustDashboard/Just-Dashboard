@@ -238,6 +238,13 @@ func (s *Server) removeDatabaseContainer(
 		}
 		removedVolumes = append(removedVolumes, name)
 	}
+	// A list the gateway kept the port to would go on refusing whatever
+	// publishes that port next.
+	if keeper := s.portKeeper(); keeper != nil {
+		if _, err := keeper.RemovePortAllowlist(ctx, dbPortOwner(server.container.Name)); err != nil {
+			warnings = append(warnings, fmt.Sprintf("the gateway's list for the port %s published could not be taken away (%v); the next database to keep that port to a list replaces it", server.container.Name, err))
+		}
+	}
 	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
 		return err
@@ -342,7 +349,9 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		// was: what gets pasted on a laptop. A connection that already names
 		// another machine is handed back as it is — that address is the one
 		// everybody else uses too.
-		dsn, err = s.publicDatabaseURL(conn, dsn)
+		ctx, cancel := timeoutCtx(r, 15*time.Second)
+		defer cancel()
+		dsn, err = s.publicDatabaseURL(ctx, conn, dsn)
 		if err != nil {
 			return err
 		}
@@ -393,7 +402,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 // renders; empty means the engine's own URL.
 var databaseURLFormatRE = regexp.MustCompile(`^(?:|url|jdbc|jdbc-mariadb|adonet|mysql2)$`)
 
-func (s *Server) publicDatabaseURL(conn *dbConnection, dsn string) (string, error) {
+func (s *Server) publicDatabaseURL(ctx context.Context, conn *dbConnection, dsn string) (string, error) {
 	info, err := dbx.ParseDSN(conn.Driver, dsn)
 	if err != nil {
 		return "", httpx.BadRequest("the saved connection could not be read")
@@ -401,7 +410,13 @@ func (s *Server) publicDatabaseURL(conn *dbConnection, dsn string) (string, erro
 	if !databaseLoopback(info.Host) && !isContainerAddress(info.Host) {
 		return dsn, nil
 	}
-	out, err := publicConnectionURL(conn.Driver, dsn, info, preferredPublicAddress(proxysvc.PublicAddresses()))
+	address := preferredPublicAddress(proxysvc.PublicAddresses())
+	// A port published on one of this machine's own addresses is reached
+	// there, and the public address would lead nowhere.
+	if server := s.serverBehind(ctx, conn, info); server != nil && exposureOf(server) == exposurePrivate {
+		address = strings.Trim(server.binding.IP, "[]")
+	}
+	out, err := publicConnectionURL(conn.Driver, dsn, info, address)
 	if err != nil {
 		return "", httpx.BadRequest("%v", err)
 	}

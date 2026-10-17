@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Keep a database to a list of allowed addresses, or publish it on one address of the server",
+          "detail": "A database's Network settings offer four answers: this server only, one of the server's tailnet, VPN or local-network addresses, a list of allowed addresses, or anywhere. The list takes IPv4 and IPv6 addresses and networks, and the server's own gateway table refuses every other address before Docker forwards the connection, which a firewall rule alone cannot do for a published port. The firewall gets a rule for each listed address, the change is shown with the exact rules before it runs, the picture draws who may connect and who is refused, and every change is in the audit log."
         }
       ]
     },

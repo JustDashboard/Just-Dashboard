@@ -276,22 +276,60 @@ is connected by naming the instance found, not by typing its address again.
   ends as `unreachable` with nothing in flight. An action that was refused or failed leaves none.
   Reading is what ends a change, so nothing has to wake up to do it, and the fleet does not keep a
   failed dial of a connection whose change is still held.
-- **Where a database is reachable from is a reading and a switch, not a trip through three pages.** `GET
+- **Where a database is reachable from is a reading and four answers, not a trip through three pages.** `GET
   /databases/{id}/access` (admin) reports the container behind a connection, whether the server is one
   the sync would connect on its own (`detected`), whether this route can change the binding (`managed`: a
   container that is not compose's and publishes the engine's port), its exposure read off the port
-  binding (`local`, `public`, `private`, `remote`), the machine's public addresses and the firewall's
-  part of the answer (present, on, an allow rule for the port from anywhere, editable). `PUT
-  /databases/{id}/access` with `exposure: local|public` recreates the container through
-  `dockerx.Recreate` with the one host address changed — the park-and-restore path the Docker page uses,
-  on the same named volume — then adds a `tcp` allow rule for the port where the firewall is on and
-  writable, or removes only the rule this dashboard wrote (matched by its comment). It sits in the
-  destructive group beside the Docker page's Recreate, is refused for a compose-owned container, and
-  audits as `database.access.change` with the binding before and after and what the firewall did.
-  Publishing a database port to every interface is the operator's explicit, audited decision, the same
-  one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
+  binding (`local`, `private` with the bound `address`, `public`, `remote`, and `allowlist` for every
+  interface with the gateway keeping the port to a list), the machine's public addresses, the host
+  addresses the port can be published on alone (`addresses`: tailnet, VPN, private and uplink ones,
+  graded by `netsec.HostNetwork.Place`, tailnet first; loopback, public, bridge and link-local ones are
+  not offered), the list (`allow`), the gateway's part (`gateway`: whether nftables is there to keep a
+  list, the networks every drop in the table lets through first — the dashboard's allowlist ranges and the
+  addresses kept on the Protection page — whether the kernel holds the port's rules and how many attempts
+  they refused), the firewall's part (present, on, an allow rule for the port from anywhere, the sources
+  other allow rules name, editable) and the request's own address (`client`, the SSH session's behind a
+  tunnel), which the list's form offers.
+  `PUT /databases/{id}/access` takes `exposure: local|private|allowlist|public`, with `address` (one of
+  `addresses`, checked again against the host) or `allow` (up to 16 IPv4/IPv6 addresses or networks,
+  normalised by `netx.NormalizePortSources`: masked, merged with any they lie inside, IPv4 first; every
+  address, a range wider than /8 or /16, loopback, multicast and unspecified are refused). The change is
+  planned first (`planDBAccess`, `accessSteps` in `db_reach.go`) and runs in the order that never leaves
+  the port open to more than both ends allow: the gateway's list is kept before the binding can widen; the
+  container is recreated through `dockerx.Recreate` only when its configured host address does not
+  already give the reach (any every-interface binding serves Anywhere and an IPv4 list; a list naming
+  IPv6 needs both families, which Docker spells as no address; a binding Docker was given once per
+  family is folded into one); the host firewall is then reconciled; the list is released last. A list
+  that cannot be kept stops the change before anything else; a recreate that fails puts the list back as
+  it was (`gateway: restored`); a firewall or a release that cannot follow is reported beside the change
+  (`firewallError`, `gatewayError`). **The gateway is what keeps the port to the list.** Docker's NAT
+  rules forward a published port before the host firewall's input chain, so a ufw or firewalld rule from
+  one address restricts nothing for a container; `netx.SetPortAllowlist` puts the list in the gateway
+  table's prerouting chain, where the connection is still addressed to this host and not yet translated
+  ([kept ports](network.md#gateway-and-protection)). The host firewall is given the rules the reach
+  wants (`dbFirewallWant`): one from anywhere for Anywhere, one per listed network for a list, none for
+  this server or one address. They are worked out against its rules (`dbFirewallPlan`: an add for each
+  wanted source no rule admits yet, then a removal for each rule of this route's nothing wants; a rule
+  is this route's by its comment `just-dashboard database <port>`, or on firewalld, which keeps none, by
+  being exactly the rule written for a listed network; ufw's IPv6 copy goes with the rule beside it) and
+  applied as netsec firewall plans of at most `netsec.MaxPlanOperations`, adds before removals, inside
+  `protectFirewall` with the request's access context, each step filed in the firewall history.
+  `POST /databases/{id}/access/preview` (admin, not audited) plans the same request and changes nothing:
+  the gateway's exact rules, whether the container is recreated, the firewall plan's steps as netsec
+  reviews them, and what the firewall would refuse. The change sits in the destructive group beside the
+  Docker page's Recreate, is refused for a compose-owned container, and audits as `database.access.change`
+  with the exposure and binding before and after, the list before and after, the address and its
+  interface, what the gateway and the firewall did and each firewall step. Publishing a database port is
+  the operator's explicit, audited decision, the same one the Docker page already allows; invariant 7 is
+  about what the dashboard itself binds. The summary and the fleet read the same exposure (`listed` on
+  the host view upgrades a public binding the gateway keeps to `allowlist`, from the spec alone). Removing
+  the container from the danger zone releases its list, which would otherwise go on refusing whatever
+  published that port next; removing it from the Docker page does not, and the next database to keep
+  that port to a list takes the leftover away first (`releaseOrphanedDBPort`: a `database:` owner whose
+  container Docker no longer has). `GET
   /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
-  preferred) in place of loopback, for pasting on another machine.
+  preferred) in place of loopback, for pasting on another machine — or the bound address, for a port
+  published on one of the host's own.
 - **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
   `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
   verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
@@ -1484,7 +1522,7 @@ per-area browser specs are in
 ### Routes
 
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
-`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+`api/handlers_db.go` and the nine it calls): 225 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
 
 - **Capability** is every capability the route's groups require. `read` is any authenticated role,
@@ -1534,7 +1572,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/test` | `system.admin` | — | — | — |
 | `GET` | `/databases/topology` | read | — | — | — |
 
-**One connection** (13)
+**One connection** (14)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1543,6 +1581,7 @@ and `protectReadOnlyConnections`.
 | `DELETE` | `/databases/{id}` | `system.admin` + `destructive` | yes | `database.connection.delete` | open |
 | `GET` | `/databases/{id}/access` | `system.admin` | — | — | — |
 | `PUT` | `/databases/{id}/access` | `system.admin` + `destructive` | yes | `database.access.change` | open |
+| `POST` | `/databases/{id}/access/preview` | `system.admin` | — | — | open |
 | `GET` | `/databases/{id}/consumers` | read | — | — | — |
 | `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
 | `GET` | `/databases/{id}/overview` | read | — | — | — |

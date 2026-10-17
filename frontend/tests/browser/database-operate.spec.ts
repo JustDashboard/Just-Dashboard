@@ -261,7 +261,10 @@ const ACCESS = {
   exposure: "local",
   port: 5432,
   publicAddresses: ["203.0.113.7"],
-  firewall: { backend: "ufw", active: true, open: false, editable: true },
+  firewall: { backend: "ufw", active: true, open: false, allowed: [], editable: true },
+  allow: [],
+  gateway: { available: true, alsoAdmitted: [], enforced: false, refused: 0 },
+  addresses: [],
 }
 
 const CONSUMERS = {
