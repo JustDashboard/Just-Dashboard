@@ -1,6 +1,9 @@
 package dbx
 
 import (
+	"context"
+	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -469,5 +472,86 @@ func TestDropStatements(t *testing.T) {
 	}
 	if _, err := PlanDropTrigger(DriverClickHouse, "", "t", "tbl"); err == nil {
 		t.Error("ClickHouse trigger dropped")
+	}
+}
+
+func TestASQLiteTriggerWithNoTimingIsBefore(t *testing.T) {
+	// SQLite's grammar makes the timing optional, and BEFORE is what it means.
+	p := parseSQLiteTrigger("CREATE TRIGGER t INSERT ON o BEGIN SELECT 1; END", "main", "t", "o")
+	if p.Reason != "" || p.Trigger.Timing != "before" {
+		t.Errorf("timing = %q (%s)", p.Trigger.Timing, p.Reason)
+	}
+	if got := parseSQLiteTrigger("CREATE TRIGGER t AFTER INSERT ON o BEGIN SELECT 1; END", "main", "t", "o"); got.Trigger.Timing != "after" {
+		t.Errorf("an AFTER trigger read as %q", got.Trigger.Timing)
+	}
+}
+
+func TestAnOracleTriggerHeaderIsAccountedForOrRefused(t *testing.T) {
+	read := func(header string) *Program {
+		return parseOracleTriggerBody("TRIGGER \"T\"\n"+header+"\nBEGIN\n  NULL;\nEND;", &TriggerSpec{Name: "T", Table: "O"})
+	}
+	for _, ok := range []string{
+		`BEFORE INSERT OR UPDATE ON "O" FOR EACH ROW`,
+		`AFTER DELETE ON "APP"."O"`,
+		`INSTEAD OF INSERT ON "V" FOR EACH ROW`,
+		`BEFORE INSERT ON "O" FOR EACH ROW WHEN (new.a > 1 AND (new.b < 2))`,
+	} {
+		if p := read(ok); p.Reason != "" || p.Trigger.Body != "BEGIN\n  NULL;\nEND;" {
+			t.Errorf("%s: %q %q", ok, p.Reason, p.Trigger)
+		}
+	}
+	for header, want := range map[string]string{
+		`BEFORE UPDATE OF "A", "B" ON "O" FOR EACH ROW`:            "UPDATE OF",
+		`AFTER INSERT ON "O" FOR EACH ROW FOLLOWS "OTHER"`:         "FOLLOWS",
+		`AFTER INSERT ON "O" FOR EACH ROW PRECEDES "OTHER"`:        "PRECEDES",
+		`AFTER INSERT ON "O" REFERENCING NEW AS n FOR EACH ROW`:    "REFERENCING",
+		`AFTER INSERT ON "O" FOR EACH ROW DISABLE`:                 "DISABLE",
+		`AFTER INSERT ON "O" FOR EACH ROW WHEN (new.a > 1) ENABLE`: "ENABLE",
+		`AFTER LOGON ON DATABASE`:                                  "LOGON",
+	} {
+		if p := read(header); p.Reason == "" || !strings.Contains(strings.ToUpper(p.Reason), want) {
+			t.Errorf("%s: reason %q, want %q", header, p.Reason, want)
+		}
+	}
+}
+
+func TestAPlanUndoesOnlyWhatRan(t *testing.T) {
+	d, _ := DialectFor(DriverSQLite)
+	for _, c := range []struct {
+		name       string
+		statements []string
+		guard      int
+		undone     bool
+	}{
+		{"a statement before the one that changes the object fails", []string{"CREATE TABLE a (x)", "NO SUCH STATEMENT", "CREATE TABLE b (x)"}, 2, false},
+		{"the statement that changes the object fails first", []string{"CREATE TABLE a (x)", "NO SUCH STATEMENT"}, 1, false},
+		{"a statement after it fails", []string{"CREATE TABLE a (x)", "CREATE TABLE b (x)", "NO SUCH STATEMENT"}, 1, true},
+	} {
+		db, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(filepath.Join(t.TempDir(), "plan.db")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := &DDLPlan{Statements: c.statements, guard: c.guard, undo: []string{"CREATE TABLE restored (x)"}}
+		if err := plan.Exec(context.Background(), db); err == nil {
+			t.Errorf("%s: no error", c.name)
+		}
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'restored'`).Scan(&n); err != nil || (n == 1) != c.undone {
+			t.Errorf("%s: restored = %d, want undone %v (%v)", c.name, n, c.undone, err)
+		}
+		db.Close()
+	}
+}
+
+func TestSessionStatementsGoFirstAndShiftTheGuard(t *testing.T) {
+	plan := (&DDLPlan{Statements: []string{"A", "B"}, guard: 1}).withSession([]string{"SET X"})
+	if strings.Join(plan.Statements, ",") != "SET X,A,B" || plan.guard != 2 || !plan.discard {
+		t.Errorf("plan = %v guard %d discard %v", plan.Statements, plan.guard, plan.discard)
+	}
+	if plain := (&DDLPlan{Statements: []string{"A"}}).withSession(nil); plain.discard || plain.guard != 0 {
+		t.Errorf("a plan with nothing to restate changed: %+v", plain)
+	}
+	if got := scratchName(strings.Repeat("x", 80)); len(got) != 64 || !strings.HasPrefix(got, "jd_check_") {
+		t.Errorf("scratch name = %q", got)
 	}
 }

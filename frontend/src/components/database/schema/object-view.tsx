@@ -26,7 +26,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { CodeView } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { schemaParams, tableParams, type Selected } from "@/components/database/schema/address"
+import {
+  objectParams,
+  schemaParams,
+  tableParams,
+  type Selected,
+} from "@/components/database/schema/address"
 import { qualified } from "@/components/database/schema/changes"
 import { Facts } from "@/components/database/schema/facts"
 import { GroupGlyph, groupOfKind, kindWord } from "@/components/database/schema/kinds"
@@ -379,10 +384,16 @@ export function ObjectView({
           schema={selected.schema}
           existing={{ routine: editable.data.routine, signature: selected.signature }}
           onClose={() => setEditing(false)}
-          onDone={() => {
+          onDone={(answer) => {
+            onChanged()
+            // New parameter types make a different overload, and the address
+            // names the old one: the page moves to the routine that was saved.
+            if (answer.signature !== undefined && answer.signature !== selected.signature) {
+              goto("schema", objectParams({ ...selected, signature: answer.signature }))
+              return
+            }
             read.refresh()
             editable.refresh()
-            onChanged()
           }}
         />
       )}

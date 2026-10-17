@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"regexp"
@@ -55,6 +56,15 @@ type DDLPlan struct {
 	// after checks the result once the statements have run; an error from it
 	// undoes the change as a failed statement would.
 	after func(ctx context.Context, conn *sql.Conn) error
+	// guard is the index of the first statement that changes the object being
+	// replaced: a failure of an earlier one changed nothing, and putting the
+	// old definition back over an object that was never touched would be the
+	// change. A failure of a later one is undone.
+	guard int
+	// discard drops the connection when the plan has run: it carried a SET.
+	discard bool
+	// signature, when set, names the saved routine once the plan has run.
+	signature func(ctx context.Context, db *sql.DB) string
 	// undo are the statements that put things back when a later one fails, on
 	// the engines that commit each statement as it runs.
 	undo []string
@@ -73,6 +83,15 @@ func (p *DDLPlan) vouching(calls ...[]string) *DDLPlan {
 		p.Unvouched = append(p.Unvouched, list...)
 	}
 	return p
+}
+
+// Signature is what the catalogue calls the routine this plan saved, or empty
+// where the engine has no signatures or the routine cannot be found.
+func (p *DDLPlan) Signature(ctx context.Context, db *sql.DB) string {
+	if p == nil || p.signature == nil {
+		return ""
+	}
+	return p.signature(ctx, db)
 }
 
 // String is the plan as one text, for showing and for the audit entry.
@@ -95,7 +114,7 @@ func (p *DDLPlan) Exec(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	if p.atomic || p.after != nil || len(p.undo) > 0 {
+	if p.atomic || p.after != nil || len(p.undo) > 0 || p.discard {
 		return p.execGuarded(ctx, db)
 	}
 	if len(p.Statements) == 1 {
@@ -124,6 +143,11 @@ func (p *DDLPlan) execGuarded(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	defer conn.Close()
+	if p.discard {
+		// A connection that ran a SET goes back to the pool changed, so the
+		// pool is told it is no good.
+		defer func() { _ = conn.Raw(func(any) error { return driver.ErrBadConn }) }()
+	}
 	var tx *sql.Tx
 	exec := conn.ExecContext
 	if p.atomic {
@@ -152,7 +176,7 @@ func (p *DDLPlan) execGuarded(ctx context.Context, db *sql.DB) error {
 					return p.restore(ctx, conn, checked)
 				}
 			}
-			if i > 0 {
+			if i > p.guard {
 				return p.restore(ctx, conn, err)
 			}
 			return err

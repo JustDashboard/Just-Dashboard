@@ -434,20 +434,41 @@ func mysqlSchemaOf(ctx context.Context, db *sql.DB, schema string) (string, erro
 	return current.String, nil
 }
 
+var sqlModeRe = regexp.MustCompile(`^[A-Za-z0-9_,]*$`)
+
+// mysqlSession returns the statement that gives the connection the sql_mode a
+// program was made under, when it is not the one the connection has. The mode
+// is stored with the program and decides how its text is read (ANSI_QUOTES
+// turns a double-quoted name into an identifier), so a save under another
+// would change what it means.
+func mysqlSession(ctx context.Context, db *sql.DB, stored string) (session []string, reason string, err error) {
+	var current string
+	if err := db.QueryRowContext(ctx, "SELECT @@SESSION.sql_mode").Scan(&current); err != nil {
+		return nil, "", err
+	}
+	if stored == current {
+		return nil, "", nil
+	}
+	if !sqlModeRe.MatchString(stored) {
+		return nil, "it was made under an sql_mode this form cannot restate", nil
+	}
+	return []string{"SET SESSION sql_mode = '" + stored + "'"}, "", nil
+}
+
 func readMySQLRoutine(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program, error) {
 	schema, err := mysqlSchemaOf(ctx, db, ref.Schema)
 	if err != nil {
 		return nil, err
 	}
 	routineType := strings.ToUpper(ref.Kind)
-	var body, definition, returns, deterministic, access, security, comment string
+	var body, definition, returns, deterministic, access, security, comment, mode string
 	err = db.QueryRowContext(ctx, `
 	  SELECT COALESCE(ROUTINE_BODY, ''), COALESCE(ROUTINE_DEFINITION, ''), COALESCE(DTD_IDENTIFIER, ''),
 	         COALESCE(IS_DETERMINISTIC, ''), COALESCE(SQL_DATA_ACCESS, ''), COALESCE(SECURITY_TYPE, ''),
-	         COALESCE(ROUTINE_COMMENT, '')
+	         COALESCE(ROUTINE_COMMENT, ''), COALESCE(SQL_MODE, '')
 	  FROM information_schema.ROUTINES
 	  WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = ? AND ROUTINE_TYPE = ?`, schema, ref.Name, routineType).
-		Scan(&body, &definition, &returns, &deterministic, &access, &security, &comment)
+		Scan(&body, &definition, &returns, &deterministic, &access, &security, &comment, &mode)
 	if err == sql.ErrNoRows {
 		return nil, ErrObjectNotFound
 	}
@@ -460,8 +481,16 @@ func readMySQLRoutine(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program,
 	if strings.TrimSpace(definition) == "" {
 		return notEditable(ref.Kind, "the server returned no body for it: this login may not read it"), nil
 	}
+	session, reason, err := mysqlSession(ctx, db, mode)
+	if err != nil {
+		return nil, err
+	}
+	if reason != "" {
+		return notEditable(ref.Kind, "%s", reason), nil
+	}
 	spec := &RoutineSpec{
-		Kind: ref.Kind, Schema: schema, Name: ref.Name, Body: definition,
+		Session: session,
+		Kind:    ref.Kind, Schema: schema, Name: ref.Name, Body: definition,
 		Deterministic: strings.EqualFold(deterministic, "YES"), DataAccess: strings.ToLower(access),
 		Security: strings.ToLower(security), Comment: comment, Args: []RoutineArg{},
 	}
@@ -510,13 +539,17 @@ func readMySQLTrigger(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program,
 	if err != nil {
 		return nil, err
 	}
-	var event, timing, orientation, statement, tableSchema, table string
-	var order int
+	var event, timing, orientation, statement, tableSchema, table, mode string
+	var order, siblings int
 	err = db.QueryRowContext(ctx, `
 	  SELECT EVENT_MANIPULATION, ACTION_TIMING, COALESCE(ACTION_ORIENTATION, 'ROW'),
-	         COALESCE(ACTION_STATEMENT, ''), COALESCE(ACTION_ORDER, 1), EVENT_OBJECT_SCHEMA, EVENT_OBJECT_TABLE
-	  FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ? AND TRIGGER_NAME = ?`, schema, ref.Name).
-		Scan(&event, &timing, &orientation, &statement, &order, &tableSchema, &table)
+	         COALESCE(ACTION_STATEMENT, ''), COALESCE(ACTION_ORDER, 1), EVENT_OBJECT_SCHEMA, EVENT_OBJECT_TABLE,
+	         COALESCE(SQL_MODE, ''),
+	         (SELECT COUNT(*) FROM information_schema.TRIGGERS o
+	           WHERE o.EVENT_OBJECT_SCHEMA = t.EVENT_OBJECT_SCHEMA AND o.EVENT_OBJECT_TABLE = t.EVENT_OBJECT_TABLE
+	             AND o.EVENT_MANIPULATION = t.EVENT_MANIPULATION AND o.ACTION_TIMING = t.ACTION_TIMING)
+	  FROM information_schema.TRIGGERS t WHERE TRIGGER_SCHEMA = ? AND TRIGGER_NAME = ?`, schema, ref.Name).
+		Scan(&event, &timing, &orientation, &statement, &order, &tableSchema, &table, &mode, &siblings)
 	if err == sql.ErrNoRows {
 		return nil, ErrObjectNotFound
 	}
@@ -528,11 +561,20 @@ func readMySQLTrigger(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program,
 		return notEditable(KindTrigger, "it is on a table in another database"), nil
 	case order > 1:
 		return notEditable(KindTrigger, "it fires after another trigger on the same event (FOLLOWS)"), nil
+	case siblings > 1:
+		return notEditable(KindTrigger, "another trigger fires on the same event and timing, and creating it again would change which runs first"), nil
 	case strings.TrimSpace(statement) == "":
 		return notEditable(KindTrigger, "the server returned no body for it"), nil
 	}
+	session, reason, err := mysqlSession(ctx, db, mode)
+	if err != nil {
+		return nil, err
+	}
+	if reason != "" {
+		return notEditable(KindTrigger, "%s", reason), nil
+	}
 	return &Program{Kind: KindTrigger, Trigger: &TriggerSpec{
-		Schema: schema, Name: ref.Name, Table: table, Timing: strings.ToLower(timing),
+		Schema: schema, Name: ref.Name, Table: table, Timing: strings.ToLower(timing), Session: session,
 		Events: []string{strings.ToLower(event)}, ForEach: strings.ToLower(orientation), Body: statement,
 	}}, nil
 }
@@ -688,18 +730,24 @@ func readMSSQLProgram(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program,
 	}
 	var schema, kind, parent, parentSchema string
 	var text sql.NullString
-	var encrypted bool
+	var encrypted, ansiNulls, quotedIdentifier, disabled, ordered bool
 	err := db.QueryRowContext(ctx, `
 	  SELECT s.name, o.type, ISNULL(po.name, ''), ISNULL(ps.name, ''), m.definition,
-	         CAST(CASE WHEN m.definition IS NULL THEN 1 ELSE 0 END AS BIT)
+	         CAST(CASE WHEN m.definition IS NULL THEN 1 ELSE 0 END AS BIT),
+	         ISNULL(m.uses_ansi_nulls, 1), ISNULL(m.uses_quoted_identifier, 1),
+	         ISNULL(tr.is_disabled, 0),
+	         CAST(CASE WHEN EXISTS (SELECT 1 FROM sys.trigger_events te
+	                                WHERE te.object_id = o.object_id AND (te.is_first = 1 OR te.is_last = 1))
+	              THEN 1 ELSE 0 END AS BIT)
 	  FROM sys.objects o
 	  JOIN sys.schemas s ON s.schema_id = o.schema_id
 	  LEFT JOIN sys.sql_modules m ON m.object_id = o.object_id
+	  LEFT JOIN sys.triggers tr ON tr.object_id = o.object_id
 	  LEFT JOIN sys.objects po ON po.object_id = o.parent_object_id
 	  LEFT JOIN sys.schemas ps ON ps.schema_id = po.schema_id
 	  WHERE o.type IN (`+types+`) AND `+mssqlSchemaIs("s")+` AND o.name = @p2
 	    AND (@p3 = '' OR po.name = @p3)`, ref.Schema, ref.Name, ref.Table).
-		Scan(&schema, &kind, &parent, &parentSchema, &text, &encrypted)
+		Scan(&schema, &kind, &parent, &parentSchema, &text, &encrypted, &ansiNulls, &quotedIdentifier, &disabled, &ordered)
 	if err == sql.ErrNoRows {
 		return nil, ErrObjectNotFound
 	}
@@ -712,7 +760,31 @@ func readMSSQLProgram(ctx context.Context, db *sql.DB, ref ObjectRef) (*Program,
 	if kind == "TF" {
 		return notEditable(ref.Kind, "it is a multi-statement table function"), nil
 	}
-	return parseMSSQLModule(text.String, ref.Kind, schema, ref.Name, parent, parentSchema), nil
+	program := parseMSSQLModule(text.String, ref.Kind, schema, ref.Name, parent, parentSchema)
+	if program.Reason != "" {
+		return program, nil
+	}
+	switch {
+	case disabled:
+		return notEditable(ref.Kind, "it is disabled, and saving would enable it"), nil
+	case ordered:
+		return notEditable(ref.Kind, "it has a position set with sp_settriggerorder (first or last), which saving would reset"), nil
+	}
+	// The settings a module is made under are stored with it, and the connection
+	// that saves it would otherwise stamp its own.
+	var session []string
+	if !ansiNulls {
+		session = append(session, "SET ANSI_NULLS OFF")
+	}
+	if !quotedIdentifier {
+		session = append(session, "SET QUOTED_IDENTIFIER OFF")
+	}
+	if program.Routine != nil {
+		program.Routine.Session = session
+	} else if program.Trigger != nil {
+		program.Trigger.Session = session
+	}
+	return program, nil
 }
 
 // parseMSSQLModule reads the text SQL Server kept for a procedure, function
@@ -1093,9 +1165,11 @@ func readOracleTrigger(ctx context.Context, db *sql.DB, text, owner, name string
 	return parseOracleTriggerBody(text, spec), nil
 }
 
-// parseOracleTriggerBody finds the block in a trigger's source: it starts at
-// the first DECLARE or BEGIN outside the header's own parentheses (a WHEN
-// condition holds neither).
+// parseOracleTriggerBody reads a trigger's source. The catalogue has said what
+// it fires on; the text is read for the body, which starts at the first
+// DECLARE or BEGIN outside the header's own parentheses, and for anything the
+// header holds that the form would drop when it wrote the trigger again:
+// UPDATE OF columns, FOLLOWS or PRECEDES, a REFERENCING clause, ENABLE.
 func parseOracleTriggerBody(text string, spec *TriggerSpec) *Program {
 	h, err := newHeaderScan(DriverOracle, text)
 	if err != nil {
@@ -1107,6 +1181,64 @@ func parseOracleTriggerBody(text string, spec *TriggerSpec) *Program {
 	}
 	if h.isWord(start, "call") {
 		return notEditable(KindTrigger, "its body is a CALL")
+	}
+	if h.take("create") {
+		h.take("or")
+		h.take("replace")
+	}
+	unread := func() *Program {
+		return notEditable(KindTrigger, "its header has %s, which this form cannot state", strings.ToUpper(h.span(h.pos, start)))
+	}
+	if !h.take("trigger") {
+		return notEditable(KindTrigger, "its text could not be read")
+	}
+	if _, ok := h.qualifiedName(); !ok {
+		return notEditable(KindTrigger, "its name could not be read")
+	}
+	switch {
+	case h.take("before"), h.take("after"):
+	case h.take("instead"):
+		h.take("of")
+	default:
+		return unread()
+	}
+	for {
+		switch h.word() {
+		case "insert", "delete":
+			h.pos++
+		case "update":
+			h.pos++
+			if h.word() == "of" {
+				return notEditable(KindTrigger, "it fires on UPDATE OF some columns")
+			}
+		default:
+			return unread()
+		}
+		if !h.take("or") {
+			break
+		}
+	}
+	if !h.take("on") {
+		return unread()
+	}
+	if _, ok := h.qualifiedName(); !ok {
+		return unread()
+	}
+	if h.take("for") && !(h.take("each") && h.take("row")) {
+		return unread()
+	}
+	if h.take("when") {
+		closing := -1
+		if h.punct('(') {
+			closing = h.closing(start)
+		}
+		if closing < 0 {
+			return unread()
+		}
+		h.pos = closing + 1
+	}
+	if h.pos != start {
+		return unread()
 	}
 	spec.Body = strings.TrimSpace(h.text[h.toks[start].start:])
 	return &Program{Kind: KindTrigger, Trigger: spec}
@@ -1175,7 +1307,8 @@ func parseSQLiteTrigger(text, schema, name, table string) *Program {
 		h.take("of")
 		spec.Timing = "instead of"
 	default:
-		spec.Timing = "after"
+		// SQLite's grammar: no timing word means BEFORE.
+		spec.Timing = "before"
 	}
 	switch w := h.word(); w {
 	case "insert", "update", "delete":

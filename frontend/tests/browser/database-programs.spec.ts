@@ -318,7 +318,13 @@ async function mockPrograms(page: Page, options: ProgramsMock = {}, connection =
           options.runRefused.status,
         )
       }
-      return json(route, { statement, statements: [statement] })
+      // Postgres names the saved routine by its identity arguments.
+      const args = (body.args as { name: string; type: string }[] | undefined) ?? []
+      const signature =
+        rest === "/ddl/routine" && method === "POST"
+          ? args.map((arg) => `${arg.name} ${arg.type}`).join(", ")
+          : undefined
+      return json(route, { statement, statements: [statement], signature })
     }
     return route.fallback()
   })
@@ -473,6 +479,34 @@ test("a function is edited from its page: filled in, with the way it is replaced
     returns: "integer",
     replaces: { signature: "cid bigint" },
   })
+})
+
+test("an edit that changes the parameter types follows the routine to its new signature", async ({
+  page,
+}) => {
+  const { sent } = await mockPrograms(page)
+  await page.goto(FUNCTION)
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit function" })
+  await dialog
+    .getByRole("group", { name: "Parameter 1" })
+    .getByRole("textbox")
+    .nth(1)
+    .fill("integer")
+  await dialog.getByRole("button", { name: "Save changes" }).click()
+  await expect(dialog).toBeHidden()
+  expect(runs(sent)[0].body).toMatchObject({ replaces: { signature: "cid bigint" } })
+
+  // The address names the overload that exists now, and the page reads it.
+  await expect(page).toHaveURL(/sig=cid(%20|\+)integer/)
+  await expect.poll(() => sent.objects.at(-1)?.searchParams.get("signature")).toBe("cid integer")
+  await expect(page.getByRole("heading", { name: /order_count\(cid integer\)/ })).toBeVisible()
+  // And Edit and Drop address it, not the signature that is gone.
+  await page.getByRole("button", { name: "Drop" }).click()
+  await expect(
+    page.getByRole("dialog", { name: "Drop function" }).getByText('"order_count"(cid integer)'),
+  ).toBeVisible()
+  expect(previews(sent).at(-1)?.body).toMatchObject({ signature: "cid integer" })
 })
 
 test("an edit that is cancelled after a change asks before it discards", async ({ page }) => {

@@ -817,8 +817,20 @@ stays editable on a protected connection.
   `CREATE` is refused (`DDLPlan.undo`). Oracle accepts a routine that does not compile and keeps it
   `INVALID`, so a plan checks `all_errors` afterwards (`DDLPlan.after`) and puts the old definition back,
   or drops the new object, when there are errors. An undo only follows a statement that ran. Postgres
-  re-applies a comment the object carried when it drops and creates; a MySQL definer becomes the
-  connection's user, which the note says.
+  re-applies a comment, the owner and the `EXECUTE` privileges the object carried when it drops and
+  creates (`pgRoutineRights`); a MySQL definer becomes the connection's user and its `procs_priv`
+  grants go with the `DROP`, which the note says, and the new definition is first made under a scratch
+  name (`jd_check_<name>`) and dropped, so the account's rights or the binary log's rule for functions
+  refuse it while the old routine is still there (`DDLPlan.guard` keeps an undo from running over an
+  object that was never touched). The settings a program was stored under — MySQL's `sql_mode`, SQL
+  Server's `ANSI_NULLS` and `QUOTED_IDENTIFIER` — are set again on the connection first (`Session`), which
+  is then discarded rather than pooled. A program is also refused for editing where saving would change
+  its place in an order it cannot restate: a MySQL trigger sharing its event and timing with another,
+  a SQL Server trigger with `sp_settriggerorder` or disabled, an Oracle trigger with `FOLLOWS`,
+  `UPDATE OF` or `REFERENCING` in its header. A new Oracle trigger is checked and dropped again if it did
+  not compile, because Oracle keeps it enabled and then refuses every write to its table (ORA-04098).
+  A save reply carries the routine's catalogue `signature` where the engine has them, so a page that
+  addressed it by signature can follow it.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the

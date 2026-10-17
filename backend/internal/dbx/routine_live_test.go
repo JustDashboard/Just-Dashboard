@@ -3,9 +3,11 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -167,6 +169,13 @@ func (c programCase) functions(t *testing.T) {
 		t.Fatalf("the edited function returns %d, want %d\n%s", got, c.wantEdited, plan)
 	}
 	t.Logf("%s edit: %s%s", c.driver, strings.ReplaceAll(plan.String(), "\n", " "), plan.Note)
+	if c.driver == DriverMySQL && !strings.Contains(plan.Note, "OR REPLACE") && len(plan.Statements) == 4 {
+		// MySQL (not MariaDB) tries the new definition under another name first.
+		if !strings.Contains(plan.Statements[0], "jd_check_"+c.fn.Name) || !strings.HasPrefix(plan.Statements[1], "DROP FUNCTION") ||
+			!strings.Contains(plan.Statements[1], "jd_check_") || plan.guard != 2 {
+			t.Errorf("the MySQL edit does not try the definition first: %v (guard %d)", plan.Statements, plan.guard)
+		}
+	}
 
 	// An edit the engine refuses leaves the edited function where it was.
 	broken, err := PlanSaveRoutine(ctx, c.db, c.driver, c.fnBroken, ref)
@@ -183,6 +192,21 @@ func (c programCase) functions(t *testing.T) {
 	}
 	if after := c.read(t, ObjectRef{Kind: KindFunction, Name: c.fn.Name, Signature: sig}).Routine; !strings.Contains(after.Body, strings.TrimRight(c.fnEdited.Body, "; \n")) {
 		t.Errorf("after a refused edit the body reads %q", after.Body)
+	}
+
+	// A new routine the engine refuses is not left behind, whatever the engine
+	// does with one that does not compile (Oracle keeps it, invalid).
+	bad := c.fnBroken
+	bad.Name += "_new"
+	newPlan, err := PlanSaveRoutine(ctx, c.db, c.driver, bad, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := newPlan.Exec(ctx, c.db); err == nil {
+		t.Fatalf("the engine accepted a new broken routine:\n%s", newPlan)
+	}
+	if _, err := ReadProgram(ctx, c.db, c.driver, ObjectRef{Kind: KindFunction, Schema: c.schema, Name: bad.Name}); !errors.Is(err, ErrObjectNotFound) {
+		t.Errorf("a refused new routine was left behind: %v", err)
 	}
 
 	if c.fnWider != nil {
@@ -281,6 +305,20 @@ func (c programCase) triggers(t *testing.T) {
 		t.Fatalf("the engine accepted a broken trigger:\n%s", broken)
 	} else {
 		t.Logf("%s trigger refusal: %v", c.driver, err)
+	}
+	// A new trigger the engine refuses is not left behind either: Oracle would
+	// keep it enabled, and every write to the table would fail with ORA-04098.
+	stray := c.trigBroken
+	stray.Name += "_new"
+	strayPlan, err := PlanSaveTrigger(ctx, c.db, c.driver, stray, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := strayPlan.Exec(ctx, c.db); err == nil {
+		t.Fatalf("the engine accepted a new broken trigger:\n%s", strayPlan)
+	}
+	if _, err := ReadProgram(ctx, c.db, c.driver, ObjectRef{Kind: KindTrigger, Schema: c.schema, Name: stray.Name}); !errors.Is(err, ErrObjectNotFound) {
+		t.Errorf("a refused new trigger was left behind: %v", err)
 	}
 	c.exec(t, c.insert(3))
 	if got := c.number(t, "SELECT COALESCE(SUM(id), 0) FROM "+c.log); got != 510 {
@@ -528,4 +566,256 @@ func TestLiveSQLiteStoredPrograms(t *testing.T) {
 		trig:  trig(10), trigEdited: trig(100), trigBroken: trigBroken,
 		insert: func(id int) string { return "INSERT INTO jdt_routine_editor_t (id) VALUES (" + itoa(id) + ")" },
 	}.run(t)
+}
+
+func TestLivePostgresKeepsTheOwnerAndPrivilegesWhenItDropsAndCreates(t *testing.T) {
+	db := catalogLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := context.Background()
+	const role = "jdt_routine_editor_r"
+	clean := func() {
+		_, _ = db.ExecContext(ctx, "DROP FUNCTION IF EXISTS jdt_routine_editor_acl(integer)")
+		_, _ = db.ExecContext(ctx, "DROP FUNCTION IF EXISTS jdt_routine_editor_acl(bigint)")
+		_, _ = db.ExecContext(ctx, "DROP ROLE IF EXISTS "+role)
+	}
+	clean()
+	t.Cleanup(clean)
+	for _, stmt := range []string{
+		"CREATE ROLE " + role + " NOLOGIN",
+		"GRANT " + role + " TO CURRENT_USER",
+		"CREATE FUNCTION jdt_routine_editor_acl(a integer) RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT a'",
+		"ALTER FUNCTION jdt_routine_editor_acl(integer) OWNER TO " + role,
+		"REVOKE ALL ON FUNCTION jdt_routine_editor_acl(integer) FROM PUBLIC",
+		"GRANT EXECUTE ON FUNCTION jdt_routine_editor_acl(integer) TO CURRENT_USER WITH GRANT OPTION",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Skipf("this login cannot set up the case (%v): %s", err, stmt)
+		}
+	}
+	rights := func() (owner, acl string, definer bool) {
+		t.Helper()
+		if err := db.QueryRowContext(ctx, `
+		  SELECT pg_get_userbyid(p.proowner), COALESCE(p.proacl::text, ''), p.prosecdef
+		  FROM pg_proc p WHERE p.proname = 'jdt_routine_editor_acl'`).Scan(&owner, &acl, &definer); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	owner, before, _ := rights()
+	spec := RoutineSpec{Kind: KindFunction, Name: "jdt_routine_editor_acl", Language: "sql", Returns: "bigint",
+		Security: "definer", Args: []RoutineArg{{Name: "a", Mode: "in", Type: "bigint"}}, Body: "SELECT a"}
+	plan, err := PlanSaveRoutine(ctx, db, DriverPostgres, spec, &RoutineRef{Schema: "public", Name: spec.Name, Signature: "a integer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.atomic || len(plan.Statements) < 4 || !strings.Contains(plan.Note, "owner and privileges") {
+		t.Fatalf("plan = %v (atomic %v)\n%s", plan.Statements, plan.atomic, plan.Note)
+	}
+	if err := plan.Exec(ctx, db); err != nil {
+		t.Fatalf("%v\n%s", err, plan)
+	}
+	if got, _, _ := rights(); got != role || got != owner {
+		t.Errorf("owner = %q after the edit, was %q", got, owner)
+	}
+	if _, after, definer := rights(); !definer || !sameACL(after, before) {
+		t.Errorf("privileges after the edit: %q, before: %q (definer %v)", after, before, definer)
+	}
+	var executable bool
+	if err := db.QueryRowContext(ctx, `SELECT has_function_privilege('public', 'jdt_routine_editor_acl(bigint)', 'EXECUTE')`).Scan(&executable); err != nil || executable {
+		t.Errorf("PUBLIC may execute the function again after the edit: %v, %v", executable, err)
+	}
+	if got := plan.Signature(ctx, db); got != "a bigint" {
+		t.Errorf("signature = %q", got)
+	}
+}
+
+func TestLiveMySQLKeepsTheSettingsAndTheOrderItWasMadeUnder(t *testing.T) {
+	for _, c := range []struct{ name, admin string }{{"mysql8", "JD_TEST_MYSQL8_ADMIN_DSN"}, {"mariadb", "JD_TEST_MYSQL_ADMIN_DSN"}} {
+		t.Run(c.name, func(t *testing.T) {
+			admin := catalogLive(t, DriverMySQL, c.admin)
+			const database = "jdt_routine_editor_settings"
+			if _, err := admin.Exec("DROP DATABASE IF EXISTS " + database); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := admin.Exec("CREATE DATABASE " + database); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = admin.Exec("DROP DATABASE IF EXISTS " + database) })
+			d, _ := DialectFor(DriverMySQL)
+			db, err := sql.Open("mysql", d.NormaliseDSN(strings.TrimSuffix(os.Getenv(c.admin), "/")+"/"+database))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Close() })
+			ctx := context.Background()
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stmt := range []string{
+				"CREATE TABLE t (id int)", "CREATE TABLE log (id int)",
+				"SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',PIPES_AS_CONCAT')",
+				"CREATE FUNCTION quoted(a int) RETURNS int DETERMINISTIC NO SQL RETURN a + 1",
+				"SET SESSION sql_mode = DEFAULT",
+				"CREATE TRIGGER first_one AFTER INSERT ON t FOR EACH ROW INSERT INTO log(id) VALUES (1)",
+				"CREATE TRIGGER second_one AFTER INSERT ON t FOR EACH ROW INSERT INTO log(id) VALUES (2)",
+				"CREATE TRIGGER lonely BEFORE DELETE ON t FOR EACH ROW SET @x = 1",
+			} {
+				if _, err := conn.ExecContext(ctx, stmt); err != nil {
+					t.Fatalf("%v\n%s", err, stmt)
+				}
+			}
+			conn.Close()
+
+			// A routine made under another sql_mode is saved under it.
+			spec := RoutineSpec{Kind: KindFunction, Name: "quoted", Returns: "int", Deterministic: true, DataAccess: "no sql",
+				Args: []RoutineArg{{Name: "a", Mode: "in", Type: "int"}}, Body: "RETURN a + 2"}
+			plan, err := PlanSaveRoutine(ctx, db, DriverMySQL, spec, &RoutineRef{Schema: database, Name: "quoted"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(plan.Statements[0], "SET SESSION sql_mode = '") || !plan.discard {
+				t.Fatalf("the plan does not restate the sql_mode: %v", plan.Statements)
+			}
+			if err := plan.Exec(ctx, db); err != nil {
+				t.Fatalf("%v\n%s", err, plan)
+			}
+			var mode string
+			if err := db.QueryRow("SELECT SQL_MODE FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? AND ROUTINE_NAME = 'quoted'", database).Scan(&mode); err != nil ||
+				!strings.Contains(mode, "PIPES_AS_CONCAT") {
+				t.Errorf("sql_mode after the edit = %q, %v", mode, err)
+			}
+			var here string
+			if err := db.QueryRow("SELECT @@SESSION.sql_mode").Scan(&here); err != nil || strings.Contains(here, "PIPES_AS_CONCAT") {
+				t.Errorf("the changed connection went back to the pool: %q, %v", here, err)
+			}
+
+			// Two triggers on one event: saving either would change which runs first.
+			for _, name := range []string{"first_one", "second_one"} {
+				p, err := ReadProgram(ctx, db, DriverMySQL, ObjectRef{Kind: KindTrigger, Schema: database, Name: name})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if p.Editable || !strings.Contains(p.Reason, "which runs first") {
+					t.Errorf("%s: editable %v, reason %q", name, p.Editable, p.Reason)
+				}
+			}
+			if p, err := ReadProgram(ctx, db, DriverMySQL, ObjectRef{Kind: KindTrigger, Schema: database, Name: "lonely"}); err != nil || !p.Editable {
+				t.Errorf("a trigger alone on its event is not editable: %v %+v", err, p)
+			}
+		})
+	}
+}
+
+func TestLiveSQLServerKeepsTheSettingsAndTheOrderItWasMadeUnder(t *testing.T) {
+	db := catalogLive(t, DriverMSSQL, "JD_TEST_MSSQL_DSN")
+	ctx := context.Background()
+	clean := func() {
+		for _, s := range []string{
+			"DROP TRIGGER IF EXISTS dbo.jdt_routine_editor_first", "DROP TRIGGER IF EXISTS dbo.jdt_routine_editor_off",
+			"DROP PROCEDURE IF EXISTS dbo.jdt_routine_editor_q", "DROP TABLE IF EXISTS dbo.jdt_routine_editor_o",
+		} {
+			_, _ = db.ExecContext(ctx, s)
+		}
+	}
+	clean()
+	t.Cleanup(clean)
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		"SET QUOTED_IDENTIFIER OFF",
+		"CREATE PROCEDURE dbo.jdt_routine_editor_q AS SELECT \"a\"",
+		"SET QUOTED_IDENTIFIER ON",
+		"CREATE TABLE dbo.jdt_routine_editor_o (id int)",
+	} {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%v\n%s", err, stmt)
+		}
+	}
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	conn.Close()
+	for _, stmt := range []string{
+		"CREATE TRIGGER dbo.jdt_routine_editor_first ON dbo.jdt_routine_editor_o AFTER INSERT AS SELECT 1",
+		"EXEC sp_settriggerorder @triggername = 'dbo.jdt_routine_editor_first', @order = 'First', @stmttype = 'INSERT'",
+		"CREATE TRIGGER dbo.jdt_routine_editor_off ON dbo.jdt_routine_editor_o AFTER DELETE AS SELECT 1",
+		"DISABLE TRIGGER dbo.jdt_routine_editor_off ON dbo.jdt_routine_editor_o",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%v\n%s", err, stmt)
+		}
+	}
+
+	spec := RoutineSpec{Kind: KindProcedure, Schema: "dbo", Name: "jdt_routine_editor_q", Body: "SELECT 'b'"}
+	plan, err := PlanSaveRoutine(ctx, db, DriverMSSQL, spec, &RoutineRef{Schema: "dbo", Name: spec.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Statements[0] != "SET QUOTED_IDENTIFIER OFF" || !plan.discard {
+		t.Fatalf("the plan does not restate the settings: %v", plan.Statements)
+	}
+	if err := plan.Exec(ctx, db); err != nil {
+		t.Fatalf("%v\n%s", err, plan)
+	}
+	var quoted bool
+	if err := db.QueryRowContext(ctx, `SELECT uses_quoted_identifier FROM sys.sql_modules WHERE object_id = OBJECT_ID('dbo.jdt_routine_editor_q')`).Scan(&quoted); err != nil || quoted {
+		t.Errorf("QUOTED_IDENTIFIER after the edit = %v, %v", quoted, err)
+	}
+
+	for name, want := range map[string]string{"jdt_routine_editor_first": "sp_settriggerorder", "jdt_routine_editor_off": "disabled"} {
+		p, err := ReadProgram(ctx, db, DriverMSSQL, ObjectRef{Kind: KindTrigger, Schema: "dbo", Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Editable || !strings.Contains(p.Reason, want) {
+			t.Errorf("%s: editable %v, reason %q", name, p.Editable, p.Reason)
+		}
+	}
+}
+
+func TestLiveOracleRefusesATriggerWhoseHeaderTheFormCannotState(t *testing.T) {
+	db := catalogLive(t, DriverOracle, "JD_TEST_ORACLE_DSN")
+	ctx := context.Background()
+	clean := func() {
+		for _, s := range []string{
+			`DROP TRIGGER "JDT_ROUTINE_EDITOR_B"`, `DROP TRIGGER "JDT_ROUTINE_EDITOR_A"`, `DROP TRIGGER "JDT_ROUTINE_EDITOR_U"`,
+			`DROP TABLE "JDT_ROUTINE_EDITOR_X" PURGE`,
+		} {
+			_, _ = db.ExecContext(ctx, s)
+		}
+	}
+	clean()
+	t.Cleanup(clean)
+	for _, stmt := range []string{
+		`CREATE TABLE "JDT_ROUTINE_EDITOR_X" ("ID" NUMBER)`,
+		`CREATE TRIGGER "JDT_ROUTINE_EDITOR_A" AFTER INSERT ON "JDT_ROUTINE_EDITOR_X" FOR EACH ROW BEGIN NULL; END;`,
+		`CREATE TRIGGER "JDT_ROUTINE_EDITOR_B" AFTER INSERT ON "JDT_ROUTINE_EDITOR_X" FOR EACH ROW FOLLOWS "JDT_ROUTINE_EDITOR_A" BEGIN NULL; END;`,
+		`CREATE TRIGGER "JDT_ROUTINE_EDITOR_U" BEFORE UPDATE OF "ID" ON "JDT_ROUTINE_EDITOR_X" FOR EACH ROW BEGIN NULL; END;`,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%v\n%s", err, stmt)
+		}
+	}
+	for name, want := range map[string]string{"JDT_ROUTINE_EDITOR_B": "FOLLOWS", "JDT_ROUTINE_EDITOR_U": "UPDATE OF"} {
+		p, err := ReadProgram(ctx, db, DriverOracle, ObjectRef{Kind: KindTrigger, Schema: "JDTEST", Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Editable || !strings.Contains(strings.ToUpper(p.Reason), want) {
+			t.Errorf("%s: editable %v, reason %q", name, p.Editable, p.Reason)
+		}
+	}
+	if p, err := ReadProgram(ctx, db, DriverOracle, ObjectRef{Kind: KindTrigger, Schema: "JDTEST", Name: "JDT_ROUTINE_EDITOR_A"}); err != nil || !p.Editable {
+		t.Errorf("a plain trigger is not editable: %v %+v", err, p)
+	}
+}
+
+// sameACL compares two aclitem arrays as sets: their order is not meaningful.
+func sameACL(a, b string) bool {
+	items := func(text string) []string {
+		out := strings.Split(strings.Trim(text, "{}"), ",")
+		slices.Sort(out)
+		return out
+	}
+	return slices.Equal(items(a), items(b))
 }

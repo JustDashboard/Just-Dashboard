@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -67,6 +68,10 @@ type RoutineSpec struct {
 	// edit that has to drop and create the object states it again so the
 	// comment survives.
 	Comment string `json:"comment,omitempty"`
+	// Session are the statements that put the connection back into the
+	// settings the routine was made under (sql_mode, ANSI_NULLS). The read
+	// supplies them from the catalogue; a request cannot.
+	Session []string `json:"-"`
 }
 
 // TriggerSpec is a trigger as the editor states it.
@@ -91,6 +96,8 @@ type TriggerSpec struct {
 	// the statements between BEGIN and END, which the plan supplies.
 	Body    string `json:"body,omitempty"`
 	Comment string `json:"comment,omitempty"`
+	// Session is RoutineSpec's.
+	Session []string `json:"-"`
 }
 
 // RoutineRef names the routine an edit replaces. Signature tells overloads
@@ -693,18 +700,28 @@ func PlanSaveRoutine(ctx context.Context, db *sql.DB, driver Driver, spec Routin
 		old = program.Routine
 		spec.Schema, spec.Name, spec.Comment = old.Schema, old.Name, old.Comment
 	}
+	spec.Session = nil
+	if old != nil {
+		spec.Session = old.Session
+	}
 	replacing := old != nil
 	switch driver {
 	case DriverPostgres:
 		if !replacing {
-			return planStmt(renderRoutine(driver, spec, "CREATE"))
+			plan, err := planStmt(renderRoutine(driver, spec, "CREATE"))
+			if plan != nil {
+				plan.signature = pgSignatureOf(spec)
+			}
+			return plan, err
 		}
 		if pgReplaceable(*old, spec) {
 			stmt, err := renderRoutine(driver, spec, "CREATE OR REPLACE")
 			if err != nil {
 				return nil, err
 			}
-			return planOf(stmt), nil
+			plan := planOf(stmt)
+			plan.signature = pgSignatureOf(spec)
+			return plan, nil
 		}
 		drop, err := pgDropRoutine(ctx, db, *old, edit.Signature)
 		if err != nil {
@@ -714,8 +731,8 @@ func PlanSaveRoutine(ctx context.Context, db *sql.DB, driver Driver, spec Routin
 		if err != nil {
 			return nil, err
 		}
-		plan := &DDLPlan{Statements: []string{drop, create}, atomic: true,
-			Note: "Postgres cannot replace a function whose parameters or return type change, so this drops it and creates it again in one transaction: if the new definition is refused, the old one stays."}
+		plan := &DDLPlan{Statements: []string{drop, create}, atomic: true, signature: pgSignatureOf(spec),
+			Note: "Postgres cannot replace a function whose parameters or return type change, so this drops it and creates it again in one transaction, and sets its owner and privileges again: if the new definition is refused, the old one stays."}
 		if old.Comment != "" {
 			comment, err := pgRoutineComment(spec, old.Comment)
 			if err != nil {
@@ -723,6 +740,11 @@ func PlanSaveRoutine(ctx context.Context, db *sql.DB, driver Driver, spec Routin
 			}
 			plan.Statements = append(plan.Statements, comment)
 		}
+		rights, err := pgRoutineRights(ctx, db, spec, edit.Signature)
+		if err != nil {
+			return nil, err
+		}
+		plan.Statements = append(plan.Statements, rights...)
 		return plan, nil
 
 	case DriverMySQL:
@@ -735,7 +757,7 @@ func PlanSaveRoutine(ctx context.Context, db *sql.DB, driver Driver, spec Routin
 			if err != nil {
 				return nil, err
 			}
-			return planOf(stmt), nil
+			return planOf(stmt).withSession(spec.Session), nil
 		}
 		create, err := renderRoutine(driver, spec, "CREATE")
 		if err != nil {
@@ -749,15 +771,34 @@ func PlanSaveRoutine(ctx context.Context, db *sql.DB, driver Driver, spec Routin
 		if err != nil {
 			return nil, err
 		}
-		return &DDLPlan{Statements: []string{drop, create}, undo: []string{restore},
-			Note: "MySQL cannot replace a routine in place, so this drops it and creates it again. MySQL commits a DROP at once: if the new definition is refused, the old one is created again from the text it was read as. The definer becomes the account this connection uses."}, nil
+		// The new definition is made under another name and dropped again
+		// before the real routine is touched: whatever would refuse it (the
+		// account's rights, the binary log's rule for functions, a syntax
+		// error) refuses it while the old routine is still there.
+		trial := spec
+		trial.Name = scratchName(spec.Name)
+		try, err := renderRoutine(driver, trial, "CREATE")
+		if err != nil {
+			return nil, err
+		}
+		dropTrial, err := dropRoutineStatement(driver, spec.Kind, spec.Schema, trial.Name)
+		if err != nil {
+			return nil, err
+		}
+		plan := &DDLPlan{Statements: []string{try, dropTrial, drop, create}, undo: []string{restore}, guard: 2,
+			Note: "MySQL cannot replace a routine in place. This makes the new definition under a scratch name to see that the server accepts it, drops that, then drops the routine and creates it again; MySQL commits a DROP at once, so if the last step fails the old one is created again from the text it was read as. The definer becomes the account this connection uses, and the privileges granted on the routine go with the DROP: grant them again afterwards."}
+		return plan.withSession(spec.Session), nil
 
 	case DriverMSSQL:
 		verb := "CREATE"
 		if replacing {
 			verb = "CREATE OR ALTER"
 		}
-		return planStmt(renderRoutine(driver, spec, verb))
+		plan, err := planStmt(renderRoutine(driver, spec, verb))
+		if err != nil {
+			return nil, err
+		}
+		return plan.withSession(spec.Session), nil
 
 	case DriverOracle:
 		verb := "CREATE"
@@ -796,6 +837,29 @@ func planStmt(stmt string, err error) (*DDLPlan, error) {
 		return nil, err
 	}
 	return planOf(stmt), nil
+}
+
+// scratchName is the name a MySQL edit tries the new definition under.
+func scratchName(name string) string {
+	const prefix = "jd_check_"
+	runes := []rune(prefix + name)
+	if len(runes) > 64 {
+		runes = runes[:64]
+	}
+	return string(runes)
+}
+
+// withSession puts the statements that restore the settings a program was
+// made under in front of a plan. They change the connection that runs the
+// plan, so it is discarded afterwards instead of going back to the pool.
+func (p *DDLPlan) withSession(session []string) *DDLPlan {
+	if len(session) == 0 {
+		return p
+	}
+	p.Statements = append(append([]string{}, session...), p.Statements...)
+	p.guard += len(session)
+	p.discard = true
+	return p
 }
 
 // pgReplaceable reports whether CREATE OR REPLACE can stand for the change:
@@ -875,9 +939,28 @@ func pgDropRoutine(ctx context.Context, db *sql.DB, old RoutineSpec, signature s
 	return "DROP " + strings.ToUpper(old.Kind) + " " + rel + "(" + strings.Join(types, ", ") + ")", nil
 }
 
-func pgRoutineComment(spec RoutineSpec, comment string) (string, error) {
+// pgInputTypeTexts are the types a routine is named by, as the form wrote them.
+func pgInputTypeTexts(spec RoutineSpec) []string {
+	var types []string
+	for _, a := range spec.Args {
+		if a.Mode != "out" {
+			types = append(types, strings.TrimSpace(a.Type))
+		}
+	}
+	return types
+}
+
+func pgRoutineName(spec RoutineSpec) (string, error) {
 	d, _ := DialectFor(DriverPostgres)
 	rel, err := ddlRel(d, spec.Schema, spec.Name)
+	if err != nil {
+		return "", err
+	}
+	return rel + "(" + strings.Join(pgInputTypeTexts(spec), ", ") + ")", nil
+}
+
+func pgRoutineComment(spec RoutineSpec, comment string) (string, error) {
+	name, err := pgRoutineName(spec)
 	if err != nil {
 		return "", err
 	}
@@ -885,13 +968,136 @@ func pgRoutineComment(spec RoutineSpec, comment string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var types []string
-	for _, a := range spec.Args {
-		if a.Mode != "out" {
-			types = append(types, strings.TrimSpace(a.Type))
+	return "COMMENT ON " + strings.ToUpper(spec.Kind) + " " + name + " IS " + lit, nil
+}
+
+// pgRoutineRights are the statements that give a routine that was dropped and
+// made again the owner and the privileges the old one had. A new routine is
+// owned by the connection's login and executable by everyone, and a function
+// that was SECURITY DEFINER with EXECUTE taken from PUBLIC must not come back
+// as the opposite of what it was.
+func pgRoutineRights(ctx context.Context, db *sql.DB, spec RoutineSpec, signature string) ([]string, error) {
+	match := "p.prokind <> 'p'"
+	if spec.Kind == KindProcedure {
+		match = "p.prokind = 'p'"
+	}
+	var owner, current, grantsJSON string
+	var aclSet bool
+	err := db.QueryRowContext(ctx, `
+	  SELECT pg_get_userbyid(p.proowner), current_user::text, p.proacl IS NOT NULL,
+	         COALESCE((SELECT json_agg(json_build_object(
+	                     'grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_get_userbyid(a.grantee) END,
+	                     'option', a.is_grantable)) FROM aclexplode(p.proacl) a), '[]')::text
+	  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+	  WHERE `+match+` AND `+pgSchemaIs("n")+` AND p.proname = $2
+	    AND ($3::text = '' OR pg_get_function_identity_arguments(p.oid) = $3::text)
+	  LIMIT 1`, spec.Schema, spec.Name, signature).Scan(&owner, &current, &aclSet, &grantsJSON)
+	if err != nil {
+		return nil, planRead("the routine's owner and privileges", err)
+	}
+	if !aclSet && owner == current {
+		return nil, nil
+	}
+	var grants []struct {
+		Grantee string `json:"grantee"`
+		Option  bool   `json:"option"`
+	}
+	if err := json.Unmarshal([]byte(grantsJSON), &grants); err != nil {
+		return nil, planRead("the routine's privileges", err)
+	}
+	d, _ := DialectFor(DriverPostgres)
+	name, err := pgRoutineName(spec)
+	if err != nil {
+		return nil, err
+	}
+	object := strings.ToUpper(spec.Kind) + " " + name
+	quote := func(role string) (string, error) { return d.QuoteIdent(role) }
+	var out, later []string
+	if aclSet {
+		out = append(out, "REVOKE ALL ON "+object+" FROM PUBLIC")
+		ownerHolds := false
+		for _, g := range grants {
+			if g.Grantee == owner {
+				ownerHolds = true
+			}
+		}
+		if !ownerHolds {
+			who, err := quote(current)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, "REVOKE ALL ON "+object+" FROM "+who)
+		}
+		for _, g := range grants {
+			switch {
+			case g.Grantee == "":
+				out = append(out, "GRANT EXECUTE ON "+object+" TO PUBLIC")
+			case g.Grantee == current && owner == current:
+				// The owner's own entry is what REVOKE left.
+			case g.Grantee == current:
+				// Granted to the login after the object has gone to its owner.
+				who, err := quote(current)
+				if err != nil {
+					return nil, err
+				}
+				grant := "GRANT EXECUTE ON " + object + " TO " + who
+				if g.Option {
+					grant += " WITH GRANT OPTION"
+				}
+				later = append(later, grant)
+			default:
+				who, err := quote(g.Grantee)
+				if err != nil {
+					return nil, err
+				}
+				grant := "GRANT EXECUTE ON " + object + " TO " + who
+				if g.Option {
+					grant += " WITH GRANT OPTION"
+				}
+				out = append(out, grant)
+			}
 		}
 	}
-	return "COMMENT ON " + strings.ToUpper(spec.Kind) + " " + rel + "(" + strings.Join(types, ", ") + ") IS " + lit, nil
+	if owner != current {
+		who, err := quote(owner)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, "ALTER "+object+" OWNER TO "+who)
+	}
+	return append(out, later...), nil
+}
+
+// pgSignatureOf finds, once a routine has been saved, the signature the
+// catalogue gives it: the form writes int where the catalogue says integer,
+// and a page that addresses the routine by signature needs the latter.
+func pgSignatureOf(spec RoutineSpec) func(context.Context, *sql.DB) string {
+	return func(ctx context.Context, db *sql.DB) string {
+		match := "p.prokind <> 'p'"
+		if spec.Kind == KindProcedure {
+			match = "p.prokind = 'p'"
+		}
+		args := []any{spec.Schema, spec.Name}
+		array := "ARRAY[]::oid[]"
+		if types := pgInputTypeTexts(spec); len(types) > 0 {
+			marks := make([]string, len(types))
+			for i, t := range types {
+				marks[i] = "to_regtype($" + itoa(i+3) + "::text)"
+				args = append(args, t)
+			}
+			array = "ARRAY[" + strings.Join(marks, ", ") + "]::oid[]"
+		}
+		var signature string
+		err := db.QueryRowContext(ctx, `
+		  SELECT pg_get_function_identity_arguments(p.oid)
+		  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		  WHERE `+match+` AND `+pgSchemaIs("n")+` AND p.proname = $2 AND p.proargtypes::oid[] = `+array+`
+		  LIMIT 1`, args...).Scan(&signature)
+		if err != nil {
+			return ""
+		}
+		return signature
+	}
 }
 
 func dropRoutineStatement(driver Driver, kind, schema, name string) (string, error) {
@@ -940,8 +1146,25 @@ func PlanSaveTrigger(ctx context.Context, db *sql.DB, driver Driver, spec Trigge
 	if _, err := ddlDialect(driver, OpTriggers); err != nil {
 		return nil, err
 	}
+	spec.Session = nil
 	if edit == nil {
-		return planStmt(renderTrigger(driver, spec, "CREATE"))
+		stmt, err := renderTrigger(driver, spec, "CREATE")
+		if err != nil {
+			return nil, err
+		}
+		plan := planOf(stmt)
+		if driver == DriverOracle {
+			// Oracle keeps a trigger that did not compile, enabled: every write
+			// to the table then fails with ORA-04098 until it is dropped.
+			drop, err := dropTriggerStatement(driver, spec.Schema, spec.Name, spec.Table)
+			if err != nil {
+				return nil, err
+			}
+			plan.after = oracleCompiled("TRIGGER", spec.Schema, spec.Name)
+			plan.undo = []string{drop}
+			plan.Note = "Oracle keeps a trigger that did not compile, and then refuses every write to its table, so this checks the result and drops the trigger again if it has errors."
+		}
+		return plan, nil
 	}
 	program, err := ReadProgram(ctx, db, driver, ObjectRef{Kind: KindTrigger, Schema: edit.Schema, Name: edit.Name, Table: edit.Table})
 	if err != nil {
@@ -954,9 +1177,14 @@ func PlanSaveTrigger(ctx context.Context, db *sql.DB, driver Driver, spec Trigge
 	// An edit keeps the trigger where it is: it is on its table, whatever the
 	// request said, and carries the comment it had.
 	spec.Schema, spec.Name, spec.Table, spec.Comment = old.Schema, old.Name, old.Table, old.Comment
+	spec.Session = old.Session
 	switch driver {
 	case DriverMSSQL:
-		return planStmt(renderTrigger(driver, spec, "CREATE OR ALTER"))
+		plan, err := planStmt(renderTrigger(driver, spec, "CREATE OR ALTER"))
+		if err != nil {
+			return nil, err
+		}
+		return plan.withSession(spec.Session), nil
 	case DriverOracle:
 		stmt, err := renderTrigger(driver, spec, "CREATE OR REPLACE")
 		if err != nil {
@@ -973,7 +1201,11 @@ func PlanSaveTrigger(ctx context.Context, db *sql.DB, driver Driver, spec Trigge
 		return plan, nil
 	case DriverMySQL:
 		if isMariaDB(ctx, db) {
-			return planStmt(renderTrigger(driver, spec, "CREATE OR REPLACE"))
+			plan, err := planStmt(renderTrigger(driver, spec, "CREATE OR REPLACE"))
+			if err != nil {
+				return nil, err
+			}
+			return plan.withSession(spec.Session), nil
 		}
 		create, err := renderTrigger(driver, spec, "CREATE")
 		if err != nil {
@@ -987,8 +1219,9 @@ func PlanSaveTrigger(ctx context.Context, db *sql.DB, driver Driver, spec Trigge
 		if err != nil {
 			return nil, err
 		}
-		return &DDLPlan{Statements: []string{drop, create}, undo: []string{restore},
-			Note: "MySQL cannot replace a trigger in place, so this drops it and creates it again. MySQL commits a DROP at once: if the new definition is refused, the old one is created again from the text it was read as. The definer becomes the account this connection uses."}, nil
+		plan := &DDLPlan{Statements: []string{drop, create}, undo: []string{restore},
+			Note: "MySQL cannot replace a trigger in place, so this drops it and creates it again. MySQL commits a DROP at once: if the new definition is refused, the old one is created again from the text it was read as. The definer becomes the account this connection uses."}
+		return plan.withSession(spec.Session), nil
 	}
 	// Postgres and SQLite change DDL inside a transaction.
 	create, err := renderTrigger(driver, spec, "CREATE")
