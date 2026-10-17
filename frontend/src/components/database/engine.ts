@@ -335,6 +335,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   json: false,
   hashFieldTtl: false,
   commandReference: false,
+  memoryBuffer: false,
 }
 
 /**

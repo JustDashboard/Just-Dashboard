@@ -36,11 +36,13 @@ const (
 // route that is on neither fails the test below: it is refused all the same,
 // and somebody still has to decide that it should be.
 var protectedRouteVerdicts = map[string]string{
-	// The connection's own record, its server's reach and its power.
+	// The connection's own record, its server's reach, what its container may
+	// use and its power.
 	"PUT ":                 staysOpen,
 	"DELETE ":              staysOpen,
 	"PUT /access":          staysOpen,
 	"POST /access/preview": staysOpen,
+	"PUT /resources":       staysOpen,
 	"POST /power":          staysOpen,
 	"PUT /settings":        isRefused,
 	// A pooler is a container and, in one mode, an account in the database.

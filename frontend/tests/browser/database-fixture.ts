@@ -188,6 +188,47 @@ export type DatabaseMock = {
   alerts?: unknown
   /** The lines `GET /logs/search` answers with, for every question. */
   logLines?: { text: string; level?: string; timestamp?: string; [key: string]: unknown }[]
+  /** What `GET /databases/{id}/resources` answers, by id; `resourcesOf` unless given. */
+  resources?: Record<number, unknown>
+}
+
+const MIB = 1024 * 1024
+
+/** The buffer each engine keeps for itself, as a fresh server of it has it. */
+const BUFFERS: Record<string, { setting: string; bytes: number }> = {
+  postgres: { setting: "shared_buffers", bytes: 128 * MIB },
+  mysql: { setting: "innodb_buffer_pool_size", bytes: 128 * MIB },
+  redis: { setting: "maxmemory", bytes: 0 },
+  mongodb: { setting: "wiredTigerCacheSizeGB", bytes: 256 * MIB },
+}
+
+/**
+ * `GET /databases/{id}/resources` for one connection: a container the
+ * dashboard may change, limited to 1 GiB and one and a half cores, on a
+ * machine of 16 GiB and eight; a file has no server to limit.
+ */
+export function resourcesOf(conn: MockConnection, over: Record<string, unknown> = {}) {
+  const host = { memoryBytes: 16 * 1024 * MIB, cpus: 8 }
+  if (conn.driver === "sqlite") {
+    return {
+      editable: false,
+      refusal: "A SQLite database is a file; there is no server to limit.",
+      running: false,
+      limits: { memoryBytes: 0, cpus: 0 },
+      host,
+      ...over,
+    }
+  }
+  return {
+    container: `${conn.name}-db`,
+    editable: true,
+    running: true,
+    limits: { memoryBytes: 1024 * MIB, cpus: 1.5 },
+    usedBytes: 412 * MIB,
+    host,
+    buffer: BUFFERS[conn.driver],
+    ...over,
+  }
 }
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -287,6 +328,9 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       return json(route, summaryOf(conn, options.summaries?.[conn.id]))
     }
     if (rest === "/ping") return json(route, { ok: true })
+    if (rest === "/resources" && route.request().method() === "GET") {
+      return json(route, options.resources?.[conn.id] ?? resourcesOf(conn))
+    }
     if (rest === "/stats/history")
       return json(route, { samples: [], everySeconds: 30, retentionHours: 168 })
     if (rest === "/access") {
@@ -357,6 +401,7 @@ export const DATABASE_SURFACES = [
   "/databases/1/backups",
   "/databases/1/alerts",
   "/databases/1/settings",
+  "/databases/1/settings/resources",
   "/databases/4",
   "/databases/4/data",
   "/databases/4/query",

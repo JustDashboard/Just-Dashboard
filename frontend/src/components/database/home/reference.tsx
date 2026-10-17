@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Archive, Plus } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -44,6 +45,7 @@ import type {
 } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { settingsPageHref } from "@/components/database/shell/settings-pages"
 
 /**
  * The reference blocks at the foot of a home: what the server runs as, where
@@ -55,6 +57,7 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 /** What the server runs as: its container, its unit, its file, or another machine. */
 export function RunsAs() {
   const { conn, summary, engine, href } = useDatabase()
+  const { can } = useAuth()
   const inspected = summary?.container?.id
   // What the container was told it may use is Docker's to say, not the
   // summary's: asked of the container's own record, and only for a database
@@ -121,6 +124,19 @@ export function RunsAs() {
             )}
             <FactRow label="Limits">
               <ContainerLimits poll={limits} />
+              {/* Not for a compose container: its file owns the limits, and
+                  the page would only say so. */}
+              {can("system.admin") && !container.composeProject && (
+                <>
+                  <span className="text-muted-foreground"> · </span>
+                  <Link
+                    href={settingsPageHref(href("settings"), { path: "resources" })}
+                    className="rounded-sm underline focus-ring"
+                  >
+                    Change
+                  </Link>
+                </>
+              )}
             </FactRow>
             {limits.data?.restartPolicy && (
               <FactRow label="Restarts" className="font-mono">

@@ -153,6 +153,14 @@ var capabilityTable = []Capability{
 	// The dashboard can start one from its own closed list of images.
 	{"provision", On("postgres", "mysql", "redis", "mongodb", "clickhouse").
 		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB)},
+	// The setting that holds the memory the engine keeps for itself, which
+	// the Resources page reads beside its container's memory limit.
+	{"memoryBuffer", func(d Driver, flavor string) any {
+		if setting := MemoryBufferSetting(d, flavor); setting != "" {
+			return setting
+		}
+		return false
+	}},
 }
 
 // listOf is the answer of a flag whose value is a list. Never nil: an engine

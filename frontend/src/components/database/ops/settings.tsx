@@ -16,6 +16,7 @@ import { ExtensionsSection } from "@/components/database/ops/settings-extensions
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
 import { PoolingSections } from "@/components/database/ops/settings-pooling"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { ResourcesSection } from "@/components/database/ops/settings-resources"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -29,6 +30,7 @@ import {
 const MISSING: Record<SettingsPageKey, string> = {
   general: "settings",
   network: "network to configure",
+  resources: "resources to limit",
   pooling: "connection pooling",
   parameters: "parameters to change here",
   extensions: "extensions",
@@ -128,6 +130,14 @@ export function SettingsNetwork() {
   return (
     <SettingsFrame page="network">
       {(confirm) => <ReachabilitySection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsResources() {
+  return (
+    <SettingsFrame page="resources">
+      {(confirm) => <ResourcesSection confirm={confirm} />}
     </SettingsFrame>
   )
 }

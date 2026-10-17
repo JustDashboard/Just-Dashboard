@@ -505,6 +505,8 @@ export const TEMPLATES = [
     port: 5432,
     defaultUser: "jd",
     database: true,
+    defaultLimits: { memoryMb: 1024, cpus: 1 },
+    minMemoryMb: 6,
     statements: true,
     autoExplain: true,
   },
@@ -519,6 +521,8 @@ export const TEMPLATES = [
     port: 5432,
     defaultUser: "jd",
     database: true,
+    defaultLimits: { memoryMb: 1024, cpus: 1 },
+    minMemoryMb: 6,
     statements: true,
     autoExplain: true,
   },
@@ -533,6 +537,8 @@ export const TEMPLATES = [
     port: 3306,
     defaultUser: "jd",
     database: true,
+    defaultLimits: { memoryMb: 1024, cpus: 1 },
+    minMemoryMb: 6,
   },
   {
     engine: "mongodb",
@@ -545,6 +551,8 @@ export const TEMPLATES = [
     port: 27017,
     defaultUser: "jd",
     database: true,
+    defaultLimits: { memoryMb: 1024, cpus: 1 },
+    minMemoryMb: 6,
   },
   {
     engine: "valkey",
@@ -557,6 +565,8 @@ export const TEMPLATES = [
     port: 6379,
     defaultUser: "",
     database: false,
+    defaultLimits: { memoryMb: 512, cpus: 1 },
+    minMemoryMb: 6,
   },
   {
     engine: "clickhouse",
@@ -569,6 +579,8 @@ export const TEMPLATES = [
     port: 9000,
     defaultUser: "jd",
     database: true,
+    defaultLimits: { memoryMb: 2048, cpus: 2 },
+    minMemoryMb: 6,
   },
 ]
 
@@ -726,6 +738,8 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
         }
       case "GET /databases/provision/options":
         return { body: TEMPLATES }
+      case "GET /databases/provision/capacity":
+        return { body: { cpus: 8, memoryBytes: 16 * 1024 ** 3 } }
       case "POST /databases/provision":
         return {
           status: 202,

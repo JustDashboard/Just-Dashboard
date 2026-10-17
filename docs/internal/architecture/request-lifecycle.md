@@ -97,6 +97,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   `system.admin` when its target is a database to be created.
 - **Power.** `POST …/power` starts, stops or restarts by its body, so it asks for `destructive` and
   spends `destrLim` by hand for `stop` and `restart`.
+- **Resources.** `PUT …/resources` is `system.admin`. A new or changed limit is applied in place; a
+  limit the body lifts (`memoryMb` or `cpus` of zero where the container has one) replaces the
+  container, so the handler asks for `destructive` and spends `destrLim` by hand once it has read the
+  container's limits (`planDBLimits`).
 - **Accounts.** The role routes check content too: an alter is refused for an attribute the engine
   cannot change (`dbx.CheckRoleRequest`), and for locking out or demoting the account the connection
   itself signs in with.
