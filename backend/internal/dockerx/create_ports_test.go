@@ -1,9 +1,11 @@
 package dockerx
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +99,138 @@ func TestCreateRetriesOnlyBindFailuresAndReturnsActualPorts(t *testing.T) {
 				t.Fatalf("result %+v, creates=%d removes=%d", result, creates, removes)
 			}
 		})
+	}
+}
+
+// What a first boot reads is in the container before it starts, in every
+// container a create makes: a start that failed on its port is retried on a
+// new container, and that one needs the file as much as the first did.
+func TestCreateWritesItsFilesBeforeEachStart(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	occupied := listener.Addr().(*net.TCPAddr).Port
+	var order []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/"):
+			fmt.Fprint(w, `{"Id":"sha256:test"}`)
+		case strings.HasSuffix(path, "/containers/create"):
+			n := 1 + strings.Count(strings.Join(order, " "), "create")
+			order = append(order, fmt.Sprintf("create candidate%d", n))
+			fmt.Fprintf(w, `{"Id":"candidate%d","Warnings":[]}`, n)
+		case strings.HasSuffix(path, "/archive") && r.Method == http.MethodPut:
+			id := strings.TrimSuffix(path[strings.LastIndex(path, "/containers/")+len("/containers/"):], "/archive")
+			if dir := r.URL.Query().Get("path"); dir != "/docker-entrypoint-initdb.d" {
+				t.Errorf("the file was unpacked into %q", dir)
+			}
+			reader := tar.NewReader(r.Body)
+			header, err := reader.Next()
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, _ := io.ReadAll(reader)
+			if header.Name != "jd.sql" || header.Mode != 0o644 || string(content) != "SELECT 1;\n" {
+				t.Errorf("archive entry %q mode %o: %q", header.Name, header.Mode, content)
+			}
+			if _, err := reader.Next(); err != io.EOF {
+				t.Errorf("the archive holds more than the one file: %v", err)
+			}
+			order = append(order, "write "+id)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(path, "/start"):
+			id := strings.TrimSuffix(path[strings.LastIndex(path, "/containers/")+len("/containers/"):], "/start")
+			order = append(order, "start "+id)
+			if id == "candidate1" {
+				w.WriteHeader(500)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "port is already allocated"})
+				return
+			}
+			w.WriteHeader(204)
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(204)
+		case strings.Contains(path, "/containers/") && strings.HasSuffix(path, "/json"):
+			if strings.Contains(path, "candidate") {
+				fmt.Fprint(w, `{"Id":"candidate2","Name":"/files-test","NetworkSettings":{"Ports":{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"32781"}]}}}`)
+			} else {
+				w.WriteHeader(404)
+				fmt.Fprint(w, `{"message":"not found"}`)
+			}
+		default:
+			t.Errorf("unexpected %s %s", r.Method, path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	api, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	c := &Client{cli: api}
+	_, err = c.Create(context.Background(), ContainerSpec{
+		Name: "files-test", Image: "postgres:17-alpine", Start: true,
+		Ports: []PortMapping{{HostIP: "127.0.0.1", HostPort: occupied, ContainerPort: 5432, Protocol: "tcp"}},
+		Files: []ContainerFile{{Path: "/docker-entrypoint-initdb.d/jd.sql", Content: []byte("SELECT 1;\n")}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "create candidate1,write candidate1,start candidate1,create candidate2,write candidate2,start candidate2"
+	if got := strings.Join(order, ","); got != want {
+		t.Errorf("order = %s\nwant    %s", got, want)
+	}
+}
+
+// A file that cannot be written leaves no container behind to be started
+// without it.
+func TestCreateRemovesAContainerItCouldNotWriteInto(t *testing.T) {
+	removed, started := false, false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/"):
+			fmt.Fprint(w, `{"Id":"sha256:test"}`)
+		case strings.HasSuffix(path, "/containers/create"):
+			fmt.Fprint(w, `{"Id":"broken","Warnings":[]}`)
+		case strings.HasSuffix(path, "/archive"):
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"message":"Could not find the file /docker-entrypoint-initdb.d in container broken"}`)
+		case strings.HasSuffix(path, "/start"):
+			started = true
+			w.WriteHeader(204)
+		case r.Method == http.MethodDelete && strings.HasSuffix(path, "/containers/broken"):
+			removed = true
+			w.WriteHeader(204)
+		case strings.Contains(path, "/containers/") && strings.HasSuffix(path, "/json"):
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"message":"not found"}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	api, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	c := &Client{cli: api}
+	_, err = c.Create(context.Background(), ContainerSpec{
+		Name: "files-test", Image: "postgres:17-alpine", Start: true,
+		Files: []ContainerFile{{Path: "/docker-entrypoint-initdb.d/jd.sql", Content: []byte("SELECT 1;\n")}},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "/docker-entrypoint-initdb.d/jd.sql") {
+		t.Errorf("create = %v", err)
+	}
+	if started || !removed {
+		t.Errorf("started %v, removed %v", started, removed)
 	}
 }
 
