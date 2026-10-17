@@ -25,9 +25,7 @@ func (s *Server) databaseApplicationURL(ctx context.Context, conn *dbConnection,
 	if err != nil {
 		return "", httpx.BadRequest("the saved connection could not be read")
 	}
-	// The authority's file is this machine's: an application keeps the
-	// encryption and brings its own copy of the certificate.
-	dsn = dbx.StripServerTLS(conn.Driver, dsn)
+	dsn = s.applicationDSN(ctx, conn, dsn)
 	host, port := info.Host, info.Port
 	if databaseLoopback(host) {
 		_, internalPort, err := s.databaseContainer(ctx, conn, info)

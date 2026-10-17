@@ -279,6 +279,10 @@ func (o *deploymentDatabaseNetworks) ResolveVariable(ctx context.Context, enviro
 		if err != nil {
 			return "", err
 		}
+	} else {
+		// On the host's network the address is the saved one, but the program
+		// is still in a container with no copy of the authority's file.
+		dsn = o.server.applicationDSN(ctx, conn, dsn)
 	}
 	if format != "" && format != "url" || database != "" {
 		return deploy.ConnectionStringForFormat(dsn, format, database)

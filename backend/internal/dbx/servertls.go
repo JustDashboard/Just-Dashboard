@@ -28,8 +28,10 @@ import (
 //     before the driver reads the string.
 //
 // The two that are not an engine's own spelling (Redis and MySQL) are read only
-// by this package; nothing else is ever handed such a string. An application
-// URL is made from it by StripServerTLS, which takes the file out.
+// by this package, so a string carrying one must never reach another program:
+// go-sql-driver would send tlsCAFile to the server as a system variable and
+// fail. An application, which is in another container and has no such file,
+// is given ForApplication's string instead.
 
 // serverCAParam is the parameter that names the authority's certificate in the
 // two connection strings whose drivers have none of their own.
@@ -115,29 +117,56 @@ func ServerTLSFile(driver Driver, dsn string) string {
 	return ""
 }
 
-// StripServerTLS takes the authority's file out of a connection string meant for
-// another program. The path is this machine's and means nothing to an
-// application in a container, where it would be a certificate file that is not
-// there; what is kept is that the server speaks TLS.
-func StripServerTLS(driver Driver, dsn string) string {
+// ForApplication is the connection string for a program in another container.
+// The authority's file is this machine's path and the parameters that name it
+// mean nothing to the program, so they are taken out, and what is left says what
+// that program has to do:
+//
+//   - TLS is allowed but not required: the string as it was before TLS. A
+//     program with no copy of the authority is not made to use TLS it cannot
+//     check, and the server still accepts it.
+//   - TLS is required: a string that uses TLS and does not verify the
+//     certificate where the driver has a word for that (PostgreSQL
+//     sslmode=require, MongoDB tlsInsecure, MySQL tls=skip-verify). Redis has no
+//     such word in a URL, so its string is rediss:// alone and the program
+//     needs the authority's certificate.
+//
+// A string that is not set up for server TLS is returned as it is.
+func ForApplication(driver Driver, dsn string, required bool) string {
+	if ServerTLSFile(driver, dsn) == "" {
+		return dsn
+	}
+	if !required && driver != DriverRedis {
+		if out, err := WithoutServerTLS(driver, dsn); err == nil {
+			return out
+		}
+		return dsn
+	}
 	switch driver {
 	case DriverPostgres:
 		if out, err := editQuery(dsn, "postgres", "postgresql", func(u *url.URL, q url.Values) {
-			if q.Get("sslrootcert") != "" {
-				q.Set("sslmode", "require")
-				q.Del("sslrootcert")
-			}
+			q.Set("sslmode", "require")
+			q.Del("sslrootcert")
 		}); err == nil {
 			return out
 		}
-	case DriverMongo, DriverRedis:
-		if out, err := editQuery(dsn, "", "", func(u *url.URL, q url.Values) { q.Del(serverCAParam) }); err == nil {
+	case DriverMongo:
+		if out, err := editQuery(dsn, "mongodb", "", func(u *url.URL, q url.Values) {
+			q.Set("tls", "true")
+			q.Set("tlsInsecure", "true")
+			q.Del(serverCAParam)
+		}); err == nil {
+			return out
+		}
+	case DriverRedis:
+		if out, err := editQuery(dsn, "redis", "rediss", func(u *url.URL, q url.Values) { q.Del(serverCAParam) }); err == nil {
 			return out
 		}
 	case DriverMySQL:
-		// The driver's own form has no way to say "encrypted" that another
-		// program reads, so what is left is the plain string.
-		if out, err := editMySQL(dsn, func(cfg *mysql.Config) { delete(cfg.Params, serverCAParam) }); err == nil {
+		if out, err := editMySQL(dsn, func(cfg *mysql.Config) {
+			delete(cfg.Params, serverCAParam)
+			cfg.TLSConfig = "skip-verify"
+		}); err == nil {
 			return out
 		}
 	}

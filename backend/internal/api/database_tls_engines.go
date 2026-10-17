@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbtls"
@@ -71,9 +70,6 @@ type dbTLSEngine struct {
 	// optional reports an engine that can accept TLS and plaintext on the one
 	// port. Redis cannot: a port speaks one protocol.
 	optional bool
-	// requirable says whether this release can refuse plaintext, by its
-	// provisioning version.
-	requirable func(version string) bool
 }
 
 // certFiles delivers a certificate as a certificate and a key, or as the one
@@ -88,23 +84,13 @@ func certFiles(keyName string) func(*dbtls.Leaf, []byte) []dbTLSFile {
 	}
 }
 
-func always(string) bool { return true }
-
-// mariaDBRequirable: refusing plaintext is require_secure_transport, which
-// MariaDB has from 11.4. The templates offer "11" as the newest 11.x.
-func mariaDBRequirable(version string) bool {
-	major, _, _ := strings.Cut(version, ".")
-	n, err := strconv.Atoi(major)
-	return err == nil && n >= 11
-}
-
 var dbTLSEngines = map[string]dbTLSEngine{
 	"postgres":    postgresTLS,
 	"pgvector":    postgresTLS,
 	"postgis":     postgresTLS,
 	"timescaledb": postgresTLS,
 	"mysql": {
-		account: "mysql", servers: []string{"mysqld"}, keyFile: "server.key", optional: true, requirable: always,
+		account: "mysql", servers: []string{"mysqld"}, keyFile: "server.key", optional: true,
 		args: func(require bool) []string {
 			args := []string{"--ssl-ca=" + dbTLSDir + "/ca.crt", "--ssl-cert=" + dbTLSDir + "/server.crt", "--ssl-key=" + dbTLSDir + "/server.key"}
 			if require {
@@ -116,7 +102,7 @@ var dbTLSEngines = map[string]dbTLSEngine{
 		reload: `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e 'ALTER INSTANCE RELOAD TLS'`,
 	},
 	"mariadb": {
-		account: "mysql", servers: []string{"mariadbd", "mysqld"}, keyFile: "server.key", optional: true, requirable: mariaDBRequirable,
+		account: "mysql", servers: []string{"mariadbd", "mysqld"}, keyFile: "server.key", optional: true,
 		args: func(require bool) []string {
 			args := []string{"--ssl-ca=" + dbTLSDir + "/ca.crt", "--ssl-cert=" + dbTLSDir + "/server.crt", "--ssl-key=" + dbTLSDir + "/server.key"}
 			if require {
@@ -128,7 +114,7 @@ var dbTLSEngines = map[string]dbTLSEngine{
 		reload: `mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e 'FLUSH SSL'`,
 	},
 	"mongodb": {
-		account: "mongodb", servers: []string{"mongod"}, keyFile: "server.pem", optional: true, requirable: always,
+		account: "mongodb", servers: []string{"mongod"}, keyFile: "server.pem", optional: true,
 		args: func(require bool) []string {
 			mode := "preferTLS"
 			if require {
@@ -149,7 +135,7 @@ var dbTLSEngines = map[string]dbTLSEngine{
 }
 
 var postgresTLS = dbTLSEngine{
-	account: "postgres", servers: []string{"postgres"}, keyFile: "server.key", optional: true, requirable: always, hba: true,
+	account: "postgres", servers: []string{"postgres"}, keyFile: "server.key", optional: true, hba: true,
 	args: func(require bool) []string {
 		args := []string{"-c", "ssl=on", "-c", "ssl_cert_file=" + dbTLSDir + "/server.crt", "-c", "ssl_key_file=" + dbTLSDir + "/server.key"}
 		if require {
@@ -181,7 +167,7 @@ hostssl all             all             all                     scram-sha-256
 // address and the exposure switch all keep meaning what they did.
 func redisTLS(server, account, cli string) dbTLSEngine {
 	return dbTLSEngine{
-		account: account, redisServer: server, keyFile: "server.key", requirable: always,
+		account: account, redisServer: server, keyFile: "server.key",
 		files: certFiles("server.key"),
 		reload: `REDISCLI_AUTH="$REDIS_PASSWORD" ` + cli + ` --tls --insecure -h 127.0.0.1 -p 6379 config set ` +
 			`tls-cert-file ` + dbTLSDir + `/server.crt tls-key-file ` + dbTLSDir + `/server.key`,
@@ -206,10 +192,29 @@ func (e dbTLSEngine) wrapScript(require bool) string {
 		`chmod 0600 ` + dbTLSDir + `/` + e.keyFile + `; exec docker-entrypoint.sh "$@" ` + strings.Join(e.args(require), " ")
 }
 
-// chownScript makes a key just written readable by the server, for a
-// certificate replaced under a running one.
-func (e dbTLSEngine) chownScript() string {
-	return `chown ` + e.account + `:` + e.account + ` ` + dbTLSDir + `/` + e.keyFile + ` && chmod 0600 ` + dbTLSDir + `/` + e.keyFile
+// newSuffix marks a file written beside the one it will replace.
+const newSuffix = ".new"
+
+// swapScript puts files written under their .new names in place of the ones
+// the server reads, once the key belongs to the account the server runs as. It
+// is one exec, so a renewal that fails while writing leaves the old pair
+// untouched, and one that fails here has not run a second mv without the first.
+func (e dbTLSEngine) swapScript(files []dbTLSFile) string {
+	key := dbTLSDir + "/" + e.keyFile + newSuffix
+	script := `set -e; chown ` + e.account + `:` + e.account + ` ` + key + `; chmod 0600 ` + key
+	for _, f := range files {
+		script += `; mv -f ` + dbTLSDir + `/` + f.name + newSuffix + ` ` + dbTLSDir + `/` + f.name
+	}
+	return script
+}
+
+// discardScript removes what a renewal wrote and did not put in place.
+func (e dbTLSEngine) discardScript(files []dbTLSFile) string {
+	script := `rm -f`
+	for _, f := range files {
+		script += ` ` + dbTLSDir + `/` + f.name + newSuffix
+	}
+	return script
 }
 
 // command is the command a container starts with once TLS is on.

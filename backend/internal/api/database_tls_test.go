@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,7 +133,7 @@ func TestTLSScriptsCarryTheArgumentsAndNoSecret(t *testing.T) {
 		}
 	}
 	for key, engine := range dbTLSEngines {
-		for _, text := range []string{engine.reload, engine.chownScript(), engine.wrapScriptOrEmpty()} {
+		for _, text := range []string{engine.reload, engine.wrapScriptOrEmpty()} {
 			if strings.Contains(text, "password=") || strings.Contains(text, "pw12345") {
 				t.Errorf("%s: a script carries a secret: %s", key, text)
 			}
@@ -197,11 +198,161 @@ func TestCertificateIsDeliveredInTheFormEachEngineReads(t *testing.T) {
 	}
 }
 
-func TestMariaDBRefusesPlaintextFromElevenFour(t *testing.T) {
-	for version, want := range map[string]bool{"12": true, "11": true, "11.4": true, "10.11": false, "10.6": false} {
-		if got := mariaDBRequirable(version); got != want {
-			t.Errorf("MariaDB %s: requirable = %v, want %v", version, got, want)
+// MariaDB has had require_secure_transport since 10.5.2, and every release the
+// templates offer is later than that, so every one can refuse plaintext.
+func TestEveryMariaDBReleaseTheTemplateOffersCanRefusePlaintext(t *testing.T) {
+	for _, v := range provisionTemplates["mariadb"].versions {
+		major, minor, _ := strings.Cut(v.id, ".")
+		maj, _ := strconv.Atoi(major)
+		min, _ := strconv.Atoi(minor)
+		if maj < 10 || (maj == 10 && min < 6) {
+			t.Errorf("MariaDB %s is offered and is older than 10.6", v.id)
 		}
+	}
+	if args := strings.Join(dbTLSEngines["mariadb"].args(true), " "); !strings.Contains(args, "--require-secure-transport=ON") {
+		t.Errorf("MariaDB arguments that require TLS = %s", args)
+	}
+}
+
+// A renewal writes beside the pair the server reads and swaps them in with one
+// command, so a failure while writing leaves the old pair as it was.
+func TestRenewalSwapsTheFilesInWithOneCommand(t *testing.T) {
+	certPEM, keyPEM, err := dbtls.NewCA(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := dbtls.LoadCA(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := ca.Issue([]string{"127.0.0.1"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, engine := range dbTLSEngines {
+		files := engine.files(leaf, certPEM)
+		swap := engine.swapScript(files)
+		if !strings.HasPrefix(swap, "set -e;") {
+			t.Errorf("%s: a failing step does not stop the swap: %s", key, swap)
+		}
+		if strings.Count(swap, "mv -f") != len(files) {
+			t.Errorf("%s: %d files and %d moves: %s", key, len(files), strings.Count(swap, "mv -f"), swap)
+		}
+		if !strings.Contains(swap, "chown "+engine.account+":"+engine.account+" /jd-tls/"+engine.keyFile+".new") {
+			t.Errorf("%s: the key is moved in before it is the server's: %s", key, swap)
+		}
+		for _, f := range files {
+			if !strings.Contains(swap, "/jd-tls/"+f.name+".new /jd-tls/"+f.name) {
+				t.Errorf("%s: %s is not moved into place: %s", key, f.name, swap)
+			}
+		}
+		if discard := engine.discardScript(files); !strings.HasPrefix(discard, "rm -f ") || strings.Count(discard, ".new") != len(files) {
+			t.Errorf("%s: discard = %s", key, discard)
+		}
+	}
+}
+
+func TestAFailedPutBackIsSaidPlainly(t *testing.T) {
+	if got := putBackWords("shop-db", nil); got != "It was put back as it was." {
+		t.Errorf("put back: %q", got)
+	}
+	got := putBackWords("shop-db", errors.New("could not set it aside"))
+	for _, want := range []string{"may be unreachable", "shop-db", "_jd_replaced_", "could not set it aside"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a failed put back does not say %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "It was put back as it was") {
+		t.Error("a failed put back claims to have worked")
+	}
+}
+
+// A linked application is given the string it had until TLS is required, and
+// then one that uses TLS without checking what it has no copy of the authority
+// to check.
+func TestApplicationStringsFollowWhetherTLSIsRequired(t *testing.T) {
+	s, _, id := redisRouter(t, auth.RoleAdmin, nowhere)
+	ctx := t.Context()
+	conn := &dbConnection{ID: id, Driver: dbx.DriverPostgres}
+	secure := "postgres://jd:pw@127.0.0.1:5433/app?sslmode=verify-full&sslrootcert=/var/lib/just-dashboard/tls/ca.pem"
+	plain := "postgres://jd:pw@127.0.0.1:5433/app?sslmode=disable"
+	if got := s.applicationDSN(ctx, conn, plain); got != plain {
+		t.Errorf("a connection without TLS was changed: %s", got)
+	}
+	if err := s.saveDBTLSRow(ctx, id, &dbTLSRow{Container: "c", Names: []string{"127.0.0.1"}, IssuedAt: time.Now(), NotAfter: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.applicationDSN(ctx, conn, secure); got != plain {
+		t.Errorf("TLS allowed: application string = %s, want the one it had", got)
+	}
+	if err := s.saveDBTLSRow(ctx, id, &dbTLSRow{Container: "c", Require: true, Names: []string{"127.0.0.1"}, IssuedAt: time.Now(), NotAfter: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.applicationDSN(ctx, conn, secure)
+	if !strings.Contains(got, "sslmode=require") || strings.Contains(got, "sslrootcert") || strings.Contains(got, "ca.pem") {
+		t.Errorf("TLS required: application string = %s", got)
+	}
+	for require, want := range map[bool]string{false: "plain", true: "unverified"} {
+		if got := applicationsGet(require, dbx.DriverPostgres); got != want {
+			t.Errorf("applications (require=%v) = %s, want %s", require, got, want)
+		}
+	}
+	if applicationsGet(true, dbx.DriverRedis) != "needsCA" || applicationsGet(false, dbx.DriverRedis) != "plain" {
+		t.Error("a Redis client with TLS required is not told it needs the authority")
+	}
+}
+
+// Forgetting a connection while its server still speaks TLS would leave the
+// server with a certificate nothing renews, and a connection added again would
+// dial plain text.
+func TestAConnectionIsNotForgottenWhileItsServerSpeaksTLS(t *testing.T) {
+	s, h, id := redisRouter(t, auth.RoleAdmin, nowhere)
+	if err := s.saveDBTLSRow(t.Context(), id, &dbTLSRow{Container: "c", Names: []string{"127.0.0.1"}, IssuedAt: time.Now(), NotAfter: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/databases/"+strconv.FormatInt(id, 10), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "turn TLS off") {
+		t.Fatalf("forgetting answered %d %s", rec.Code, rec.Body.String())
+	}
+	var kept int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM db_connections WHERE id = ?`, id).Scan(&kept); err != nil || kept != 1 {
+		t.Errorf("the connection was removed: %d %v", kept, err)
+	}
+	if _, err := s.Store.DB.Exec(`DELETE FROM db_server_tls WHERE connection_id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/databases/"+strconv.FormatInt(id, 10), nil))
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("forgetting after TLS was turned off answered %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A certificate that already ends where the authority ends cannot be given a
+// longer life, so the schedule does not renew it on that account, every pass.
+func TestACertificateCappedByTheAuthorityIsNotRenewedForever(t *testing.T) {
+	s := testServer(t)
+	if _, _, _, err := s.loadDBTLSAuthority(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('shop','postgres','x',0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+	// The authority has ten days left, so any certificate is inside its window.
+	end := time.Now().Add(10 * 24 * time.Hour).Truncate(time.Second)
+	if _, err := s.Store.DB.Exec(`UPDATE db_tls_ca SET not_after = ?`, end.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.dbTLSRenewalReason(t.Context(), id, end.Add(-5*24*time.Hour)); got != "expiry" {
+		t.Errorf("a certificate ending before the authority has reason %q, want expiry", got)
+	}
+	// Ending exactly where the authority does: nothing a renewal can improve.
+	if got := s.dbTLSRenewalReason(t.Context(), id, end); got != "" {
+		t.Errorf("a certificate at the authority's end has reason %q, want none", got)
 	}
 }
 

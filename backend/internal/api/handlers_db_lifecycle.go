@@ -135,6 +135,13 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 			return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before dropping this linked database")
 		}
 	}
+	if sameDatabase(conn, target) && !req.RemoveContainer {
+		// The connection goes with its database, and the server would keep its
+		// certificate with nothing left to renew it.
+		if err := s.refuseWhileTLS(r.Context(), id); err != nil {
+			return err
+		}
+	}
 	// Let go of our own connections first. Postgres refuses to drop a database
 	// while anything is attached to it, and the pool this dashboard has been
 	// browsing with is one of the things attached.
@@ -330,6 +337,8 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	target := r.URL.Query().Get("target")
 	switch target {
 	case "", "host":
+		// Pasted into another program, which has no copy of the authority's file.
+		dsn = s.applicationDSN(r.Context(), conn, dsn)
 	case "container":
 		ctx, cancel := timeoutCtx(r, 15*time.Second)
 		defer cancel()
@@ -342,7 +351,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		// was: what gets pasted on a laptop. A connection that already names
 		// another machine is handed back as it is — that address is the one
 		// everybody else uses too.
-		dsn, err = s.publicDatabaseURL(conn, dsn)
+		dsn, err = s.publicDatabaseURL(r.Context(), conn, s.applicationDSN(r.Context(), conn, dsn))
 		if err != nil {
 			return err
 		}
@@ -393,7 +402,7 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 // renders; empty means the engine's own URL.
 var databaseURLFormatRE = regexp.MustCompile(`^(?:|url|jdbc|jdbc-mariadb|adonet|mysql2)$`)
 
-func (s *Server) publicDatabaseURL(conn *dbConnection, dsn string) (string, error) {
+func (s *Server) publicDatabaseURL(_ context.Context, conn *dbConnection, dsn string) (string, error) {
 	info, err := dbx.ParseDSN(conn.Driver, dsn)
 	if err != nil {
 		return "", httpx.BadRequest("the saved connection could not be read")

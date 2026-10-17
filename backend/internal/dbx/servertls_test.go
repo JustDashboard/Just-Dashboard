@@ -68,29 +68,55 @@ func TestServerTLSRoundTripsEveryEngine(t *testing.T) {
 	}
 }
 
-func TestStripServerTLSKeepsTheEncryptionAndDropsThePath(t *testing.T) {
-	pg, _ := WithServerTLS(DriverPostgres, "postgres://jd:pw@db-4.jd.internal:5432/app?sslmode=disable", testCAFile)
-	got := StripServerTLS(DriverPostgres, pg)
+// An application has no copy of the authority. While TLS is only allowed it is
+// given the string it had before; once it is required it is given one that uses
+// TLS without checking the certificate, where the driver can say so.
+func TestApplicationsGetAStringTheyCanUse(t *testing.T) {
+	secure := func(driver Driver, plain string) string {
+		out, err := WithServerTLS(driver, plain, testCAFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	pg := "postgres://jd:pw@db-4.jd.internal:5432/app?sslmode=disable"
+	my := "jd:pw@tcp(127.0.0.1:3306)/app"
+	mongo := "mongodb://jd:pw@127.0.0.1:27017/app?authSource=admin"
+	redis := "redis://:pw@127.0.0.1:6379/0"
+	for _, c := range []struct {
+		driver Driver
+		plain  string
+	}{{DriverPostgres, pg}, {DriverMySQL, my}, {DriverMongo, mongo}} {
+		allowed := ForApplication(c.driver, secure(c.driver, c.plain), false)
+		if ServerTLSFile(c.driver, allowed) != "" || strings.Contains(allowed, "tlsCAFile") || strings.Contains(allowed, "sslrootcert") ||
+			strings.Contains(allowed, "verify-full") || strings.Contains(allowed, "tls=true") || strings.Contains(allowed, "skip-verify") {
+			t.Errorf("%s allowed: %q still carries TLS", c.driver, allowed)
+		}
+	}
+	got := ForApplication(DriverPostgres, secure(DriverPostgres, pg), true)
 	if !strings.Contains(got, "sslmode=require") || strings.Contains(got, "sslrootcert") {
-		t.Errorf("Postgres application URL = %q", got)
+		t.Errorf("Postgres required = %q", got)
 	}
-	redis, _ := WithServerTLS(DriverRedis, "redis://:pw@127.0.0.1:6379/0", testCAFile)
-	got = StripServerTLS(DriverRedis, redis)
-	if !strings.HasPrefix(got, "rediss://") || strings.Contains(got, "tlsCAFile") {
-		t.Errorf("Redis application URL = %q", got)
+	got = ForApplication(DriverMongo, secure(DriverMongo, mongo), true)
+	if !strings.Contains(got, "tls=true") || !strings.Contains(got, "tlsInsecure=true") ||
+		strings.Contains(got, "tlsCAFile") || !strings.Contains(got, "authSource=admin") {
+		t.Errorf("Mongo required = %q", got)
 	}
-	mongo, _ := WithServerTLS(DriverMongo, "mongodb://jd:pw@127.0.0.1:27017/app", testCAFile)
-	got = StripServerTLS(DriverMongo, mongo)
-	if !strings.Contains(got, "tls=true") || strings.Contains(got, "tlsCAFile") {
-		t.Errorf("Mongo application URL = %q", got)
+	got = ForApplication(DriverMySQL, secure(DriverMySQL, my), true)
+	if got != "jd:pw@tcp(127.0.0.1:3306)/app?tls=skip-verify" {
+		t.Errorf("MySQL required = %q", got)
 	}
-	my, _ := WithServerTLS(DriverMySQL, "jd:pw@tcp(127.0.0.1:3306)/app", testCAFile)
-	if got := StripServerTLS(DriverMySQL, my); got != "jd:pw@tcp(127.0.0.1:3306)/app" {
-		t.Errorf("MySQL application string = %q", got)
+	// Redis is one protocol per port: TLS whether or not it is "required".
+	for _, required := range []bool{false, true} {
+		got = ForApplication(DriverRedis, secure(DriverRedis, redis), required)
+		if !strings.HasPrefix(got, "rediss://") || strings.Contains(got, "tlsCAFile") {
+			t.Errorf("Redis (required=%v) = %q", required, got)
+		}
 	}
-	plain := "postgres://jd:pw@127.0.0.1:5432/app?sslmode=disable"
-	if StripServerTLS(DriverPostgres, plain) != plain {
-		t.Error("a connection without server TLS was changed")
+	for driver, plain := range map[Driver]string{DriverPostgres: pg, DriverMySQL: my, DriverMongo: mongo, DriverRedis: redis} {
+		if ForApplication(driver, plain, true) != plain {
+			t.Errorf("%s: a connection without server TLS was changed", driver)
+		}
 	}
 }
 

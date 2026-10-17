@@ -33,13 +33,17 @@ import (
 //
 // JD_DB_TLS_LIVE=1 on a host with Docker and the engines' images already pulled;
 // JD_DB_TLS_ENGINES narrows it to some of them (a comma-separated list of
-// provisioning keys). Each server it starts is removed with its volumes.
+// the subtests' names). Each server it starts is removed with its volumes.
 func TestLiveDatabaseServerTLS(t *testing.T) {
 	if os.Getenv("JD_DB_TLS_LIVE") != "1" {
 		t.Skip("set JD_DB_TLS_LIVE=1 on a Docker host")
 	}
-	engines := []struct{ key, version string }{
-		{"postgres", "17"}, {"redis", "8"}, {"mysql", "8.4"}, {"mariadb", "11.4"}, {"mongodb", "8"}, {"valkey", "8"},
+	// mariadb-10.11 is the oldest MariaDB the template offers that is not the
+	// 11.x line: refusing plaintext has to work on it as much as on 11.4.
+	engines := []struct{ name, key, version string }{
+		{"postgres", "postgres", "17"}, {"redis", "redis", "8"}, {"mysql", "mysql", "8.4"},
+		{"mariadb", "mariadb", "11.4"}, {"mariadb-10.11", "mariadb", "10.11"}, {"mongodb", "mongodb", "8"},
+		{"valkey", "valkey", "8"},
 	}
 	only := map[string]bool{}
 	for _, key := range strings.Split(os.Getenv("JD_DB_TLS_ENGINES"), ",") {
@@ -48,10 +52,10 @@ func TestLiveDatabaseServerTLS(t *testing.T) {
 		}
 	}
 	for _, engine := range engines {
-		if len(only) > 0 && !only[engine.key] {
+		if len(only) > 0 && !only[engine.name] {
 			continue
 		}
-		t.Run(engine.key, func(t *testing.T) { liveServerTLS(t, engine.key, engine.version) })
+		t.Run(engine.name, func(t *testing.T) { liveServerTLS(t, engine.name, engine.key, engine.version) })
 	}
 }
 
@@ -71,11 +75,11 @@ func tlsLiveRouter(t *testing.T) (*Server, http.Handler) {
 	return s, r
 }
 
-func liveServerTLS(t *testing.T, key, version string) {
+func liveServerTLS(t *testing.T, label, key, version string) {
 	s, router := tlsLiveRouter(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
-	name := "jdt-db-server-tls-" + key
+	name := "jdt-db-server-tls-" + strings.ReplaceAll(label, ".", "-")
 	t.Cleanup(func() {
 		clean, stop := context.WithTimeout(context.Background(), time.Minute)
 		defer stop()
@@ -185,6 +189,7 @@ func liveServerTLS(t *testing.T, key, version string) {
 	if engine.optional && !plaintextWorks() {
 		t.Error("plaintext was refused when it was only allowed")
 	}
+	applicationString(t, router, s, conn.Driver, id, st, "allowed")
 	if !engine.optional && plaintextWorks() {
 		t.Error("plaintext connects to a port that should speak TLS only")
 	}
@@ -202,7 +207,7 @@ func liveServerTLS(t *testing.T, key, version string) {
 	}
 
 	// Refusing plaintext.
-	if engine.optional && engine.requirable(version) {
+	if engine.optional {
 		if rec := do(t, router, http.MethodPut, tlsPath, `{"enabled":true,"require":true}`); rec.Code != http.StatusOK {
 			t.Fatalf("require: %d %s", rec.Code, rec.Body)
 		}
@@ -212,6 +217,11 @@ func liveServerTLS(t *testing.T, key, version string) {
 		ready("TLS required")
 		if plaintextWorks() {
 			t.Error("plaintext connects to a server that requires TLS")
+		}
+		applicationString(t, router, s, conn.Driver, id, st, "required")
+		// The server is not forgotten while it speaks TLS.
+		if rec := do(t, router, http.MethodDelete, pathf("/databases/%d", id), ""); rec.Code != http.StatusConflict {
+			t.Errorf("forgetting a connection whose server speaks TLS answered %d", rec.Code)
 		}
 	}
 
@@ -275,6 +285,56 @@ func liveServerTLS(t *testing.T, key, version string) {
 	}
 	if exists, _ := s.modules.docker.VolumeExists(ctx, dbTLSVolume(name)); exists {
 		t.Error("the certificate volume was left behind")
+	}
+}
+
+// applicationString holds what a linked program is given to what a program with
+// no copy of the authority can use: no path of this machine's, the string it had
+// before TLS while TLS is only allowed, and TLS without a check once it is
+// required (Redis, with no such word in a URL, needs the authority).
+func applicationString(t *testing.T, router http.Handler, s *Server, driver dbx.Driver, id int64, st dbTLSStatus, mode string) {
+	t.Helper()
+	for _, target := range []string{"host", "public"} {
+		rec := do(t, router, http.MethodGet, pathf("/databases/%d/url", id)+"?target="+target, "")
+		var got struct {
+			URL string `json:"url"`
+		}
+		if target == "public" && rec.Code != http.StatusOK {
+			continue // no public address on this machine
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil {
+			t.Fatalf("%s URL (%s): %d %s", target, mode, rec.Code, rec.Body)
+		}
+		if strings.Contains(got.URL, "ca.pem") || strings.Contains(got.URL, "tlsCAFile") || strings.Contains(got.URL, "sslrootcert") {
+			t.Errorf("%s URL (%s) carries this machine's authority file: %s", target, mode, got.URL)
+		}
+		if target != "host" {
+			continue
+		}
+		dialled := s.dialDatabase(context.Background(), driver, got.URL)
+		switch {
+		case driver == dbx.DriverRedis:
+			if !strings.HasPrefix(got.URL, "rediss://") {
+				t.Errorf("Redis application string (%s) does not use TLS: %s", mode, got.URL)
+			}
+			if st.Applications != "needsCA" {
+				t.Errorf("Redis applications = %q", st.Applications)
+			}
+		case mode == "allowed":
+			if dialled != nil {
+				t.Errorf("the string an application gets while TLS is allowed does not connect (%v): %s", dialled, got.URL)
+			}
+			if st.Applications != "plain" {
+				t.Errorf("applications = %q while allowed", st.Applications)
+			}
+		default:
+			if dialled != nil {
+				t.Errorf("the string an application gets once TLS is required does not connect (%v): %s", dialled, got.URL)
+			}
+			if st.Applications != "unverified" {
+				t.Errorf("applications = %q once required", st.Applications)
+			}
+		}
 	}
 }
 

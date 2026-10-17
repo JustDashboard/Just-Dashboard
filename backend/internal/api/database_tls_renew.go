@@ -119,10 +119,16 @@ func (s *Server) renewDueDBTLS(ctx context.Context) {
 }
 
 // dbTLSRenewalReason says why a certificate is due: "expiry", "names", or empty
-// when it is not.
+// when it is not. A certificate that already ends where the authority ends
+// cannot be given a longer life by renewing it, so it is not due on that
+// account: renewing it every pass would only churn the server and the audit log
+// until the authority itself is replaced.
 func (s *Server) dbTLSRenewalReason(ctx context.Context, id int64, notAfter time.Time) string {
 	if dbtls.NeedsRenewal(notAfter, time.Now()) {
-		return "expiry"
+		authority, err := s.readDBTLSAuthority(ctx)
+		if err == nil && (authority == nil || notAfter.Before(authority.NotAfter)) {
+			return "expiry"
+		}
 	}
 	row, err := s.dbTLSRow(ctx, id)
 	if err != nil || row == nil {

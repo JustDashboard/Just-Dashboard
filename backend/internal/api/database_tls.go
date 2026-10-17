@@ -22,6 +22,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/docker/docker/errdefs"
 )
 
 // TLS for the databases this dashboard started.
@@ -319,10 +320,8 @@ type dbTLSStatus struct {
 	// Require reports that a connection without TLS is refused.
 	Require bool `json:"require"`
 	// CanOptional is false for an engine whose port speaks one protocol, where
-	// TLS on means plaintext off. CanRequire is false for a release that has no
-	// way to refuse plaintext.
+	// TLS on means plaintext off.
 	CanOptional bool `json:"canOptional"`
-	CanRequire  bool `json:"canRequire"`
 	// Verified reports that the dashboard's own saved connection checks the
 	// certificate against the authority.
 	Verified  bool       `json:"verified"`
@@ -336,6 +335,11 @@ type dbTLSStatus struct {
 	// RenewAt is when the renewal will take it up; RenewedAt is when it last did.
 	RenewAt   *time.Time `json:"renewAt,omitempty"`
 	RenewedAt *time.Time `json:"renewedAt,omitempty"`
+	// Applications says what a linked application is given: "plain" (the string
+	// it had before TLS, while TLS is only allowed), "unverified" (TLS without
+	// checking the certificate, once TLS is required) or "needsCA" (TLS that
+	// checks, which an application with no copy of the authority cannot do).
+	Applications string `json:"applications,omitempty"`
 	// Linked counts the deployment environments that reach this database by its
 	// internal name, which stop connecting if they do not speak TLS once it is
 	// required.
@@ -378,6 +382,10 @@ func (s *Server) handleDBTLS(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) describeDBTLS(ctx context.Context, id int64) (*dbTLSStatus, error) {
+	conn, _, err := s.dbConnRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	t, reason, err := s.resolveDBTLS(ctx, id)
 	if err != nil {
 		return nil, err
@@ -406,6 +414,7 @@ func (s *Server) describeDBTLS(ctx context.Context, id int64) (*dbTLSStatus, err
 			renewed := row.RenewedAt
 			out.RenewedAt = &renewed
 		}
+		out.Applications = applicationsGet(row.Require, conn.Driver)
 	}
 	var linked int
 	if err := s.Store.DB.QueryRowContext(ctx,
@@ -420,7 +429,6 @@ func (s *Server) describeDBTLS(ctx context.Context, id int64) (*dbTLSStatus, err
 	out.Port, _ = strconv.Atoi(t.info.Port)
 	out.Exposure = exposureOf(t.server)
 	out.CanOptional = t.engine.optional
-	out.CanRequire = t.engine.optional && t.engine.requirable(t.ver.id)
 	out.Verified = dbx.ServerTLSRequired(t.conn.Driver, t.dsn)
 	if out.Enabled && !t.engine.optional {
 		out.Require = true
@@ -429,6 +437,47 @@ func (s *Server) describeDBTLS(ctx context.Context, id int64) (*dbTLSStatus, err
 		out.Client = dbTLSClientFor(t, out.Exposure)
 	}
 	return out, nil
+}
+
+// refuseWhileTLS stops a connection being forgotten while its server still
+// speaks TLS with a certificate this dashboard renews: the record of it goes
+// with the connection, the server keeps serving the certificate, nothing renews
+// it, and connecting to the server again would dial plain text.
+func (s *Server) refuseWhileTLS(ctx context.Context, id int64) error {
+	row, err := s.dbTLSRow(ctx, id)
+	if err != nil {
+		return err
+	}
+	if row != nil {
+		return httpx.Err(http.StatusConflict, "tls_on",
+			"this database's server speaks TLS with a certificate this dashboard renews; turn TLS off in its Network settings before forgetting the connection")
+	}
+	return nil
+}
+
+// applicationsGet names what a linked application is given: see
+// dbTLSStatus.Applications. Redis has no setting to skip the check in a URL.
+func applicationsGet(require bool, driver dbx.Driver) string {
+	switch {
+	case !require:
+		return "plain"
+	case driver == dbx.DriverRedis:
+		return "needsCA"
+	}
+	return "unverified"
+}
+
+// applicationDSN is a connection's string for a program in another container,
+// or on the host's network: the saved one with the dashboard's own file of the
+// authority taken out (dbx.ForApplication). Whether TLS is required is the
+// server's, read from the record.
+func (s *Server) applicationDSN(ctx context.Context, conn *dbConnection, dsn string) string {
+	if dbx.ServerTLSFile(conn.Driver, dsn) == "" {
+		return dsn
+	}
+	row, err := s.dbTLSRow(ctx, conn.ID)
+	required := err != nil || row == nil || row.Require
+	return dbx.ForApplication(conn.Driver, dsn, required)
 }
 
 // dbTLSClientFor words the connection for a program on another machine.
@@ -531,13 +580,61 @@ func (s *Server) handleDBTLSUpdate(w http.ResponseWriter, r *http.Request) error
 // dbTLSVolume is the volume that holds a container's certificate.
 func dbTLSVolume(container string) string { return container + dbTLSVolumeSuffix }
 
-func hasDBTLSMount(spec *dockerx.ContainerSpec) bool {
+func hasDBTLSMount(spec *dockerx.ContainerSpec) bool { return mountSource(spec) != "" }
+
+// dbTLSVolumeLabel marks a volume this dashboard made for a connection's
+// certificate, with the connection's id. It is what lets a volume of the same
+// name that somebody else made be left alone.
+const dbTLSVolumeLabel = "jd.tls-of"
+
+// mountSource is the volume a spec mounts the certificate from, or empty.
+func mountSource(spec *dockerx.ContainerSpec) string {
 	for _, m := range spec.Mounts {
 		if m.Target == dbTLSDir {
-			return true
+			return m.Source
 		}
 	}
-	return false
+	return ""
+}
+
+// claimDBTLSVolume returns the volume a connection's certificate goes in,
+// making it with the label when it is not there. A volume of that name that
+// carries no such label, or another connection's, is somebody else's data and is
+// refused rather than mounted or, later, removed.
+func (s *Server) claimDBTLSVolume(ctx context.Context, container string, id int64) (string, bool, error) {
+	name := dbTLSVolume(container)
+	owner := strconv.FormatInt(id, 10)
+	existing, err := s.modules.docker.InspectVolume(ctx, name)
+	switch {
+	case err == nil:
+		if existing.Labels[dbTLSVolumeLabel] != owner {
+			return "", false, httpx.Err(http.StatusConflict, "volume_exists", fmt.Sprintf(
+				"a volume named %s already exists and was not made by this dashboard for this database; rename or remove it on the Docker page first", name))
+		}
+		return name, false, nil
+	case !errdefs.IsNotFound(err):
+		return "", false, s.dockerErr(err)
+	}
+	if _, err := s.modules.docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: name, Labels: map[string]string{dbTLSVolumeLabel: owner}}); err != nil {
+		return "", false, s.dockerErr(err)
+	}
+	return name, true, nil
+}
+
+// dropDBTLSVolume removes a certificate volume this dashboard made for the
+// connection. One that is not there, is somebody else's, or is still held is
+// left.
+func (s *Server) dropDBTLSVolume(ctx context.Context, name string, id int64) {
+	if name == "" {
+		return
+	}
+	rescue, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	existing, err := s.modules.docker.InspectVolume(rescue, name)
+	if err != nil || existing.Labels[dbTLSVolumeLabel] != strconv.FormatInt(id, 10) {
+		return
+	}
+	_ = s.modules.docker.RemoveVolume(rescue, name, false)
 }
 
 // writeDBTLSFiles is the BeforeStart that puts the certificate where the server
@@ -613,9 +710,6 @@ func (s *Server) setDBTLS(ctx context.Context, id int64, enabled, require bool) 
 	if !t.engine.optional {
 		require = true
 	}
-	if require && !t.engine.requirable(t.ver.id) {
-		return name, detail, httpx.BadRequest("%s %s has no way to refuse connections without TLS; MariaDB 11.4 and later do", t.tmpl.label, t.ver.id)
-	}
 	detail["require"] = require
 	if on && row != nil && row.Require == require && dbx.ServerTLSRequired(t.conn.Driver, t.dsn) {
 		detail["unchanged"] = true
@@ -634,8 +728,7 @@ func (s *Server) addDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *doc
 	if err != nil {
 		return httpx.Internal(fmt.Errorf("the authority's certificate could not be written: %w", err))
 	}
-	names := dbTLSNames(t)
-	leaf, err := ca.Issue(names, time.Now())
+	leaf, err := ca.Issue(dbTLSNames(t), time.Now())
 	if err != nil {
 		return httpx.BadRequest("a certificate could not be made: %v", err)
 	}
@@ -643,9 +736,12 @@ func (s *Server) addDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *doc
 	if err != nil {
 		return httpx.BadRequest("this connection's string cannot carry TLS settings: %v", err)
 	}
-	hadMount := hasDBTLSMount(spec)
-	if !hadMount {
-		spec.Mounts = append(spec.Mounts, dockerx.MountSpec{Type: "volume", Source: dbTLSVolume(t.server.container.Name), Target: dbTLSDir})
+	volume, created := mountSource(spec), false
+	if volume == "" {
+		if volume, created, err = s.claimDBTLSVolume(ctx, t.server.container.Name, t.conn.ID); err != nil {
+			return err
+		}
+		spec.Mounts = append(spec.Mounts, dockerx.MountSpec{Type: "volume", Source: volume, Target: dbTLSDir})
 	}
 	spec.Command = t.engine.command(original, require)
 	files := append(t.engine.files(leaf, authority.CertPEM), t.engine.extraFiles(require)...)
@@ -653,17 +749,21 @@ func (s *Server) addDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *doc
 	res, err := s.modules.docker.Recreate(ctx, t.server.container.ID,
 		dockerx.RecreateOptions{Spec: spec, BeforeStart: s.writeDBTLSFiles(files)}, nil)
 	if err != nil {
-		if !hadMount {
-			s.dropDBTLSVolume(ctx, t.server.container.Name)
+		if created {
+			s.dropDBTLSVolume(ctx, volume, t.conn.ID)
 		}
 		return s.dockerErr(err)
 	}
 	s.modules.dbs.Close(t.conn.ID)
 	s.dbConns.stale(t.conn.ID)
 	if err := s.waitDBTLSReady(ctx, t.conn.Driver, newDSN); err != nil {
-		s.putBackDBTLS(ctx, res.ID, before, t.server.container.Name, hadMount, detail)
+		drop := ""
+		if created {
+			drop = volume
+		}
+		back := s.putBackDBTLS(ctx, res.ID, before, drop, t.conn.ID, detail)
 		return httpx.Err(http.StatusBadGateway, "tls_failed", fmt.Sprintf(
-			"%s did not accept connections with TLS on (%s). It was put back as it was.", t.server.container.Name, connectError(newDSN, err)))
+			"%s did not accept connections with TLS on (%s). %s", t.server.container.Name, connectError(newDSN, err), putBackWords(t.server.container.Name, back)))
 	}
 	if err := s.saveDBConnectionDSN(ctx, t.conn.ID, newDSN); err != nil {
 		return err
@@ -689,7 +789,8 @@ func (s *Server) addDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *doc
 
 func (s *Server) removeDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *dockerx.ContainerSpec, original []string,
 	on bool, row *dbTLSRow, detail map[string]any) error {
-	if !on && row == nil && !hasDBTLSMount(spec) {
+	volume := mountSource(spec)
+	if !on && row == nil && volume == "" {
 		detail["unchanged"] = true
 		return nil
 	}
@@ -716,9 +817,9 @@ func (s *Server) removeDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *
 	if err := s.waitDBTLSReady(ctx, t.conn.Driver, newDSN); err != nil {
 		// The files it had are still in the volume, which is what lets the
 		// server start the way it did.
-		s.putBackDBTLS(ctx, res.ID, before, t.server.container.Name, true, detail)
+		back := s.putBackDBTLS(ctx, res.ID, before, "", t.conn.ID, detail)
 		return httpx.Err(http.StatusBadGateway, "tls_failed", fmt.Sprintf(
-			"%s did not accept connections with TLS off (%s). It was put back as it was.", t.server.container.Name, connectError(newDSN, err)))
+			"%s did not accept connections with TLS off (%s). %s", t.server.container.Name, connectError(newDSN, err), putBackWords(t.server.container.Name, back)))
 	}
 	if err := s.saveDBConnectionDSN(ctx, t.conn.ID, newDSN); err != nil {
 		return err
@@ -726,7 +827,7 @@ func (s *Server) removeDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *
 	if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM db_server_tls WHERE connection_id = ?`, t.conn.ID); err != nil {
 		return httpx.Internal(err)
 	}
-	s.dropDBTLSVolume(ctx, t.server.container.Name)
+	s.dropDBTLSVolume(ctx, volume, t.conn.ID)
 	if len(res.Warnings) > 0 {
 		detail["warnings"] = res.Warnings
 	}
@@ -734,27 +835,28 @@ func (s *Server) removeDBTLS(ctx context.Context, t *dbTLSTarget, spec, before *
 }
 
 // putBackDBTLS returns a container to the configuration it had before a change
-// that did not take. It runs on a context that outlives the request's, because
-// the request's may be what ran out.
-func (s *Server) putBackDBTLS(ctx context.Context, id string, before *dockerx.ContainerSpec, container string, keepVolume bool, detail map[string]any) {
+// that did not take, and removes the volume the change made, if it made one. It
+// runs on a context that outlives the request's, because the request's may be
+// what ran out. Its error is what the response has to say, since a database
+// that could not be put back may not be reachable.
+func (s *Server) putBackDBTLS(ctx context.Context, id string, before *dockerx.ContainerSpec, drop string, connID int64, detail map[string]any) error {
 	rescue, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Minute)
 	defer cancel()
 	if _, err := s.modules.docker.Recreate(rescue, id, dockerx.RecreateOptions{Spec: before}, nil); err != nil {
 		detail["putBackError"] = err.Error()
-		return
+		return err
 	}
 	detail["putBack"] = true
-	if !keepVolume {
-		s.dropDBTLSVolume(rescue, container)
-	}
+	s.dropDBTLSVolume(rescue, drop, connID)
+	return nil
 }
 
-// dropDBTLSVolume removes a container's certificate volume. A volume that is not
-// there, or is still held, is left: the next change finds the same name free.
-func (s *Server) dropDBTLSVolume(ctx context.Context, container string) {
-	rescue, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	_ = s.modules.docker.RemoveVolume(rescue, dbTLSVolume(container), false)
+// putBackWords says what became of the container after a change that did not take.
+func putBackWords(container string, err error) string {
+	if err == nil {
+		return "It was put back as it was."
+	}
+	return fmt.Sprintf("Putting it back failed too (%v), so the database may be unreachable. Look at %s on the Docker page: if the earlier container is parked there under a name ending _jd_replaced_…, rename it back and start it.", err, container)
 }
 
 // --- renewing --------------------------------------------------------------------
@@ -786,7 +888,11 @@ func (s *Server) handleDBTLSRenew(w http.ResponseWriter, r *http.Request) error 
 func (s *Server) renewDBTLS(ctx context.Context, id int64, reason string) (string, map[string]any, error) {
 	s.dbTLS.mu.Lock()
 	defer s.dbTLS.mu.Unlock()
+	return s.renewDBTLSLocked(ctx, id, reason)
+}
 
+// renewDBTLSLocked is renewDBTLS for a caller that holds dbTLS.mu.
+func (s *Server) renewDBTLSLocked(ctx context.Context, id int64, reason string) (string, map[string]any, error) {
 	row, err := s.dbTLSRow(ctx, id)
 	if err != nil {
 		return "", nil, err
@@ -807,23 +913,45 @@ func (s *Server) renewDBTLS(ctx context.Context, id int64, reason string) (strin
 	if err != nil {
 		return name, detail, err
 	}
+	caFile, err := s.dbTLSCAFile(authority.CertPEM)
+	if err != nil {
+		return name, detail, httpx.Internal(err)
+	}
 	leaf, err := ca.Issue(dbTLSNames(t), time.Now())
 	if err != nil {
 		return name, detail, httpx.BadRequest("a certificate could not be made: %v", err)
 	}
-	id0 := t.server.container.ID
-	for _, f := range t.engine.files(leaf, authority.CertPEM) {
-		if err := s.modules.docker.WriteContainerFile(ctx, id0, dbTLSDir+"/"+f.name, f.content, f.mode); err != nil {
+	container := t.server.container.ID
+	files := t.engine.files(leaf, authority.CertPEM)
+	// Written beside the pair the server reads and swapped in by one command,
+	// so a failure part way leaves the old pair, not a certificate with another
+	// certificate's key.
+	discard := func() {
+		_, _, _ = s.modules.docker.ExecCheck(context.WithoutCancel(ctx), container, []string{"sh", "-c", t.engine.discardScript(files)}, 20*time.Second)
+	}
+	for _, f := range files {
+		if err := s.modules.docker.WriteContainerFile(ctx, container, dbTLSDir+"/"+f.name+newSuffix, f.content, f.mode); err != nil {
+			discard()
 			return name, detail, s.dockerErr(err)
 		}
 	}
+	if _, out, err := s.modules.docker.ExecCheck(ctx, container, []string{"sh", "-c", t.engine.swapScript(files)}, 20*time.Second); err != nil {
+		discard()
+		return name, detail, httpx.Err(http.StatusBadGateway, "tls_failed",
+			fmt.Sprintf("the new certificate could not be put in place (%v %s); the old one is still in use", err, strings.TrimSpace(string(out))))
+	}
+	addr := net.JoinHostPort(t.info.Host, t.info.Port)
+	reloadErr := s.reloadDBTLS(ctx, t, container)
+	if reloadErr == nil {
+		reloadErr = s.waitDBTLSServed(ctx, t, addr, caFile, leaf.Serial, 15*time.Second)
+	}
 	restarted := false
-	if err := s.reloadDBTLS(ctx, t, id0); err != nil {
-		// The engine would not read the new files while running. They are in
-		// place, so a start reads them.
-		detail["reloadError"] = err.Error()
-		if rerr := s.modules.docker.Lifecycle(ctx, id0, dockerx.ActionRestart, nil); rerr != nil {
-			return name, detail, s.dockerErr(rerr)
+	if reloadErr != nil {
+		// The engine would not read the new files while running, or said it
+		// did and kept the old ones. They are in place, so a start reads them.
+		detail["reloadError"] = reloadErr.Error()
+		if err := s.modules.docker.Lifecycle(ctx, container, dockerx.ActionRestart, nil); err != nil {
+			return name, detail, s.dockerErr(err)
 		}
 		restarted = true
 		s.modules.dbs.Close(t.conn.ID)
@@ -833,6 +961,12 @@ func (s *Server) renewDBTLS(ctx context.Context, id int64, reason string) (strin
 	if err := s.waitDBTLSReady(ctx, t.conn.Driver, t.dsn); err != nil {
 		return name, detail, httpx.Err(http.StatusBadGateway, "tls_failed", fmt.Sprintf(
 			"%s did not accept connections after its certificate was replaced (%s)", t.server.container.Name, connectError(t.dsn, err)))
+	}
+	if restarted {
+		if err := s.waitDBTLSServed(ctx, t, addr, caFile, leaf.Serial, 30*time.Second); err != nil {
+			return name, detail, httpx.Err(http.StatusBadGateway, "tls_failed", fmt.Sprintf(
+				"%s is still presenting its old certificate after a restart (%v)", t.server.container.Name, err))
+		}
 	}
 	next := &dbTLSRow{
 		Container: t.server.container.Name, Require: row.Require, Names: leaf.Names, Serial: leaf.Serial,
@@ -845,11 +979,8 @@ func (s *Server) renewDBTLS(ctx context.Context, id int64, reason string) (strin
 	return name, detail, nil
 }
 
-// reloadDBTLS makes the server read the certificate files again.
+// reloadDBTLS asks a running server to read the certificate files again.
 func (s *Server) reloadDBTLS(ctx context.Context, t *dbTLSTarget, container string) error {
-	if _, out, err := s.modules.docker.ExecCheck(ctx, container, []string{"sh", "-c", t.engine.chownScript()}, 20*time.Second); err != nil {
-		return fmt.Errorf("the key could not be handed to the server's account: %w (%s)", err, strings.TrimSpace(string(out)))
-	}
 	_, out, err := s.modules.docker.ExecCheck(ctx, container, []string{"sh", "-c", t.engine.reload}, 40*time.Second)
 	if err != nil {
 		return fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(out)))
@@ -858,4 +989,28 @@ func (s *Server) reloadDBTLS(ctx context.Context, t *dbTLSTarget, container stri
 		return fmt.Errorf("the server did not accept the new files (%s)", strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// waitDBTLSServed waits for the server to present the certificate with this
+// serial. A server asked to reload may take a moment, and may say it did and
+// not have.
+func (s *Server) waitDBTLSServed(ctx context.Context, t *dbTLSTarget, addr, caFile, serial string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	for {
+		cert, err := dbx.ServedCertificate(ctx, t.conn.Driver, addr, caFile)
+		switch {
+		case err == nil && strings.EqualFold(cert.SerialNumber.Text(16), serial):
+			return nil
+		case err == nil:
+			err = fmt.Errorf("it presents certificate %s", strings.ToUpper(cert.SerialNumber.Text(16)))
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
 }
