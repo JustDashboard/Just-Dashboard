@@ -129,6 +129,13 @@
           "kind": "security",
           "text": "Oracle and SQL Server statement lists no longer show what comments said or the literals after one",
           "detail": "Oracle keeps a statement's text with its line breaks turned into spaces, so a -- comment hid everything after it from the literal masker and the rest of the statement was shown as it was run. Comments are now dropped from the text of Oracle and SQL Server statements, optimizer hints are kept with their literals replaced, and SQL Server's nested comments are read the way it reads them."
+        },
+        {
+        },
+        {
+          "kind": "added",
+          "text": "Encrypt backup archives, with a key you can export",
+          "detail": "A backup job can seal its archives with age before they are written to disk, S3 or Backblaze B2, and a new job that writes to a bucket does unless told otherwise. One backup key, sealed with the master key, opens them: restores, database restores, recovery checks and downloads decrypt them on the way, and archives taken before keep restoring as they were. Backups → Backup key exports the key behind a confirmation, recorded in the audit log, so an archive also opens with the age command where the dashboard is not."
         }
       ]
     },

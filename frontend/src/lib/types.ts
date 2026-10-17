@@ -2764,7 +2764,20 @@ export type BackupJob = {
   databaseDumps?: number[]
   /** Containers frozen for the archive step, so their volumes are quiet. */
   pauseContainers?: string[]
+  /** New archives are sealed to the server's backup key before they are written. */
+  encrypt?: boolean
   recovery?: BackupRecoveryPlan
+}
+
+/** The server's backup key, by its public half; the secret never leaves but by export. */
+export type BackupArchiveKey = {
+  exists: boolean
+  /** The age public key, as an exported key file's "public key" line prints it. */
+  recipient?: string
+  createdAt?: string
+  exportedAt?: string
+  encryptingJobs: number
+  encryptedArchives: number
 }
 
 export type BackupResourceKind =
@@ -2829,11 +2842,22 @@ export type BackupDatabaseDump = {
 
 export type BackupManifest = {
   version: number
+  /** Over the bytes the destination holds: the ciphertext, for an encrypted archive. */
   artifactDigest: string
   complete: boolean
   sources?: { path: string; archivePath: string }[]
   databaseDumps?: BackupDatabaseDump[]
   pausedContainers?: string[]
+  encryption?: BackupArchiveEncryption
+}
+
+/** How an archive was sealed: age, to the key whose public half is `recipient`. */
+export type BackupArchiveEncryption = {
+  format: "age"
+  recipient: string
+  /** Over the .tar.gz inside, which is what a copy decrypted by hand is checked against. */
+  plaintextDigest: string
+  plaintextBytes: number
 }
 
 export type BackupRecoveryPlan = {

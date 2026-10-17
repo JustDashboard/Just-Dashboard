@@ -2,7 +2,6 @@ package backups
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -209,7 +208,7 @@ func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, err
 // VerifyDatabaseCoverage confirms the archive really holds the dump entries
 // the manifest names for these connections, with the recorded sizes.
 func (r *Runner) VerifyDatabaseCoverage(ctx context.Context, runID int64, connectionIDs []int64) error {
-	run, path, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -226,7 +225,7 @@ func (r *Runner) VerifyDatabaseCoverage(ctx context.Context, runID int64, connec
 		}
 	}
 	found := map[string]bool{}
-	if err := walkArchive(ctx, path, func(header *tar.Header, _ *tar.Reader) error {
+	if err := walkArchive(ctx, archive, func(header *tar.Header, _ *tar.Reader) error {
 		if size, ok := wanted[header.Name]; ok && header.Typeflag == tar.TypeReg && header.Size == size {
 			found[header.Name] = true
 		}
@@ -250,7 +249,7 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	if r.databases == nil {
 		return "", errors.New("the database dump owner is unavailable")
 	}
-	run, path, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return "", err
 	}
@@ -274,7 +273,7 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	defer os.RemoveAll(directory)
 	target := filepath.Join(directory, selected.File)
 	extracted := false
-	if err := walkArchive(ctx, path, func(header *tar.Header, reader *tar.Reader) error {
+	if err := walkArchive(ctx, archive, func(header *tar.Header, reader *tar.Reader) error {
 		if header.Name != selected.ArchivePath || header.Typeflag != tar.TypeReg {
 			return nil
 		}
@@ -307,18 +306,12 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	return r.databases.RestoreDatabase(ctx, connectionID, database, target)
 }
 
-func walkArchive(ctx context.Context, path string, visit func(*tar.Header, *tar.Reader) error) error {
-	f, err := os.Open(path)
+func walkArchive(ctx context.Context, archive ArchiveFile, visit func(*tar.Header, *tar.Reader) error) error {
+	reader, release, err := archive.entries()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	reader := tar.NewReader(gz)
+	defer release()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
