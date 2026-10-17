@@ -447,6 +447,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
 | `JD_TEST_MONGO_RS_DSN` | a MongoDB replica set the run owns: accounts and views are made in `admin` | replication, accounts, the credential guards |
 | `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignInIsNotAPing` |
+| `JD_TEST_POSTGRES_HYPOPG_DSN` | a PostgreSQL with the `hypopg` extension created in the database the DSN names (`postgres:17` plus `postgresql-17-hypopg`, then `CREATE EXTENSION hypopg`); the tables the tests make are named `jdt_index_advice_…` | the what-if index on the Explain view: `TestLiveHypotheticalIndexChangesThePlanAndNothingElse`, `TestLiveIndexAdviceThroughTheRouter` |
 | `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
 | `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
 | `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |

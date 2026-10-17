@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
-  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 119
+  flags (106 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -425,7 +425,7 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
     power and reachability; taking a dump, adding one made elsewhere and deleting one, which are
     files on this machine (`/backup`, `/backups/upload`, `DELETE /backups`); saved queries and the
     diagram's arrangement; the POSTs that only read (`/classify`, `/orm`, `/rows/sql`,
-    `/redis/classify`, MongoDB's find, count, document, explain, aggregate preview, schema,
+    `/explain/index-candidates`, `/explain/what-if`, `/redis/classify`, MongoDB's find, count, document, explain, aggregate preview, schema,
     validation check and command classify); and stopping work in flight, which changes no data and
     is what the operator of a production server most needs to be able to do (`/query/cancel`,
     `/activity/cancel`, `/activity/kill`, `/redis/clients/kill`, `/mongo/killop`).
@@ -567,6 +567,46 @@ older MySQL has no such variable and its own refusal of the combination is the a
 SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
 the pool.
+
+**Index advice is a tool the reader runs from the Explain view, never a finding.** 0.7.5 removed the
+Advisor and every automatic recommendation, and nothing here comes back as one: both actions are buttons
+on the Plan view, nothing is asked until one is pressed, and nothing is kept (`dbx/index_advice*.go`,
+`dbx/missing_indexes.go`, `api/handlers_db_index_advice.go`). The capability flags are `indexWhatIf`
+(PostgreSQL, not CockroachDB or YugabyteDB, which have no HypoPG) and `missingIndexes` (SQL Server).
+- *What if?* (PostgreSQL). `POST …/explain/index-candidates` takes the plan with `EXPLAIN (VERBOSE,
+  FORMAT JSON)` — verbose, because only then is every column qualified with its alias and every relation
+  named with its schema — and reads the conditions the plan prints (`Filter`, `Join Filter`, `Hash Cond`,
+  `Merge Cond`, and a `Sort Key` under a `Limit`) with a small tokenizer, not a SQL parser
+  (`index_advice_plan.go`). Only a plain column compared with a constant, or with another table's
+  column, proposes anything; an `OR`, an expression, a function of the column, `LIKE` and `<>` propose
+  nothing, because a wrong suggestion costs every later write. Per table the candidates are the filters
+  (equality columns, then one range column, else the sort) and the join columns, at most three columns
+  each. One is dropped when an existing valid, non-partial b-tree already leads with the same columns
+  (`covered`), and a table that is a partition, a view or a foreign table, whose catalogue could not
+  be read, or that is past the twelfth the request reads (`Detail`), is `skipped`: a partition's index
+  belongs to the parent, which a plan of a SELECT never names, so a partitioned table gets no
+  candidate. The page words an empty list from those two counts and claims nothing else. The plan
+  and the HypoPG probe are read inside the engine's read-only scope. The answer also carries the
+  state of HypoPG (`ready`, `not_created` or `not_installed`), which the page prints as a fact naming
+  the extension, once; the candidates stay listed, and "Create the real index…" is offered for the
+  selected one without a try, previewed like any index.
+  `POST …/explain/what-if` takes the statement and a table with its columns, builds the `CREATE INDEX`
+  with `PlanCreateIndex` (so every name is quoted by the dialect), and on **one connection that is
+  discarded afterwards** plans the statement, calls `hypopg_create_index` (by the schema `pg_extension` says the extension lives in, quoted), and plans it again, inside the
+  engine's read-only transaction. It answers both plans, their total costs, the name the plan uses for
+  the hypothetical index, and whether the planner chose it. Nothing is executed (`EXPLAIN` without
+  `ANALYZE`; a hypothetical index lives in that connection's memory), so both routes sit on the read
+  side beside `/explain`, are let through on a protected connection, and are audited
+  (`database.explain.index_candidates`, `database.explain.what_if`). Making the index real is not
+  theirs: the page opens the schema change dialog on `POST /ddl/index` with `concurrently`, which
+  previews the statement the server will run and needs `service.control`, as every index does.
+- *Missing indexes* (SQL Server). `GET …/missing-indexes` reads `sys.dm_db_missing_index_groups`,
+  `_group_stats` and `_details` for the current database, most valuable first (cost × impact × the
+  plans that wanted it, 50 at most), with the `CREATE NONCLUSTERED INDEX … INCLUDE (…)` each entry
+  implies, written from names parsed whole and quoted by the dialect, and when the server started,
+  because a restart empties the views. A login without `VIEW SERVER STATE` is answered with
+  `supported: false` and the engine's words. The page copies a statement or opens it in the editor
+  for a role that may run SQL; it does not create the index itself.
 
 What a run leaves behind is the dashboard's own: `GET …/history` is the connection's last hundred
 statements with their risk, duration, row counts and the engine's error text (`db_query_history`), and
@@ -1563,6 +1603,9 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/columns` | read | — | — | — |
 | `GET` | `/databases/{id}/count` | read | — | — | — |
 | `POST` | `/databases/{id}/explain` | read | by content: `analyze` | `database.explain` | by content |
+| `POST` | `/databases/{id}/explain/index-candidates` | read | — | `database.explain.index_candidates` | open |
+| `POST` | `/databases/{id}/explain/what-if` | read | — | `database.explain.what_if` | open |
+| `GET` | `/databases/{id}/missing-indexes` | read | — | — | — |
 | `GET` | `/databases/{id}/stats/history` | read | — | — | — |
 | `GET` | `/databases/{id}/history` | read | — | — | — |
 | `GET` | `/databases/{id}/queries` | read | — | — | — |

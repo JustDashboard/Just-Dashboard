@@ -1562,7 +1562,7 @@ var gatedCapabilities = []string{
 	"serverDatabaseCreate", "serverDatabaseConnect",
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
-	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
+	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
 	"comments", "indexes", "extensions",

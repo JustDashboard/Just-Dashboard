@@ -1862,6 +1862,8 @@ export type DbCapabilityFlag =
   | "cellRead" // GET /cell: one whole value the grid clipped
   | "explainJSON" // a plan as a tree
   | "explainAnalyze" // a plan measured by running the statement
+  | "indexWhatIf" // POST /explain/index-candidates and /explain/what-if: an index tried on a plan with HypoPG
+  | "missingIndexes" // GET /missing-indexes: SQL Server's own list of the indexes its plans wanted
   // The schema.
   | "ddl" // the create-table form; gate the other forms on `ddlOperations`
   | "schemas" // more than one namespace to choose from

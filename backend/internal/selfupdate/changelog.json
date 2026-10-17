@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Try an index on a PostgreSQL plan from the Explain view, and list SQL Server's missing indexes on request",
+          "detail": "What if? on a plan proposes indexes for the columns it filters, joins and sorts on, skipping any an existing index already leads with. It then tries one with HypoPG, planning the statement again beside the plan without it, so the cost before and after sits side by side. Nothing is created: the real CREATE INDEX CONCURRENTLY is offered only on a click, shown before it runs. A server without the hypopg extension says so. On SQL Server, Missing indexes lists what the optimizer has wished for, with the CREATE INDEX each implies. Both are tools the reader presses for; the Advisor's automatic findings stay removed."
         }
       ]
     },

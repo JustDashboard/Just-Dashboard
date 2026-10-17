@@ -86,6 +86,8 @@ var protectedRoutesAllowed = []protectedRoute{
 	// Requests that are POSTs because they carry a body, and read.
 	{http.MethodPost, "/classify", nil},
 	{http.MethodPost, "/orm", nil},
+	{http.MethodPost, "/explain/index-candidates", nil},
+	{http.MethodPost, "/explain/what-if", nil},
 	{http.MethodPost, "/rows/sql", nil},
 	{http.MethodPost, "/redis/classify", nil},
 	{http.MethodPost, "/mongo/find", nil},
