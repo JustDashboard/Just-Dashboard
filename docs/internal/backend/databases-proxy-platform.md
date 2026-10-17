@@ -195,10 +195,11 @@ is connected by naming the instance found, not by typing its address again.
   word and any firewall error in the `database.server.provision` audit and in the `202` reply. The saved
   connection dials loopback either way — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1`.
   The templates are a closed, server-side list (`provisionTemplates`, offered in `provisionOrder`):
-  PostgreSQL, PostgreSQL with pgvector or PostGIS, TimescaleDB, MySQL, MariaDB, Redis, Valkey, KeyDB,
-  Dragonfly, MongoDB and ClickHouse. Each carries its own closed list of releases; a request names a
-  `version` from it and never an image reference, so what is pulled is always a reference written in
-  that file. `user` and `password` are optional: the account name is held to `provisionUserRe` (and may
+  PostgreSQL, PostgreSQL with pgvector or PostGIS, PostgreSQL full, TimescaleDB, MySQL, MariaDB, Redis,
+  Valkey, KeyDB, Dragonfly, MongoDB and ClickHouse. Each carries its own closed list of releases; a
+  request names a `version` from it and never an image reference, so what is pulled is always a
+  reference written in that file. *The provisioning catalogue* below lists them and says how each
+  release's support status and the full template's image are handled. `user` and `password` are optional: the account name is held to `provisionUserRe` (and may
   not be `root` on MySQL or MariaDB, nor given at all to the password-only engines), a supplied password
   to `provisionPasswordRe` — deliberately narrow, because it is written into a Redis configuration
   line, a ClickHouse XML file and a MySQL DSN, and a character that means something in any of those is
@@ -209,6 +210,73 @@ is connected by naming the instance found, not by typing its address again.
   constant bootstrap (`passwordProvisionBootstrap`) that writes a private configuration and removes it
   first: the kernel refuses to reopen a file in `/tmp` that was handed to the server's account
   (`fs.protected_regular`), and without the `rm` the container started once and died on every restart.
+
+### The provisioning catalogue
+
+The releases each template offers, as refreshed on 2026-10-17. A version is a release line, and its
+tag floats only within that line's patch releases; Timescale is pinned to one release of the extension.
+
+| Template | Releases (default first in bold) | Image |
+| --- | --- | --- |
+| `postgres` | **18**, 17, 16, 15, 14 | `postgres:<major>-alpine` |
+| `pgvector` | **18**, 17, 16, 15 | `pgvector/pgvector:pg<major>` |
+| `postgis` (x86-64 only) | **18**, 17, 16, 15 | `postgis/postgis:18-3.6-alpine`, `<major>-3.5-alpine` below 18 |
+| `postgres-full` | **18**, 17 | `jd-postgres-full:<major>`, built on the server |
+| `timescaledb` | **18**, 17, 16 | `timescale/timescaledb:2.30.2-pg<major>` (Timescale stopped building for 15 at 2.28) |
+| `mysql` | 9.7, **8.4**, 8.0 | `mysql:<release>` |
+| `mariadb` | 12.3, **11.8**, 11.4, 10.11, 10.6 | `mariadb:<release>` |
+| `mongodb` | **8.0**, 7.0, 6.0 | `mongo:<release>` |
+| `clickhouse` | **26.8**, 26.3, 25.8 | `clickhouse/clickhouse-server:<release>` |
+| `redis`, `valkey`, `keydb`, `dragonfly` | unchanged | |
+
+- **PostgreSQL 18 keeps its data a directory higher.** From 18 the official image (and every image
+  built on it: pgvector, PostGIS, Timescale, the full template) sets `PGDATA=/var/lib/postgresql/18/docker`
+  and declares `/var/lib/postgresql` the volume, so a later `pg_upgrade --link` can see two majors side by
+  side. `postgresRelease` gives an 18 release that mount target; a volume at the old
+  `/var/lib/postgresql/data` would be left empty while the cluster went into an anonymous volume that a
+  recreate does not carry over. `TestProvisionMountsTheVolumeWhereEachMajorKeepsItsData` holds it.
+- **Support status is a fact, not a finding.** `GET /databases/provision/options` gives each release
+  its `endOfLife` from `dbx.ReleaseEndOfLife(flavour, release)`: the vendors' published dates, a table
+  in `dbx/eol.go` (PostgreSQL, MySQL, MariaDB, MongoDB, SQL Server, Oracle, and ClickHouse's long-term
+  March and August releases; TimescaleDB is dated as the PostgreSQL it runs on). Redis, Valkey, KeyDB,
+  Dragonfly and the forks that keep their own calendar (CockroachDB, YugabyteDB, TiDB, FerretDB) have
+  no date and say nothing, and so does a release whose last day is not published yet (MariaDB's newest
+  rolling release, MongoDB 8.3). The version picker says the chosen release's "Supported until Nov 2030"
+  under it — a day still ahead to the month, in `calendarDate`'s words on the UTC calendar
+  (`components/database/support.ts`). A release whose date has passed stays on the closed list —
+  each engine's most recent such line, for a server that has to match the one it replaces — and the
+  picker keeps it behind an *Older versions* fold that states each one's status; it moves there by
+  itself on the day it ends (PostgreSQL 14 on 2026-11-12), with no change here; chosen, it is dated
+  there ("End of life since Apr 30, 2026") and not under the releases still maintained. Every default was
+  maintained on the day of the refresh (`TestProvisionCatalogueDefaultsWereMaintainedWhenItWasRefreshed`),
+  and no offered tag floats across release lines. Existing servers on any release keep working: the
+  list decides only what can be started.
+- **The full template is built here, never pulled.** No published image carries pgvector, PostGIS,
+  pg_cron, pg_partman, pgaudit, hypopg and pg_repack on the official image's layout, so
+  `backend/internal/api/recipes/postgres-full/Dockerfile` (embedded in the binary) builds one: the
+  official Debian `postgres:<major>-trixie` image plus the PostgreSQL project's own apt packages of each,
+  which that image already trusts — nothing is fetched from anywhere else. `POST
+  /databases/provision/build` (`system.admin`) writes the recipe into a private temporary directory and
+  runs `dockerx.Build` with `--pull` as a job (`database.image.build.<engine>.<version>`; one build at a
+  time, `StartExclusive` on `database.image.build.`, 30 minutes), audited `database.image.build` with the
+  engine, release, recipe digest, job id and whether the request attached to a running build. Asking
+  for the image already being built answers that job, so a returning page attaches to it; another image
+  is refused with `409 build_running`. The build is labelled `io.just-dashboard.recipe=<digest>`, the
+  first twelve hex digits of the recipe's SHA-256: the options report `build.ready` only for an image
+  carrying the current digest (and `build.job` while one runs), so an image built from an older recipe
+  is built again, and `POST /databases/provision` refuses the template with `409 image_not_built`
+  until it is ready rather than letting Docker try to pull a name that is this server's own. The name
+  is bare (`jd-postgres-full:18`), which resolves to Docker's official `library` namespace, where
+  nobody can publish an image a pull could mistake for it. The image names `pg_cron,pgaudit` in the
+  `postgresql.conf.sample` every new cluster is made from, the way TimescaleDB's image names its own
+  library, and a first-boot script it carries points `cron.database_name` at the database the server
+  is created for (`ALTER SYSTEM`, through `\gexec`); the container runs the official command, so both
+  stay ordinary parameters the Parameters page can change — on the command line they would outrank
+  every file. The two extensions that need preloading are then ready to enable on the Extensions page
+  like the rest; nothing is created in the database until the operator enables it. `dbx` recognises the image by name
+  (`jd-postgres-full`, variant `full`). The add flow builds first when the chosen release is not built,
+  drawing *Build the image* as the first stage and the job console with the build's output, and
+  quick setup in a project's sheet offers the template only once its image is built.
 
 ### A connection: its record, its state and its power
 
@@ -239,6 +307,12 @@ is connected by naming the instance found, not by typing its address again.
   processors, each absent where there is none, and `restartPolicy` — under the names the Docker page's
   own route uses, read for a stopped container too (one inspect; the listing inspects only the running
   ones). It answers 200 for a stopped, unreachable or broken connection; those are states, not errors.
+  `endOfLife` is when the release the server last said it runs stops being maintained
+  (`dbx.VersionEndOfLife`, by driver, flavour and the server's own version string), absent where the
+  table has no date: Home's identity line and General's *Name and labels* say it beside the version as
+  a plain fact — "supported until Nov 2028", "end of life since Nov 13, 2025", in the words of the
+  "added Sep 1, 2026" beside it — and nowhere else, with no
+  colour, badge or advice. See *The provisioning catalogue* for the table.
 - **Where a server runs is read off the machine each time** (`dbHostView.place`), never stored: the
   container that publishes or answers at the address, then the
   process listening on the port and its unit, then a stopped container whose configuration publishes that
@@ -1510,7 +1584,7 @@ and `protectReadOnlyConnections`.
   the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
   29 open, 12 by content, 20 preview only, 61 refused.
 
-**Every database** (19)
+**Every database** (20)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -1529,6 +1603,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
 | `GET` | `/databases/orm/targets` | read | — | — | — |
 | `POST` | `/databases/provision` | `system.admin` | — | `database.server.provision` | — |
+| `POST` | `/databases/provision/build` | `system.admin` | — | `database.image.build` | — |
 | `GET` | `/databases/provision/options` | `system.admin` | — | — | — |
 | `POST` | `/databases/sync` | `system.admin` | — | `database.connection.sync` | — |
 | `POST` | `/databases/test` | `system.admin` | — | — | — |
@@ -1821,9 +1896,10 @@ password is never set and the server refuses every sign-in while looking reachab
 `error` is surfaced by both callers — the add flow (`components/database/connect/start.tsx`) and
 deployment quick setup (`components/deploy/quick-database.tsx`) — so an engine's own refusal is not
 reported as "not ready". Two of the templates exist for deployments: `pgvector`
-(`pgvector/pgvector:pg16`) and `postgis` (`postgis/postgis:16-3.5-alpine`, listed and accepted only on
-x86-64, the one architecture it is published for) are the same PostgreSQL 16 contract with the extension
+(`pgvector/pgvector:pg18`) and `postgis` (`postgis/postgis:18-3.6-alpine`, listed and accepted only on
+x86-64, the one architecture it is published for) are the same PostgreSQL 18 contract with the extension
 a retrieval or geospatial schema creates on its first migration, which the official image lacks.
+Quick setup leaves out the full template until its image has been built from Add a database.
 Deployment setup preselects one when detection read that extension from the schema. `mongodb` is refused
 before any pull on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die
 with an illegal instruction. The URL read also takes `format` and `database`; see [deployment database

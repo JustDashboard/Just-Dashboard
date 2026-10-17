@@ -1,4 +1,4 @@
-import type { DbDriver, DbFlavor, Job } from "@/lib/types"
+import type { DbDriver, DbEndOfLife, DbFlavor, Job } from "@/lib/types"
 
 /**
  * What the server says about the machine's databases beyond the saved
@@ -187,14 +187,29 @@ export type DbProvisionTemplate = {
   image: string
   driver: DbDriver
   flavor: DbFlavor
-  /** Newest first; a closed list. */
-  versions: { version: string; image: string }[]
+  /** Newest first; a closed list, releases past their end of life included. */
+  versions: DbProvisionRelease[]
   defaultVersion: string
   port: number
   /** Empty: the engine has no accounts and `user` must not be sent. */
   defaultUser: string
   /** False: there is no initial database to name. */
   database: boolean
+  /** What an image built on this server adds to the official one, by extension name. */
+  extensions?: string[]
+}
+
+/** One release a template can start. */
+export type DbProvisionRelease = {
+  version: string
+  image: string
+  endOfLife?: DbEndOfLife
+  /**
+   * Set for a release whose image is built on this server rather than
+   * pulled: whether it is already, from the current recipe, and the job
+   * building it now.
+   */
+  build?: { ready: boolean; job?: string }
 }
 
 export type DbProvisionRequest = {

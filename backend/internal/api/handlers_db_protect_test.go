@@ -768,7 +768,7 @@ func TestProtectionLeavesSectionRoutesAlone(t *testing.T) {
 	s := testServer(t)
 	protectTestConnection(t, s, "protected", true)
 	for _, path := range []string{
-		"/", "/test", "/sync", "/adopt", "/host", "/host/grant", "/provision",
+		"/", "/test", "/sync", "/adopt", "/host", "/host/grant", "/provision", "/provision/build",
 		"/inventory/scan", "/inventory/connect", "/inventory/ignore",
 	} {
 		if why := refusal(t, s, http.MethodPost, "/api/v1/databases"+path, `{}`); why != "" {

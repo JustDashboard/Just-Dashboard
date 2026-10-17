@@ -455,6 +455,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
 | `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
 | `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
+| `JD_TEST_POSTGRES_FULL_DSN` | a server started from the full template's image (`jd-postgres-full`, built from `backend/internal/api/recipes/postgres-full`) on its own command, as an account that may create databases, connected to the database it was created with; the test makes and drops one database of its own and leaves `pg_cron` as it found it | `TestLivePostgresFullCarriesItsExtensions` |
 
 Some tests reach past a database to the machine and run only when asked:
 
@@ -462,7 +463,7 @@ Some tests reach past a database to the machine and run only when asked:
 | --- | --- |
 | `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventoryNeverCarriesAContainerSecret`); it only reads |
 | `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
-| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
+| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:26.3` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes. A template whose image is built on the server (`postgres-full:18`) is built first through `POST /databases/provision/build`, and the image is left for the next run |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
 

@@ -73,6 +73,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/sync", s.handle(s.handleDBSync))
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
+			// The image a template is built from here rather than pulled: the
+			// first part of provisioning one, and the same capability.
+			r.Method(http.MethodPost, "/provision/build", s.handle(s.handleDBProvisionBuild))
 			r.Method(http.MethodPut, "/{id}", s.handle(s.handleDBConnUpdate))
 			r.Method(http.MethodGet, "/{id}/url", s.handle(s.handleDBConnURL))
 			// Where the server is reachable from. Reading it lists containers

@@ -1,8 +1,10 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -960,7 +962,10 @@ type provisionTemplate struct {
 	label  string
 	// image is what a request that names no version starts, and versions the
 	// closed list it may choose from, newest first. A request never supplies
-	// an image reference: the tag is looked up, not taken.
+	// an image reference: the tag is looked up, not taken. A release past its
+	// end of life stays on the list — the most recent such line of each
+	// engine, for a server that has to match the one it replaces — and the
+	// page offers it apart from the rest, saying so.
 	image    string
 	versions []provisionVersion
 	port     int
@@ -977,12 +982,38 @@ type provisionTemplate struct {
 	// read its password from the environment. It is a constant script: the
 	// secret reaches it through the environment, never through its text.
 	bootstrap string
+	// recipe is the Dockerfile a template's image is built from on this
+	// server, for a template no published image serves; empty for one that is
+	// pulled. extensions is what that image adds to the official one.
+	recipe     string
+	extensions []string
 }
 
-// provisionVersion is one release a template can start.
+// provisionVersion is one release a template can start. dataPath is where
+// this release keeps its data, where that is not the template's.
 type provisionVersion struct {
-	id, image string
+	id, image, dataPath string
 }
+
+// postgresRelease is one PostgreSQL major and the image that starts it.
+//
+// From 18 the official image keeps its cluster in /var/lib/postgresql/18/docker
+// and declares /var/lib/postgresql the volume, so that pg_upgrade --link can
+// one day see two majors side by side. A volume mounted where every earlier
+// major kept its data would be left empty there while the cluster went into an
+// anonymous volume beside it — one that a recreate does not carry over.
+func postgresRelease(major, image string) provisionVersion {
+	if n, _ := strconv.Atoi(major); n >= 18 {
+		return provisionVersion{major, image, "/var/lib/postgresql"}
+	}
+	return provisionVersion{major, image, ""}
+}
+
+// postgresFullRecipe is the "full" template's Dockerfile. Its digest is what
+// the image it builds is labelled with.
+//
+//go:embed recipes/postgres-full/Dockerfile
+var postgresFullRecipe string
 
 func postgresProvisionEnv(user, pw, db string) []dockerx.EnvVar {
 	return []dockerx.EnvVar{
@@ -1021,10 +1052,11 @@ func passwordProvisionBootstrap(server, account string) string {
 
 var provisionTemplates = map[string]provisionTemplate{
 	"postgres": {
-		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL", image: "postgres:16-alpine",
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL", image: "postgres:18-alpine",
 		versions: []provisionVersion{
-			{"17", "postgres:17-alpine"}, {"16", "postgres:16-alpine"},
-			{"15", "postgres:15-alpine"}, {"14", "postgres:14-alpine"},
+			postgresRelease("18", "postgres:18-alpine"), postgresRelease("17", "postgres:17-alpine"),
+			postgresRelease("16", "postgres:16-alpine"), postgresRelease("15", "postgres:15-alpine"),
+			postgresRelease("14", "postgres:14-alpine"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
 		env: postgresProvisionEnv,
@@ -1032,36 +1064,58 @@ var provisionTemplates = map[string]provisionTemplate{
 	// The same server with the extension a retrieval or geospatial schema
 	// creates on its first migration; the official image ships neither.
 	"pgvector": {
-		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + pgvector", image: "pgvector/pgvector:pg16",
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + pgvector", image: "pgvector/pgvector:pg18",
 		versions: []provisionVersion{
-			{"17", "pgvector/pgvector:pg17"}, {"16", "pgvector/pgvector:pg16"}, {"15", "pgvector/pgvector:pg15"},
+			postgresRelease("18", "pgvector/pgvector:pg18"), postgresRelease("17", "pgvector/pgvector:pg17"),
+			postgresRelease("16", "pgvector/pgvector:pg16"), postgresRelease("15", "pgvector/pgvector:pg15"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
 		env: postgresProvisionEnv,
 	},
 	"postgis": {
-		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + PostGIS", image: "postgis/postgis:16-3.5-alpine",
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + PostGIS", image: "postgis/postgis:18-3.6-alpine",
 		versions: []provisionVersion{
-			{"17", "postgis/postgis:17-3.5-alpine"}, {"16", "postgis/postgis:16-3.5-alpine"},
-			{"15", "postgis/postgis:15-3.5-alpine"},
+			postgresRelease("18", "postgis/postgis:18-3.6-alpine"), postgresRelease("17", "postgis/postgis:17-3.5-alpine"),
+			postgresRelease("16", "postgis/postgis:16-3.5-alpine"), postgresRelease("15", "postgis/postgis:15-3.5-alpine"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
 		env: postgresProvisionEnv,
 	},
+	// Every extension a schema commonly reaches for at once, on the official
+	// image's layout and contract. The image is built here from a recipe in
+	// this repository (recipes/postgres-full) rather than pulled, under a bare
+	// name: one with no namespace resolves to Docker's own library, where
+	// nobody can publish an image a pull could mistake for this one. The image
+	// itself loads pg_cron and pgaudit at start and points pg_cron at the
+	// database the server is created for, so it is started like any other.
+	"postgres-full": {
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL, full", image: "jd-postgres-full:18",
+		versions: []provisionVersion{
+			postgresRelease("18", "jd-postgres-full:18"), postgresRelease("17", "jd-postgres-full:17"),
+		},
+		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
+		env:        postgresProvisionEnv,
+		recipe:     postgresFullRecipe,
+		extensions: []string{"vector", "postgis", "pg_cron", "pg_partman", "pgaudit", "hypopg", "pg_repack"},
+	},
 	// PostgreSQL with the time-series extension preloaded, on the official
 	// image's own layout: the same variables, the same data directory.
+	// Pinned to one release of the extension, so a version chosen here is the
+	// same server on every machine and on every day; Timescale stopped
+	// building for 15 at 2.28, so 15 is not offered.
 	"timescaledb": {
-		driver: dbx.DriverPostgres, flavor: dbx.FlavorTimescaleDB, label: "TimescaleDB", image: "timescale/timescaledb:latest-pg16",
+		driver: dbx.DriverPostgres, flavor: dbx.FlavorTimescaleDB, label: "TimescaleDB", image: "timescale/timescaledb:2.30.2-pg18",
 		versions: []provisionVersion{
-			{"17", "timescale/timescaledb:latest-pg17"}, {"16", "timescale/timescaledb:latest-pg16"},
-			{"15", "timescale/timescaledb:latest-pg15"},
+			postgresRelease("18", "timescale/timescaledb:2.30.2-pg18"),
+			postgresRelease("17", "timescale/timescaledb:2.30.2-pg17"),
+			postgresRelease("16", "timescale/timescaledb:2.30.2-pg16"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
 		env: postgresProvisionEnv,
 	},
 	"mysql": {
 		driver: dbx.DriverMySQL, flavor: dbx.FlavorMySQL, label: "MySQL", image: "mysql:8.4",
-		versions: []provisionVersion{{"9", "mysql:9"}, {"8.4", "mysql:8.4"}, {"8.0", "mysql:8.0"}},
+		versions: []provisionVersion{{"9.7", "mysql:9.7", ""}, {"8.4", "mysql:8.4", ""}, {"8.0", "mysql:8.0", ""}},
 		port:     3306, dataPath: "/var/lib/mysql", user: "jd", database: true,
 		env: func(user, pw, db string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{
@@ -1073,10 +1127,10 @@ var provisionTemplates = map[string]provisionTemplate{
 		},
 	},
 	"mariadb": {
-		driver: dbx.DriverMySQL, flavor: dbx.FlavorMariaDB, label: "MariaDB", image: "mariadb:11",
+		driver: dbx.DriverMySQL, flavor: dbx.FlavorMariaDB, label: "MariaDB", image: "mariadb:11.8",
 		versions: []provisionVersion{
-			{"12", "mariadb:12"}, {"11", "mariadb:11"}, {"11.4", "mariadb:11.4"},
-			{"10.11", "mariadb:10.11"}, {"10.6", "mariadb:10.6"},
+			{"12.3", "mariadb:12.3", ""}, {"11.8", "mariadb:11.8", ""}, {"11.4", "mariadb:11.4", ""},
+			{"10.11", "mariadb:10.11", ""}, {"10.6", "mariadb:10.6", ""},
 		},
 		port: 3306, dataPath: "/var/lib/mysql", user: "jd", database: true,
 		env: func(user, pw, db string) []dockerx.EnvVar {
@@ -1090,14 +1144,14 @@ var provisionTemplates = map[string]provisionTemplate{
 	},
 	"redis": {
 		driver: dbx.DriverRedis, flavor: dbx.FlavorRedis, label: "Redis", image: "redis:7-alpine",
-		versions: []provisionVersion{{"8", "redis:8-alpine"}, {"7", "redis:7-alpine"}, {"6", "redis:6-alpine"}},
+		versions: []provisionVersion{{"8", "redis:8-alpine", ""}, {"7", "redis:7-alpine", ""}, {"6", "redis:6-alpine", ""}},
 		port:     6379, dataPath: "/data",
 		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("redis-server", "redis"),
 	},
 	"valkey": {
 		driver: dbx.DriverRedis, flavor: dbx.FlavorValkey, label: "Valkey", image: "valkey/valkey:8-alpine",
 		versions: []provisionVersion{
-			{"9", "valkey/valkey:9-alpine"}, {"8", "valkey/valkey:8-alpine"}, {"7.2", "valkey/valkey:7.2-alpine"},
+			{"9", "valkey/valkey:9-alpine", ""}, {"8", "valkey/valkey:8-alpine", ""}, {"7.2", "valkey/valkey:7.2-alpine", ""},
 		},
 		port: 6379, dataPath: "/data",
 		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("valkey-server", "valkey"),
@@ -1106,7 +1160,7 @@ var provisionTemplates = map[string]provisionTemplate{
 	// since 6.3.4: there is no other release to offer.
 	"keydb": {
 		driver: dbx.DriverRedis, flavor: dbx.FlavorKeyDB, label: "KeyDB", image: "eqalpha/keydb:latest",
-		versions: []provisionVersion{{"latest", "eqalpha/keydb:latest"}},
+		versions: []provisionVersion{{"latest", "eqalpha/keydb:latest", ""}},
 		port:     6379, dataPath: "/data",
 		env: passwordProvisionEnv, bootstrap: passwordProvisionBootstrap("keydb-server", "keydb"),
 	},
@@ -1116,15 +1170,15 @@ var provisionTemplates = map[string]provisionTemplate{
 	"dragonfly": {
 		driver: dbx.DriverRedis, flavor: dbx.FlavorDragonfly, label: "Dragonfly",
 		image:    "docker.dragonflydb.io/dragonflydb/dragonfly:latest",
-		versions: []provisionVersion{{"latest", "docker.dragonflydb.io/dragonflydb/dragonfly:latest"}},
+		versions: []provisionVersion{{"latest", "docker.dragonflydb.io/dragonflydb/dragonfly:latest", ""}},
 		port:     6379, dataPath: "/data",
 		env: func(_, pw, _ string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{{Name: "DFLY_requirepass", Value: pw}, {Name: "REDIS_PASSWORD", Value: pw}}
 		},
 	},
 	"mongodb": {
-		driver: dbx.DriverMongo, flavor: dbx.FlavorMongoDB, label: "MongoDB", image: "mongo:7",
-		versions: []provisionVersion{{"8", "mongo:8"}, {"7", "mongo:7"}, {"6", "mongo:6"}},
+		driver: dbx.DriverMongo, flavor: dbx.FlavorMongoDB, label: "MongoDB", image: "mongo:8.0",
+		versions: []provisionVersion{{"8.0", "mongo:8.0", ""}, {"7.0", "mongo:7.0", ""}, {"6.0", "mongo:6.0", ""}},
 		port:     27017, dataPath: "/data/db", user: "jd", database: true,
 		env: func(user, pw, db string) []dockerx.EnvVar {
 			return []dockerx.EnvVar{
@@ -1140,10 +1194,10 @@ var provisionTemplates = map[string]provisionTemplate{
 	// are ones it may create.
 	"clickhouse": {
 		driver: dbx.DriverClickHouse, flavor: dbx.FlavorClickHouse, label: "ClickHouse",
-		image: "clickhouse/clickhouse-server:25.8",
+		image: "clickhouse/clickhouse-server:26.8",
 		versions: []provisionVersion{
-			{"26.3", "clickhouse/clickhouse-server:26.3"}, {"25.8", "clickhouse/clickhouse-server:25.8"},
-			{"25.3", "clickhouse/clickhouse-server:25.3"}, {"24.8", "clickhouse/clickhouse-server:24.8"},
+			{"26.8", "clickhouse/clickhouse-server:26.8", ""}, {"26.3", "clickhouse/clickhouse-server:26.3", ""},
+			{"25.8", "clickhouse/clickhouse-server:25.8", ""},
 		},
 		port: 9000, dataPath: "/var/lib/clickhouse", user: "jd", database: true,
 		env: func(user, pw, db string) []dockerx.EnvVar {
@@ -1161,7 +1215,7 @@ var provisionTemplates = map[string]provisionTemplate{
 // because a map has none, and a list of engines that reshuffles on every poll
 // is unusable.
 var provisionOrder = []string{
-	"postgres", "pgvector", "postgis", "timescaledb", "mysql", "mariadb",
+	"postgres", "pgvector", "postgis", "postgres-full", "timescaledb", "mysql", "mariadb",
 	"redis", "valkey", "keydb", "dragonfly", "mongodb", "clickhouse",
 }
 
@@ -1198,15 +1252,34 @@ type provisionOption struct {
 	// initial database can be named.
 	DefaultUser string `json:"defaultUser"`
 	Database    bool   `json:"database"`
+	// Extensions is what a template built here adds to the official image.
+	Extensions []string `json:"extensions,omitempty"`
 }
 
 type provisionVersionOption struct {
 	Version string `json:"version"`
 	Image   string `json:"image"`
+	// EndOfLife is the release line's last day of maintenance, where the
+	// table knows it.
+	EndOfLife *dbx.EndOfLife `json:"endOfLife,omitempty"`
+	// Build is set for a release whose image is built on this server.
+	Build *provisionBuild `json:"build,omitempty"`
+}
+
+// provisionBuild is where a built image stands: here and from the current
+// recipe, or not, and the job building it now.
+type provisionBuild struct {
+	Ready bool   `json:"ready"`
+	Job   string `json:"job,omitempty"`
 }
 
 func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
+	// The catalogue is the page's first read; a Docker that is slow to say
+	// whether an image is here costs the build state, not the page.
+	ctx, cancel := timeoutCtx(r, 5*time.Second)
+	defer cancel()
+	now := time.Now()
 	out := []provisionOption{}
 	for _, key := range provisionOrder {
 		if key == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
@@ -1217,9 +1290,17 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 		option := provisionOption{
 			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver), Flavor: t.flavor,
 			Versions: []provisionVersionOption{}, Port: t.port, DefaultUser: t.user, Database: t.database,
+			Extensions: t.extensions,
 		}
 		for _, v := range t.versions {
-			option.Versions = append(option.Versions, provisionVersionOption{Version: v.id, Image: v.image})
+			one := provisionVersionOption{Version: v.id, Image: v.image}
+			if eol, ok := dbx.ReleaseEndOfLife(t.flavor, v.id, now); ok {
+				one.EndOfLife = eol
+			}
+			if t.recipe != "" {
+				one.Build = s.recipeBuild(ctx, t, v)
+			}
+			option.Versions = append(option.Versions, one)
 			if v.image == t.image {
 				option.DefaultVersion = v.id
 			}
@@ -1335,6 +1416,13 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if tmpl.recipe != "" && s.modules.docker != nil && !s.recipeBuild(r.Context(), tmpl, version).Ready {
+		// Never pulled: the name is this server's own, and a pull of it
+		// could only fail, minutes into what looked like a start.
+		return httpx.Err(http.StatusConflict, "image_not_built", fmt.Sprintf(
+			"%s %s is built on this server before its first start, and %s has not been built from the current recipe; build it first",
+			tmpl.label, version.id, version.image))
+	}
 	// MongoDB 5 and later die with an illegal instruction on a CPU without
 	// AVX (a Proxmox default CPU type) or ARMv8.2 atomics, and the linked
 	// application then restarts in a loop; saying so here is cheaper than a
@@ -1411,7 +1499,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 			{HostIP: hostIP, HostPort: port, ContainerPort: tmpl.port, Protocol: "tcp"},
 		},
 		Mounts: []dockerx.MountSpec{
-			{Type: "volume", Source: volume, Target: tmpl.dataPath},
+			{Type: "volume", Source: volume, Target: cmp.Or(version.dataPath, tmpl.dataPath)},
 		},
 	}
 	if tmpl.bootstrap != "" {
