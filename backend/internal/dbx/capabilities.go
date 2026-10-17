@@ -93,6 +93,9 @@ var (
 	redisEngines  = On(string(DriverRedis))
 	mongoEngines  = On(string(DriverMongo))
 	mongoDBProper = On(string(DriverMongo)).Except(FlavorFerretDB)
+	// replicationEngines are the products whose place in a replication
+	// topology is read: the replication view, and the alert on its lag.
+	replicationEngines = anyOf(opsFlag("replication"), redisEngines, mongoDBProper)
 )
 
 // capabilityTable is the reading the driver catalogue serves. It holds the
@@ -136,7 +139,7 @@ var capabilityTable = []Capability{
 	// The server's parameters, and changing one where the engine keeps it.
 	{"settings", everyEngine},
 	{"settingsWrite", anyOf(opsFlag("settingsWrite"), redisEngines)},
-	{"replication", anyOf(opsFlag("replication"), redisEngines, mongoDBProper)},
+	{"replication", replicationEngines},
 	// A plan as a tree, and a plan measured by running the statement.
 	{"explainJSON", anyOf(explainForm(false), mongoDBProper)},
 	{"explainAnalyze", anyOf(explainForm(true), mongoDBProper)},
@@ -157,6 +160,14 @@ var capabilityTable = []Capability{
 	// no container of the dashboard's to mount a certificate into.
 	{"serverTLS", On("postgres", "mysql", "redis", "mongodb").
 		Except(FlavorCockroachDB, FlavorYugabyteDB, FlavorPercona, FlavorTiDB, FlavorFerretDB, FlavorKeyDB, FlavorDragonfly)},
+	// The setting that holds the memory the engine keeps for itself, which
+	// the Resources page reads beside its container's memory limit.
+	{"memoryBuffer", func(d Driver, flavor string) any {
+		if setting := MemoryBufferSetting(d, flavor); setting != "" {
+			return setting
+		}
+		return false
+	}},
 }
 
 // listOf is the answer of a flag whose value is a list. Never nil: an engine

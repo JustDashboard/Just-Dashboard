@@ -298,6 +298,11 @@ func TestProvisionTemplatesAreCoherent(t *testing.T) {
 		if tmpl.image == "" || tmpl.port == 0 || tmpl.dataPath == "" {
 			t.Errorf("%s: incomplete template %+v", engine, tmpl)
 		}
+		// Every PostgreSQL template is on the official image's entrypoint,
+		// and its server counts its statements from the first start.
+		if (tmpl.driver == dbx.DriverPostgres) != tmpl.initdb {
+			t.Errorf("%s: initdb %v for a %s template", engine, tmpl.initdb, tmpl.driver)
+		}
 		// Every release a template offers has to be recognised and adoptable,
 		// not only the default: the list is what the operator chooses from.
 		for _, version := range tmpl.versions {

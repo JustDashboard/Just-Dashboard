@@ -39,6 +39,9 @@ const (
 	// rule names rather than selected on a channel.
 	NotificationEventProxyFiring    = "proxy.alert.firing"
 	NotificationEventProxyRecovered = "proxy.alert.recovered"
+	// And the database events, to the channels a database alert rule names.
+	NotificationEventDatabaseFiring    = "database.alert.firing"
+	NotificationEventDatabaseRecovered = "database.alert.recovered"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -311,6 +314,32 @@ type NotificationEnvelope struct {
 	// Proxy carries a proxy alert's subject and reading; it is set on the two
 	// proxy events and on nothing else.
 	Proxy *ProxyAlertEnvelope `json:"proxy,omitempty"`
+	// Database carries a database alert's subject and reading; it is set on
+	// the two database events and on nothing else.
+	Database *DatabaseAlertEnvelope `json:"database,omitempty"`
+}
+
+// DatabaseAlertEnvelope is what a database alert says when a server stops
+// answering, fills its disk, runs out of connections or falls behind, or a
+// backup of it fails or is missed — and when that is over. Label names the
+// database or the backup job in words and Detail is the reading against the
+// rule's line, so the message can be acted on from a phone.
+type DatabaseAlertEnvelope struct {
+	RuleID int64  `json:"ruleId"`
+	Kind   string `json:"kind"`
+	// ConnectionID is the database a server reading is about; a backup job
+	// may dump several, and names JobID instead.
+	ConnectionID int64   `json:"connectionId,omitempty"`
+	JobID        int64   `json:"jobId,omitempty"`
+	Subject      string  `json:"subject"`
+	Label        string  `json:"label"`
+	Detail       string  `json:"detail"`
+	Reading      float64 `json:"reading"`
+	Threshold    float64 `json:"threshold,omitempty"`
+	// Since is when the subject entered the state being announced.
+	Since time.Time `json:"since"`
+	// Test marks a message sent from "Send test", so nobody acts on it.
+	Test bool `json:"test,omitempty"`
 }
 
 // ProxyAlertEnvelope is what a proxy alert says when a subject — a
@@ -351,6 +380,9 @@ type notificationMessage struct {
 	Summary string
 	Fields  [][2]string
 	URL     string
+	// LinkLabel is the words an e-mail puts before URL; a run's own message
+	// says "Open the run".
+	LinkLabel string
 	// Color is the Discord embed colour; Slack and e-mail ignore it.
 	Color int
 }
@@ -376,6 +408,8 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 		return renderTrafficAlert(envelope, project, environment)
 	case NotificationEventProxyFiring, NotificationEventProxyRecovered:
 		return renderProxyAlert(envelope)
+	case NotificationEventDatabaseFiring, NotificationEventDatabaseRecovered:
+		return renderDatabaseAlert(envelope)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -523,6 +557,56 @@ func renderProxyAlert(envelope NotificationEnvelope) notificationMessage {
 		fields = append(fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
 	}
 	message.Fields = fields
+	return message
+}
+
+// databaseAlertWhat is each database alert kind as the noun phrase a title
+// leads with. The kinds are dbx's; an unknown one still renders.
+var databaseAlertWhat = map[string]string{
+	"down":          "Database not answering",
+	"disk":          "Database disk filling up",
+	"connections":   "Database connections near the limit",
+	"replication":   "Replication falling behind",
+	"backup_failed": "Backup failed",
+	"backup_missed": "Backup missed",
+}
+
+// renderDatabaseAlert is the sentence a database alert sends: what, which
+// database or backup job, and the reading against the line.
+func renderDatabaseAlert(envelope NotificationEnvelope) notificationMessage {
+	message := notificationMessage{URL: envelope.URL, LinkLabel: "Open it in Just Dashboard"}
+	alert := envelope.Database
+	if alert == nil {
+		alert = &DatabaseAlertEnvelope{}
+	}
+	what := databaseAlertWhat[alert.Kind]
+	if what == "" {
+		what = "Database alert"
+	}
+	label := alert.Label
+	if label == "" {
+		label = alert.Subject
+	}
+	prefix := ""
+	if alert.Test {
+		prefix = "[test] "
+	}
+	if envelope.Event == NotificationEventDatabaseFiring {
+		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Title = fmt.Sprintf("%s%s — %s", prefix, what, label)
+	} else {
+		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, what, label)
+	}
+	message.Summary = alert.Detail
+	subject := "Database"
+	if strings.HasPrefix(alert.Kind, "backup_") {
+		subject = "Backup job"
+	}
+	message.Fields = [][2]string{{subject, label}}
+	if !alert.Since.IsZero() {
+		message.Fields = append(message.Fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
+	}
 	return message
 }
 
@@ -694,7 +778,11 @@ func emailMessage(cfg NotificationConfig, message notificationMessage, sentAt ti
 		fmt.Fprintf(&text, "\r\n%s: %s", field[0], field[1])
 	}
 	if message.URL != "" {
-		fmt.Fprintf(&text, "\r\n\r\nOpen the run: %s", message.URL)
+		link := message.LinkLabel
+		if link == "" {
+			link = "Open the run"
+		}
+		fmt.Fprintf(&text, "\r\n\r\n%s: %s", link, message.URL)
 	}
 	text.WriteString("\r\n\r\n— Just Dashboard\r\n")
 	var out bytes.Buffer

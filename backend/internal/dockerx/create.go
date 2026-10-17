@@ -109,6 +109,22 @@ type ContainerSpec struct {
 	// Start controls whether the container is started after creation. A spec
 	// created but not started is the equivalent of `docker create`.
 	Start bool `json:"start"`
+
+	// Files are written into the container once it exists and before it
+	// starts: what an image reads on its first boot, such as the scripts the
+	// official PostgreSQL image runs when it initialises its data directory.
+	// They are the dashboard's own and never a request's, so the field has no
+	// JSON name — a spec decoded from the Docker page cannot carry one into a
+	// container — and a spec read back from a container has none.
+	Files []ContainerFile `json:"-"`
+}
+
+// ContainerFile is one regular file a container is created with.
+type ContainerFile struct {
+	Path    string
+	Content []byte
+	// Mode is the file's permission bits; zero is 0644.
+	Mode int64
 }
 
 type EnvVar struct {
@@ -318,6 +334,16 @@ func (c *Client) create(ctx context.Context, spec ContainerSpec, progress chan<-
 		for _, extra := range extraNetworks(spec) {
 			if err := cli.NetworkConnect(ctx, extra, created.ID, nil); err != nil {
 				warnings = append(warnings, fmt.Sprintf("created, but could not attach network %s: %v", extra, err))
+			}
+		}
+
+		for _, file := range spec.Files {
+			if err := c.WriteContainerFile(ctx, created.ID, file.Path, file.Content, file.Mode); err != nil {
+				// Started without what its first boot reads, it would
+				// initialise as some other server, and a container left
+				// created can be started by anyone who finds it.
+				_ = cli.ContainerRemove(ctx, created.ID, container.RemoveOptions{})
+				return nil, fmt.Errorf("could not write %s into the container: %w", file.Path, err)
 			}
 		}
 

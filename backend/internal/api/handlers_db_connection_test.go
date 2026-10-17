@@ -53,6 +53,10 @@ type fakeDBContainer struct {
 	// holds them: bytes, billionths of a processor, Docker's own word.
 	memory, nanoCPUs int64
 	restart          string
+	// used is the memory it uses now, as its stats report it, and oomKilled
+	// whether the kernel stopped it last time for going past its limit.
+	used      int64
+	oomKilled bool
 }
 
 type fakeDockerEngine struct {
@@ -115,6 +119,17 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/_ping":
 		w.Header().Set("API-Version", "1.47")
+	case path == "/info":
+		_ = json.NewEncoder(w).Encode(map[string]any{"NCPU": 8, "MemTotal": int64(8 << 30)})
+	case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/stats"):
+		c := f.find(strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stats"))
+		if c == nil || c.state != "running" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"read": "0001-01-01T00:00:00Z"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"read": "2026-01-02T03:04:05Z", "memory_stats": map[string]any{"usage": c.used},
+		})
 	case path == "/containers/json":
 		all := r.URL.Query().Get("all") == "1" || r.URL.Query().Get("all") == "true"
 		out := []map[string]any{}
@@ -151,6 +166,7 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"Config": map[string]any{"Image": c.image, "Labels": c.labels, "Env": c.env},
 			"State": map[string]any{
 				"Status": c.state, "Running": c.state == "running", "StartedAt": "2026-01-02T03:04:05Z",
+				"OOMKilled": c.oomKilled,
 			},
 			"HostConfig": map[string]any{
 				"NetworkMode": "bridge", "PortBindings": binding(c),
@@ -179,6 +195,19 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.calls = append(f.calls, verb+" "+c.name)
 		if verb == "stop" || verb == "restart" {
 			f.graces = append(f.graces, r.URL.Query().Get("t"))
+		}
+		if verb == "update" {
+			// As the Engine does: a zero is a limit left as it is.
+			var limits struct{ Memory, NanoCpus int64 }
+			_ = json.NewDecoder(r.Body).Decode(&limits)
+			if limits.Memory != 0 {
+				c.memory = limits.Memory
+			}
+			if limits.NanoCpus != 0 {
+				c.nanoCPUs = limits.NanoCpus
+			}
+			_, _ = w.Write([]byte(`{"Warnings":[]}`))
+			return
 		}
 		switch verb {
 		case "start", "restart":
@@ -1565,10 +1594,10 @@ var gatedCapabilities = []string{
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions",
+	"comments", "indexes", "extensions", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
-	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "queryLog", "clickhouseViews", "sqliteFile",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "queryLog", "clickhouseViews", "sqliteFile",
 	// Redis
 	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
 	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
@@ -1580,18 +1609,22 @@ var gatedCapabilities = []string{
 	"orm", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
 	"importReplace", "importCreateTable", "dumpSchemaOnly", "dumpDataOnly", "dumpTables", "dumpCompression",
 	"dumpDatabases", "dumpUpload", "restoreNewDatabase", "copy", "copyStructureOnly",
+	// point-in-time recovery
+	"pitr",
 }
 
 // The flags that are a list of words: empty for an engine without the
 // feature, and never null.
 var listedCapabilities = []string{
 	"catalogGroups", "ddlOperations", "maintenanceActions", "ormTargets", "exportFormats", "importFormats",
+	"alertKinds",
 }
 
 // The flags that are a word where the feature comes in more than one form,
 // and false where the engine has none of them.
 var wordedCapabilities = []string{
 	"rowIdentity", "returnsChangedRow", "readOnlyScope", "importAtomic", "json", "hashFieldTtl", "commandReference",
+	"memoryBuffer",
 }
 
 func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {

@@ -113,6 +113,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"comments":          "sql -sqlite",
 		"indexes":           "sql mongodb",
 		"extensions":        "postgres -cockroachdb mysql -tidb",
+		"pooler":            "postgres -cockroachdb -yugabytedb",
 
 		// watching and maintaining a server
 		"stats":           sqlStats + " mongodb redis",
@@ -130,6 +131,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"privileges":      "postgres -cockroachdb mysql sqlserver clickhouse",
 		"statements":      "postgres -cockroachdb mysql -tidb clickhouse sqlserver oracle",
 		"statementsReset": "postgres -cockroachdb mysql -tidb",
+		"statementsSetup": "postgres -cockroachdb -yugabytedb",
 		"queryLog":        "postgres mysql clickhouse mongodb redis",
 		"clickhouseViews": "clickhouse",
 		"sqliteFile":      "sqlite",
@@ -167,6 +169,8 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"restoreNewDatabase": "postgres mysql sqlserver mongodb redis",
 		"copy":               "postgres mysql sqlserver mongodb redis",
 		"copyStructureOnly":  "postgres mysql sqlserver",
+		// The write-ahead log WAL-G archives.
+		"pitr": "postgres -cockroachdb -yugabytedb",
 	}
 
 	has := func(words string, d Driver, flavor string) bool {
@@ -204,7 +208,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 // engines that have the feature, and false for the rest.
 var wordCapabilities = map[string]bool{
 	"rowIdentity": true, "returnsChangedRow": true, "readOnlyScope": true, "importAtomic": true,
-	"json": true, "hashFieldTtl": true, "commandReference": true,
+	"json": true, "hashFieldTtl": true, "commandReference": true, "memoryBuffer": true,
 }
 
 // The flags that carry a word or a list say what the code they describe does.
@@ -242,6 +246,26 @@ func TestCapabilityWordsAndLists(t *testing.T) {
 		{DriverRedis, FlavorValkey, "commandReference", "docs"},
 		{DriverRedis, FlavorKeyDB, "commandReference", "names"},
 		{DriverPostgres, "", "commandReference", false},
+		// The setting each engine keeps its own memory in, and none for a
+		// fork whose memory is something else's.
+		{DriverPostgres, "", "memoryBuffer", "shared_buffers"},
+		{DriverPostgres, FlavorTimescaleDB, "memoryBuffer", "shared_buffers"},
+		{DriverPostgres, FlavorCockroachDB, "memoryBuffer", false},
+		{DriverPostgres, FlavorYugabyteDB, "memoryBuffer", false},
+		{DriverMySQL, "", "memoryBuffer", "innodb_buffer_pool_size"},
+		{DriverMySQL, FlavorMariaDB, "memoryBuffer", "innodb_buffer_pool_size"},
+		{DriverMySQL, FlavorPercona, "memoryBuffer", "innodb_buffer_pool_size"},
+		{DriverMySQL, FlavorTiDB, "memoryBuffer", false},
+		{DriverRedis, FlavorRedis, "memoryBuffer", "maxmemory"},
+		{DriverRedis, FlavorValkey, "memoryBuffer", "maxmemory"},
+		{DriverRedis, FlavorKeyDB, "memoryBuffer", "maxmemory"},
+		{DriverRedis, FlavorDragonfly, "memoryBuffer", "maxmemory"},
+		{DriverMongo, "", "memoryBuffer", "wiredTigerCacheSizeGB"},
+		{DriverMongo, FlavorFerretDB, "memoryBuffer", false},
+		{DriverClickHouse, "", "memoryBuffer", "max_server_memory_usage"},
+		{DriverMSSQL, "", "memoryBuffer", false},
+		{DriverOracle, "", "memoryBuffer", false},
+		{DriverSQLite, "", "memoryBuffer", false},
 	} {
 		if got := word(c.d, c.flavor, c.flag); got != c.want {
 			t.Errorf("%s/%s: %s = %v, want %v", c.d, c.flavor, c.flag, got, c.want)

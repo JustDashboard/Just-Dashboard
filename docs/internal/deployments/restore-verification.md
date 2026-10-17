@@ -39,7 +39,10 @@ when its application check fails. Gate evidence includes the exact restore-test 
 ## Isolation, persistence and cleanup
 
 Backups pins retention while reading, copies and re-hashes the archive into private staging, and
-extracts without accepting skipped unsafe entries. Verification extraction limits entries to 200,000,
+extracts without accepting skipped unsafe entries. An encrypted archive is copied and re-hashed as it is
+stored and decrypted only while it is extracted, so the workspace never holds a second plaintext copy of
+it; the evidence's artifact digest is the ciphertext's
+([archive encryption](../backend/git-backups-users.md#archive-encryption)). Verification extraction limits entries to 200,000,
 enforces the configured byte limit and reserves 256 MiB of free space before each file. File ownership
 is restored when running as root, so a non-root image can access its own data. Source paths and local
 artifacts continue through the file resolver. Staging must be outside every backup source.
@@ -79,8 +82,11 @@ capture protocol. Other files retain ordinary filesystem capture and its changed
 
 Native dumps of saved PostgreSQL/MySQL/MongoDB/Redis connections are supported through the Databases
 owner and recorded manifests, including jobs with no filesystem source; see
-[deployment backup coverage](backup-coverage.md). Multi-container restore orchestration,
-external-service recovery and PITR remain outside this implementation. Copying live database data
+[deployment backup coverage](backup-coverage.md). Multi-container restore orchestration and
+external-service recovery remain outside this implementation. Point-in-time recovery of a PostgreSQL
+server is not part of it either: it is the database Backups page's own archive of the write-ahead log,
+recovered into a new container, described in
+[Databases → Point-in-time recovery](../backend/databases-proxy-platform.md#point-in-time-recovery). Copying live database data
 directories is not promoted to an application-consistent backup by this feature. Application checker
 coverage and actual production RPO/RTO must be established for each supported workload.
 

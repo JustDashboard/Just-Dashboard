@@ -90,7 +90,7 @@ func TestNoRouteQuotesAConnectionStringsPassword(t *testing.T) {
 				case rest == "/redis/monitor" || rest == "/redis/subscribe":
 					// A WebSocket upgrade cannot be asked through a recorder.
 					continue
-				case rt.method != http.MethodGet && (rest == "/access" || rest == "/power" || rest == "/tls" || rest == "/tls/renew"):
+				case rt.method != http.MethodGet && (rest == "/access" || rest == "/resources" || rest == "/power" || rest == "/tls" || rest == "/tls/renew"):
 					// These act on the machine and not on the connection.
 					continue
 				}
@@ -336,8 +336,13 @@ func dialingRequests(driver dbx.Driver) []dialingRequest {
 		{"POST", "/server/databases", `{"name":"newdb"}`},
 		{"POST", "/server/databases/connect", `{"database":"otherdb"}`},
 		{"POST", "/server/extensions", `{"name":"pg_trgm"}`},
+		{"POST", "/server/extensions?preview=1", `{"name":"pg_trgm","schema":"public","version":"1.6","cascade":true}`},
+		{"PATCH", "/server/extensions/pg_trgm", `{"version":"1.6"}`},
+		{"POST", "/server/preload", `{"library":"pg_cron"}`},
+		{"POST", "/server/preload?preview=1", `{"library":"auto_explain"}`},
 		{"DELETE", "/server/roles/r1", ``},
 		{"DELETE", "/server/extensions/pg_trgm", ``},
+		{"DELETE", "/server/extensions/pg_trgm?cascade=1", ``},
 		{"POST", "/activity/kill", `{"pid":"1"}`},
 		{"POST", "/activity/cancel", `{"pid":"1"}`},
 		{"POST", "/statements/reset", `{}`},
@@ -356,6 +361,7 @@ func dialingRequests(driver dbx.Driver) []dialingRequest {
 		{"GET", "/search?q=x", ``},
 		{"GET", "/object?kind=view&name=v", ``},
 		{"GET", "/server/roles/r1", ``},
+		{"GET", "/server/extensions/pg_trgm", ``},
 		{"GET", "/server/grants?role=r1", ``},
 		{"GET", "/querylog", ``},
 		{"GET", "/querylog?source=table", ``},
