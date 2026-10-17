@@ -511,7 +511,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
     extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
     profiler, a statistics reset.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
-  calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
+  calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
+  the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
+  server. Restoring a backup
   run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
   answer: `handleBackupRestoreDatabase` refuses a protected connection with the same `409`, and the
   adapter behind it (`backupDatabaseDumper.RestoreDatabase`) refuses again whoever calls it.
@@ -584,8 +586,28 @@ it over-reports instead (`SELECT 'delete'` is destructive), which is the directi
 A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
 any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read. What
 replaces rather than adds (`REPLACE INTO`, `… OR REPLACE`), what creates an account, and a PostgreSQL
-function that acts on the server (`pg_terminate_backend`, `lo_export`, `dblink`…) are `high` too: the
+function that acts on the server (`pg_terminate_backend`, `lo_export`, `set_config`…) are `high` too: the
 console must not be a cheaper way to do what the kill and drop routes charge for.
+
+A `SELECT` is not a read when what it calls runs other SQL or acts past the transaction it runs in
+(`callRules`, `dbx/statement_calls.go`). Calls are found in the raw text like the verbs, by exact name or
+prefix, quoted or not. A function handed SQL as text is never a read, whatever it is given: the text can
+be built by concatenation (`'select pg_terminate_'||'backend(…)'`), so nothing that reads the statement
+knows what it runs, and such a function is the only way to put a function's name together from pieces.
+On PostgreSQL that is the `query_to_xml`, `cursor_to_xml` and `table_to_xml` families, `ts_stat`,
+`ts_rewrite`, `crosstab`, `connectby` and `xpath_table` (the last two write their arguments into a query
+unquoted), and anything named `dblink…` or `pg_background…`; on Oracle `DBMS_XMLGEN`, `DBMS_XMLQUERY`,
+`DBMS_XMLSTORE`, `DBMS_SQL` and `EXECUTE IMMEDIATE`. The rest outlive the rollback a read ends in, on a
+pooled connection that the next request is handed (found live: an advisory lock and a `dblink`
+connection are both still there): PostgreSQL's advisory locks, statistics resets (`pg_…_reset…`, not the
+`pg_stat_get_…` that say when one happened), and its replication-origin, slot, WAL-replay and
+`heap_force_…` functions; MySQL's and MariaDB's named locks (`GET_LOCK`, the locking service) and a `:=`
+assignment; a sequence's next value on every engine (`nextval`, `setval`, `NEXT VALUE FOR`, Oracle's
+`.NEXTVAL`), which SQL Server's rolled-back transaction and Oracle's query-only scope do not give back;
+and Oracle's packages that reach outside the database or leave state behind (`UTL_HTTP`, `UTL_INADDR`,
+`HTTPURITYPE`, `DBMS_PIPE`, `DBMS_LOCK`…). Each is `high`, with the call named in its reason. What runs a
+string at the statement level — MySQL's `PREPARE`/`EXECUTE`, a `sys.` procedure through `CALL`, SQL
+Server's `EXEC(@sql)` and `sp_executesql`, an Oracle block — does not lead with a read and was never one.
 
 A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
 verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
