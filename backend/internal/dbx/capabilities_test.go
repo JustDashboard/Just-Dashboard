@@ -112,6 +112,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"comments":          "sql -sqlite",
 		"indexes":           "sql mongodb",
 		"extensions":        "postgres -cockroachdb mysql -tidb",
+		"rowSecurity":       "postgres -cockroachdb",
 
 		// watching and maintaining a server
 		"stats":           sqlStats + " mongodb redis",

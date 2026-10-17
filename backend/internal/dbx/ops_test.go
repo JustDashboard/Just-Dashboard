@@ -153,6 +153,68 @@ func TestPrivilegeStatementsPerEngine(t *testing.T) {
 	}
 }
 
+// EXECUTE on a function and a privilege on some of a table's columns are
+// PostgreSQL's alone, and each is a statement of its own shape.
+func TestFunctionAndColumnPrivilegeStatements(t *testing.T) {
+	args := func(s string) *string { return &s }
+	for _, c := range []struct {
+		name   string
+		change PrivilegeChange
+		want   []string
+	}{
+		{"one function", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "total", Arguments: args("integer, text"), Privileges: []string{"execute"}},
+			[]string{`GRANT EXECUTE ON ROUTINE "billing"."total"(integer, text) TO "app"`}},
+		{"a function by its name alone", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "total", Privileges: []string{"EXECUTE"}, GrantOption: true},
+			[]string{`GRANT EXECUTE ON ROUTINE "billing"."total" TO "app" WITH GRANT OPTION`}},
+		{"a function that takes nothing", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Routine: "now_utc", Arguments: args(""), Privileges: []string{"EXECUTE"}, Revoke: true},
+			[]string{`REVOKE EXECUTE ON ROUTINE "billing"."now_utc"() FROM "app"`}},
+		{"every function and the ones made later", PrivilegeChange{Role: "app", Level: GrantOnFunction, Schema: "billing", Privileges: []string{"EXECUTE"}, Future: true},
+			[]string{`GRANT EXECUTE ON ALL ROUTINES IN SCHEMA "billing" TO "app"`,
+				`ALTER DEFAULT PRIVILEGES IN SCHEMA "billing" GRANT EXECUTE ON FUNCTIONS TO "app"`}},
+		{"columns", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id", "to\"tal"}, Privileges: []string{"select", "UPDATE"}},
+			[]string{`GRANT SELECT ("id", "to""tal"), UPDATE ("id", "to""tal") ON TABLE "billing"."invoices" TO "app"`}},
+		{"every privilege on a column", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id"}, Privileges: []string{"ALL"}, GrantOption: true},
+			[]string{`GRANT ALL PRIVILEGES ("id") ON TABLE "billing"."invoices" TO "app" WITH GRANT OPTION`}},
+		{"taking a column privilege away", PrivilegeChange{Role: "app", Level: GrantOnColumn, Schema: "billing", Table: "invoices", Columns: []string{"id"}, Privileges: []string{"SELECT"}, Revoke: true, GrantOption: true},
+			[]string{`REVOKE GRANT OPTION FOR SELECT ("id") ON TABLE "billing"."invoices" FROM "app"`}},
+	} {
+		got, err := PrivilegeStatements(DriverPostgres, c.change)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, strings.Join(got, "\n"), strings.Join(c.want, "\n"))
+		}
+	}
+	for _, bad := range []PrivilegeChange{
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("integer) TO PUBLIC; DROP TABLE t; --"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("integer))"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("a int /* x */"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Arguments: args("a int, b\\n int"), Privileges: []string{"EXECUTE"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Privileges: []string{"SELECT"}},
+		{Role: "app", Level: GrantOnFunction, Schema: "s", Routine: "f", Privileges: []string{"EXECUTE"}, Future: true},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Privileges: []string{"SELECT"}},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Columns: []string{"a"}, Privileges: []string{"DELETE"}},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Table: "t", Columns: []string{"a"}, Privileges: []string{"SELECT"}, Future: true},
+		{Role: "app", Level: GrantOnColumn, Schema: "s", Columns: []string{"a"}, Privileges: []string{"SELECT"}},
+	} {
+		if got, err := PrivilegeStatements(DriverPostgres, bad); err == nil {
+			t.Errorf("%+v rendered %v", bad, got)
+		} else if _, ok := err.(ErrPrivilegeRequest); !ok {
+			t.Errorf("%+v: %v is not a request refusal", bad, err)
+		}
+	}
+	// No other engine offers either level.
+	for _, driver := range []Driver{DriverMySQL, DriverMSSQL, DriverClickHouse} {
+		for _, level := range PrivilegeLevelsFor(driver) {
+			if level.Level == GrantOnFunction || level.Level == GrantOnColumn {
+				t.Errorf("%s offers the %s level", driver, level.Level)
+			}
+		}
+	}
+}
+
 // The privilege keyword that reaches a statement is the closed set's own.
 // Nothing a request sends becomes SQL: an unknown privilege is refused before
 // any statement is rendered.
