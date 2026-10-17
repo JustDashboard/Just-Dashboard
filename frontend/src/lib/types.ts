@@ -2029,6 +2029,12 @@ export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
   hashFieldTtl: string | false
   /** What `GET /redis/commands` holds: the server's documentation, or names only. */
   commandReference: "docs" | "names" | false
+  /**
+   * The setting the engine keeps its own memory in (`shared_buffers`,
+   * `innodb_buffer_pool_size`, `maxmemory`, …), read beside its container's
+   * memory limit by `GET /{id}/resources`.
+   */
+  memoryBuffer: string | false
 }
 
 /** Any key of the capabilities object: what `engine.can(…)` takes. */
@@ -5902,6 +5908,35 @@ export type DbAccessChange = {
   /** opened, closed, already, none, inactive, read-only or failed. */
   firewall: string
   firewallError?: string
+}
+
+/** What a database's container may use, as GET /databases/{id}/resources reads it. */
+export type DbResources = {
+  container?: string
+  /** The route can change the limits; `refusal` says why it cannot. */
+  editable: boolean
+  refusal?: string
+  running: boolean
+  /** Bytes and cores, zero for no limit. */
+  limits: { memoryBytes: number; cpus: number }
+  /** What it uses now, read while it runs. */
+  usedBytes?: number
+  /** The kernel stopped it, the last time it stopped, for going past its memory limit. */
+  oomKilled?: boolean
+  /** This machine as Docker sees it; zero where Docker did not say. */
+  host: { memoryBytes: number; cpus: number }
+  /** The memory the engine keeps for itself, by its own setting. */
+  buffer?: { setting: string; bytes: number }
+  /** Why the buffer could not be read from a server that runs. */
+  bufferError?: string
+}
+
+/** What PUT /databases/{id}/resources did. */
+export type DbResourcesChange = {
+  limits: { memoryBytes: number; cpus: number }
+  /** A limit was lifted, which replaced the container. */
+  replaced: boolean
+  warnings: string[]
 }
 
 /**
