@@ -197,7 +197,7 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 			add("nft", []string{"delete", "table", "inet", firewallTable}, true, false)
 		}
 	}
-	if !reflect.DeepEqual(old.Forwards, next.Forwards) || !reflect.DeepEqual(old.NAT, next.NAT) || !reflect.DeepEqual(old.Limits, next.Limits) || !reflect.DeepEqual(old.Blocklists, next.Blocklists) || !reflect.DeepEqual(old.Trusted, next.Trusted) || !reflect.DeepEqual(old.TrustedNotes, next.TrustedNotes) || !reflect.DeepEqual(old.Exceptions, next.Exceptions) {
+	if !reflect.DeepEqual(old.Forwards, next.Forwards) || !reflect.DeepEqual(old.NAT, next.NAT) || !reflect.DeepEqual(old.Limits, next.Limits) || !reflect.DeepEqual(old.Blocklists, next.Blocklists) || !reflect.DeepEqual(old.PortAllowlists, next.PortAllowlists) || !reflect.DeepEqual(old.Trusted, next.Trusted) || !reflect.DeepEqual(old.TrustedNotes, next.TrustedNotes) || !reflect.DeepEqual(old.Exceptions, next.Exceptions) {
 		if gatewayEmpty(old) {
 			add("nft", []string{"delete", "table", "inet", gatewayTable}, true, false)
 		} else {

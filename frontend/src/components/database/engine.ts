@@ -1,5 +1,6 @@
 import {
   Archive,
+  Bell,
   ChartActivity,
   CodeBracket,
   FileText,
@@ -70,6 +71,7 @@ export type SectionId =
   | "logs"
   | "access"
   | "backups"
+  | "alerts"
   | "settings"
 
 export type SectionGroupId = "home" | "work" | "schema" | "insights" | "operate"
@@ -218,6 +220,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   server: false,
   provision: false,
   majorUpgrade: false,
+  serverTLS: false,
   inventoryConnect: false,
   hostAccount: false,
   fileBased: false,
@@ -237,6 +240,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   cellRead: false,
   explainJSON: false,
   explainAnalyze: false,
+  indexWhatIf: false,
+  missingIndexes: false,
   ddl: false,
   schemas: false,
   catalog: false,
@@ -249,6 +254,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   comments: false,
   indexes: false,
   extensions: false,
+  pooler: false,
   stats: false,
   sessions: false,
   kill: false,
@@ -264,6 +270,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   privileges: false,
   statements: false,
   statementsReset: false,
+  statementHistory: false,
+  statementsSetup: false,
   queryLog: false,
   clickhouseViews: false,
   sqliteFile: false,
@@ -318,6 +326,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   serverDatabaseConnect: false,
   copy: false,
   copyStructureOnly: false,
+  pitr: false,
+  alertKinds: [],
   catalogGroups: [],
   ddlOperations: [],
   maintenanceActions: [],
@@ -331,6 +341,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   json: false,
   hashFieldTtl: false,
   commandReference: false,
+  memoryBuffer: false,
 }
 
 /**
@@ -359,7 +370,15 @@ const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
 }
 
 function floorOf(driver: DbDriver): Partial<DbCapabilities> {
-  return Object.fromEntries(FLOOR[driver].map((flag) => [flag, true]))
+  const flags = FLOOR[driver]
+  return {
+    ...Object.fromEntries(flags.map((flag) => [flag, true])),
+    // Every engine can be in a backup job, and every server can stop
+    // answering or fill its disk; the rest of the list is the server's.
+    alertKinds: flags.includes("server")
+      ? ["down", "disk", "backup_failed", "backup_missed"]
+      : ["backup_failed", "backup_missed"],
+  }
 }
 
 const TABLES: EngineNouns = {
@@ -722,7 +741,7 @@ type SectionSpec = {
   /** The kinds of engine that have the page at all. */
   kinds: readonly EngineKind[]
   /** A capability the engine must also have. Absent: the kind alone decides. */
-  needs?: DbCapabilityFlag
+  needs?: DbCapabilityName
   workbench?: boolean
   /** What the page is, in the sentence that says an engine has none. */
   thing: string
@@ -827,6 +846,15 @@ const SECTIONS: SectionSpec[] = [
     kinds: OPENED,
     needs: "dump",
     thing: "dumps",
+  },
+  {
+    id: "alerts",
+    group: "operate",
+    title: "Alerts",
+    icon: Bell,
+    kinds: OPENED,
+    needs: "alertKinds",
+    thing: "alerts",
   },
   {
     id: "settings",

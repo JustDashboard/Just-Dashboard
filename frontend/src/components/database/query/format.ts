@@ -1,6 +1,6 @@
 import type { Dialect } from "@/components/database/query/dialect"
 import { RESERVED } from "@/components/database/query/keywords"
-import { tokenize, type Token } from "@/components/database/query/sql-text"
+import { readScript, tokenize, type Token } from "@/components/database/query/sql-text"
 
 /**
  * A statement laid out: one clause to a line, a long list one item to a line,
@@ -81,6 +81,8 @@ function gap(before: Item | undefined, item: Item): boolean {
   const prior = isGroup(before) ? "close" : before.kind
   if (kind === "comma" || kind === "semicolon") return false
   if (kind === "dot" || prior === "dot") return false
+  // A text written against a word is that word's literal: N'…', E'…', x'…', _utf8mb4'…'.
+  if (kind === "text" && prior === "word" && !(item as Leaf).spaced) return false
   if (kind === "open") {
     // A keyword stands off its parenthesis. After a name it is as it was
     // written: `count(*)` is a call and `INSERT INTO t (a, b)` is not, and
@@ -321,8 +323,27 @@ function statement(items: Item[], indent: string): string {
   return lines.join("\n")
 }
 
-/** A text of one or more statements, laid out. An empty text stays empty. */
+/**
+ * A text of one or more statements, laid out. An empty text stays empty.
+ *
+ * A script whose client reads separators of its own — DELIMITER, GO, a `/`
+ * line — or that holds a body of statements keeps every separator and every
+ * body as written, line breaks included, and only its plain statements are
+ * laid out: GO and `/` are separators only on a line of their own, and a
+ * body's layout is its author's.
+ */
 export function formatSql(text: string, dialect: Dialect): string {
+  const script = readScript(text, dialect)
+  if (script.separators || script.spans.some((span) => span.body)) {
+    let out = ""
+    let at = 0
+    for (const span of script.spans) {
+      out += text.slice(at, span.start)
+      out += span.body ? span.text : formatSql(span.text, dialect).replace(/\n$/, "")
+      at = span.end
+    }
+    return out + text.slice(at)
+  }
   const items = parse(text, dialect)
   const statements: Item[][] = [[]]
   let closed = false

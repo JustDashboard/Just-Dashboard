@@ -384,6 +384,9 @@ func (d postgresDialect) byteLength(column Column, quoted string) (string, bool,
 
 func (postgresDialect) explainSQL(_, statement string, opts ExplainOptions) (string, error) {
 	var options []string
+	if opts.Verbose {
+		options = append(options, "VERBOSE")
+	}
 	if opts.Analyze {
 		// BUFFERS is what turns "this was slow" into "this read 40,000 pages".
 		options = append(options, "ANALYZE", "BUFFERS")

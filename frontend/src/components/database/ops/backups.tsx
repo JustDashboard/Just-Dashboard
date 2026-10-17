@@ -25,6 +25,7 @@ import {
 } from "@/components/database/ops/backups-model"
 import { DumpsPicture } from "@/components/database/ops/backups-picture"
 import { DumpFacts, RestoreDump } from "@/components/database/ops/backups-restore"
+import { PointInTimeRecovery } from "@/components/database/ops/pitr"
 import { TakeDump } from "@/components/database/ops/backups-take"
 import type { DbBackupFile, DbBackups } from "@/components/database/ops/backups-types"
 import { UploadDump } from "@/components/database/ops/backups-upload"
@@ -548,6 +549,8 @@ export function Backups() {
           </div>
         )}
       </Panel>
+
+      {engine.can("pitr") && <PointInTimeRecovery jobs={scheduled.data ?? []} />}
 
       {asking?.kind === "take" && data && (
         <TakeDump

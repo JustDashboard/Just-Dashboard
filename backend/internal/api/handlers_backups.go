@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -25,6 +26,8 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 		// jobs already do. Listed here rather than on each module's page so
 		// "what is not backed up" has one answer.
 		r.Method(http.MethodGet, "/resources", s.handle(s.handleBackupResources))
+		// The backup key's public half and what depends on it, never the key.
+		r.Method(http.MethodGet, "/key", s.handle(s.handleBackupKey))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleBackupJobGet))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleBackupRuns))
 		r.Method(http.MethodGet, "/runs/{runID}/contents", s.handle(s.handleBackupContents))
@@ -41,6 +44,12 @@ func (s *Server) mountBackupRoutes(r chi.Router) {
 			// configuration — so taking one off the server is an
 			// administrator's act, not a reader's.
 			r.Method(http.MethodGet, "/runs/{runID}/download", s.handle(s.handleBackupDownload))
+			// The key opens every encrypted archive this server wrote, wherever
+			// they are copied to, and nothing here can take an exported copy
+			// back: an irreversible act, so the destructive budget too.
+			s.destructive(r, func(r chi.Router) {
+				r.Method(http.MethodPost, "/key/export", s.handle(s.handleBackupKeyExport))
+			})
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
@@ -73,6 +82,9 @@ type jobRequest struct {
 	DatabaseDumps          []int64                `json:"databaseDumps,omitempty"`
 	PauseContainers        []string               `json:"pauseContainers,omitempty"`
 	ExpectedRecoveryOutput *string                `json:"expectedRecoveryOutput,omitempty"`
+	// Encrypt is omitted by a caller that predates it: a new job then takes
+	// the default for its destination and an edited one keeps its setting.
+	Encrypt *bool `json:"encrypt,omitempty"`
 }
 
 func (req *jobRequest) toJob() *backups.Job {
@@ -86,8 +98,18 @@ func (req *jobRequest) toJob() *backups.Job {
 		TargetKind: req.TargetKind, Target: req.Target,
 		Schedule: req.Schedule, Retention: req.Retention, RetentionDays: req.RetentionDays, Enabled: req.Enabled,
 		Recovery: req.Recovery, SQLitePaths: req.SQLitePaths, DatabaseDumps: req.DatabaseDumps,
-		PauseContainers: req.PauseContainers,
+		PauseContainers: req.PauseContainers, Encrypt: req.encrypt(),
 	}
+}
+
+func (req *jobRequest) encrypt() bool {
+	if req.Encrypt != nil {
+		return *req.Encrypt
+	}
+	// An archive that leaves the server is encrypted unless the operator says
+	// otherwise. One kept on this server's disk sits beside the key that
+	// would open it, so it is not by default.
+	return req.TargetKind != backups.TargetLocal
 }
 
 func (s *Server) handleBackupVerifyRestore(w http.ResponseWriter, r *http.Request) error {
@@ -119,6 +141,8 @@ func mapBackupError(err error) error {
 		return httpx.Err(http.StatusConflict, "already_running", err.Error())
 	case errors.Is(err, backups.ErrRecoveryUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "unavailable", err.Error())
+	case errors.Is(err, backups.ErrNoArchiveKey), errors.Is(err, backups.ErrArchiveKey):
+		return httpx.Err(http.StatusConflict, "archive_key_unavailable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
@@ -184,7 +208,9 @@ func (s *Server) handleBackupJobEnabled(w http.ResponseWriter, r *http.Request) 
 
 // handleBackupDownload streams one run's verified artifact to the browser.
 // A remote artifact is fetched into private staging first, so the checksum
-// is proven before a byte leaves — the same path a restore takes.
+// is proven before a byte leaves — the same path a restore takes. An
+// encrypted one leaves as the .tar.gz inside it: the administrator taking it
+// off the server wants an archive that opens, and the key stays here.
 func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) error {
 	runID, err := strconv.ParseInt(chi.URLParam(r, "runID"), 10, 64)
 	if err != nil || runID <= 0 {
@@ -192,25 +218,75 @@ func (s *Server) handleBackupDownload(w http.ResponseWriter, r *http.Request) er
 	}
 	ctx, cancel := timeoutCtx(r, 6*time.Hour)
 	defer cancel()
-	run, path, cleanup, err := s.modules.backupRunner.OpenArtifact(ctx, runID)
+	run, archive, cleanup, err := s.modules.backupRunner.OpenArtifact(ctx, runID)
 	if err != nil {
 		return mapBackupError(err)
 	}
 	defer cleanup()
-	f, err := os.Open(path)
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	httpx.SetAudit(r, "backup.download", strconv.FormatInt(runID, 10), map[string]any{"artifact": run.Artifact, "bytes": st.Size()})
+	target := strconv.FormatInt(runID, 10)
 	name := filepath.Base(run.Artifact)
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
-	http.ServeContent(w, r, name, st.ModTime(), f)
+	if !archive.Encrypted() {
+		f, err := os.Open(archive.Path)
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		// A GET passes the audit middleware by, so the entry is written here.
+		s.recordRead(r, "backup.download", target, map[string]any{"artifact": run.Artifact, "bytes": st.Size()}, nil)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+		http.ServeContent(w, r, name, st.ModTime(), f)
+		return nil
+	}
+	plain, err := archive.Open()
+	if err != nil {
+		return mapBackupError(err)
+	}
+	defer plain.Close()
+	size := run.Manifest.Encryption.PlaintextBytes
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": strings.TrimSuffix(name, ".age")}))
+	// The length is how the browser knows a download that stops short of it
+	// is not whole.
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	_, err = io.Copy(w, plain)
+	s.recordRead(r, "backup.download", target, map[string]any{"artifact": run.Artifact, "bytes": size, "decrypted": true}, err)
+	if err != nil {
+		// Too late for an error response: a chunk that fails to authenticate
+		// ends the transfer short of its length instead.
+		panic(http.ErrAbortHandler)
+	}
+	return nil
+}
+
+// handleBackupKey describes the install's backup key: its public half, when
+// it was made and last exported, and how much depends on it.
+func (s *Server) handleBackupKey(w http.ResponseWriter, r *http.Request) error {
+	status, err := s.modules.backupStore.ArchiveKeyStatus(r.Context())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, status)
+	return nil
+}
+
+// handleBackupKeyExport answers with the backup key as an age identity file,
+// for opening archives where this dashboard is not. The audit entry names the
+// key by its public half and never holds the secret one.
+func (s *Server) handleBackupKeyExport(w http.ResponseWriter, r *http.Request) error {
+	recipient, file, err := s.modules.backupStore.ExportArchiveKey(r.Context())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.SetAudit(r, "backup.key.export", recipient, nil)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "just-dashboard-backup-key.txt"}))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(file)
 	return nil
 }
 
@@ -244,7 +320,7 @@ func (s *Server) handleBackupJobCreate(w http.ResponseWriter, r *http.Request) e
 		s.Log.Warn("backup schedule reload failed", "err", err)
 	}
 	httpx.SetAudit(r, "backup.job.create", job.Name,
-		map[string]any{"target": job.TargetKind, "schedule": job.Schedule, "sources": len(job.Sources), "recoveryCheck": job.Recovery != nil, "sqliteSnapshots": len(job.SQLitePaths), "databaseDumps": len(job.DatabaseDumps)})
+		map[string]any{"target": job.TargetKind, "schedule": job.Schedule, "sources": len(job.Sources), "recoveryCheck": job.Recovery != nil, "sqliteSnapshots": len(job.SQLitePaths), "databaseDumps": len(job.DatabaseDumps), "encrypt": job.Encrypt})
 	httpx.JSON(w, http.StatusCreated, job)
 	return nil
 }
@@ -264,7 +340,15 @@ func (s *Server) handleBackupJobUpdate(w http.ResponseWriter, r *http.Request) e
 	if err := backups.ValidateSchedule(req.Schedule); err != nil {
 		return httpx.BadRequest("schedule is not a valid cron expression: %v", err)
 	}
-	job, err := s.modules.backupStore.Update(r.Context(), id, req.toJob(), req.Secrets)
+	update := req.toJob()
+	if req.Encrypt == nil {
+		current, err := s.modules.backupStore.Get(r.Context(), id)
+		if err != nil {
+			return mapBackupError(err)
+		}
+		update.Encrypt = current.Encrypt
+	}
+	job, err := s.modules.backupStore.Update(r.Context(), id, update, req.Secrets)
 	if err != nil {
 		return mapBackupError(err)
 	}
@@ -272,7 +356,7 @@ func (s *Server) handleBackupJobUpdate(w http.ResponseWriter, r *http.Request) e
 		s.Log.Warn("backup schedule reload failed", "err", err)
 	}
 	httpx.SetAudit(r, "backup.job.update", job.Name,
-		map[string]any{"target": job.TargetKind, "schedule": job.Schedule, "enabled": job.Enabled, "recoveryCheck": job.Recovery != nil, "sqliteSnapshots": len(job.SQLitePaths), "databaseDumps": len(job.DatabaseDumps)})
+		map[string]any{"target": job.TargetKind, "schedule": job.Schedule, "enabled": job.Enabled, "recoveryCheck": job.Recovery != nil, "sqliteSnapshots": len(job.SQLitePaths), "databaseDumps": len(job.DatabaseDumps), "encrypt": job.Encrypt})
 	httpx.JSON(w, http.StatusOK, job)
 	return nil
 }

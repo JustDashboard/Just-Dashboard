@@ -74,7 +74,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
 - **SQL statements.** `POST /databases/{id}/query`, `…/script` and an analysed `…/explain` classify
   their SQL by the rules of the connection's own engine (`dbx.ParseScript`, which gives every
   statement its `Risk`) and ask for what the verdict requires (`authoriseSQL`); a script is judged by
-  its worst statement, and a statement the lexer cannot read with certainty is destructive.
+  its worst statement, and a statement the lexer cannot read with certainty is destructive. Where a
+  statement ends is the engine's reading too — a stored program's body or a block is one statement,
+  cut at its client's separators (`DELIMITER`, `GO`, a `/` line) — and one that holds statements of
+  its own is at least destructive whatever word leads it.
   `POST …/export/query` takes only a statement that classifies as a read.
 - **Rows.** `POST …/changes` classifies nothing: its handler counts the operations the set holds and
   asks for `destructive`, and spends `destrLim`, when one of them is a delete. A dry run, which
@@ -83,6 +86,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   `destructive` on top of it when the plan changes a column's type, which rewrites the column, or
   when the operator's own SQL in it (a CHECK condition, an index predicate, a USING conversion, a
   function default) calls anything `dbx` does not vouch for — for a preview as much as for a run.
+  The routes that store code (`POST …/ddl/routine` and `…/ddl/trigger`: a function, a procedure or a
+  trigger) ask for `destructive` on every request, whatever the body says, because the SQL console
+  classifies the same `CREATE` as high risk; they sit at `service.control` only so a form can ask for
+  its statement as it is filled in, and a run spends `destrLim`. Their drops are in `s.destructive`.
 - **Maintenance.** `POST …/maintenance` is `service.control` and names its action in the body. An
   action that locks a table against the application while it runs, or can lose rows (`vacuum_full`,
   `reindex`, MySQL `optimize` and `repair`, SQLite `vacuum`, SQL Server `rebuild`), asks for
@@ -94,6 +101,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   `system.admin` when its target is a database to be created.
 - **Power.** `POST …/power` starts, stops or restarts by its body, so it asks for `destructive` and
   spends `destrLim` by hand for `stop` and `restart`.
+- **Resources.** `PUT …/resources` is `system.admin`. A new or changed limit is applied in place; a
+  limit the body lifts (`memoryMb` or `cpus` of zero where the container has one) replaces the
+  container, so the handler asks for `destructive` and spends `destrLim` by hand once it has read the
+  container's limits (`planDBLimits`).
 - **Accounts.** The role routes check content too: an alter is refused for an attribute the engine
   cannot change (`dbx.CheckRoleRequest`), and for locking out or demoting the account the connection
   itself signs in with.
@@ -294,8 +305,8 @@ neighbouring connection on the same server that would reset the account it signs
 replace or drop the database it is on.
 
 The rule guards the dashboard's own controls and is exactly as strong as the classification: a
-`SELECT` that calls a function which writes is a read to anything that judges a statement by its
-text. An operator who needs the engine itself to refuse writes gives the connection an account that
+`SELECT` that calls a function of the operator's own which writes is a read to anything that judges
+a statement by its text. An operator who needs the engine itself to refuse writes gives the connection an account that
 cannot make them. The per-route answers, the neighbour rule and what it does not follow are in
 [Databases](../backend/databases-proxy-platform.md#protected-connections).
 

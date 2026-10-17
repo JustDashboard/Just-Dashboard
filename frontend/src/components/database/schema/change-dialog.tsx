@@ -90,6 +90,7 @@ export function PlannedStatement({
             )}
           </div>
         )}
+        {answer?.note && <FormNote>{answer.note}</FormNote>}
         {answer?.calls && answer.calls.length > 0 && (
           <FormNote tone="warning">
             This statement also runs {answer.calls.map((name) => `${name}()`).join(", ")} for every

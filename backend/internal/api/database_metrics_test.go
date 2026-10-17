@@ -186,7 +186,7 @@ func TestDatabaseMetricsRedisRespectsCollectionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	s.recordDatabaseMetric(ctx, rec)
+	s.recordDatabaseMetric(ctx, rec, nil)
 	if elapsed := time.Since(started); elapsed > 750*time.Millisecond {
 		t.Fatalf("a slow Redis reply outlived the collection deadline: %s", elapsed)
 	}

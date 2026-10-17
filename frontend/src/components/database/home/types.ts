@@ -228,6 +228,9 @@ export type DbStatements = {
     sql?: string
     available: boolean
     preloaded: boolean
+    configured?: boolean
+    preload?: string
+    blocked?: string
     note?: string
   }
 }

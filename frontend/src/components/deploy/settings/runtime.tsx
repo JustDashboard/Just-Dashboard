@@ -3,13 +3,11 @@
 import { useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
-import { ApiError, get, refusedIndex } from "@/lib/api"
+import { ApiError, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
 import type {
-  ContainerHistory,
   DeploymentBuildMethod,
   DeploymentConfiguration,
   DeploymentEnvironmentConfiguration,
@@ -18,7 +16,6 @@ import type {
 } from "@/lib/types"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Meter, utilisationTone } from "@/components/meter"
 import { ProductGlyph, imageProduct, portProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -49,6 +46,11 @@ import {
   SettingsPage,
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
+import {
+  LimitField,
+  useContainerPeaks,
+  type ContainerPeaks,
+} from "@/components/deploy/settings/limit-field"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
@@ -225,44 +227,14 @@ function blueGreenRefusal(
 }
 
 /** The live release's container over the last hour: its peaks, for the limits drawn against them. */
-type Usage =
-  | { state: "none" | "loading" }
-  | { state: "ready"; memory: number; cpus: number; processes: number }
+type Usage = ContainerPeaks
 
-/**
- * One hour of the live release's history, polled each minute for the whole
- * page: the same recorded history the Overview's usage tiles read, reduced to
- * the three peaks the limits are set against. A poll that fails after one
- * landed keeps the peaks it has, rather than dropping every meter on the page
- * and raising them again a minute later.
- */
+/** The live release's peaks, for the whole page. */
 function useLiveUsage(): Usage {
   const { runtime } = useProject().detail
   const services = runtime?.status === "available" ? runtime.services : []
   const live = services.find((service) => service.liveRelease) ?? services[0]
-  const containerId = live?.containerId
-  const history = usePoll(
-    (signal) =>
-      get<ContainerHistory>(
-        `/docker/containers/${encodeURIComponent(containerId ?? "")}/stats/history`,
-        { points: 60 },
-        signal,
-      ),
-    60000,
-    [containerId],
-    { enabled: Boolean(containerId) },
-  )
-  if (!containerId || (history.error && !history.data)) return { state: "none" }
-  if (!history.data) return { state: "loading" }
-  const points = history.data.points
-  if (points.length === 0) return { state: "none" }
-  return {
-    state: "ready",
-    memory: Math.max(...points.map((point) => point.memBytesPeak)),
-    // Docker's CPU percentage counts one core as 100.
-    cpus: Math.max(0, ...points.map((point) => point.cpuPeak ?? 0)) / 100,
-    processes: Math.max(...points.map((point) => point.pids)),
-  }
+  return useContainerPeaks(live?.containerId)
 }
 
 export function RuntimeSettings({
@@ -960,83 +932,6 @@ function RuntimeForm({
         </Disclosure>
       </SettingSection>
     </SettingForm>
-  )
-}
-
-/**
- * A limit, and — while the live release has an hour of history — how close
- * that release came to it: a meter of its peak against the limit being typed,
- * so a limit set below what the application already uses is seen before it
- * is saved rather than found in an out-of-memory kill.
- */
-function LimitField({
-  id,
-  label,
-  unit,
-  step,
-  value,
-  peak,
-  peakLabel,
-  info,
-  error,
-  disabled,
-  onChange,
-}: {
-  id: string
-  label: string
-  unit: string
-  step: number
-  value: number
-  peak?: number
-  peakLabel: (peak: number) => string
-  info: string
-  error?: string
-  disabled: boolean
-  onChange: (value: number) => void
-}) {
-  const pct = peak !== undefined && value > 0 ? (peak / value) * 100 : undefined
-  // Keyed on which line it is rather than on its text, so "no limit" rises as
-  // the field is cleared and a peak rises when its hour lands, but a figure
-  // that only moves is not re-announced.
-  const hint =
-    peak !== undefined ? (
-      <span key="peak" className="block animate-rise">
-        peak {peakLabel(peak)} in the last hour
-      </span>
-    ) : value === 0 ? (
-      <span key="unlimited" className="block animate-rise">
-        no limit
-      </span>
-    ) : undefined
-  return (
-    <Field label={label} htmlFor={id} info={info} hint={hint} error={error}>
-      <InputGroup>
-        <InputGroupInput
-          id={id}
-          type="number"
-          min={0}
-          step={step}
-          value={value}
-          readOnly={disabled}
-          aria-invalid={Boolean(error)}
-          className="font-mono"
-          onChange={(event) => onChange(Math.max(0, Number(event.target.value)))}
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupText>{unit}</InputGroupText>
-        </InputGroupAddon>
-      </InputGroup>
-      {pct !== undefined && (
-        <Meter
-          value={pct}
-          tone={utilisationTone(pct)}
-          size="thin"
-          // Named for the peak, not the limit, so the field keeps the label to itself.
-          label={`${label.replace(/ limit$/, "")} peak in the last hour`}
-          className="animate-rise"
-        />
-      )}
-    </Field>
   )
 }
 
