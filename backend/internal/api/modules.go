@@ -84,8 +84,10 @@ type moduleSet struct {
 	// from it.
 	requests *accesslog.Store
 	// trafficAlerts watches the request record for the rules operators set,
-	// and tells the notification channels when one crosses its line.
+	// and tells the notification channels when one crosses its line;
+	// dbAlerts does the same for the databases' readings and their backups.
 	trafficAlerts *deploy.TrafficAlertEvaluator
+	dbAlerts      *dbAlerts
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
@@ -363,6 +365,7 @@ func (s *Server) initModules() {
 			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
 		},
 		s.trafficAlertNames, s.Log)
+	s.modules.dbAlerts = s.newDBAlerts()
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)

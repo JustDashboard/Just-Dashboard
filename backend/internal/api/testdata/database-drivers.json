@@ -3,6 +3,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -238,6 +246,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -429,6 +445,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -620,6 +644,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -805,6 +835,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1003,6 +1041,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -1230,6 +1276,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1412,6 +1466,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1596,6 +1658,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1778,6 +1848,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -1962,6 +2038,10 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -2168,6 +2248,10 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2353,6 +2437,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -2580,6 +2671,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2765,6 +2863,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -2957,6 +3062,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": false,
@@ -3162,6 +3274,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -3333,6 +3452,13 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -3549,6 +3675,13 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -3736,6 +3869,14 @@
     "capabilities": {
       "aclRules": false,
       "aggregation": true,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": false,
       "bulkKeys": false,
       "cancel": true,
@@ -3868,6 +4009,14 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": true,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": true,
@@ -3999,6 +4148,12 @@
         "capabilities": {
           "aclRules": false,
           "aggregation": true,
+          "alertKinds": [
+            "down",
+            "disk",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": false,
           "cancel": false,
@@ -4137,6 +4292,14 @@
     "capabilities": {
       "aclRules": true,
       "aggregation": false,
+      "alertKinds": [
+        "down",
+        "disk",
+        "connections",
+        "replication",
+        "backup_failed",
+        "backup_missed"
+      ],
       "aofRewrite": true,
       "bulkKeys": true,
       "cancel": false,
@@ -4261,6 +4424,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4384,6 +4555,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4507,6 +4686,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": true,
           "bulkKeys": true,
           "cancel": false,
@@ -4630,6 +4817,14 @@
         "capabilities": {
           "aclRules": true,
           "aggregation": false,
+          "alertKinds": [
+            "down",
+            "disk",
+            "connections",
+            "replication",
+            "backup_failed",
+            "backup_missed"
+          ],
           "aofRewrite": false,
           "bulkKeys": true,
           "cancel": false,

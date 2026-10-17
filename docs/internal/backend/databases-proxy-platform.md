@@ -57,10 +57,10 @@ depend on what a request carries are stated once in
   answer from the interfaces their dialects implement (`OpsCapabilities`, `ExplainForms`) and Redis and
   MongoDB are named beside them; the ones that belong to one surface are registered beside its code from
   an `init` (`RegisterCapabilities`, in `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`,
-  `redis_`, `mongo_`, `transfer_` and `orm_capabilities.go`). A registration replaces a row of the same
+  `redis_`, `mongo_`, `transfer_`, `orm_` and `alert_capabilities.go`). A registration replaces a row of the same
   name for every engine, so a flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses
   one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
-  `ormTargets`, `exportFormats`, `importFormats`; empty and never null) or a word where a feature comes
+  `ormTargets`, `exportFormats`, `importFormats`, `alertKinds`; empty and never null) or a word where a feature comes
   in more than one form and `false` where the engine has none (`rowIdentity`, `returnsChangedRow`,
   `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`). Two names that look alike
   are two features: `cancel` stops what another session is running (`/activity/cancel`, `/mongo/killop`),
@@ -952,7 +952,9 @@ stays editable on a protected connection.
   engine outage. Home offers 1h, 6h, 24h and 7d ranges and derives rates from stored totals; negative
   counter deltas and recording gaps longer than 90 seconds are never drawn as continuous rates.
   History begins when this version of the dashboard starts; past activity cannot be reconstructed
-  from engine totals.
+  from engine totals. Each pass ends by handing what it read to the
+  [alerts](#alerts-told-when-a-server-or-its-backups-go-wrong), which have it read a server's disk
+  and replication as well only while a rule watches that server for them.
 
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
@@ -1307,6 +1309,79 @@ stays editable on a protected connection.
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
   `/activity`, and unlike `/statements`, it returns statement text with its literals at read capability.
+
+### Alerts: told when a server or its backups go wrong
+
+A database's **Alerts** page (`/databases/{id}/alerts`, in the rail under Operate) holds rules that
+tell the deployments' notification channels — webhook, Discord, Slack, Telegram and e-mail, through
+`deploy.AutomationStore.DeliverNotification`, so a channel is configured once on
+`/deploy/notifications` and nowhere else — when something is wrong with a database, and when it is
+over. There is no second delivery system and no second poll: the server kinds are judged on the
+recorder's own thirty-second pass (`api/database_metrics.go` hands `dbAlerts.Evaluate` what it read),
+and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
+
+- **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
+  database of an engine can be watched for, and the create route refuses a rule for one database
+  whose engine lacks the kind. A server can be `down` (it did not answer the recorder; a SQL pool
+  whose snapshot was refused is pinged to tell a refusal from a server that went away), fill its
+  `disk`, run near its `connections` limit (the snapshot's sessions against `max_connections` less
+  the superuser reserve, Redis `connected_clients` against `maxclients` — now recorded with the
+  counters — and MongoDB `current` against `current + available`), and fall behind in
+  `replication`; every engine, SQLite included, can have a backup job that failed
+  (`backup_failed`: the job's newest finished run failed) or was missed (`backup_missed`: a scheduled,
+  enabled job has had no successful run since the time its schedule was next due after its last
+  success — `backups.NextScheduled`, in the zone the scheduler fires in — plus the rule's grace, and
+  no run is in flight). Connections are not offered on CockroachDB, TiDB or FerretDB, whose
+  snapshots count none; replication is offered exactly where the replication view is.
+- **What is read, and only when a rule needs it.** The recorder reads disk and replication only
+  for a server an enabled rule watches for them. Replication (`dbx.ReadReplicationLag`,
+  `MongoReplicationLag`, `RedisReplicationLag`) is the worst lag a server can see: a PostgreSQL
+  standby's replay delay, counted as nothing once it has replayed all it received (an idle primary
+  is not lag), or a primary's `replay_lag`; a MySQL or MariaDB replica's `Seconds_Behind_Source`, a
+  stopped thread being a stop without the engine's error, which quotes rows; every secondary of a
+  MongoDB set against its primary, a member not answering or no primary being a stop; a Redis
+  replica's seconds since it heard from its primary, or a primary's slowest replica. A MySQL primary
+  cannot see its replicas' lag and says so rather than reading zero. The disk is the engine's own
+  answer where it gives one, which also covers a server on another machine (ClickHouse
+  `system.disks`, SQL Server `sys.dm_os_volume_stats`, MongoDB `dbStats`' `fsUsedSize` and
+  `fsTotalSize`); otherwise the server is placed the way its summary places it — a container's mount
+  under the data directory the engine names (`data_directory`, `@@datadir`, Redis `CONFIG GET dir`)
+  or under its image's usual one (`dbx.DataDirHints`), Docker's own disk when no mount holds it; a
+  server on this machine's data directory, else the root disk — and that filesystem measured through
+  `/host` as `df` would (`statDisk`). A server elsewhere that does not report its disk is not judged,
+  and says why. The place is kept five minutes per connection and DSN.
+- **Hold, hysteresis and cooldown** (`stepDBAlert`, one pure function). A server reading must be
+  over the line on two passes in a row and for the rule's minutes before it fires; it recovers once
+  it has been under a clearing line — five points under a percentage, a fifth under a lag — on two
+  passes, and between the line and the clearing line it stays firing. A backup run is a fact, so one
+  reading fires it and one recovers it. The cooldown keeps a subject that fires again soon after its
+  last message from being told again until the cooldown has passed, and tells it then if it is still
+  firing; a recovery whose firing was kept back is not told either, and a rule may tell firings only
+  (`notifyRecovery`). A reading that could not be taken — the server down, the disk unreadable, the
+  pass out of time — keeps the subject where it was rather than recovering it. A subject the rule no
+  longer reaches (a job that stopped dumping the database) leaves, told it is over if it was firing.
+- **State is the store's.** `db_alert_rules` (a `connection_id` of NULL watches every database),
+  `db_alert_state` (one row per rule and subject: a database, or `job:<id>`) and `db_alert_events`
+  (the newest thousand, with how many channels were told and what was kept back and why) are new
+  tables; rules and events of a forgotten connection go with it. A rule's `revision` moves on every
+  edit and a pass writes a subject only while the revision it read still holds, so an edit made while
+  a pass was deciding is never overwritten and nothing decided on its old terms is told. An edit to
+  the kind, the line, the minutes or the database, or a pause, starts the rule over; its channels,
+  cooldown and recovery setting do not.
+- **The messages.** `database.alert.firing` and `database.alert.recovered` carry a `database` block
+  in the webhook envelope (rule, kind, connection or job, label, the reading in words with its line,
+  since when, `test`), and the providers render it as "Database disk filling up — shop" with the
+  reading as the summary; the link opens the database's Alerts page, or its Backups page (the
+  server's, for a rule over every database) for a backup kind. A test sends the rule's message,
+  marked `[test]`, to its channels and counts the delivered, failed and paused ones. The reading of a
+  server that is down is the driver's error with the connection's secrets scrubbed (`connectError`).
+- **Who may.** Reading the rules, their subjects and their events is the read surface, as the
+  database's other readings are; creating a rule and sending its test need `system.admin`, and
+  editing (which is also how a rule is paused) and removing one sit in `s.destructive` as well, as
+  the proxy's alert rules do, because both stop somebody being told. Every mutation is audited as
+  `database.alert.create`, `.update`, `.delete` or `.test`, with the rule's terms and never a reading.
+  The routes are not under `/{id}`: a rule can watch every database, and one rule for one database
+  is the dashboard's own state, which a protected connection does not refuse.
 
 ### Redis
 
@@ -1776,6 +1851,16 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/sync` | `system.admin` | — | `database.connection.sync` | — |
 | `POST` | `/databases/test` | `system.admin` | — | — | — |
 | `GET` | `/databases/topology` | read | — | — | — |
+
+**Alerts** (5)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/alerts?connection=` | read | — | — | — |
+| `POST` | `/databases/alerts/rules` | `system.admin` | — | `database.alert.create` | — |
+| `PUT` | `/databases/alerts/rules/{rule}` | `system.admin` + `destructive` | yes | `database.alert.update` | — |
+| `DELETE` | `/databases/alerts/rules/{rule}` | `system.admin` + `destructive` | yes | `database.alert.delete` | — |
+| `POST` | `/databases/alerts/rules/{rule}/test` | `system.admin` | — | `database.alert.test` | — |
 
 **One connection** (14)
 

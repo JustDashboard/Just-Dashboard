@@ -93,6 +93,9 @@ var (
 	redisEngines  = On(string(DriverRedis))
 	mongoEngines  = On(string(DriverMongo))
 	mongoDBProper = On(string(DriverMongo)).Except(FlavorFerretDB)
+	// replicationEngines are the products whose place in a replication
+	// topology is read: the replication view, and the alert on its lag.
+	replicationEngines = anyOf(opsFlag("replication"), redisEngines, mongoDBProper)
 )
 
 // capabilityTable is the reading the driver catalogue serves. It holds the
@@ -136,7 +139,7 @@ var capabilityTable = []Capability{
 	// The server's parameters, and changing one where the engine keeps it.
 	{"settings", everyEngine},
 	{"settingsWrite", anyOf(opsFlag("settingsWrite"), redisEngines)},
-	{"replication", anyOf(opsFlag("replication"), redisEngines, mongoDBProper)},
+	{"replication", replicationEngines},
 	// A plan as a tree, and a plan measured by running the statement.
 	{"explainJSON", anyOf(explainForm(false), mongoDBProper)},
 	{"explainAnalyze", anyOf(explainForm(true), mongoDBProper)},

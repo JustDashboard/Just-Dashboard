@@ -1833,6 +1833,14 @@ export type DbFlavor =
   | "azure-sql-edge"
 
 /**
+ * What a database can be watched for: its server not answering, its disk,
+ * its connections against its limit, its replication, and the backup jobs
+ * that dump it failing or missing their time (`dbx.AlertKinds`).
+ */
+export type DbAlertKind =
+  "down" | "disk" | "connections" | "replication" | "backup_failed" | "backup_missed"
+
+/**
  * The capability flags that are a yes or a no, as `GET /databases/drivers`
  * serves them for every driver and every flavour (`dbx.Capabilities`; the
  * server's tests pin who has which). A flag says the feature exists for the
@@ -2007,6 +2015,8 @@ export type DbImportFormat = "csv" | "tsv" | "json" | "ndjson"
  * form and `false` where the engine has none of them.
  */
 export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
+  /** What a database of this engine can be watched for (`/databases/alerts`). */
+  alertKinds: DbAlertKind[]
   catalogGroups: DbCatalogGroup[]
   ddlOperations: DbDdlOperation[]
   /** The ids `POST /maintenance` takes; `GET /maintenance` describes them. */

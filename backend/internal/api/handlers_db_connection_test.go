@@ -1586,6 +1586,7 @@ var gatedCapabilities = []string{
 // feature, and never null.
 var listedCapabilities = []string{
 	"catalogGroups", "ddlOperations", "maintenanceActions", "ormTargets", "exportFormats", "importFormats",
+	"alertKinds",
 }
 
 // The flags that are a word where the feature comes in more than one form,
