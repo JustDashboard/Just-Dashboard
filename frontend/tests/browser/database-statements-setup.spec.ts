@@ -21,7 +21,10 @@ import { mockFleet } from "./database-fleet-fixture"
 const expect = baseExpect.configure({ timeout: 15_000 })
 test.describe.configure({ timeout: 60_000 })
 
-const NOW = "2026-10-17T09:00:00Z"
+// The page reads "since" against the browser's own clock, so the readings are
+// taken from it rather than from a date that is in the future on some runs.
+const NOW = new Date().toISOString()
+const MINUTES_AGO = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
 type Reply = { status: number; body: unknown }
 const refused = (message: string, status = 400, code = "bad_request"): Reply => ({
@@ -49,12 +52,12 @@ const notCounting = (enable: Record<string, unknown>) => ({
 const UNLOADED = notCounting({
   configured: false,
   preload: PRELOAD,
-  note: "Add pg_stat_statements to shared_preload_libraries and restart the server first; the extension only records once it is loaded at start.",
+  note: "Statement statistics need pg_stat_statements loaded when the server starts. Turning them on takes one restart.",
 })
 /** Stored, and the server has not restarted since. */
 const CONFIGURED = notCounting({
   configured: true,
-  note: "pg_stat_statements is in shared_preload_libraries and is loaded when the server next starts; restart it, then create the extension.",
+  note: "pg_stat_statements is set to load the next time the server starts; the statistics begin once it has restarted.",
 })
 /** Loaded: one statement is what is left. */
 const LOADED = notCounting({
@@ -83,13 +86,12 @@ const statement = (id: string, query: string, share: number, calls: number, mean
   hitRatio: 0.99,
   share,
 })
-/** A few minutes later, for the picture of the view it ends on. */
+/** Three quarters of an hour later, for the picture of the view it ends on. */
 const COUNTED = {
   supported: true,
   sort: "total",
   resettable: true,
   totalMs: 9_400,
-  since: NOW,
   statements: [
     statement(
       "1",
@@ -251,6 +253,22 @@ async function visit(page: Page, path: string) {
 }
 
 const STATEMENTS_VIEW = "/databases/1/performance?view=statements"
+
+/**
+ * Waits for everything on the page that ends to have ended — a dialog fading
+ * in, its backdrop, a row rising into place — so a picture is not taken
+ * through a half-drawn dialog. A sweep that runs for as long as its step does
+ * never ends, and is not waited for.
+ */
+const still = (page: Page) =>
+  page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  )
 const region = (page: Page, name: string) => page.getByRole("region", { name, exact: true })
 const setup = (page: Page) => page.getByRole("dialog", { name: "Turn on statement statistics" })
 const stage = (page: Page, name: string) =>
@@ -267,7 +285,7 @@ test("a server that never loaded the module is set up in three steps, each one a
 
   const statements = region(page, "Statements")
   await expect(statements).toContainText("This server is not counting its statements")
-  await expect(statements).toContainText("Add pg_stat_statements to shared_preload_libraries")
+  await expect(statements).toContainText("Turning them on takes one restart.")
   await statements.getByRole("button", { name: "Turn on statement statistics" }).click()
 
   // The plan, and the one statement the first step runs, before anything runs.
@@ -310,7 +328,7 @@ test("a setup left before the restart resumes at the restart, and Not now change
   await visit(page, STATEMENTS_VIEW)
 
   const statements = region(page, "Statements")
-  await expect(statements).toContainText("is loaded when the server next starts")
+  await expect(statements).toContainText("set to load the next time the server starts")
   await statements.getByRole("button", { name: "Turn on statement statistics" }).click()
   const dialog = setup(page)
   await expect(stage(page, "Load the module at start")).toContainText("Done")
@@ -416,7 +434,7 @@ for (const [who, options] of [
     const ops = await mockSetup(page, { "GET 1/statements": UNLOADED }, options)
     await visit(page, STATEMENTS_VIEW)
     const statements = region(page, "Statements")
-    await expect(statements).toContainText("Add pg_stat_statements to shared_preload_libraries")
+    await expect(statements).toContainText("Turning them on takes one restart.")
     await expect(
       statements.getByRole("button", { name: "Turn on statement statistics" }),
     ).toHaveCount(0)
@@ -531,14 +549,17 @@ test("the states of the setup, for the record @shots", async ({ page }) => {
   await statements.getByRole("button", { name: "Turn on statement statistics" }).click()
   const dialog = setup(page)
   await expect(dialog).toContainText(PRELOAD)
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-preload-1440.png` })
 
   await dialog.getByRole("button", { name: "Add pg_stat_statements" }).click()
   await expect(dialog.getByRole("button", { name: "Restart and turn on" })).toBeVisible()
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-restart-1440.png` })
 
   await dialog.getByRole("button", { name: "Restart and turn on" }).click()
   await expect(dialog.getByRole("status")).toContainText("Restarting shop")
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-restarting-1440.png` })
   release()
   await expect(dialog).toHaveCount(0)
@@ -546,9 +567,11 @@ test("the states of the setup, for the record @shots", async ({ page }) => {
 
   // A few minutes on, the list it opens on.
   await page.unrouteAll({ behavior: "ignoreErrors" })
-  await mockSetup(page, { "GET 1/statements": COUNTED })
+  await mockSetup(page, { "GET 1/statements": () => ({ ...COUNTED, since: MINUTES_AGO(47) }) })
   await visit(page, STATEMENTS_VIEW)
   await expect(statements).toContainText("SELECT * FROM orders WHERE customer_id = $1")
+  await expect(statements).toContainText("since 47m")
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-done-1440.png` })
 
   // A server the dashboard cannot restart.
@@ -558,7 +581,19 @@ test("the states of the setup, for the record @shots", async ({ page }) => {
   await visit(page, STATEMENTS_VIEW)
   await statements.getByRole("button", { name: "Turn on statement statistics" }).click()
   await expect(dialog.getByText("The restart is yours to do")).toBeVisible()
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-elsewhere-1440.png` })
+
+  // The same way in, from the database's home.
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  server = serverThatSetsUp()
+  await mockSetup(page, server.answers)
+  await visit(page, "/databases/1")
+  const busiest = region(page, "Busiest statements")
+  await expect(busiest.getByRole("button", { name: "Turn on statement statistics" })).toBeVisible()
+  await busiest.scrollIntoViewIfNeeded()
+  await still(page)
+  await busiest.screenshot({ path: `${shots}/home-entry-1440.png` })
 
   // The add flow's PostgreSQL settings, with slow plans chosen.
   await page.unrouteAll({ behavior: "ignoreErrors" })
@@ -568,6 +603,9 @@ test("the states of the setup, for the record @shots", async ({ page }) => {
   const panel = page.locator("[data-slot=flow-panel]")
   await panel.getByRole("switch", { name: /plan of every statement/ }).click()
   await expect(panel.getByRole("switch", { name: /plan of every statement/ })).toBeChecked()
+  // The note under the options is the last thing in the panel's scroll.
+  await panel.getByText("It counts its statements from the first start").scrollIntoViewIfNeeded()
+  await still(page)
   await page.screenshot({ path: `${shots}/create-postgres-1440.png` })
 
   // The plan on a phone.
@@ -578,5 +616,6 @@ test("the states of the setup, for the record @shots", async ({ page }) => {
   await visit(page, STATEMENTS_VIEW)
   await statements.getByRole("button", { name: "Turn on statement statistics" }).click()
   await expect(dialog).toContainText(PRELOAD)
+  await still(page)
   await page.screenshot({ path: `${shots}/setup-preload-390.png` })
 })
