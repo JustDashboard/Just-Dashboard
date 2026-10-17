@@ -6,7 +6,7 @@ import type { DbTLS } from "@/lib/types"
  */
 
 /** A change the section can make. */
-export type TLSChange = "on" | "allow" | "require" | "off"
+export type TLSChange = "on" | "allow" | "require" | "off" | "renew"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -121,6 +121,15 @@ export function changeEffects(
         lead: restart,
         cautions: ["Clients may connect without TLS again."],
       }
+    case "renew":
+      return {
+        title: `Renew the certificate of ${engine}`,
+        confirm: "Renew",
+        lead: `Issues a new certificate, writes it under the running ${container} and asks the engine to read it. No session is dropped.`,
+        cautions: [
+          "If the engine cannot read it while running, the container is restarted, which drops every open session.",
+        ],
+      }
     case "off":
       return {
         title: `Turn off TLS for ${engine}`,
@@ -142,6 +151,26 @@ export function changedWords(change: TLSChange, name: string): string {
       return `${name} accepts plain text again`
     case "off":
       return `${name} no longer speaks TLS`
+    case "renew":
+      return `${name} has a new certificate`
+  }
+}
+
+/**
+ * What a linked application is given, in a sentence. Its traffic stays on this
+ * server's internal network either way; what it cannot do without a copy of the
+ * authority is check the certificate.
+ */
+export function applicationsWords(applications: DbTLS["applications"]): string | undefined {
+  switch (applications) {
+    case "plain":
+      return "Linked applications are given the connection string they had before TLS, and still connect without it."
+    case "unverified":
+      return "Linked applications are given a connection string that uses TLS and does not check the certificate. Give them the CA certificate to have them check it."
+    case "needsCA":
+      return "A Redis URL has no setting to skip the check, so linked applications need the CA certificate to connect."
+    default:
+      return undefined
   }
 }
 

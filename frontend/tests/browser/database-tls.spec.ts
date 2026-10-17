@@ -25,7 +25,6 @@ const TLS_OFF = {
   enabled: false,
   require: false,
   canOptional: true,
-  canRequire: true,
   verified: false,
   container: "shop-db",
   port: 5432,
@@ -52,6 +51,7 @@ const TLS_ON = {
   notAfter: minutes(325 * DAY + 7),
   renewAt: minutes(295 * DAY + 7),
   authority: AUTHORITY,
+  applications: "plain",
   client: {
     host: "127.0.0.1",
     port: 5432,
@@ -67,7 +67,6 @@ const TLS_REDIS = {
   container: "cache-db",
   port: 6379,
   canOptional: false,
-  canRequire: false,
   linked: 0,
 }
 
@@ -82,6 +81,7 @@ const REDIS_ON = {
   notAfter: minutes(362 * DAY + 3),
   renewAt: minutes(332 * DAY + 3),
   authority: AUTHORITY,
+  applications: "needsCA",
   client: {
     host: "127.0.0.1",
     port: 6379,
@@ -176,7 +176,12 @@ async function mockTLS(
       state[Number(id)] = Number(id) === 4 ? TLS_REDIS : TLS_OFF
     } else {
       const base = Number(id) === 4 ? REDIS_ON : TLS_ON
-      state[Number(id)] = { ...base, require: Boolean(body?.require) || !base.canOptional }
+      const require = Boolean(body?.require) || !base.canOptional
+      state[Number(id)] = {
+        ...base,
+        require,
+        applications: base.canOptional ? (require ? "unverified" : "plain") : "needsCA",
+      }
     }
     return route.fulfill({ json: state[Number(id)] })
   })
@@ -295,17 +300,39 @@ test("an engine whose port speaks one protocol is not offered a choice", async (
     tls(page).getByRole("group", { name: "Whether plain text is accepted" }),
   ).toHaveCount(0)
   await expect(tls(page)).toContainText("rediss://:<password>@127.0.0.1:6379/0")
+  await expect(tls(page).locator("[data-slot=tls-applications]")).toContainText(
+    "need the CA certificate",
+  )
 })
 
-test("renewing replaces the certificate without a confirmation, because no session is dropped", async ({
+test("renewing says that a restart can happen, and is confirmed because of it", async ({
   page,
 }) => {
   const server = await mockTLS(page, { state: { 1: TLS_ON } })
   await visit(page, NETWORK)
   await tls(page).getByRole("button", { name: "Renew certificate" }).click()
-  await expect(dialog(page)).toHaveCount(0)
+  await expect(dialog(page)).toContainText("Renew the certificate of PostgreSQL")
+  await expect(dialog(page)).toContainText("No session is dropped")
+  await expect(dialog(page)).toContainText("If the engine cannot read it while running")
+  await expect(dialog(page)).toContainText("the container is restarted")
+  await dialog(page).getByRole("button", { name: "Renew", exact: true }).click()
   await expect.poll(() => server.sent.some((one) => one.request === "POST 1/tls/renew")).toBe(true)
   await expect(tls(page)).toContainText("Last renewed")
+})
+
+test("linked applications are told what they are given, and that the CA lets them check it", async ({
+  page,
+}) => {
+  await mockTLS(page, { state: { 1: TLS_ON } })
+  await visit(page, NETWORK)
+  const note = tls(page).locator("[data-slot=tls-applications]")
+  await expect(note).toContainText("still connect without it")
+  await expect(note).toContainText("Their traffic stays on this server’s internal network")
+  const choice = tls(page).getByRole("group", { name: "Whether plain text is accepted" })
+  await choice.getByRole("button", { name: /TLS required/ }).click()
+  await dialog(page).getByRole("button", { name: "Require", exact: true }).click()
+  await expect(note).toContainText("does not check the certificate")
+  await expect(note).toContainText("Give them the CA certificate")
 })
 
 test("the authority's certificate is a download", async ({ page }) => {

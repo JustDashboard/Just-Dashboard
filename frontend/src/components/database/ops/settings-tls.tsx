@@ -22,6 +22,7 @@ import { CouldNotRead, FactsSkeleton } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import {
+  applicationsWords,
   certificateLife,
   changeEffects,
   changedWords,
@@ -39,9 +40,9 @@ import { useDatabase } from "@/components/database/shell/database-context"
  *
  * Turning it on, off or toward required recreates the container — the same
  * act as changing where it can be reached from, with the same dropped sessions
- * — so each says what it does before it is taken. A renewal does not: the new
- * certificate is written under the running server, and it happens by itself a
- * month before the old one ends.
+ * — so each says what it does before it is taken. A renewal is asked for the same
+ * way, because the engine that cannot read the new certificate while running
+ * is restarted; it happens by itself a month before the old one ends.
  *
  * Any role reads the word the summary has. The certificate, the connection
  * string and the changes are an administrator's.
@@ -85,6 +86,10 @@ export function TransportSecuritySection({
       to === "off"
         ? { enabled: false }
         : { enabled: true, require: to === "require" || (to === "on" && !data.canOptional) }
+    const send = () =>
+      to === "renew"
+        ? post<DbTLS>(`/databases/${id}/tls/renew`)
+        : put<DbTLS>(`/databases/${id}/tls`, body)
     confirm({
       title: effects.title,
       confirmLabel: effects.confirm,
@@ -116,7 +121,7 @@ export function TransportSecuritySection({
         void (async () => {
           setWorking(to)
           try {
-            await put<DbTLS>(`/databases/${id}/tls`, body)
+            await send()
             notify.success(changedWords(to, conn.name))
           } catch (err) {
             notify.error(`Could not change TLS for ${conn.name}`, err)
@@ -127,18 +132,6 @@ export function TransportSecuritySection({
         return "reported"
       },
     })
-  }
-
-  const renew = async () => {
-    setWorking("renew")
-    try {
-      await post<DbTLS>(`/databases/${id}/tls/renew`)
-      notify.success(`${conn.name} has a new certificate`)
-    } catch (err) {
-      notify.error(`Could not renew the certificate of ${conn.name}`, err)
-    } finally {
-      finish()
-    }
   }
 
   const download = () => {
@@ -213,15 +206,11 @@ export function TransportSecuritySection({
           </ChoiceCard>
           <ChoiceCard
             selected={data.require}
-            disabled={!mayChange || !data.canRequire}
+            disabled={!mayChange}
             onClick={() => data.require || change("require")}
           >
             <ChoiceCardTitle>TLS required</ChoiceCardTitle>
-            <ChoiceCardHint>
-              {data.canRequire
-                ? "A client that does not use TLS is refused."
-                : "This release has no way to refuse plain text; MariaDB 11.4 and later do."}
-            </ChoiceCardHint>
+            <ChoiceCardHint>A client that does not use TLS is refused.</ChoiceCardHint>
           </ChoiceCard>
         </ChoiceGrid>
       )}
@@ -241,6 +230,9 @@ export function TransportSecuritySection({
                 <span className="ml-2 font-mono text-muted-foreground">
                   {shortFingerprint(data.authority.fingerprint)}
                 </span>
+                <span className="ml-2 text-muted-foreground">
+                  ends {calendarDate(data.authority.notAfter)}
+                </span>
               </Detail>
             )}
             <Detail label="This dashboard">
@@ -253,7 +245,7 @@ export function TransportSecuritySection({
               <Download aria-hidden />
               Download CA certificate
             </Button>
-            <Button variant="outline" disabled={!mayChange} onClick={() => void renew()}>
+            <Button variant="outline" disabled={!mayChange} onClick={() => change("renew")}>
               <RefreshClockwise aria-hidden />
               Renew certificate
             </Button>
@@ -261,6 +253,14 @@ export function TransportSecuritySection({
               Turn off TLS
             </Button>
           </div>
+
+          {applicationsWords(data.applications) && (
+            <FormNote data-slot="tls-applications">
+              <span className="font-medium text-foreground">Linked applications.</span>{" "}
+              {applicationsWords(data.applications)} Their traffic stays on this server&rsquo;s
+              internal network.
+            </FormNote>
+          )}
 
           {data.client && (
             <div className="grid gap-2 border-t border-hairline pt-5">

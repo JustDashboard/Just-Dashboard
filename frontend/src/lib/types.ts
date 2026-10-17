@@ -5924,6 +5924,13 @@ export type DbTLS = {
   /** When the renewal takes it up. */
   renewAt?: string
   renewedAt?: string
+  /**
+   * What a linked application is given: the string it had before TLS ("plain",
+   * while TLS is only allowed), TLS without checking the certificate
+   * ("unverified", once required), or TLS that checks and so needs the
+   * authority's certificate ("needsCA", Redis).
+   */
+  applications?: "plain" | "unverified" | "needsCA"
   /** Deployment environments that reach this database by its internal name. */
   linked: number
   authority: {

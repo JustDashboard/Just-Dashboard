@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  applicationsWords,
   certificateLife,
   changeEffects,
   changedWords,
@@ -81,8 +82,15 @@ describe("what a change tells the person asking", () => {
     expect(changeEffects("on", tls, "PostgreSQL").cautions.join(" ")).toContain("still accepted")
   })
 
+  test("a renewal says that a restart can happen when the engine cannot reload", () => {
+    const effects = changeEffects("renew", tls, "PostgreSQL")
+    expect(effects.title).toBe("Renew the certificate of PostgreSQL")
+    expect(effects.lead).toContain("No session is dropped")
+    expect(effects.cautions.join(" ")).toContain("the container is restarted")
+  })
+
   test("every change has a word for the toast", () => {
-    for (const change of ["on", "allow", "require", "off"]) {
+    for (const change of ["on", "allow", "require", "off", "renew"]) {
       expect(changedWords(change, "shop")).toContain("shop")
       expect(changeEffects(change, tls, "x").confirm.length).toBeGreaterThan(0)
     }
@@ -93,5 +101,15 @@ describe("an authority's fingerprint", () => {
   test("is shortened and grouped", () => {
     expect(shortFingerprint("a1b2c3d4e5f60718293a")).toBe("A1B2 C3D4 E5F6 0718")
     expect(shortFingerprint("")).toBe("")
+  })
+})
+
+describe("what a linked application is given", () => {
+  test("each answer is said, and the CA is offered where the application would check", () => {
+    expect(applicationsWords("plain")).toContain("still connect without it")
+    expect(applicationsWords("unverified")).toContain("does not check the certificate")
+    expect(applicationsWords("unverified")).toContain("CA certificate")
+    expect(applicationsWords("needsCA")).toContain("need the CA certificate")
+    expect(applicationsWords(undefined)).toBeUndefined()
   })
 })
