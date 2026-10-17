@@ -624,7 +624,7 @@ func RedisInfo(ctx context.Context, client *redis.Client) (map[string]any, error
 // counters whose difference between two polls is a rate, and gauges read as
 // they are.
 var redisCounterFields = []string{
-	"uptime_in_seconds", "connected_clients", "blocked_clients",
+	"uptime_in_seconds", "connected_clients", "maxclients", "blocked_clients",
 	"used_memory", "used_memory_rss", "used_memory_peak", "maxmemory",
 	"mem_fragmentation_ratio",
 	"total_connections_received", "total_commands_processed",
