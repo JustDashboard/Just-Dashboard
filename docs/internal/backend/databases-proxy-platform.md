@@ -1444,6 +1444,10 @@ the detail of each classifier is below, with the surface it guards.
   process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
   exclusive create before renaming onto it. So the listing never holds a file that is still being
   written, and of two uploads of one name — or two dumps in one second — neither lands on the other.
+  These dumps are not encrypted: they are files on this server, beside the key that would open them. A
+  backup job that dumps the connection may seal its archive to the server's backup key
+  ([archive encryption](git-backups-users.md#archive-encryption)); the page's picture then names the
+  schedule with *encrypted*, and its restore decrypts on the way to `dbx.Restore`.
 - **A dump, a restore and a copy are jobs** (`handlers_db_transfer.go`). `POST /{id}/backup` and
   `/restore` answer `202` with a `jobs.Job`; the page watches `/jobs/{id}` and its stream, where the
   lines are the tool's own, and stops it with `/jobs/{id}/cancel`. The last line, on stream `result`,

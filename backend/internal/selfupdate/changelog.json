@@ -61,6 +61,11 @@
           "kind": "changed",
           "text": "Draw every wiring picture without the dotted background",
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
+        },
+        {
+          "kind": "added",
+          "text": "Encrypt backup archives, with a key you can export",
+          "detail": "A backup job can seal its archives with age before they are written to disk, S3 or Backblaze B2, and a new job that writes to a bucket does unless told otherwise. One backup key, sealed with the master key, opens them: restores, database restores, recovery checks and downloads decrypt them on the way, and archives taken before keep restoring as they were. Backups → Backup key exports the key behind a confirmation, recorded in the audit log, so an archive also opens with the age command where the dashboard is not."
         }
       ]
     },
