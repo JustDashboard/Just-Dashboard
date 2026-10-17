@@ -25,7 +25,7 @@ import { get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ApiToken, DbMetricsExport } from "@/lib/types"
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 const PATH = "/databases/metrics-export"
 
@@ -38,18 +38,37 @@ const PATH = "/databases/metrics-export"
  */
 export function MetricsExport({ admin }: { admin: boolean }) {
   const [open, setOpen] = useState(false)
+  const opener = useRef<HTMLButtonElement>(null)
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button ref={opener} size="sm" variant="outline" onClick={() => setOpen(true)}>
         <LineChart className="size-4" />
         Metrics export
       </Button>
-      {open && <MetricsExportDialog admin={admin} onClose={() => setOpen(false)} />}
+      {open && (
+        <MetricsExportDialog
+          admin={admin}
+          onClose={() => setOpen(false)}
+          // The dialog is opened by state, so there is no trigger for Radix to return to.
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            opener.current?.focus()
+          }}
+        />
+      )}
     </>
   )
 }
 
-function MetricsExportDialog({ admin, onClose }: { admin: boolean; onClose: () => void }) {
+function MetricsExportDialog({
+  admin,
+  onClose,
+  onCloseAutoFocus,
+}: {
+  admin: boolean
+  onClose: () => void
+  onCloseAutoFocus: (event: Event) => void
+}) {
   const origin = useApiOrigin()
   const { confirm, dialog } = useConfirm()
   const read = usePoll((signal) => get<DbMetricsExport>(PATH, undefined, signal), 30_000)
@@ -120,6 +139,7 @@ function MetricsExportDialog({ admin, onClose }: { admin: boolean; onClose: () =
         title="Metrics export"
         description="Scrape the recorded database metrics with Prometheus, and choose how long they are kept."
         footer={<Button onClick={onClose}>Done</Button>}
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         {read.error && !report ? (
           <ErrorState error={read.error} onRetry={read.refresh} retryable />
