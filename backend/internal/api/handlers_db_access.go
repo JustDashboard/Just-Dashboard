@@ -386,6 +386,13 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 		s.modules.dbs.Close(id)
 		s.dbConns.stale(id)
 	}
+	// A pooler leaves loopback by this switch and by nothing else, and comes
+	// back to it by this switch, so it is asked whether or not the database
+	// itself had to move.
+	pooler := s.followPoolerExposure(ctx, r, conn, dsn, hostIP)
+	if pooler != nil {
+		detail["pooler"] = pooler
+	}
 
 	firewall, ferr := s.setDBFirewall(ctx, r, int(server.binding.PublicPort), req.Exposure == exposurePublic)
 	detail["firewall"] = firewall
@@ -396,6 +403,9 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 
 	access := s.describeDBAccess(ctx, conn, dsn)
 	resp := map[string]any{"access": access, "firewall": firewall}
+	if pooler != nil {
+		resp["pooler"] = pooler
+	}
 	if ferr != nil {
 		resp["firewallError"] = ferr.Error()
 	}

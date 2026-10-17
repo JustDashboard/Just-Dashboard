@@ -42,6 +42,9 @@ var protectedRouteVerdicts = map[string]string{
 	"PUT /access":   staysOpen,
 	"POST /power":   staysOpen,
 	"PUT /settings": isRefused,
+	// A pooler is a container and, in one mode, an account in the database.
+	"PUT /pooler":    isRefused,
+	"DELETE /pooler": isRefused,
 	// Dumps are files on this machine: taking one, adding one made elsewhere
 	// and deleting one. Loading one back, importing a file and copying into a
 	// new database write to a server.
@@ -110,7 +113,9 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /server/databases":                      isRefused,
 	"POST /server/databases/connect":              isRefused,
 	"POST /server/extensions":                     isRefused,
+	"PATCH /server/extensions/{name}":             isRefused,
 	"DELETE /server/extensions/{name}":            isRefused,
+	"POST /server/preload":                        isRefused,
 	// Redis: the console runs a read, the bulk action counts, a client can be
 	// disconnected. Keys, streams, accounts and configuration are writes.
 	"POST /redis/classify":       staysOpen,
