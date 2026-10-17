@@ -328,6 +328,13 @@ to the contribution terms above, including the additional licence grant to the p
   These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
+- Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a
+  deployment reaches it) also run
+  `JD_POOLER_LIVE=1 go test ./internal/api -run TestLivePooler -count=1 -v` on a Docker host. It starts a
+  PostgreSQL container and, through the routes, a PgBouncer beside it, signs in through the pooler in both
+  authentication modes, reads its statistics, changes a setting and a password, follows the database's
+  power, reaches it from a probe container on a deployment network, then removes it and forgets the
+  connection, and removes its own containers, volumes and networks.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
