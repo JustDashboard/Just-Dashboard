@@ -210,14 +210,7 @@ function PoolerSection({
   )
 
   const fields = (
-    <PoolerFields
-      field={field}
-      pooler={pooler}
-      draft={draft}
-      problems={problems}
-      editable={admin}
-      onChange={set}
-    />
+    <PoolerFields field={field} draft={draft} problems={problems} editable={admin} onChange={set} />
   )
 
   if (!pooler.enabled && !pooler.available) {
@@ -357,14 +350,12 @@ function PoolerSection({
 /** The four settings. Read-only text for a role that may not change them. */
 function PoolerFields({
   field,
-  pooler,
   draft,
   problems,
   editable,
   onChange,
 }: {
   field: string
-  pooler: DbPooler
   draft: PoolingDraft
   problems: ReturnType<typeof poolingProblems>
   editable: boolean

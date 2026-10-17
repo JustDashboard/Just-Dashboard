@@ -231,7 +231,7 @@ describe("where a database is connected from, through its pooler", () => {
     const c = conn()
     const [host] = pooledTargets(c, pooler(), access())
     expect(maskedParts(c, engineFor(c), host).url).toBe(
-      `postgres://app:${MASK}@127.0.0.1:6433/shop_main`,
+      `postgres://app:${MASK}@127.0.0.1:6433/shop_main?sslmode=disable`,
     )
   })
 })
