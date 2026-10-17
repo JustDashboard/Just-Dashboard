@@ -362,6 +362,20 @@ const dialog = (page: Page) => page.getByRole("dialog")
 const row = (page: Page, name: string) => section(page).locator(`[data-extension="${name}"]`)
 const chip = (page: Page, name: RegExp) => section(page).getByRole("button", { name })
 
+/**
+ * Closes every toast, so a screenshot shows the page and not the news about it.
+ *
+ * The press is the page's own: a pointer pressed outside an open dialog is the
+ * reader closing the dialog, and the dialog hides the rest of the page from
+ * the accessibility tree, so the toasts are found by their markup.
+ */
+async function dismissToasts(page: Page) {
+  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
+    await close.evaluate((button: HTMLElement) => button.click())
+  }
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0)
+}
+
 async function noSidewaysScroll(page: Page) {
   const sideways = await page.evaluate(() =>
     [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]
@@ -514,7 +528,7 @@ test("a library loaded at start is added, the server restarted, then the extensi
   await expect(flow).toContainText(
     "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements', 'pg_cron'",
   )
-  await expect(flow).toContainText("Kept")
+  await expect(flow).toContainText("Already loaded")
   await expect(flow).toContainText("cron.database_name is set to shop_main")
   await flow.getByRole("button", { name: "Load at start" }).click()
 
@@ -575,7 +589,11 @@ test("a list the dashboard cannot change says why, and offers nothing that would
   await expect(flow).toContainText("pg_cron cannot be added from here")
   await expect(flow).toContainText("given on the server's command line")
   await expect(flow.getByRole("button", { name: "Load at start" })).toHaveCount(0)
-  await flow.getByRole("button", { name: "Close" }).click()
+  // The footer's Close, not the corner's.
+  await flow
+    .getByRole("button", { name: "Close", exact: true })
+    .and(page.locator(":not([data-slot=dialog-close])"))
+    .click()
   await expect(flow).toHaveCount(0)
 })
 
@@ -612,14 +630,17 @@ test("a role that may only read is shown the catalogue and offered none of its c
   await visit(page)
   await expect(row(page, "hstore")).toContainText("1.8 available")
   await expect(section(page)).toContainText("pg_cron is loaded once shop restarts")
-  await expect(
-    section(page).getByRole("button", { name: /^(Enable|Update|Disable|Restart) / }),
-  ).toHaveCount(0)
+  // No row carries a command, and the notice carries no restart; the chips still filter.
+  const commands = section(page).locator("li[data-extension] button")
+  const restart = section(page).getByRole("button", { name: /^Restart / })
+  await expect(commands).toHaveCount(0)
+  await expect(restart).toHaveCount(0)
   await chip(page, /^Available/).click()
   await expect(row(page, "pg_cron")).toBeVisible()
-  await expect(
-    section(page).getByRole("button", { name: /^(Enable|Update|Disable|Restart) / }),
-  ).toHaveCount(0)
+  await expect(commands).toHaveCount(0)
+  await chip(page, /^Update available/).click()
+  await expect(row(page, "hstore")).toBeVisible()
+  await expect(commands).toHaveCount(0)
 })
 
 test("at a phone's width the list and the dialogs keep to the screen", async ({ page }) => {
@@ -660,19 +681,23 @@ test("extension states @shots", async ({ page }) => {
   await expect(dialog(page)).toContainText("ALTER SYSTEM SET shared_preload_libraries")
   await shot("extensions-preload-1440")
   await dialog(page).getByRole("button", { name: "Load at start" }).click()
-  await expect(dialog(page).getByRole("button", { name: "Restart shop" })).toBeVisible()
+  // Drawn once the server has answered: the command live, the news of the step taken gone.
+  await expect(dialog(page).getByRole("button", { name: "Restart shop" })).toBeEnabled()
+  await dismissToasts(page)
   await shot("extensions-restart-1440")
   await page.keyboard.press("Escape")
 
   await chip(page, /^Enabled/).click()
   await row(page, "hstore").getByRole("button", { name: "Update hstore" }).click()
   await expect(dialog(page)).toContainText(`ALTER EXTENSION "hstore" UPDATE TO '1.8'`)
+  await dismissToasts(page)
   await shot("extensions-update-1440")
   await page.keyboard.press("Escape")
 
   await row(page, "hstore").getByRole("button", { name: "Disable hstore" }).click()
   await dialog(page).getByRole("switch", { name: "Drop these 2 with the extension" }).click()
   await expect(dialog(page)).toContainText('DROP EXTENSION "hstore" CASCADE')
+  await dismissToasts(page)
   await shot("extensions-disable-1440")
   // A choice was made, so a slip would ask; Cancel is the reader saying so.
   await dialog(page).getByRole("button", { name: "Cancel" }).click()
@@ -680,5 +705,6 @@ test("extension states @shots", async ({ page }) => {
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(row(page, "hstore")).toBeVisible()
+  await dismissToasts(page)
   await shot("extensions-enabled-390")
 })

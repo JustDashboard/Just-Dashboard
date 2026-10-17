@@ -340,7 +340,11 @@ function LoadPlan({ plan, library }: { plan: Preview<PreloadAnswer>; library: st
           <FormFact label="From the next start" mono>
             {plan.answer.libraries.join(", ")}
           </FormFact>
-          {kept.length > 0 && <FormFact label="Kept">{listWords(kept)}</FormFact>}
+          {kept.length > 0 && (
+            <FormFact label="Already loaded" mono>
+              {kept.join(", ")}
+            </FormFact>
+          )}
         </FormFacts>
       )}
       {plan.answer?.notes.map((note) => (

@@ -193,6 +193,11 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
   const counts = useMemo(() => extensionCounts(extensions), [extensions])
   const inView = useMemo(() => shownExtensions(extensions, show, "", ""), [extensions, show])
   const categories = extensionCategories(inView)
+  // Whether the search and the category filter are drawn is the whole list's
+  // to say, not the chip's: the controls stay where they are from one chip
+  // to the next.
+  const searchable = extensions.length > 8
+  const categorised = useMemo(() => extensionCategories(extensions).length > 1, [extensions])
   const shown = shownExtensions(extensions, show, search, category)
   const narrowed = search.trim() !== "" || category !== ""
   const listed = all || narrowed ? shown : shown.slice(0, LISTED)
@@ -331,7 +336,7 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
               )}
             </Notice>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="space-y-2">
             <ChipStrip role="group" aria-label="Which extensions are listed">
               <FilterChip selected={show === "enabled"} onClick={() => choose("enabled")}>
                 Enabled
@@ -356,40 +361,42 @@ function Extensions({ confirm }: { confirm: (request: ConfirmRequest) => void })
                 </FilterChip>
               )}
             </ChipStrip>
-            {inView.length > 8 && (
-              <SearchInput
-                dense
-                aria-label="Filter the extensions"
-                placeholder="Filter by name or what it does"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                containerClassName="sm:w-64"
-              />
-            )}
-            {categories.length > 1 && (
-              <Select
-                value={category || EVERY_CATEGORY}
-                onValueChange={(next) => {
-                  setCategory(next === EVERY_CATEGORY ? "" : next)
-                  setAll(false)
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  aria-label="Filter by category"
-                  className="w-auto min-w-40"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={EVERY_CATEGORY}>Every category</SelectItem>
-                  {categories.map((one) => (
-                    <SelectItem key={one} value={one}>
-                      {one}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {(searchable || categorised) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {searchable && (
+                  <SearchInput
+                    aria-label="Filter the extensions"
+                    placeholder="Filter by name or what it does"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                )}
+                {categorised && (
+                  <Select
+                    value={category || EVERY_CATEGORY}
+                    onValueChange={(next) => {
+                      setCategory(next === EVERY_CATEGORY ? "" : next)
+                      setAll(false)
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-label="Filter by category"
+                      className="w-auto min-w-44"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={EVERY_CATEGORY}>Every category</SelectItem>
+                      {categories.map((one) => (
+                        <SelectItem key={one} value={one}>
+                          {one}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             )}
           </div>
           {!data.editable && (
