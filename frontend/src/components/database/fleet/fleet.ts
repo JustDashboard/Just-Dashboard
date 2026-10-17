@@ -309,6 +309,8 @@ export function reachWord(exposure: DbFleetEntry["exposure"]): string {
       return "this server only"
     case "private":
       return "a private network"
+    case "allowlist":
+      return "listed addresses"
     case "public":
       return "the internet"
     case "remote":

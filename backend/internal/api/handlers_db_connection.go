@@ -96,6 +96,9 @@ type dbConnState struct {
 	// systemctl starts and stops a unit. Nil is the host's own; a test hands
 	// in one that records what it was asked.
 	systemctl *dbSystemctl
+	// keeper keeps a port to a list. Nil is the network module's gateway; a
+	// test hands in one of its own.
+	keeper dbPortKeeper
 }
 
 // forget drops everything kept about a connection, for a change after which
@@ -757,6 +760,32 @@ type dbHostView struct {
 	// actions out, looked for once however many connections ask.
 	systemctlOnce sync.Once
 	hasSystemctl  bool
+
+	// kept is the owners of the ports the gateway keeps to a list, read once.
+	keptOnce sync.Once
+	kept     map[string]bool
+}
+
+// listed is how far a container's binding reaches once the gateway has had
+// its say: a port on every interface that is kept to a list reaches the list.
+func (v *dbHostView) listed(container string, exposure dbExposure) dbExposure {
+	if exposure != exposurePublic {
+		return exposure
+	}
+	v.keptOnce.Do(func() {
+		v.kept = map[string]bool{}
+		if keeper := v.s.portKeeper(); keeper != nil {
+			if entries, err := keeper.KeptPorts(); err == nil {
+				for _, e := range entries {
+					v.kept[e.Owner] = true
+				}
+			}
+		}
+	})
+	if v.kept[dbPortOwner(container)] {
+		return exposureAllowlist
+	}
+	return exposure
 }
 
 // dbManaged is what runs one process, read once.
@@ -852,7 +881,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 
 	if server := s.serverBehind(ctx, conn, info); server != nil {
 		out.inContainer(server.container)
-		out.Exposure = exposureOf(server)
+		out.Exposure = v.listed(server.container.Name, exposureOf(server))
 		out.Managed = out.Container.ComposeProject == "" && server.binding != nil
 		return out
 	}
@@ -862,7 +891,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 		if c, binding := s.runningContainerPublishing(ctx, port); c != nil {
 			out.inContainer(c)
 			out.foreign = !s.engineImage(ctx, conn, c)
-			out.Exposure = exposureOf(&dbServer{container: c, binding: binding})
+			out.Exposure = v.listed(c.Name, exposureOf(&dbServer{container: c, binding: binding}))
 			return out
 		}
 	} else if c := s.containerAt(ctx, info.Host); c != nil {
@@ -890,7 +919,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 	if listening == nil {
 		if c, exposure := v.stoppedContainerFor(ctx, conn, loopback, port); c != nil {
 			out.inContainer(c)
-			out.Exposure = exposure
+			out.Exposure = v.listed(c.Name, exposure)
 			return out
 		}
 	}

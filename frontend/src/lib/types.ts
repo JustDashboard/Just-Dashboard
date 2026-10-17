@@ -5889,16 +5889,61 @@ export type DbAccess = {
   container?: string
   composeProject?: string
   managed: boolean
-  exposure: "local" | "public" | "private" | "remote"
+  /**
+   * Read off the port binding: this machine only, one of its addresses, every
+   * interface — and, every interface with the gateway keeping the port to a
+   * list, `allowlist`.
+   */
+  exposure: "local" | "public" | "private" | "allowlist" | "remote"
   port?: number
   publicAddresses: string[]
   firewall: {
     backend?: string
     active: boolean
     open: boolean
+    /** The sources the firewall's other allow rules for the port name. */
+    allowed: string[]
     editable: boolean
   }
+  /** The one host address a private binding publishes on. */
+  address?: string
+  /**
+   * What the gateway keeps the port to. Set while the binding is not every
+   * interface only when a change could not finish taking it away.
+   */
+  allow: string[]
+  gateway: DbGateway
+  /** This machine's addresses the port can be published on alone. */
+  addresses: DbHostAddress[]
+  /** The address this request came from, which the list's form offers. */
+  client?: string
 }
+
+/** Whether the gateway table can keep a port to a list, and what it lets in besides. */
+export type DbGateway = {
+  available: boolean
+  reason?: string
+  /** The networks every drop in the gateway table lets through first. */
+  alsoAdmitted: string[]
+  /** The kernel holds the port's rules now. */
+  enforced: boolean
+  /** Connection attempts the rules dropped since the table was loaded. */
+  refused: number
+}
+
+/** One address of this machine a port can be published on alone. */
+export type DbHostAddress = {
+  address: string
+  interface?: string
+  /** Who the address faces: tailnet, vpn, private or uplink. */
+  network: "tailnet" | "vpn" | "private" | "uplink"
+}
+
+/** What PUT /databases/{id}/access takes. */
+export type DbAccessRequest =
+  | { exposure: "local" | "public" }
+  | { exposure: "private"; address: string }
+  | { exposure: "allowlist"; allow: string[] }
 
 export type DbPoolMode = "transaction" | "session"
 export type DbPoolerAuth = "userlist" | "auth_query"
@@ -5991,7 +6036,44 @@ export type DbPoolerStats = {
 /** What PUT /databases/{id}/access did, and the reading afterwards. */
 export type DbAccessChange = {
   access: DbAccess
-  /** opened, closed, already, none, inactive, read-only or failed. */
+  /** opened, closed, updated, already, none, inactive, read-only or failed. */
+  firewall: string
+  firewallError?: string
+  /** kept, released, restored, unchanged or failed. */
+  gateway: string
+  gatewayError?: string
+  /**
+   * What the switch did to the connection's pooler, when it has one. `error`
+   * is why it could not be moved; `removed` that it was taken down instead of
+   * being left published (a move to this server that failed).
+   */
+  pooler?: {
+    container: string
+    port?: number
+    exposure?: "local" | "public" | "private"
+    recreated?: boolean
+    firewall?: string
+    firewallError?: string
+    error?: string
+    removed?: boolean
+    closeError?: string
+  }
+}
+
+/** One end of a change to where a server is reachable from. */
+export type DbReach = {
+  exposure: DbAccess["exposure"]
+  hostIp: string
+  allow?: string[]
+}
+
+/** What POST /databases/{id}/access/preview says a change would do, in order. */
+export type DbAccessPreview = {
+  from: DbReach
+  to: DbReach
+  /** The container is replaced, which drops every session. */
+  recreate: boolean
+  steps: { kind: "gateway" | "recreate" | "firewall"; description: string; lines?: string[] }[]
   firewall: string
   firewallError?: string
   /**

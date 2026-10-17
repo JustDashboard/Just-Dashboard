@@ -94,7 +94,7 @@ func gatewayEmpty(sp *Spec) bool {
 			return false
 		}
 	}
-	return true
+	return len(sp.PortAllowlists) == 0
 }
 
 // restoreGateway puts the kernel's gateway table back to what a spec

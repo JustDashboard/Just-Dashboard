@@ -80,6 +80,9 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// different port binding, which is the Docker page's Recreate
 			// under another name and sits in the same group.
 			r.Method(http.MethodGet, "/{id}/access", s.handle(s.handleDBAccess))
+			// What a change would do — the gateway's rules, the recreate,
+			// the firewall's plan — without doing any of it.
+			r.Method(http.MethodPost, "/{id}/access/preview", s.handle(s.handleDBAccessPreview))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDBConnDelete))
 				r.Method(http.MethodPut, "/{id}/access", s.handle(s.handleDBAccessUpdate))

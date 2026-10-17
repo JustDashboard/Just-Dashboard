@@ -76,8 +76,15 @@ export function connectTargets(
     return [{ ...saved, note: "Anything that can reach that address connects with it." }]
   }
 
-  const address = publicAddress(access.publicAddresses)
-  const published = access.exposure === "public" && Boolean(address)
+  // One address of this machine is the address; a list or anywhere is the
+  // machine's public one, which the listed addresses dial like anybody would.
+  const address =
+    access.exposure === "private" ? access.address : publicAddress(access.publicAddresses)
+  const published =
+    (access.exposure === "public" ||
+      access.exposure === "allowlist" ||
+      access.exposure === "private") &&
+    Boolean(address)
   return [
     {
       id: "host",
@@ -104,13 +111,39 @@ export function connectTargets(
     published
       ? {
           id: "public",
-          label: "Anywhere",
+          label: outside(access.exposure).label,
           host: address,
           port: conn.port,
-          note: "Reachable from anywhere with the password. Treat the string as a secret.",
+          note: outside(access.exposure).note,
         }
-      : { id: "public", label: "Anywhere", note: "", unavailable: unpublished(access) },
+      : {
+          id: "public",
+          label: outside(access.exposure).label,
+          note: "",
+          unavailable: unpublished(access),
+        },
   ]
+}
+
+/** What the string for another machine is called, and who can use it, by how far the port reaches. */
+function outside(exposure: DbAccess["exposure"]): { label: string; note: string } {
+  switch (exposure) {
+    case "private":
+      return {
+        label: "One network",
+        note: "Reachable from the network that address is on, with the password. Treat the string as a secret.",
+      }
+    case "allowlist":
+      return {
+        label: "Allowed addresses",
+        note: "Reachable from the addresses on the list, with the password. Treat the string as a secret.",
+      }
+    default:
+      return {
+        label: "Anywhere",
+        note: "Reachable from anywhere with the password. Treat the string as a secret.",
+      }
+  }
 }
 
 /**
@@ -168,7 +201,7 @@ export function pooledTargets(
 
 /** Why there is no string for a laptop, in one sentence. */
 function unpublished(access: DbAccess): string {
-  if (access.exposure === "public") {
+  if (access.exposure === "public" || access.exposure === "allowlist") {
     return `This machine has no public address of its own — the provider maps one in front of it. Use that address with port ${access.port}.`
   }
   if (access.exposure === "private") {

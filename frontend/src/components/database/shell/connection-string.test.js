@@ -77,6 +77,20 @@ describe("where a database is connected from", () => {
     expect(anywhere.unavailable).toBeUndefined()
   })
 
+  test("a list is reached on the machine's address, and one network on the address it is bound to", () => {
+    const listed = targets(conn(), access({ exposure: "allowlist", allow: ["198.51.100.0/24"] }))[2]
+    expect(listed).toMatchObject({ id: "public", label: "Allowed addresses", host: "203.0.113.7" })
+    expect(listed.note).toContain("on the list")
+    const one = targets(conn(), access({ exposure: "private", address: "100.101.1.2" }))[2]
+    expect(one).toMatchObject({
+      id: "public",
+      label: "One network",
+      host: "100.101.1.2",
+      port: "55432",
+    })
+    expect(one.unavailable).toBeUndefined()
+  })
+
   test("a server installed on the host has no name on a Docker network", () => {
     const container = targets(conn(), access({ container: undefined, managed: false }))[1]
     expect(container.host).toBeUndefined()

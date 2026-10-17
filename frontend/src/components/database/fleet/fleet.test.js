@@ -292,6 +292,7 @@ describe("the words for where and how far", () => {
   test("reach is said in words", () => {
     expect(reachWord("local")).toBe("this server only")
     expect(reachWord("public")).toBe("the internet")
+    expect(reachWord("allowlist")).toBe("listed addresses")
   })
 })
 

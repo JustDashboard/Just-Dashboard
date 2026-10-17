@@ -91,6 +91,11 @@
           "kind": "added",
           "text": "Count a new PostgreSQL server's statements from its first start, and turn the statistics on for one that never loaded them",
           "detail": "Every PostgreSQL template, pgvector, PostGIS and TimescaleDB among them, now starts with pg_stat_statements loaded and the extension created in its new database, so Performance ranks statements at once; TimescaleDB keeps its own library beside it, and the list stays one the Parameters page can change. Logging the plan of every statement slower than a second (auto_explain) is a choice when the database is created. On a server that never loaded the module, Turn on statement statistics adds it to the libraries the server loads at start, keeping the ones it has, then asks before restarting the server and creates the extension once it answers again; where the dashboard cannot restart the server, it says where that happens instead."
+        },
+        {
+          "kind": "added",
+          "text": "Keep a database to a list of allowed addresses, or publish it on one address of the server",
+          "detail": "A database's Network settings offer four answers: this server only, one of the server's tailnet, VPN or local-network addresses, a list of allowed addresses, or anywhere. The list takes IPv4 and IPv6 addresses and networks, and the server's own gateway table refuses every other address before Docker forwards the connection, which a firewall rule alone cannot do for a published port. The firewall gets a rule for each listed address, the change is shown with the exact rules before it runs, the picture draws who may connect and who is refused, and every change is in the audit log."
         }
       ]
     },
