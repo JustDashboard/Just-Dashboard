@@ -342,12 +342,15 @@ func pgStatementsEnable(ctx context.Context, db *sql.DB) *StatementsEnable {
 	case out.Preloaded:
 		out.SQL = "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
 	case out.Configured:
-		out.Note = "pg_stat_statements is in shared_preload_libraries and is loaded when the server next starts; restart it, then create the extension."
+		out.Note = "pg_stat_statements is set to load the next time the server starts; the statistics begin once it has restarted."
 	default:
+		// Where the page can do it, the note says what it takes rather than
+		// telling the reader to do by hand what the button beside it does.
 		out.Note = "Add pg_stat_statements to shared_preload_libraries and restart the server first; the extension only records once it is loaded at start."
 		if err == nil {
 			if out.Blocked = preload.blocked(); out.Blocked == "" {
 				out.Preload = pgPreloadStatement(withStatementsLibrary(preload.next))
+				out.Note = "Statement statistics need pg_stat_statements loaded when the server starts. Turning them on takes one restart."
 			}
 		}
 	}
