@@ -37,11 +37,13 @@ const (
 // and somebody still has to decide that it should be.
 var protectedRouteVerdicts = map[string]string{
 	// The connection's own record, its server's reach and its power.
-	"PUT ":          staysOpen,
-	"DELETE ":       staysOpen,
-	"PUT /access":   staysOpen,
-	"POST /power":   staysOpen,
-	"PUT /settings": isRefused,
+	"PUT ":            staysOpen,
+	"DELETE ":         staysOpen,
+	"PUT /access":     staysOpen,
+	"PUT /tls":        staysOpen,
+	"POST /tls/renew": staysOpen,
+	"POST /power":     staysOpen,
+	"PUT /settings":   isRefused,
 	// Dumps are files on this machine: taking one, adding one made elsewhere
 	// and deleting one. Loading one back, importing a file and copying into a
 	// new database write to a server.
