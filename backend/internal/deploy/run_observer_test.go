@@ -54,9 +54,12 @@ func TestRunObserversHearAboutFailedRuns(t *testing.T) {
 	f := newOrchestrationFixture(t)
 	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
 	run := f.enqueue(t, environmentID)
+	// The steps wait until the start is announced. The announcement reads the
+	// run on its own goroutine and stays quiet about a run that has already
+	// ended, so a failure that outruns it would leave nothing to assert.
 	executor := &recordingExecutor{results: map[StepKey]StepResult{
 		StepBuildArtifact: {State: StepFailed, ErrorCode: "builder_unavailable", ErrorMessage: "BuildKit fixture unavailable"},
-	}}
+	}, block: make(chan struct{})}
 	observer := &recordingObserver{seen: make(chan struct{}, 1)}
 	engine := NewEngine(f.runs, executor, fixedReconciler{}, EngineConfig{
 		WorkerID: "engine-observer-failure", PollEvery: 5 * time.Millisecond,
@@ -64,6 +67,13 @@ func TestRunObserversHearAboutFailedRuns(t *testing.T) {
 	if err := engine.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	for deadline := time.Now().Add(3 * time.Second); observer.startedCount() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("observer was never told the run started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(executor.block)
 	waitForRunState(t, f.runs, run.ID, RunFailed)
 	finished := observer.waitFinished(t)
 	if finished.ID != run.ID || finished.State != RunFailed || finished.TerminalCode != "builder_unavailable" {
