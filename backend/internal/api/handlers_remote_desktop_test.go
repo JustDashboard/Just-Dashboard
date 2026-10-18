@@ -213,3 +213,53 @@ func TestRemoteDesktopStreamUsesWebRTCOnlyFromTheTailnet(t *testing.T) {
 		}
 	}
 }
+
+// A bridge on another machine (JD_REMOTE_DESKTOP_BRIDGE) is proxied exactly
+// as the container would be, reads as running while it answers, publishes
+// its WebRTC on its own address, and is never installed or removed from here.
+func TestRemoteDesktopBridgeElsewhereIsProxiedAndNeverManaged(t *testing.T) {
+	c, s := newClient(t)
+	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(remotedesk.BridgeUserHeader) != remotedesk.BridgeAccount {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		io.WriteString(w, "<!doctype html>")
+	}))
+	t.Cleanup(bridge.Close)
+	address := strings.TrimPrefix(bridge.URL, "http://")
+	s.Cfg.RemoteDesktopBridge = address
+	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{
+		DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: &stubEngine{}, Bridge: s.remoteDesktopBridge(),
+	})
+
+	w := c.do(http.MethodGet, "/api/v1/remote-desktop/stream", "", nil)
+	var st remotedesk.EngineStatus
+	json.Unmarshal(w.Body.Bytes(), &st)
+	if w.Code != http.StatusOK || st.State != remotedesk.EngineRunning || st.Address != address || st.Media != "127.0.0.1" || st.Image != "remote" {
+		t.Fatalf("status: %d %+v", w.Code, st)
+	}
+	if streamTransport(st, "100.107.233.73") != remotedesk.TransportWebRTC {
+		t.Fatalf("a tailnet browser must be offered WebRTC on the remote bridge's own address")
+	}
+	if w := c.do(http.MethodGet, "/api/v1/remote-desktop/bridge/stream.html?hostId=1&appId=2", "", nil); w.Code != http.StatusOK || w.Body.String() != "<!doctype html>" {
+		t.Fatalf("stream page through the remote bridge: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodDelete, "/api/v1/remote-desktop/stream", "", nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), address) {
+		t.Fatalf("removing a bridge elsewhere must be refused with where it is: %d %s", w.Code, w.Body.String())
+	}
+
+	bridge.Close()
+	s.modules.remoteDesktop.ForgetBridgeAddress()
+	s.modules.remoteDesktop = remotedesk.New(remotedesk.Options{
+		DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Engine: &stubEngine{}, Bridge: s.remoteDesktopBridge(),
+	})
+	w = c.do(http.MethodGet, "/api/v1/remote-desktop/stream", "", nil)
+	json.Unmarshal(w.Body.Bytes(), &st)
+	if st.State != remotedesk.EngineStopped || !strings.Contains(st.Error, address) {
+		t.Fatalf("a bridge that stopped answering: %+v", st)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/remote-desktop/bridge/stream.html", "", nil); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("proxy to a bridge that is down: %d", w.Code)
+	}
+}

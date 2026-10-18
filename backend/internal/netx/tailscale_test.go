@@ -682,3 +682,24 @@ func TestTailscaleWarnsBeforeThisNodesKeyExpires(t *testing.T) {
 		}
 	}
 }
+
+// Warming a path is the tailnet's own tool pointed at one of its own
+// addresses, never a way to reach anything else.
+func TestTailscaleWarmPingsOnlyTailnetAddresses(t *testing.T) {
+	restoreRun, restoreHas := run, has
+	t.Cleanup(func() { run, has = restoreRun, restoreHas })
+	has = func(string) bool { return true }
+	var pinged []string
+	run = func(_ context.Context, name string, args ...string) (string, error) {
+		pinged = append(pinged, name+" "+strings.Join(args, " "))
+		return "pong from zoro-1 (100.84.53.82) via 89.28.56.43:40066 in 49ms", nil
+	}
+	s := &Service{}
+	for _, address := range []string{"203.0.113.9", "not-an-address", "", "100.84.53.82", "fd7a:115c:a1e0::e37:3553"} {
+		s.TailscaleWarm(context.Background(), address)
+	}
+	want := "tailscale ping -c 3 --timeout 1s 100.84.53.82,tailscale ping -c 3 --timeout 1s fd7a:115c:a1e0::e37:3553"
+	if strings.Join(pinged, ",") != want {
+		t.Fatalf("pinged %q", pinged)
+	}
+}

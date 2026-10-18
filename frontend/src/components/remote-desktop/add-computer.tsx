@@ -104,6 +104,7 @@ function blankDraft(): ComputerDraft {
     security: "",
     layout: "",
     peerId: "",
+    gfx: false,
   }
 }
 
