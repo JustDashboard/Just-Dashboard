@@ -155,20 +155,23 @@ test("replacing an MCP key makes another MCP key for the same databases, at its 
   const editor = page.getByRole("dialog", { name: "Replace API key" })
   await expect(editor).toContainText("Opens the MCP endpoint only")
   await editor.getByRole("button", { name: "Create replacement" }).click()
-  expect(calls[0]).toEqual({
-    method: "POST",
-    path: "/tokens/mcp",
-    // blog, protected since, is left behind: no MCP key reaches it.
-    body: {
-      name: "claude-code",
-      role: "limited",
-      ttlDays: 90,
-      connections: [
-        { connectionId: 1, access: "write" },
-        { connectionId: 7, access: "read" },
-      ],
-    },
-  })
+  // The replacement first reads which databases a key can still be given.
+  await expect
+    .poll(() => calls[0])
+    .toEqual({
+      method: "POST",
+      path: "/tokens/mcp",
+      // blog, protected since, is left behind: no MCP key reaches it.
+      body: {
+        name: "claude-code",
+        role: "limited",
+        ttlDays: 90,
+        connections: [
+          { connectionId: 1, access: "write" },
+          { connectionId: 7, access: "read" },
+        ],
+      },
+    })
   const secret = page.getByRole("dialog", { name: "Your new key" })
   await expect(secret).toContainText("claude mcp add --transport http just-dashboard")
   await expect(secret).toContainText("/api/v1/mcp")
@@ -196,12 +199,14 @@ test("an MCP key replaced by an owner who can no longer change a database only r
     .getByRole("dialog", { name: "Replace API key" })
     .getByRole("button", { name: "Create replacement" })
     .click()
-  expect(calls[0].body).toEqual({
-    name: "cursor",
-    role: "readonly",
-    ttlDays: 90,
-    connections: [{ connectionId: 1, access: "read" }],
-  })
+  await expect
+    .poll(() => calls[0]?.body)
+    .toEqual({
+      name: "cursor",
+      role: "readonly",
+      ttlDays: 90,
+      connections: [{ connectionId: 1, access: "read" }],
+    })
 })
 
 test("the first key keeps its one-time secret through refresh, then discards it on Done", async ({
