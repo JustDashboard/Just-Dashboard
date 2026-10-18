@@ -209,69 +209,40 @@ export function listWords(names: string[]): string {
 }
 
 /**
- * The extensions PostgreSQL ships in its own contrib package, and its own
- * procedural language: the elephant is the honest mark for these, because
- * they are PostgreSQL's. Anything else is somebody else's project, drawn as
- * its own logo where one is bundled and as a plain piece of a puzzle where
- * none is — a mark is never guessed (`product-logo.tsx`).
+ * The mark an extension is drawn with, where it has one: its own project's, or
+ * the project it is the extension of — Timescale's for its toolkit and for
+ * pgvectorscale, Supabase's for the extensions it publishes, Python's and
+ * Perl's for their procedural languages. PostgreSQL's own contrib modules and
+ * every project with no mark bundled have none, and are drawn as their
+ * category's glyph: an elephant on fifty rows says nothing about any of them,
+ * and a mark is never guessed (`product-logo.tsx`).
  */
-const POSTGRES_OWN = new Set([
-  "adminpack",
-  "amcheck",
-  "auto_explain",
-  "autoinc",
-  "bloom",
-  "btree_gin",
-  "btree_gist",
-  "citext",
-  "cube",
-  "dblink",
-  "dict_int",
-  "dict_xsyn",
-  "earthdistance",
-  "file_fdw",
-  "fuzzystrmatch",
-  "hstore",
-  "insert_username",
-  "intagg",
-  "intarray",
-  "isn",
-  "lo",
-  "ltree",
-  "moddatetime",
-  "old_snapshot",
-  "pageinspect",
-  "passwordcheck",
-  "pg_buffercache",
-  "pg_freespacemap",
-  "pg_logicalinspect",
-  "pg_prewarm",
-  "pg_stat_statements",
-  "pg_surgery",
-  "pg_trgm",
-  "pg_visibility",
-  "pg_walinspect",
-  "pgcrypto",
-  "pgrowlocks",
-  "pgstattuple",
-  "plpgsql",
-  "postgres_fdw",
-  "refint",
-  "seg",
-  "sslinfo",
-  "tablefunc",
-  "tcn",
-  "tsm_system_rows",
-  "tsm_system_time",
-  "unaccent",
-  "uuid-ossp",
-  "xml2",
-])
+const EXTENSION_MARKS: Record<string, string> = {
+  address_standardizer: "postgis-extension",
+  h3: "h3",
+  pg_graphql: "supabase",
+  pg_jsonschema: "supabase",
+  pg_net: "supabase",
+  pgjwt: "jwt",
+  pgsodium: "supabase",
+  plperl: "perl",
+  plperlu: "perl",
+  plpython3u: "python",
+  plv8: "v8",
+  postgis: "postgis-extension",
+  postgis_raster: "postgis-extension",
+  postgis_sfcgal: "postgis-extension",
+  postgis_tiger_geocoder: "postgis-extension",
+  postgis_topology: "postgis-extension",
+  supabase_vault: "supabase",
+  timescaledb: "timescaledb",
+  timescaledb_toolkit: "timescaledb",
+  vectorscale: "timescaledb",
+}
 
 /** The logo an extension is drawn as, or `undefined` for one with none bundled. */
 export function extensionLogo(name: string, engineLogo: string | undefined, catalogue: boolean) {
-  if (name.startsWith("timescaledb")) return "timescaledb"
   // A plugin catalogue is the server's own: MySQL's plugins are MySQL's.
-  if (catalogue || POSTGRES_OWN.has(name)) return engineLogo
-  return undefined
+  if (catalogue) return engineLogo
+  return Object.hasOwn(EXTENSION_MARKS, name) ? EXTENSION_MARKS[name] : undefined
 }

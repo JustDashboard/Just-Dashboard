@@ -20,7 +20,7 @@ import {
   OptionRow,
   Statement,
 } from "@/components/form"
-import { ROW_REVEAL } from "@/components/icon-action"
+import { ROW_DIM } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -484,23 +484,30 @@ function ParameterRows({
                 {readable}
               </span>
             )}
+            {parameter.changed && parameter.default !== undefined && !parameter.secret && (
+              <span className="block truncate text-hint text-muted-foreground">
+                default <span className="font-mono">{parameter.default || "empty"}</span>
+              </span>
+            )}
           </>
         )
         return (
           <li
             key={parameter.name}
             data-parameter={parameter.name}
-            className="group flex min-w-0 items-start gap-3 py-2"
+            className="group flex min-w-0 items-center gap-3 py-2.5"
           >
             <div className="min-w-0 flex-1 space-y-0.5">
               <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-                <span className="min-w-0 font-mono text-xs wrap-anywhere">{parameter.name}</span>
+                <span className="min-w-0 font-mono text-body font-medium wrap-anywhere">
+                  {parameter.name}
+                </span>
                 {parameter.pending && <Tag tone="warning">waiting for a restart</Tag>}
                 {parameter.changed && !parameter.pending && <Tag>changed</Tag>}
                 {parameter.restart && <Tag>restart to apply</Tag>}
               </p>
               {parameter.description && (
-                <p className="line-clamp-2 text-hint leading-relaxed text-muted-foreground">
+                <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
                   {parameter.description}
                 </p>
               )}
@@ -510,16 +517,17 @@ function ParameterRows({
                 type="button"
                 aria-label={`Change ${parameter.name}`}
                 onClick={() => onEdit(parameter)}
-                className="-my-1 -mr-2 flex max-w-[48%] min-w-0 shrink-0 items-start gap-2 rounded-md px-2 py-1 text-right focus-ring transition-colors hover:bg-row-hover"
+                className="flex max-w-[48%] min-w-0 shrink-0 items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-right focus-ring transition-colors hover:bg-row-hover"
               >
-                <span className="min-w-0">{value}</span>
-                <Pencil
-                  className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground", ROW_REVEAL)}
-                />
+                <span className="flex min-w-0 flex-col items-end">{value}</span>
+                <Pencil className={cn("size-3.5 shrink-0 text-muted-foreground", ROW_DIM)} />
               </button>
             ) : (
               <div
-                className={cn("max-w-[45%] min-w-0 shrink-0 text-right", editing && "pr-[22px]")}
+                className={cn(
+                  "flex max-w-[45%] min-w-0 shrink-0 flex-col items-end text-right",
+                  editing && "pr-[33px]",
+                )}
               >
                 {value}
               </div>
@@ -545,6 +553,15 @@ function ParameterValue({ parameter }: { parameter: Parameter }) {
   }
   if (parameter.value === "") {
     return <span className="block text-xs text-muted-foreground italic">empty</span>
+  }
+  if (parameter.type === "bool") {
+    return (
+      <Status
+        tone={isOn(parameter.value) ? "running" : "stopped"}
+        label={parameter.value}
+        className="font-mono"
+      />
+    )
   }
   return (
     <span className="block truncate font-mono text-xs" title={parameter.value}>

@@ -325,7 +325,6 @@ function Conversation({
         onMode={setComposing}
         settings={settings}
         schema={transcript.turns.length > 0 && transcript.schema ? transcript.schema : schema}
-        context={transcript.context}
         tables={tables}
         attachable={context}
         busy={busy}
@@ -583,7 +582,6 @@ function Composer({
   onMode,
   settings,
   schema,
-  context,
   tables,
   attachable,
   busy,
@@ -595,7 +593,6 @@ function Composer({
   onMode: (mode: "sql" | "policy") => void
   settings: AssistantSettings
   schema: string
-  context?: { described: number; named: number; omitted: number }
   tables: SchemaTable[]
   attachable: AssistantContext
   busy: boolean
@@ -747,11 +744,11 @@ function Composer({
           )}
         </span>
       </div>
-      <FormNote tone={withResult ? "warning" : "default"}>
-        {withResult
-          ? `Sends ${destination} the question and the attached rows, with the structure of ${schema || "this database"}.`
-          : `Sends ${destination} the question and the structure of ${schema || "this database"}: names, types and keys, never rows${context && context.omitted + context.named > 0 ? `; ${context.described} tables described, ${context.named + context.omitted} named or counted` : ""}.`}
-      </FormNote>
+      {withResult && (
+        <FormNote tone="warning">
+          {`Sends ${destination} the question and the attached rows, with the structure of ${schema || "this database"}.`}
+        </FormNote>
+      )}
     </form>
   )
 }

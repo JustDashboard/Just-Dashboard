@@ -357,8 +357,8 @@ test("the assistant is off until an administrator sets a provider up", async ({ 
   })
   await expect(pane(page)).toContainText("Claude Sonnet 5.5")
   await expect(question(page)).toBeVisible()
-  // Where the question is written, it says who it goes to and what is sent.
-  await expect(pane(page)).toContainText("Sends Anthropic the question and the structure of public")
+  // The composer carries no standing note about what is sent; only attached rows get one.
+  await expect(pane(page)).not.toContainText("Sends Anthropic")
 })
 
 test("a server on this machine is set up by its address and model", async ({ page }) => {
@@ -378,7 +378,7 @@ test("a server on this machine is set up by its address and model", async ({ pag
     baseUrl: "http://127.0.0.1:11434/v1",
     key: "",
   })
-  await expect(pane(page)).toContainText("Sends 127.0.0.1:11434 the question")
+  await expect(pane(page)).not.toContainText("Sends 127.0.0.1:11434")
 })
 
 test("turning the assistant off asks first and forgets the provider", async ({ page }) => {

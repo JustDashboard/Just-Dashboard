@@ -168,6 +168,7 @@ function FindAndColumnsBar({
         value={find}
         placeholder="Find in these rows"
         aria-label="Find in these rows"
+        className="h-6"
         containerClassName="min-w-0 flex-1 sm:w-auto"
         onChange={(event) => onFind(event.target.value)}
       />

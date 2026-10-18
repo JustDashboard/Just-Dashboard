@@ -398,12 +398,10 @@ test("the catalogue is read by what each is for, searched, filtered and told apa
   await expect(row(page, "pg_stat_statements")).toContainText(
     "The server loads pg_stat_statements when it starts.",
   )
-  // A row you read, not one you take; one that ships with PostgreSQL is drawn as PostgreSQL's.
+  // A row you read, not one you take; a contrib module has no mark of its own, so it is its
+  // category's glyph and not a logo.
   await expect(section(page).locator("[data-slot=choice-row]")).toHaveCount(0)
-  await expect(row(page, "pg_stat_statements").locator("img")).toHaveAttribute(
-    "src",
-    "/logos/postgresql.svg",
-  )
+  await expect(row(page, "pg_stat_statements").locator("img")).toHaveCount(0)
 
   await chip(page, /^Available/).click()
   // Grouped by what each is for, under the catalogue's headings.
