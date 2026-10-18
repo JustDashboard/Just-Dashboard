@@ -175,6 +175,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		s.mountDatabaseRLSRoutes(r)
 		s.mountDatabaseOpsRoutes(r)
 		s.mountDatabaseTransferRoutes(r)
+		s.mountDatabaseSeedRoutes(r)
 		s.mountDatabaseUpgradeRoutes(r)
 		s.mountDatabasePITRRoutes(r)
 		s.mountDatabaseAlertRoutes(r)

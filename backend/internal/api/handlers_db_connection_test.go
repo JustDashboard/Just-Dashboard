@@ -1655,7 +1655,7 @@ var gatedCapabilities = []string{
 	"documents", "shellSyntax", "collections", "collectionOptions", "aggregation", "schemaAnalysis",
 	"indexUsage", "indexHide", "validation", "profiler",
 	// code generation and moving data
-	"orm", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
+	"orm", "seed", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
 	"importReplace", "importCreateTable", "dumpSchemaOnly", "dumpDataOnly", "dumpTables", "dumpCompression",
 	"dumpDatabases", "dumpUpload", "restoreNewDatabase", "copy", "copyStructureOnly",
 	// point-in-time recovery

@@ -95,6 +95,9 @@ var protectedRouteVerdicts = map[string]string{
 	// The query runner and what reads through a POST.
 	"POST /classify": staysOpen,
 	"POST /orm":      staysOpen,
+	// A seed's plan reads what is there; the seed itself adds rows.
+	"POST /seed/plan": staysOpen,
+	"POST /seed":      isRefused,
 	// Plans of a statement under a hypothetical index: nothing is run or made.
 	"POST /explain/index-candidates": staysOpen,
 	"POST /explain/what-if":          staysOpen,
