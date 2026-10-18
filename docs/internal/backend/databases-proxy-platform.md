@@ -2618,6 +2618,68 @@ was written by (a server since moved to a newer major cannot start the older clu
   point-in-time recovery off and on again. An install whose dashboard image predates WAL-G, or an
   architecture WAL-G publishes no build for, is told so and offered nothing.
 
+### The MCP server
+
+An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Context Protocol over
+Streamable HTTP — reaches the databases through one endpoint, `POST /api/v1/mcp`
+(`api/handlers_mcp.go`, `handlers_mcp_tools.go`; the protocol is `internal/mcp`). It sits outside the
+`/databases` tree, as the metrics export does, because what admits a request there is different.
+
+- **Only an MCP key opens it, and an MCP key opens nothing else.** A key with `scope = 'mcp'` is
+  refused by every other group with `403 key_scope`; the endpoint's group authenticates with
+  `httpx.AuthenticateMCP`, which reads a bearer key and never the session cookie (so it needs no CSRF
+  header), refuses any other key with `403 key_scope`, and answers a missing or wrong key with
+  `401` and `WWW-Authenticate: Bearer` naming no authorization server. A request with a foreign
+  `Origin` is refused `403` (`wsx.Upgrader.CheckOrigin`), which is what the transport asks of a
+  server against DNS rebinding. Then the allowlist, `apiLim` per principal and `AuditMutations`, as
+  every group. An agent mounts none of it.
+- **What a key reaches** is `api_token_connections`: one row per connection, `read` or `write`, at
+  most 64, read again on every call so a grant taken away answers the next request. A key carries
+  its owner's role. `POST /tokens/mcp` (session only) makes one from `{name, ttlDays, connections}`;
+  `PUT /tokens/{id}/connections` (session only, the owner's own active MCP key) replaces what it
+  reaches and keeps the secret. Both refuse a protected connection (`409 connection_read_only`), an
+  engine without the `mcp` capability (every SQL engine has it; MongoDB and Redis do not), a missing
+  one, an empty list, and a `write` grant from a role without `service.control`. They are audited as
+  `dashboard.token.create` (with `scope` and the databases by name) and
+  `dashboard.token.connections`. Listing, revoking and deleting are the routes every key has.
+- **Both revisions of the protocol.** A 2025 client (`2025-03-26`, `2025-06-18`, `2025-11-25`)
+  opens with `initialize` and repeats the version in `MCP-Protocol-Version`; a 2026-07-28 client
+  sends no handshake and carries its version in every request's `_meta`, mirrored into
+  `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`, which must agree with the body
+  (`-32020`). The endpoint keeps no session in either, issues no `Mcp-Session-Id`, refuses a batch,
+  answers `GET` and `DELETE` with `405` (no stream for the server to speak first on), and takes a
+  notification or a reply with `202`. `server/discover`, `ping`, `tools/list` and `tools/call` are
+  the methods; `initialize` is recorded as `database.mcp.connect` with the client's name and
+  version.
+- **The tools** (`mcp.Tools`): `list_connections`, `list_tables`, `describe_schema` (structure only:
+  column names and types, nullability, keys and what a foreign key references — no defaults or
+  comments, which can be values somebody typed), `sample_rows` (10, at most 50), `explain` (planned,
+  never run), `run_query` and `run_write`. `run_query` is offered to an owner whose role may run SQL
+  (`service.control`, the query route's own question); it refuses anything `dbx` does not classify as
+  a read before sending it, and runs the statement inside the engine's read-only scope (100 rows, at
+  most 500, 30 seconds). `run_write` is offered only when the key may change some database, runs one
+  statement at a time (60 seconds), and passes it through `authoriseSQL`: a destructive statement
+  needs `destructive` and spends `destrLim`, as in the SQL editor. Every value is cut at 1,000 bytes
+  and a result at 48 KB. A key has four calls in flight at most.
+- **A protected connection is refused for every tool, reads included,** whatever the key was given,
+  and `list_connections` names it under `unavailable` with why. Unlike the SQL editor, where a
+  protected connection still reads, nothing about a database the operator protected reaches an AI
+  client.
+- **A refusal is a result, not a protocol error**: a tool that was refused, or that the engine
+  answered with an error, returns `isError: true` with the reason for the model to read. Its audit
+  entry is `database.mcp.<tool>` with the connection as target and the outcome (`ok`, `refused` with
+  a reason, `failed`) in the detail, and `httpx.AuditFailed` marks it a failure although the HTTP
+  status is 200. A statement is recorded as its shape (`dbx.StatementShape`: every literal and number
+  a `?`, comments dropped, read with the runner's own lexer for the engine) and an engine error with
+  its quoted spans removed, because a literal is somebody's e-mail address. `tools/list`, `ping` and
+  discovery are not audited.
+- **The UI** is the *MCP server* dialog of the control center
+  (`components/database/fleet/mcp-server-dialog.tsx`, logic in `mcp-server.ts`): the endpoint, the
+  signed-in account's active MCP keys with what each reaches, a form choosing databases (those the
+  server would refuse listed with why) and read or change for each, the key shown once with the
+  configuration for Claude Code, Cursor and VS Code, editing a key's databases and revoking it.
+  Account → API keys lists MCP keys as *MCP only* and replaces one with the same databases.
+
 ### Tests
 
 Which variables name which fixture, which tests fall back to a standard port and which never do, and the
