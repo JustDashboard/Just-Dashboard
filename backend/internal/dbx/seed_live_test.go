@@ -324,6 +324,36 @@ func TestLiveSeedClickHouse(t *testing.T) {
 	if n != 300 || emails < 100 {
 		t.Errorf("%d rows, %d emails", n, emails)
 	}
+
+	// No transaction: a table the server refuses is left out with why, and
+	// the table written before it is still reported as written, so a second
+	// try is not made blind to it.
+	_, _ = db.Exec(`DROP TABLE IF EXISTS jdt_seed_ch_refused`)
+	t.Cleanup(func() { _, _ = db.Exec(`DROP TABLE IF EXISTS jdt_seed_ch_refused`) })
+	if _, err := db.Exec(`CREATE TABLE jdt_seed_ch_refused (
+		id UInt64, amount Decimal(10, 2), CONSTRAINT never CHECK amount > 99999999
+	) ENGINE = MergeTree ORDER BY id`); err != nil {
+		t.Fatal(err)
+	}
+	report, err = Seed(ctx, db, DriverClickHouse, SeedRequest{Seed: 5, Schema: database, Tables: []SeedTableRequest{
+		{Name: "jdt_seed_ch_visits", Rows: 10}, {Name: "jdt_seed_ch_refused", Rows: 10},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]SeedTableReport{}
+	for _, r := range report.Tables {
+		byName[r.Name] = r
+	}
+	if v := byName["jdt_seed_ch_visits"]; v.Inserted != 10 || v.Problem != "" {
+		t.Errorf("visits %+v", v)
+	}
+	if r := byName["jdt_seed_ch_refused"]; r.Inserted != 0 || r.Problem == "" {
+		t.Errorf("refused %+v", r)
+	}
+	if err := db.QueryRow(`SELECT count() FROM jdt_seed_ch_visits`).Scan(&n); err != nil || n != 310 {
+		t.Errorf("%d visits after the second seed (%v)", n, err)
+	}
 }
 
 // A row the table refuses for a reason the seed could not see — here a CHECK

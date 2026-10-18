@@ -358,15 +358,45 @@ func TestSeedRefusesWhatWasNotAskedProperly(t *testing.T) {
 		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: MaxSeedRows + 1}}}, "between 1 and"},
 		{SeedRequest{Tables: []SeedTableRequest{{Name: "nope", Rows: 1}}}, "nope"},
 		{SeedRequest{Tables: []SeedTableRequest{{Name: "recent", Rows: 1}}}, "view"},
-		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: 1, Columns: map[string]string{"email": "integer"}}}}, "cannot be filled"},
-		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: 1, Columns: map[string]string{"id": "integer"}}}}, "filled by the server"},
-		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: 1, Columns: map[string]string{"email": "null"}}}}, "cannot be filled"},
-		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: 1, Columns: map[string]string{"nope": "email"}}}}, "no column"},
+		{SeedRequest{Tables: []SeedTableRequest{{Name: "users", Rows: 6}, {Schema: "main", Name: "users", Rows: 6}}}, "named twice"},
 	} {
 		_, err := PlanSeed(ctx, db, DriverSQLite, tc.req)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%+v: %v, want %q", tc.req, err, tc.want)
 		}
+	}
+}
+
+// A choice the table no longer takes — its column dropped, retyped, given to
+// the server — is set aside with a warning, and the rest of the seed stands.
+func TestSeedSetsAsideAChoiceTheTableNoLongerTakes(t *testing.T) {
+	db := openSeedDB(t)
+	plan, err := PlanSeed(context.Background(), db, DriverSQLite, SeedRequest{Seed: 2, Tables: []SeedTableRequest{
+		{Name: "users", Rows: 3, Columns: map[string]string{
+			"email": "integer", "id": "integer", "last_name": "null", "gone": "email", "first_name": "nope",
+		}},
+		{Name: "categories", Rows: 3},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := planTable(t, plan, "users")
+	for column, want := range map[string]string{"email": "email", "id": seedAuto, "last_name": seedNull, "first_name": "firstName"} {
+		if c, _ := planColumn(t, users, column); c.Generator != want {
+			t.Errorf("users.%s is filled by %q, want %q", column, c.Generator, want)
+		}
+	}
+	got := strings.Join(plan.Warnings, "\n")
+	for _, want := range []string{
+		"users has no column gone now", "users.id is filled by the server",
+		`users.email cannot be filled with "integer" now`, `users.first_name cannot be filled with "nope" now`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no warning saying %q in %q", want, got)
+		}
+	}
+	if plan.Rows != 6 {
+		t.Errorf("the plan writes %d rows", plan.Rows)
 	}
 }
 
@@ -553,5 +583,136 @@ func TestSeedValuesFitTheirColumns(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// A table that only points into a cycle is not part of it: its key is not
+// the one the cycle is broken at, and it points at the rows the seed writes.
+func TestSeedBreaksACycleOnlyWhereItCloses(t *testing.T) {
+	db := openSeedDB(t,
+		`CREATE TABLE posts (id INTEGER PRIMARY KEY, user_ref INTEGER REFERENCES members(id), title TEXT NOT NULL)`,
+		`CREATE TABLE members (id INTEGER PRIMARY KEY, team_id INTEGER REFERENCES teams(id), name TEXT NOT NULL)`,
+		`CREATE TABLE teams (id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES members(id), name TEXT NOT NULL)`,
+	)
+	ctx := context.Background()
+	req := SeedRequest{Seed: 4, Tables: seedTables(10, "posts", "teams", "members")}
+	plan, err := PlanSeed(ctx, db, DriverSQLite, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posts, members := planTable(t, plan, "posts"), planTable(t, plan, "members")
+	if len(posts.Notes) != 0 || strings.Join(posts.After, ",") != "members" {
+		t.Errorf("posts: after %v, notes %v", posts.After, posts.Notes)
+	}
+	if len(members.Notes) != 1 || !strings.Contains(members.Notes[0], "members and teams point at each other") {
+		t.Errorf("members: notes %v", members.Notes)
+	}
+	if _, err := Seed(ctx, db, DriverSQLite, req); err != nil {
+		t.Fatal(err)
+	}
+	var empty int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM posts WHERE user_ref IS NULL`).Scan(&empty); err != nil || empty != 0 {
+		t.Errorf("%d posts point at no member (%v)", empty, err)
+	}
+}
+
+// A one-to-one key that may be empty is empty once every parent row is
+// taken, rather than holding its table to as many rows as the parent has.
+func TestSeedFillsAnOptionalOneToOneKeyAndThenLeavesItEmpty(t *testing.T) {
+	db := openSeedDB(t,
+		`CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL)`,
+		`INSERT INTO files (path) VALUES ('a'), ('b'), ('c')`,
+		`CREATE TABLE avatars (id INTEGER PRIMARY KEY, file_id INTEGER UNIQUE REFERENCES files(id), label TEXT)`,
+	)
+	ctx := context.Background()
+	req := SeedRequest{Seed: 5, Tables: seedTables(20, "avatars")}
+	plan, err := PlanSeed(ctx, db, DriverSQLite, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := planTable(t, plan, "avatars"); p.Rows != 20 || len(p.Notes) != 0 {
+		t.Fatalf("avatars: rows %d, notes %v", p.Rows, p.Notes)
+	}
+	report, err := Seed(ctx, db, DriverSQLite, req)
+	if err != nil || report.Inserted != 20 || report.Skipped != 0 {
+		t.Fatalf("report %+v, %v", report, err)
+	}
+	var pointing, distinct int
+	if err := db.QueryRow(`SELECT COUNT(file_id), COUNT(DISTINCT file_id) FROM avatars`).Scan(&pointing, &distinct); err != nil {
+		t.Fatal(err)
+	}
+	if pointing != 3 || distinct != 3 {
+		t.Errorf("%d avatars point at %d files", pointing, distinct)
+	}
+}
+
+// Two keys sharing a column: a row drawn again for one is checked against
+// the other too, so nothing the table would refuse is ever sent.
+func TestSeedKeepsKeysThatShareAColumnApart(t *testing.T) {
+	db := openSeedDB(t, `CREATE TABLE grid (
+		a INTEGER NOT NULL CHECK (a IN (1, 2, 3)),
+		b INTEGER NOT NULL CHECK (b IN (1, 2, 3)),
+		c INTEGER NOT NULL CHECK (c IN (1, 2, 3)),
+		PRIMARY KEY (a, b),
+		UNIQUE (b, c)
+	)`)
+	ctx := context.Background()
+	for seed := int64(1); seed <= 20; seed++ {
+		if _, err := db.Exec(`DELETE FROM grid`); err != nil {
+			t.Fatal(err)
+		}
+		report, err := Seed(ctx, db, DriverSQLite, SeedRequest{Seed: seed, Tables: seedTables(20, "grid")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g := report.Tables[0]; g.Skipped != 0 || g.Inserted == 0 {
+			t.Fatalf("seed %d: inserted %d, skipped %d, errors %v", seed, g.Inserted, g.Skipped, g.Errors)
+		}
+	}
+}
+
+// A join table whose rows are drawn again to keep their pairs apart still
+// writes the values its preview showed in every other column.
+func TestSeedPreviewOfAJoinTableIsWhatIsWritten(t *testing.T) {
+	db := openSeedDB(t,
+		`CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE post_tags (
+			order_id INTEGER NOT NULL REFERENCES orders(id),
+			tag_id INTEGER NOT NULL REFERENCES tags(id),
+			first_name TEXT NOT NULL,
+			PRIMARY KEY (order_id, tag_id)
+		)`,
+	)
+	ctx := context.Background()
+	req := SeedRequest{Seed: 8, Tables: []SeedTableRequest{
+		{Name: "users", Rows: 2}, {Name: "orders", Rows: 3}, {Name: "tags", Rows: 3}, {Name: "post_tags", Rows: 8},
+	}}
+	plan, err := PlanSeed(ctx, db, DriverSQLite, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Seed(ctx, db, DriverSQLite, req); err != nil {
+		t.Fatal(err)
+	}
+	joins := planTable(t, plan, "post_tags")
+	_, at := planColumn(t, joins, "first_name")
+	rows, err := db.Query(`SELECT first_name FROM post_tags ORDER BY rowid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		if n < len(joins.Preview) && name != *joins.Preview[n][at] {
+			t.Errorf("row %d was written as %s and previewed as %s", n, name, *joins.Preview[n][at])
+		}
+		n++
+	}
+	if n != 8 {
+		t.Errorf("%d pairs written", n)
 	}
 }

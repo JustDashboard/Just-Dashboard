@@ -58,9 +58,11 @@ import {
   choiceGroups,
   newSeed,
   planLine,
+  pruneChoices,
   readSeedPlan,
   readSeedReport,
   reportLine,
+  requestedChoices,
   reportTitle,
   rowsFrom,
   seedKey,
@@ -147,15 +149,21 @@ export function SeedPanel({
   )
   const [firstSeed] = useState(() => newSeed())
   const [seed, setSeed] = useSessionState(`databases.${id}.seed.number`, firstSeed)
+  // A table's own count as typed where it is not one the server takes: it
+  // holds the plan, and the write, until it is.
+  const [badRows, setBadRows] = useState<Record<string, string>>({})
+  const badTable = chosen.find((t) => Object.hasOwn(badRows, seedKey(t.schema, t.name)))
 
   /* ------------------------------------------------------------- planning */
 
   const problem =
     rows === undefined
       ? `Rows: a whole number from 1 to ${MAX_SEED_ROWS.toLocaleString("en-US")}.`
-      : chosen.length > MAX_SEED_TABLES
-        ? `A seed fills at most ${MAX_SEED_TABLES} tables at once; ${chosen.length} are chosen.`
-        : undefined
+      : badTable
+        ? `Rows for ${tableLabel(badTable, several)}: a whole number from 1 to ${MAX_SEED_ROWS.toLocaleString("en-US")}.`
+        : chosen.length > MAX_SEED_TABLES
+          ? `A seed fills at most ${MAX_SEED_TABLES} tables at once; ${chosen.length} are chosen.`
+          : undefined
   const wanted =
     rows !== undefined && !problem && chosen.length > 0
       ? JSON.stringify(seedRequest({ seed, targets: chosen, rows, perTable, choices }))
@@ -170,17 +178,27 @@ export function SeedPanel({
     const timer = setTimeout(() => setAsked((held) => ({ ...held, key: wanted })), SETTLE_MS)
     return () => clearTimeout(timer)
   }, [armed, wanted, asked.key])
+  // A plan read past (the reader changed something meanwhile) is let go,
+  // and the server stops counting for it.
   const planning = usePoll(
-    async () =>
-      readSeedPlan(await post<unknown>(`/databases/${id}/seed/plan`, JSON.parse(asked.key))),
+    async (signal) => ({
+      plan: readSeedPlan(
+        await post<unknown>(`/databases/${id}/seed/plan`, JSON.parse(asked.key), { signal }),
+      ),
+      asked: requestedChoices(asked.key),
+    }),
     0,
     [id, asked.key, asked.nonce],
     { enabled: asked.key !== "" },
   )
+  const answered = planning.data
+  useEffect(() => {
+    if (answered) setChoices((held) => pruneChoices(held, answered.asked, answered.plan))
+  }, [answered, setChoices])
   // The plan on screen stays while the next one is read.
   const [kept, setKept] = useState<SeedPlan>()
-  if (planning.data && planning.data !== kept) setKept(planning.data)
-  const plan = planning.data ?? (planning.error ? undefined : kept)
+  if (answered && answered.plan !== kept) setKept(answered.plan)
+  const plan = answered?.plan ?? (planning.error ? undefined : kept)
   const reading = planning.loading || (armed && wanted !== "" && wanted !== asked.key)
   // What a write sends is what the preview on screen shows, and nothing newer.
   const current = Boolean(plan) && !reading && asked.key === wanted
@@ -210,13 +228,14 @@ export function SeedPanel({
       )
       setReport(done)
       setReviewing(false)
-      // The same number again would make the same rows, which a unique key
-      // would now refuse; the next preview is of new ones.
-      setSeed(newSeed())
     } catch (err) {
       notify.error("The rows were not written", err)
     } finally {
       setWriting(false)
+      // The same number again would make the same rows: refused by a unique
+      // key, or — where some of them went in without a transaction to take
+      // them back — written a second time. The next preview is of new ones.
+      setSeed(newSeed())
     }
   }
 
@@ -316,14 +335,22 @@ export function SeedPanel({
               several={several}
               rows={rows ?? DEFAULT_SEED_ROWS}
               perTable={perTable}
-              onRows={(key, value) =>
+              badRows={badRows}
+              onRows={(key, value) => {
+                setBadRows((held) => {
+                  const next = { ...held }
+                  if (typeof value === "string") next[key] = value
+                  else delete next[key]
+                  return next
+                })
+                if (typeof value === "string") return
                 setPerTable((held) => {
                   const next = { ...held }
-                  if (value === undefined || value === rows) delete next[key]
+                  if (value === rows) delete next[key]
                   else next[key] = value
                   return next
                 })
-              }
+              }}
               onChoose={(table, column, generator) =>
                 setChoices((held) =>
                   chooseGenerator(
@@ -382,6 +409,7 @@ function SeedOutput({
   several,
   rows,
   perTable,
+  badRows,
   onRows,
   onChoose,
 }: {
@@ -394,7 +422,9 @@ function SeedOutput({
   several: boolean
   rows: number
   perTable: SeedRows
-  onRows: (key: string, value: number | undefined) => void
+  badRows: Record<string, string>
+  /** A count the server takes, or the text typed where it is not one. */
+  onRows: (key: string, value: number | string) => void
   onChoose: (table: SeedTable, column: SeedColumn, generator: string) => void
 }) {
   const ids = useId()
@@ -505,6 +535,7 @@ function SeedOutput({
         <TableFacts
           table={open}
           rows={Object.hasOwn(perTable, key) ? perTable[key] : rows}
+          typed={Object.hasOwn(badRows, key) ? badRows[key] : undefined}
           onRows={(value) => onRows(key, value)}
         />
         {open.problem ? (
@@ -543,19 +574,16 @@ function SeedOutput({
 function TableFacts({
   table,
   rows,
+  typed,
   onRows,
 }: {
   table: SeedTable
   rows: number
-  onRows: (value: number | undefined) => void
+  /** What was typed, where it is not a count the server takes. */
+  typed?: string
+  onRows: (value: number | string) => void
 }) {
-  const [text, setText] = useState(String(rows))
-  const [held, setHeld] = useState(rows)
-  if (held !== rows) {
-    setHeld(rows)
-    setText(String(rows))
-  }
-  const typed = rowsFrom(text)
+  const text = typed ?? String(rows)
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
       <span>
@@ -588,13 +616,9 @@ function TableFacts({
           inputMode="numeric"
           value={text}
           aria-label={`Rows for ${table.name}`}
-          aria-invalid={typed === undefined}
+          aria-invalid={typed !== undefined}
           className="numeric text-xs"
-          onChange={(event) => {
-            setText(event.target.value)
-            const value = rowsFrom(event.target.value)
-            if (value !== undefined) onRows(value)
-          }}
+          onChange={(event) => onRows(rowsFrom(event.target.value) ?? event.target.value)}
         />
         <InputGroupAddon align="inline-end">
           <InputGroupText className="text-xs">rows</InputGroupText>

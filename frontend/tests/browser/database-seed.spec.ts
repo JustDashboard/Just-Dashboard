@@ -149,27 +149,38 @@ type SeedBody = {
 }
 
 /** What the mock server plans for a request: the shape the real one answers with. */
+/** Columns the mock server's tables have lost since the page was opened. */
+const dropped = new Set<string>()
+
 function planFor(body: SeedBody) {
   const asked = new Map(body.tables.map((t) => [t.name, t]))
+  const warnings: string[] = []
   const tables = ORDER.filter((name) => asked.has(name)).map((name) => {
     const want = asked.get(name)!
     const table = SCHEMA[name]
-    const columns = table.columns.map((c) => {
-      const generator = want.columns?.[c.name] ?? c.generator
-      const choice = c.choices?.find((x) => x.id === generator)
-      return {
-        name: c.name,
-        type: c.type,
-        generator,
-        inferred: c.generator,
-        label: choice?.label ?? c.label,
-        choices: c.choices ?? [],
-        nullable: c.name === "tier",
-        unique: c.unique ?? false,
-        reference: c.reference,
-        later: c.later,
+    for (const column of Object.keys(want.columns ?? {})) {
+      if (dropped.has(`${name}.${column}`)) {
+        warnings.push(`${name} has no column ${column} now; what was chosen for it is set aside`)
       }
-    })
+    }
+    const columns = table.columns
+      .filter((c) => !dropped.has(`${name}.${c.name}`))
+      .map((c) => {
+        const generator = want.columns?.[c.name] ?? c.generator
+        const choice = c.choices?.find((x) => x.id === generator)
+        return {
+          name: c.name,
+          type: c.type,
+          generator,
+          inferred: c.generator,
+          label: choice?.label ?? c.label,
+          choices: c.choices ?? [],
+          nullable: c.name === "tier",
+          unique: c.unique ?? false,
+          reference: c.reference,
+          later: c.later,
+        }
+      })
     const rows = table.problem ? 0 : want.rows
     return {
       schema: "public",
@@ -182,9 +193,10 @@ function planFor(body: SeedBody) {
       preview: table.problem
         ? []
         : Array.from({ length: Math.min(rows, 8) }, (_, n) =>
-            table.columns.map((c, i) =>
-              columns[i].generator === "null" ? null : (c.value?.(n, body.seed) ?? null),
-            ),
+            columns.map((column) => {
+              const c = table.columns.find((x) => x.name === column.name)!
+              return column.generator === "null" ? null : (c.value?.(n, body.seed) ?? null)
+            }),
           ),
       statement: table.problem
         ? ""
@@ -201,12 +213,13 @@ function planFor(body: SeedBody) {
     tables,
     rows: tables.reduce((sum, t) => sum + t.rows, 0),
     atomic: true,
-    warnings: [],
+    warnings,
   }
 }
 
 async function mockSeed(page: Page, options: DatabaseMock & { capabilities?: string[] } = {}) {
   await mockDatabases(page, options)
+  dropped.clear()
   const sent = { plans: [] as SeedBody[], writes: [] as SeedBody[] }
   if (options.capabilities) {
     await page.route("**/api/v1/auth/session", (route) =>
@@ -382,10 +395,37 @@ test("rows, tables and a column's generator are asked for again by themselves", 
   await page.keyboard.press("Escape")
   await expect.poll(() => sent.plans.at(-1)?.tables.map((t) => t.name)).toEqual(["customers"])
 
+  // A table's own count the server would refuse holds the plan, and the write.
+  await page.getByLabel("Rows for customers").fill("0")
+  await expect(page.getByText("Rows for customers: a whole number from 1 to 10,000.")).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Write \d+ rows?$/ })).toBeDisabled()
+  await page.getByLabel("Rows for customers").fill("7")
+  await expect(page.getByRole("button", { name: /^Write \d+ rows?$/ })).toBeEnabled()
+
   // New values: the same tables with another seed.
   const seed = sent.plans.at(-1)!.seed
   await page.getByRole("button", { name: "New values" }).click()
   await expect.poll(() => sent.plans.at(-1)?.seed).not.toBe(seed)
+})
+
+test("a choice for a column the table has since lost is said once and not sent again", async ({
+  page,
+}) => {
+  const sent = await mockSeed(page)
+  await page.goto("/databases/1/generate")
+  await seedCard(page).click()
+  await page.getByRole("button", { name: "email is filled with Email address" }).click()
+  await page.getByRole("menuitemradio", { name: "Full name" }).click()
+  await expect.poll(() => sent.plans.at(-1)?.tables[0].columns).toEqual({ email: "fullName" })
+
+  // The column goes; the next plan carries the choice once, is answered with
+  // a warning and not a refusal, and the one after carries it no more.
+  dropped.add("customers.email")
+  await page.getByLabel("Rows per table").fill("12")
+  await expect(page.getByText("customers has no column email now")).toBeVisible()
+  await page.getByLabel("Rows per table").fill("13")
+  await expect.poll(() => sent.plans.at(-1)?.tables.map((t) => t.rows)).toEqual([13, 13, 13])
+  expect(sent.plans.at(-1)?.tables[0].columns).toBeUndefined()
 })
 
 test("writing shows the statements, sends the plan on screen, and says what went in", async ({

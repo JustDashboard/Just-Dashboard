@@ -131,10 +131,10 @@ func TestSeedRefusalsSayWhy(t *testing.T) {
 	f := newSeedFixture(t)
 	for body, want := range map[string]string{
 		`{"tables": []}`: "at least one table",
-		`{"tables": [{"name": "books", "rows": 20000}]}`:                                      "between 1 and",
-		`{"tables": [{"name": "nowhere", "rows": 2}]}`:                                        "nowhere",
-		`{"tables": [{"name": "authors", "rows": 2, "columns": {"email": "boolean"}}]}`:       "cannot be filled",
-		`{"tables": [{"name": "authors", "rows": 2, "columns": {"email": "email"}}], "x": 1}`: "unknown field",
+		`{"tables": [{"name": "books", "rows": 20000}]}`:                                                 "between 1 and",
+		`{"tables": [{"name": "nowhere", "rows": 2}]}`:                                                   "nowhere",
+		`{"tables": [{"name": "authors", "rows": 2}, {"schema": "main", "name": "authors", "rows": 2}]}`: "named twice",
+		`{"tables": [{"name": "authors", "rows": 2, "columns": {"email": "email"}}], "x": 1}`:            "unknown field",
 	} {
 		for _, route := range []string{"/seed/plan", "/seed"} {
 			rec := f.do(http.MethodPost, f.path(route), body)

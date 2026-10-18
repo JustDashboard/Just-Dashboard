@@ -113,7 +113,8 @@ type SeedTablePlan struct {
 	// for, which is more where the table cannot take as many (Notes say why).
 	Rows  int `json:"rows"`
 	Asked int `json:"asked"`
-	// Existing is how many rows the table held when it was read.
+	// Existing is how many rows the table held when it was read, or -1: it
+	// is counted only where a unique column's values are numbered from it.
 	Existing int64 `json:"existing"`
 	// After names the tables written before this one because it points at
 	// them.
@@ -254,11 +255,14 @@ type seedTable struct {
 	// referenced are the columns a seeded child points at.
 	referenced map[int]bool
 
-	streams  []*rand.Rand
-	rowRand  *rand.Rand
-	linkRand []*rand.Rand
-	seen     []map[string]bool
-	made     int
+	streams    []*rand.Rand
+	rowRand    *rand.Rand
+	linkRand   []*rand.Rand
+	retryCols  []*rand.Rand
+	retryRow   *rand.Rand
+	retryLinks []*rand.Rand
+	seen       []map[string]bool
+	made       int
 }
 
 // seedCell is a value as it is bound: generated text, a NULL, or a value read
@@ -325,7 +329,6 @@ func normaliseSeedRequest(req *SeedRequest) error {
 		return seedRequestErrorf("a seed fills at most %d tables at once", MaxSeedTables)
 	}
 	total := 0
-	seen := map[string]bool{}
 	for i := range req.Tables {
 		t := &req.Tables[i]
 		t.Name = strings.TrimSpace(t.Name)
@@ -341,11 +344,6 @@ func normaliseSeedRequest(req *SeedRequest) error {
 		if t.Rows < 1 || t.Rows > MaxSeedRows {
 			return seedRequestErrorf("%s: between 1 and %d rows can be asked for", t.Name, MaxSeedRows)
 		}
-		key := t.Schema + "\x00" + t.Name
-		if seen[key] {
-			return seedRequestErrorf("%s is named twice", t.Name)
-		}
-		seen[key] = true
 		total += t.Rows
 	}
 	if total > MaxSeedTotal {
@@ -396,11 +394,18 @@ func newSeedRun(ctx context.Context, db *sql.DB, driver Driver, req *SeedRequest
 	schemas := []string{}
 	names := []string{}
 	seenSchema := map[string]bool{}
+	seenTable := map[string]bool{}
 	for i := range req.Tables {
 		t := &req.Tables[i]
 		if t.Schema == "" || driver == DriverSQLite {
 			t.Schema = defaultSchema
 		}
+		// Once its schema is known: users and public.users are one table.
+		key := ormTableKey(t.Schema, t.Name)
+		if seenTable[key] {
+			return nil, seedRequestErrorf("%s is named twice", t.Name)
+		}
+		seenTable[key] = true
 		if !seenSchema[t.Schema] {
 			seenSchema[t.Schema] = true
 			schemas = append(schemas, t.Schema)
@@ -734,27 +739,39 @@ func (run *seedRun) chooseGenerators(t *seedTable, req *SeedRequest) error {
 			chosen = want.Columns
 		}
 	}
+	// A choice is remembered by the page, and the table may have changed
+	// since it was made: a column dropped, retyped, given a key. One that no
+	// longer fits is set aside and said, rather than refusing the seed of
+	// every other table along with it.
+	names := make([]string, 0, len(chosen))
 	for name := range chosen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		if t.column(name) < 0 {
-			return seedRequestErrorf("%s has no column %q", t.label, name)
+			run.warnings = append(run.warnings, fmt.Sprintf(
+				"%s has no column %s now; what was chosen for it is set aside", t.label, name))
 		}
 	}
 	for _, c := range t.cols {
 		if c.fixed != "" {
 			c.gen = seedGeneratorByID[c.fixed]
 			if id, ok := chosen[c.name]; ok && id != c.fixed {
-				return seedRequestErrorf("%s.%s is filled by the server and takes no generator", t.label, c.name)
+				run.warnings = append(run.warnings, fmt.Sprintf(
+					"%s.%s is filled by the server; what was chosen for it is set aside", t.label, c.name))
 			}
 			continue
 		}
 		c.inferred = c.opening(t.name)
 		c.gen = c.inferred
 		if id, ok := chosen[c.name]; ok {
-			g := seedGeneratorByID[id]
-			if g == nil || !c.allows(g) {
-				return seedRequestErrorf("%s.%s cannot be filled with %q", t.label, c.name, id)
+			if g := seedGeneratorByID[id]; g != nil && c.allows(g) {
+				c.gen = g
+			} else {
+				run.warnings = append(run.warnings, fmt.Sprintf(
+					"%s.%s cannot be filled with %q now, and is filled as it opens", t.label, c.name, id))
 			}
-			c.gen = g
 		}
 		if c.gen == nil {
 			t.problem = fmt.Sprintf("%s is %s, which no generator writes; it has no default and cannot be left empty",
@@ -903,15 +920,35 @@ func (run *seedRun) orderTables() {
 		if progressed {
 			continue
 		}
-		// Every table left points at another one left: a cycle. Break it at
-		// the first key that can be left empty.
+		// Every table left points at another one left, so some of them point
+		// at each other. Break a cycle at the first key that can be left empty
+		// and closes it: a table that only points into a cycle keeps its key.
+		reaches := func(from, to *seedTable) bool {
+			seen := map[*seedTable]bool{}
+			var walk func(t *seedTable) bool
+			walk = func(t *seedTable) bool {
+				for _, link := range edges(t) {
+					if link.parent == to {
+						return true
+					}
+					if !seen[link.parent] {
+						seen[link.parent] = true
+						if walk(link.parent) {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			return walk(from)
+		}
 		broken := false
 		for _, t := range run.tables {
 			if !pending[t] {
 				continue
 			}
 			for _, link := range edges(t) {
-				if !link.required {
+				if !link.required && reaches(link.parent, t) {
 					link.deferred = true
 					t.notes = append(t.notes, fmt.Sprintf(
 						"%s points only at %s rows that were there before: %s and %s point at each other, so %s is written first",
@@ -927,20 +964,37 @@ func (run *seedRun) orderTables() {
 		if broken {
 			continue
 		}
+		// No key in a cycle can be left empty. The tables in one are left out;
+		// the ones only pointing at them are ordered once they are gone.
+		var cycle []*seedTable
 		var names []string
 		for _, t := range run.tables {
-			if pending[t] {
+			if pending[t] && reaches(t, t) {
+				cycle = append(cycle, t)
 				names = append(names, t.label)
 			}
 		}
-		for _, t := range run.tables {
-			if pending[t] {
-				t.problem = fmt.Sprintf("%s point at each other with keys that cannot be left empty, so no order of writing them works",
-					seedList(names))
-				delete(pending, t)
-			}
+		if len(cycle) == 0 {
+			// Not reachable: no progress means a cycle. Kept so a mistake
+			// here ends the loop rather than the request.
+			cycle = run.pendingIn(pending)
+		}
+		for _, t := range cycle {
+			t.problem = fmt.Sprintf("%s point at each other with keys that cannot be left empty, so no order of writing them works",
+				seedList(names))
+			delete(pending, t)
 		}
 	}
+}
+
+func (run *seedRun) pendingIn(pending map[*seedTable]bool) []*seedTable {
+	var out []*seedTable
+	for _, t := range run.tables {
+		if pending[t] {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func seedAppendTable(list []*seedTable, t *seedTable) []*seedTable {
@@ -973,11 +1027,17 @@ func (run *seedRun) read(q seedQuerier) error {
 		if t.problem != "" {
 			continue
 		}
-		n, err := run.count(q, t.rel)
-		if err != nil {
-			return fmt.Errorf("could not count the rows of %s: %w", t.label, err)
+		// A full count is a scan of the table on some engines, so it is made
+		// only where a unique column's values are numbered from it.
+		var n int64
+		t.existing = -1
+		if t.countsRows() {
+			var err error
+			if n, err = run.count(q, t.rel); err != nil {
+				return fmt.Errorf("could not count the rows of %s: %w", t.label, err)
+			}
+			t.existing = n
 		}
-		t.existing = n
 		for _, c := range t.cols {
 			c.start = int(n) + 1
 			if !c.counting {
@@ -1010,6 +1070,21 @@ func (run *seedRun) read(q seedQuerier) error {
 // seeded says a foreign key points at rows the seed writes before its table.
 func (link *seedLink) seeded() bool {
 	return link.parent != nil && link.parent.problem == "" && !link.self && !link.deferred
+}
+
+// countsRows says the table has a unique column whose values carry a number
+// counted from the rows already there: a text with the row's number after it,
+// a moment a step from the last.
+func (t *seedTable) countsRows() bool {
+	for _, c := range t.cols {
+		if !c.unique || c.counting || c.gen == nil || !c.gen.writesValue() {
+			continue
+		}
+		if c.gen.distinct == seedSuffix || c.gen.distinct == seedApart {
+			return true
+		}
+	}
+	return false
 }
 
 func (run *seedRun) count(q seedQuerier, rel string) (int64, error) {
@@ -1201,7 +1276,7 @@ func (run *seedRun) linkProblem(t *seedTable) string {
 // many rows as it has values.
 func (run *seedRun) capRows(t *seedTable) {
 	for _, link := range t.links {
-		if !link.unique {
+		if !link.unique || !run.capsRows(link) {
 			continue
 		}
 		room := len(link.pool)
@@ -1209,6 +1284,11 @@ func (run *seedRun) capRows(t *seedTable) {
 		if link.seeded() {
 			room = link.parent.rows
 			why = fmt.Sprintf("this seed writes %d %s rows for it to point at", room, link.parent.label)
+		}
+		if !link.required {
+			// The one row SQL Server's unique index lets be empty.
+			room++
+			why += ", and one row can be empty"
 		}
 		if room < t.rows {
 			t.rows = room
@@ -1237,6 +1317,13 @@ func (run *seedRun) capRows(t *seedTable) {
 	}
 }
 
+// capsRows says a one-to-one key holds its table to the parent's rows. One
+// that must be filled does; one that can be empty is empty past them —
+// except on SQL Server, where a unique index takes a single NULL.
+func (run *seedRun) capsRows(link *seedLink) bool {
+	return link.required || run.driver == DriverMSSQL
+}
+
 // --- making rows ---------------------------------------------------------------
 
 func seedStream(seed int64, parts ...string) *rand.Rand {
@@ -1249,16 +1336,24 @@ func seedStream(seed int64, parts ...string) *rand.Rand {
 }
 
 // begin readies a table's random streams: one per column, one for what a
-// row's columns share, one per foreign key.
+// row's columns share, one per foreign key — and a second set the same shape
+// that only a key drawn again takes from, so that a row redrawn to stay
+// apart from an earlier one changes no other row's values.
 func (run *seedRun) begin(t *seedTable) {
 	t.streams = make([]*rand.Rand, len(t.cols))
+	t.retryCols = make([]*rand.Rand, len(t.cols))
 	for i, c := range t.cols {
 		t.streams[i] = seedStream(run.seed, t.schema, t.name, "column", c.name)
+		t.retryCols[i] = seedStream(run.seed, t.schema, t.name, "again", c.name)
 	}
 	t.rowRand = seedStream(run.seed, t.schema, t.name, "row")
+	t.retryRow = seedStream(run.seed, t.schema, t.name, "again")
 	t.linkRand = make([]*rand.Rand, len(t.links))
+	t.retryLinks = make([]*rand.Rand, len(t.links))
 	for i, link := range t.links {
-		t.linkRand[i] = seedStream(run.seed, t.schema, t.name, "link", strings.Join(link.fk.Columns, ","))
+		cols := strings.Join(link.fk.Columns, ",")
+		t.linkRand[i] = seedStream(run.seed, t.schema, t.name, "link", cols)
+		t.retryLinks[i] = seedStream(run.seed, t.schema, t.name, "link again", cols)
 	}
 	t.seen = make([]map[string]bool, len(t.keys))
 	for i := range t.seen {
@@ -1281,43 +1376,53 @@ func (run *seedRun) next(t *seedTable) (cells []seedCell, ok bool) {
 			}
 			continue
 		}
-		cells[i] = run.value(t, i, row, n)
+		cells[i] = seedValue(t.cols[i], t.streams[i], row, n)
 	}
 	for li, link := range t.links {
-		if !run.pick(t, li, link, n, cells) {
+		if !run.pick(t, t.linkRand[li], link, n, cells) {
 			return nil, false
 		}
 	}
-	// A key of several columns: draw the row's key columns again until it
-	// differs from every row made before it.
+	// Keys of several columns: the row's key columns are drawn again until it
+	// differs from every row made before it on every one of them — all of
+	// them checked again after each redraw, since keys can share a column.
+	var keys []int
 	for k, key := range t.keys {
-		if run.previewing && run.keyWaits(t, key) {
-			continue
+		if !(run.previewing && run.keyWaits(t, key)) {
+			keys = append(keys, k)
 		}
-		for try := 0; ; try++ {
-			id := tupleKey(cells, key)
-			if !t.seen[k][id] {
-				t.seen[k][id] = true
+	}
+	for try := 0; len(keys) > 0; try++ {
+		clash := -1
+		for _, k := range keys {
+			if t.seen[k][tupleKey(cells, t.keys[k])] {
+				clash = k
 				break
 			}
-			if try == seedTupleTries {
-				return nil, false
+		}
+		if clash < 0 {
+			for _, k := range keys {
+				t.seen[k][tupleKey(cells, t.keys[k])] = true
 			}
-			again := newSeedRow(t.rowRand)
-			for _, i := range key {
-				c := t.cols[i]
-				switch {
-				case c.link != nil && !c.link.unique:
-					// A one-to-one key's row is apart already; any other is
-					// drawn again.
-					for li, link := range t.links {
-						if link == c.link {
-							run.pick(t, li, link, n, cells)
-						}
+			break
+		}
+		if try == seedTupleTries {
+			return nil, false
+		}
+		again := newSeedRow(t.retryRow)
+		for _, i := range t.keys[clash] {
+			c := t.cols[i]
+			switch {
+			case c.link != nil && !c.link.unique:
+				// A one-to-one key's row is apart already; any other is
+				// drawn again.
+				for li, link := range t.links {
+					if link == c.link {
+						run.pick(t, t.retryLinks[li], link, n, cells)
 					}
-				case c.gen != nil && c.gen.writesValue():
-					cells[i] = run.value(t, i, again, n)
 				}
+			case c.gen != nil && c.gen.writesValue():
+				cells[i] = seedValue(c, t.retryCols[i], again, n)
 			}
 		}
 	}
@@ -1335,8 +1440,8 @@ func (run *seedRun) keyWaits(t *seedTable, key []int) bool {
 	return false
 }
 
-func (run *seedRun) value(t *seedTable, i int, row *seedRow, n int) seedCell {
-	text, null := t.cols[i].gen.value(t.cols[i], t.streams[i], row, n)
+func seedValue(c *seedColumn, r *rand.Rand, row *seedRow, n int) seedCell {
+	text, null := c.gen.value(c, r, row, n)
 	if null {
 		return seedCell{null: true}
 	}
@@ -1352,7 +1457,7 @@ func tupleKey(cells []seedCell, at []int) string {
 }
 
 // pick fills a foreign key's columns with one of the keys it can point at.
-func (run *seedRun) pick(t *seedTable, li int, link *seedLink, n int, cells []seedCell) bool {
+func (run *seedRun) pick(t *seedTable, r *rand.Rand, link *seedLink, n int, cells []seedCell) bool {
 	empty := func() bool {
 		if link.required {
 			return false
@@ -1371,14 +1476,17 @@ func (run *seedRun) pick(t *seedTable, li int, link *seedLink, n int, cells []se
 	var tuple []seedCell
 	if link.unique {
 		if link.perm == nil {
-			link.perm = t.linkRand[li].Perm(len(link.pool))
+			link.perm = r.Perm(len(link.pool))
 		}
 		if n >= len(link.perm) {
+			if !link.required && (run.driver != DriverMSSQL || n == len(link.perm)) {
+				return empty()
+			}
 			return false
 		}
 		tuple = link.pool[link.perm[n]]
 	} else {
-		tuple = link.pool[t.linkRand[li].IntN(len(link.pool))]
+		tuple = link.pool[r.IntN(len(link.pool))]
 	}
 	for k, c := range link.cols {
 		cells[t.column(c.name)] = tuple[k]

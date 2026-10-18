@@ -4,10 +4,12 @@ import {
   choiceGroups,
   newSeed,
   planLine,
+  pruneChoices,
   readSeedPlan,
   readSeedReport,
   reportLine,
   reportTitle,
+  requestedChoices,
   rowsFrom,
   seedKey,
   seedRequest,
@@ -158,6 +160,28 @@ describe("the request", () => {
     expect(choices).toEqual({ [key]: { email: "word" } })
     choices = chooseGenerator(choices, key, "email", "email", "email")
     expect(choices).toEqual({})
+  })
+
+  test("a choice the server set aside is forgotten, and one made since is kept", () => {
+    const users = seedKey("public", "users")
+    const orders = seedKey("public", "orders")
+    const read = readSeedPlan(plan)
+    // The plan answered a request that chose "word" for email and "fullName"
+    // for a column users no longer has; it kept the first and not the second.
+    const asked = requestedChoices(
+      JSON.stringify({
+        tables: [{ schema: "public", name: "users", columns: { email: "word", gone: "fullName" } }],
+      }),
+    )
+    expect(asked).toEqual({ [users]: { email: "word", gone: "fullName" } })
+    const held = { [users]: { email: "word", gone: "fullName" }, [orders]: { status: "text" } }
+    expect(pruneChoices(held, asked, read)).toEqual({
+      [users]: { email: "word" },
+      [orders]: { status: "text" },
+    })
+    // Changed since that request was sent: not the plan's to judge.
+    const since = { [users]: { email: "word", gone: "email" } }
+    expect(pruneChoices(since, asked, read)).toBe(since)
   })
 
   test("every table, or the ones ticked", () => {

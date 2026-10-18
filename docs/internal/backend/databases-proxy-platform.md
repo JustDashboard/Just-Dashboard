@@ -2209,7 +2209,9 @@ the detail of each classifier is below, with the surface it guards.
   and from `sys.check_constraints` and `all_constraints` on SQL Server and Oracle; anything else is the
   table's to refuse. A column with a default and nothing in its name or its checks to say what it holds
   keeps its default. The reader may choose another generator per column from the plan's `choices`; each
-  column also says which one it opens with (`inferred`). Every address and number is one that reaches
+  column also says which one it opens with (`inferred`). A choice the table no longer takes — the page
+  remembers choices, and a column may since have been dropped, retyped or given to the server — is set
+  aside with a warning rather than refusing the seed, and the page forgets it. Every address and number is one that reaches
   nobody: RFC 2606's example domains, RFC 5737's documentation ranges, the 555-01xx and 07700 900xxx
   ranges set aside for fiction. A value is made as the text an import would carry and is bound by the
   import's own `bindValue`, so a seed reaches an engine by the road a file does.
@@ -2219,11 +2221,15 @@ the detail of each classifier is below, with the surface it guards.
   A parent outside the seed is read for up to 10,000 of the keys it has. A table that points at itself
   is written in chunks of about a fifth of its rows, reading its own keys between them, so its first rows
   are empty there and the rest point at earlier ones. Tables that point at each other are broken at a key
-  that can be left empty, which then points at what its parent held before the seed; a cycle with no
-  such key leaves its tables out. A one-to-one key points at each parent row once, and caps the table's
-  rows at the parent's. A unique column's values are kept apart — a number counts up from past the
-  largest one there, a text carries the row's own number counted from the table's rows — and a key of
-  several columns is drawn again until it differs from every earlier row's. A required key with
+  that can be left empty and closes the cycle, which then points at what its parent held before the
+  seed; a table that only points into a cycle keeps its key, and a cycle with no such key leaves its own
+  tables out and no others. A one-to-one key points at each parent row once: one that must be filled
+  caps the table's rows at the parent's, and one that may be empty is empty past them (on SQL Server,
+  whose unique index takes a single NULL, one row past them). A unique column's values are kept apart —
+  a number counts up from past the largest one there, a text carries the row's own number counted from
+  the table's rows (the one thing a table is counted for, since a count is a scan on some engines) — and
+  the keys of several columns are drawn again, from random streams of their own so that no other row
+  changes, until the row differs from every earlier one on every key. A required key with
   nothing to point at leaves its table out with the reason, and so does a column of a type no generator
   writes that has no default and cannot be empty.
 - **The write is one transaction through the import's writer** (`seed_write.go`, `importRun`): batches
@@ -2231,7 +2237,10 @@ the detail of each classifier is below, with the surface it guards.
   statement. A row the table refuses for a reason the seed could not see — a CHECK on an expression, a
   trigger, a unique index over an expression — is left out and counted with its reason, and the rest
   carries on; a table whose parent took none of its seeded rows is left out. On ClickHouse, which has no
-  transaction, each table is its own batch and a table written before a failure stays (`atomic: false`).
+  transaction, each table is its own batch and a table written before a failure stays (`atomic: false`):
+  a table the server refuses is reported as left out with the reason, and the rest are still reported,
+  so a second try is never blind to what the first wrote. The page moves to a new seed number after
+  every write, whether or not it succeeded.
   A request may name 100 tables and 10,000 rows a table, 100,000 in all.
 - **The page** is a card of its own on the Generate page (`components/database/generate/seed.tsx`,
   `seed-model.ts`), gated on `seed`: the tables (every one, or the ones ticked), the rows each and a

@@ -110,6 +110,9 @@ func (run *seedRun) writeAll(db *sql.DB, report *SeedReport) error {
 }
 
 // writeEach is ClickHouse's: a batch per table, each sent when it is whole.
+// A table written stays written whatever happens to the next, so a table
+// that fails is reported as left out, with why, and the seed goes on: the
+// answer has to say which tables are in, or a second try writes them twice.
 func (run *seedRun) writeEach(db *sql.DB, report *SeedReport) error {
 	if err := run.read(db); err != nil {
 		return err
@@ -119,40 +122,43 @@ func (run *seedRun) writeEach(db *sql.DB, report *SeedReport) error {
 			report.Tables = append(report.Tables, run.leftOut(t))
 			continue
 		}
-		tx, err := db.BeginTx(run.ctx, nil)
+		out, err := run.writeBatch(db, t)
 		if err != nil {
-			return err
-		}
-		out, err := run.writeTable(tx, t)
-		var row *importRowFailure
-		switch {
-		case errors.As(err, &row):
-			// The driver gathers a batch and cannot carry on past a row it
-			// refuses. Nothing of this table has been sent.
-			_ = tx.Rollback()
-			out = &SeedTableReport{
-				Schema: t.schema, Name: t.name, Rows: t.rows, Errors: []ImportRowError{},
-				Notes: append([]string{}, t.notes...), Statement: out.statementOr(),
-				Problem: fmt.Sprintf("row %d was refused, and ClickHouse cannot carry on past it: %v", row.row, row.err),
+			if cerr := run.ctx.Err(); cerr != nil {
+				return cerr
 			}
-		case err != nil:
-			_ = tx.Rollback()
-			return err
-		default:
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("%s could not be written: %w", t.label, err)
+			left := run.leftOut(t)
+			left.Rows = t.rows
+			var row *importRowFailure
+			if errors.As(err, &row) {
+				// The driver gathers a batch and cannot carry on past a row
+				// it refuses. Nothing of this table was sent.
+				left.Problem = fmt.Sprintf("row %d was refused, and ClickHouse cannot carry on past it: %v", row.row, row.err)
+			} else {
+				left.Problem = fmt.Sprintf("%s could not be written: %v", t.label, err)
 			}
+			out = &left
 		}
 		report.Tables = append(report.Tables, *out)
 	}
 	return nil
 }
 
-func (r *SeedTableReport) statementOr() string {
-	if r == nil {
-		return ""
+// writeBatch writes one table as one ClickHouse batch.
+func (run *seedRun) writeBatch(db *sql.DB, t *seedTable) (*SeedTableReport, error) {
+	tx, err := db.BeginTx(run.ctx, nil)
+	if err != nil {
+		return nil, err
 	}
-	return r.Statement
+	out, err := run.writeTable(tx, t)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // written is every table in the order it is written, then the ones left out.
@@ -182,6 +188,16 @@ func (run *seedRun) writeTable(tx *sql.Tx, t *seedTable) (*SeedTableReport, erro
 	if t.problem == "" {
 		if err := run.pointAtParents(tx, t); err != nil {
 			return nil, err
+		}
+		// A parent left out while the seed was writing is one whose rows
+		// from before are what this table points at, and they were not read.
+		for _, link := range t.links {
+			if !link.seeded() && !link.loaded {
+				if err := run.readPool(tx, t, link, nil); err != nil {
+					return nil, err
+				}
+				link.loaded = true
+			}
 		}
 	}
 	if t.problem == "" {
@@ -347,8 +363,14 @@ func (run *seedRun) pointAtParents(q seedQuerier, t *seedTable) error {
 				"%s points at any %s row, not only the new ones: %s's key is made by the server in a way the seed cannot tell apart",
 				strings.Join(link.fk.Columns, ", "), parent.label, parent.label))
 		}
-		if link.unique && len(link.pool) < t.rows {
-			t.rows = len(link.pool)
+		room := len(link.pool)
+		if !link.required {
+			room++
+		}
+		if link.unique && run.capsRows(link) && room < t.rows {
+			t.rows = room
+			t.notes = append(t.notes, fmt.Sprintf("%s points at each %s row once, and %d of the rows this seed wrote went in: %d rows are written",
+				strings.Join(link.fk.Columns, ", "), parent.label, len(link.pool), room))
 		}
 	}
 	return nil

@@ -274,6 +274,47 @@ export function chooseGenerator(
   return next
 }
 
+/**
+ * The choices once a plan has answered for them: one the server set aside —
+ * its column dropped, retyped, or now filled by the server — is forgotten,
+ * so it is said once and not sent with every plan after. Only what the
+ * request that plan answers carried is judged; a choice made since is kept.
+ */
+export function pruneChoices(
+  choices: SeedChoices,
+  asked: SeedChoices,
+  plan: SeedPlan,
+): SeedChoices {
+  let next = choices
+  for (const table of plan.tables) {
+    const key = seedKey(table.schema, table.name)
+    const sent = asked[key]
+    if (!sent || !choices[key]) continue
+    for (const [column, generator] of Object.entries(sent)) {
+      const held = table.columns.find((c) => c.name === column)
+      if (choices[key][column] !== generator || held?.generator === generator) continue
+      const rest = { ...next[key] }
+      delete rest[column]
+      next = { ...next }
+      if (Object.keys(rest).length === 0) delete next[key]
+      else next[key] = rest
+    }
+  }
+  return next
+}
+
+/** What a request asked each table's columns to be filled with. */
+export function requestedChoices(body: string): SeedChoices {
+  const parsed = JSON.parse(body) as {
+    tables?: { schema?: string; name?: string; columns?: Record<string, string> }[]
+  }
+  const out: SeedChoices = {}
+  for (const t of parsed.tables ?? []) {
+    if (t.columns && typeof t.name === "string") out[seedKey(t.schema ?? "", t.name)] = t.columns
+  }
+  return out
+}
+
 /** A column's choices by group, in the order the server listed them. */
 export function choiceGroups(choices: readonly SeedChoice[]): {
   group: string
