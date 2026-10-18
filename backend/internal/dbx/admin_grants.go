@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -29,6 +30,11 @@ const (
 	GrantOnSchema   = "schema"
 	GrantOnTable    = "table"
 	GrantOnSequence = "sequence"
+	// GrantOnFunction is EXECUTE on a function, a procedure or an aggregate;
+	// GrantOnColumn is a privilege on some of a table's columns. Only
+	// PostgreSQL's closed set has them.
+	GrantOnFunction = "function"
+	GrantOnColumn   = "column"
 	GrantOnRole     = "role"
 )
 
@@ -38,7 +44,7 @@ type PrivilegeLevel struct {
 	Level      string   `json:"level"`
 	Privileges []string `json:"privileges"`
 	// Needs names the request fields that identify the object at this level,
-	// in order: "database", "schema", "table", "memberOf".
+	// in order: "database", "schema", "table", "routine", "columns", "memberOf".
 	Needs []string `json:"needs"`
 	// AllObjects is true when the last of Needs may be left empty to mean
 	// every object of that kind in the schema.
@@ -55,10 +61,17 @@ type PrivilegeChange struct {
 	Role string
 	Host string
 	// Level is one of the GrantOn* levels.
-	Level      string
-	Database   string
-	Schema     string
-	Table      string
+	Level    string
+	Database string
+	Schema   string
+	Table    string
+	// Routine and Arguments name a function: its name, and the types it takes
+	// as pg_get_function_identity_arguments writes them. Arguments is nil to
+	// name the function by its name alone, which the engine accepts while no
+	// other has the same name.
+	Routine    string
+	Arguments  *string
+	Columns    []string
 	Privileges []string
 	// MemberOf is the role being granted, at the role level.
 	MemberOf string
@@ -94,9 +107,14 @@ type Grant struct {
 	Host  string `json:"host,omitempty"`
 	Level string `json:"level"`
 	// Database, Schema and Table name the object, as far down as Level goes.
-	Database   string   `json:"database,omitempty"`
-	Schema     string   `json:"schema,omitempty"`
-	Table      string   `json:"table,omitempty"`
+	Database string `json:"database,omitempty"`
+	Schema   string `json:"schema,omitempty"`
+	Table    string `json:"table,omitempty"`
+	// Routine and Arguments name a function at the function level; Column
+	// names the column at the column level, with Table the table it is in.
+	Routine    string   `json:"routine,omitempty"`
+	Arguments  string   `json:"arguments,omitempty"`
+	Column     string   `json:"column,omitempty"`
 	Privileges []string `json:"privileges"`
 	// Grantable is true when the grantee may grant these on.
 	Grantable bool   `json:"grantable,omitempty"`
@@ -218,7 +236,8 @@ func checkPrivileges(levels []PrivilegeLevel, c PrivilegeChange) ([]string, erro
 		return nil, privilegeRefused("a role is required")
 	}
 	for i, need := range level.Needs {
-		value := map[string]string{"database": c.Database, "schema": c.Schema, "table": c.Table, "memberOf": c.MemberOf}[need]
+		value := map[string]string{"database": c.Database, "schema": c.Schema, "table": c.Table,
+			"routine": c.Routine, "columns": strings.Join(c.Columns, ""), "memberOf": c.MemberOf}[need]
 		last := i == len(level.Needs)-1
 		if strings.TrimSpace(value) == "" && !(last && level.AllObjects) {
 			return nil, privilegeRefused("a %s is required at the %s level", need, c.Level)
@@ -430,6 +449,30 @@ func privilegeList(privileges []string, all string) string {
 	return strings.Join(privileges, ", ")
 }
 
+// routineArgumentRe is what an argument list of identity arguments is made
+// of: names, types, array brackets and their modifiers, commas and spaces.
+var routineArgumentRe = regexp.MustCompile(`^[\pL\pN_ ,.\[\]()"]*$`)
+
+// routineArguments confines a function's argument list to the parentheses it
+// is written in. The list is what pg_get_function_identity_arguments returns,
+// and the page sends it back as it read it; what is checked here is that
+// nothing else can arrive in its place, because it follows the function's
+// name and what follows is the rest of the statement.
+func routineArguments(arguments string) (string, error) {
+	arguments = strings.TrimSpace(arguments)
+	if arguments == "" {
+		return "", nil
+	}
+	arguments, err := validateFragment(DriverPostgres, "the function's argument list", arguments)
+	if err != nil {
+		return "", privilegeRefused("%v", err)
+	}
+	if !routineArgumentRe.MatchString(arguments) {
+		return "", privilegeRefused("the function's argument list holds a character an argument list does not")
+	}
+	return arguments, nil
+}
+
 // --- PostgreSQL --------------------------------------------------------------
 
 func (postgresDialect) PrivilegeLevels() []PrivilegeLevel {
@@ -442,6 +485,10 @@ func (postgresDialect) PrivilegeLevels() []PrivilegeLevel {
 			Privileges: []string{"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "ALL"}},
 		{Level: GrantOnSequence, Needs: []string{"schema", "table"}, AllObjects: true, Future: true, GrantOption: true,
 			Privileges: []string{"USAGE", "SELECT", "UPDATE", "ALL"}},
+		{Level: GrantOnFunction, Needs: []string{"schema", "routine"}, AllObjects: true, Future: true, GrantOption: true,
+			Privileges: []string{"EXECUTE", "ALL"}},
+		{Level: GrantOnColumn, Needs: []string{"schema", "table", "columns"}, GrantOption: true,
+			Privileges: []string{"SELECT", "INSERT", "UPDATE", "REFERENCES", "ALL"}},
 		{Level: GrantOnRole, Needs: []string{"memberOf"}, Privileges: []string{}},
 	}
 }
@@ -461,8 +508,7 @@ func (d postgresDialect) privilegeStatements(c PrivilegeChange, privileges []str
 	// The two verbs differ in more than the keyword: a grant ends in TO and
 	// may carry the grant option after it, a revoke ends in FROM and names
 	// the grant option before the privileges.
-	render := func(on string) string {
-		list := privilegeList(privileges, "ALL PRIVILEGES")
+	renderList := func(list, on string) string {
 		if c.Revoke {
 			prefix := "REVOKE "
 			if c.GrantOption {
@@ -475,6 +521,9 @@ func (d postgresDialect) privilegeStatements(c PrivilegeChange, privileges []str
 			stmt += " WITH GRANT OPTION"
 		}
 		return stmt
+	}
+	render := func(on string) string {
+		return renderList(privilegeList(privileges, "ALL PRIVILEGES"), on)
 	}
 	switch c.Level {
 	case GrantOnRole:
@@ -498,22 +547,53 @@ func (d postgresDialect) privilegeStatements(c PrivilegeChange, privileges []str
 			return nil, err
 		}
 		return []string{render("SCHEMA " + name)}, nil
-	case GrantOnTable, GrantOnSequence:
+	case GrantOnColumn:
+		rel, err := qualify(d, c.Schema, c.Table)
+		if err != nil {
+			return nil, err
+		}
+		columns, err := quoteColumns(d, "a column grant", c.Columns)
+		if err != nil {
+			return nil, err
+		}
+		// Each privilege carries the column list: the list belongs to the
+		// privilege, not to the statement.
+		parts := []string{"ALL PRIVILEGES (" + columns + ")"}
+		if !(len(privileges) == 1 && privileges[0] == "ALL") {
+			parts = parts[:0]
+			for _, privilege := range privileges {
+				parts = append(parts, privilege+" ("+columns+")")
+			}
+		}
+		return []string{renderList(strings.Join(parts, ", "), "TABLE "+rel)}, nil
+	case GrantOnTable, GrantOnSequence, GrantOnFunction:
 		schema, err := d.QuoteIdent(c.Schema)
 		if err != nil {
 			return nil, err
 		}
-		kind, kinds := "TABLE", "TABLES"
-		if c.Level == GrantOnSequence {
-			kind, kinds = "SEQUENCE", "SEQUENCES"
+		// ROUTINE covers a function, a procedure and an aggregate alike;
+		// default privileges have no such word and take FUNCTIONS.
+		kind, kinds, defaults, object := "TABLE", "TABLES", "TABLES", c.Table
+		switch c.Level {
+		case GrantOnSequence:
+			kind, kinds, defaults = "SEQUENCE", "SEQUENCES", "SEQUENCES"
+		case GrantOnFunction:
+			kind, kinds, defaults, object = "ROUTINE", "ROUTINES", "FUNCTIONS", c.Routine
 		}
-		if c.Table != "" {
+		if object != "" {
 			if c.Future {
 				return nil, privilegeRefused("future objects are covered by a grant on the whole schema, not on one %s", strings.ToLower(kind))
 			}
-			rel, err := qualify(d, c.Schema, c.Table)
+			rel, err := qualify(d, c.Schema, object)
 			if err != nil {
 				return nil, err
+			}
+			if c.Level == GrantOnFunction && c.Arguments != nil {
+				arguments, err := routineArguments(*c.Arguments)
+				if err != nil {
+					return nil, err
+				}
+				rel += "(" + arguments + ")"
 			}
 			return []string{render(kind + " " + rel)}, nil
 		}
@@ -534,7 +614,7 @@ func (d postgresDialect) privilegeStatements(c PrivilegeChange, privileges []str
 				}
 				prefix += " FOR ROLE " + o
 			}
-			stmts = append(stmts, prefix+" IN SCHEMA "+schema+" "+render(kinds))
+			stmts = append(stmts, prefix+" IN SCHEMA "+schema+" "+render(defaults))
 		}
 		return stmts, nil
 	}
@@ -551,11 +631,14 @@ const pgSystemSchemas = `n.nspname NOT IN ('pg_catalog', 'information_schema')
 // database, so those are this database's. The privileges of one grantee on
 // one object from one grantor come back as one row.
 func (postgresDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([]Grant, bool, error) {
+	// detail is the second half of an object's name where one has it: a
+	// function's argument types, or the column of a column privilege.
 	rows, err := db.QueryContext(ctx, `
-	  SELECT level, database, schema, object, grantee, grantor, grantable, owner, future,
+	  SELECT level, database, schema, object, detail, grantee, grantor, grantable, owner, future,
 	         string_agg(privilege, ',' ORDER BY privilege)
 	  FROM (
 	    SELECT 'database' AS level, d.datname::text AS database, ''::text AS schema, ''::text AS object,
+	           ''::text AS detail,
 	           COALESCE(ge.rolname, 'PUBLIC')::text AS grantee, COALESCE(gr.rolname, '')::text AS grantor,
 	           a.privilege_type::text AS privilege, a.is_grantable AS grantable,
 	           a.grantee = d.datdba AS owner, false AS future, 1 AS ord
@@ -565,7 +648,7 @@ func (postgresDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([
 	    LEFT JOIN pg_roles gr ON gr.oid = a.grantor
 	    WHERE NOT d.datistemplate AND $2 = '' AND $3 = ''
 	    UNION ALL
-	    SELECT 'schema', current_database()::text, n.nspname::text, '',
+	    SELECT 'schema', current_database()::text, n.nspname::text, '', '',
 	           COALESCE(ge.rolname, 'PUBLIC'), COALESCE(gr.rolname, ''),
 	           a.privilege_type, a.is_grantable, a.grantee = n.nspowner, false, 2
 	    FROM pg_namespace n
@@ -575,7 +658,7 @@ func (postgresDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([
 	    WHERE `+pgSystemSchemas+` AND $3 = ''
 	    UNION ALL
 	    SELECT CASE WHEN c.relkind = 'S' THEN 'sequence' ELSE 'table' END, current_database()::text,
-	           n.nspname::text, c.relname::text,
+	           n.nspname::text, c.relname::text, '',
 	           COALESCE(ge.rolname, 'PUBLIC'), COALESCE(gr.rolname, ''),
 	           a.privilege_type, a.is_grantable, a.grantee = c.relowner, false, 3
 	    FROM pg_class c
@@ -585,19 +668,41 @@ func (postgresDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([
 	    LEFT JOIN pg_roles gr ON gr.oid = a.grantor
 	    WHERE c.relkind IN ('r', 'v', 'm', 'p', 'f', 'S') AND `+pgSystemSchemas+`
 	    UNION ALL
-	    SELECT CASE d.defaclobjtype WHEN 'S' THEN 'sequence' WHEN 'n' THEN 'schema' ELSE 'table' END,
-	           current_database()::text, COALESCE(n.nspname, '')::text, '',
+	    SELECT 'function', current_database()::text, n.nspname::text, p.proname::text,
+	           pg_get_function_identity_arguments(p.oid)::text,
+	           COALESCE(ge.rolname, 'PUBLIC'), COALESCE(gr.rolname, ''),
+	           a.privilege_type, a.is_grantable, a.grantee = p.proowner, false, 4
+	    FROM pg_proc p
+	    JOIN pg_namespace n ON n.oid = p.pronamespace
+	    CROSS JOIN LATERAL aclexplode(p.proacl) a
+	    LEFT JOIN pg_roles ge ON ge.oid = a.grantee
+	    LEFT JOIN pg_roles gr ON gr.oid = a.grantor
+	    WHERE `+pgSystemSchemas+`
+	    UNION ALL
+	    SELECT 'column', current_database()::text, n.nspname::text, c.relname::text, att.attname::text,
+	           COALESCE(ge.rolname, 'PUBLIC'), COALESCE(gr.rolname, ''),
+	           a.privilege_type, a.is_grantable, false, false, 5
+	    FROM pg_attribute att
+	    JOIN pg_class c ON c.oid = att.attrelid
+	    JOIN pg_namespace n ON n.oid = c.relnamespace
+	    CROSS JOIN LATERAL aclexplode(att.attacl) a
+	    LEFT JOIN pg_roles ge ON ge.oid = a.grantee
+	    LEFT JOIN pg_roles gr ON gr.oid = a.grantor
+	    WHERE NOT att.attisdropped AND c.relkind IN ('r', 'v', 'm', 'p', 'f') AND `+pgSystemSchemas+`
+	    UNION ALL
+	    SELECT CASE d.defaclobjtype WHEN 'S' THEN 'sequence' WHEN 'n' THEN 'schema' WHEN 'f' THEN 'function' ELSE 'table' END,
+	           current_database()::text, COALESCE(n.nspname, '')::text, '', '',
 	           COALESCE(ge.rolname, 'PUBLIC'), pg_get_userbyid(d.defaclrole)::text,
-	           a.privilege_type, a.is_grantable, false, true, 4
+	           a.privilege_type, a.is_grantable, false, true, 6
 	    FROM pg_default_acl d
 	    LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
 	    CROSS JOIN LATERAL aclexplode(d.defaclacl) a
 	    LEFT JOIN pg_roles ge ON ge.oid = a.grantee
-	    WHERE d.defaclobjtype IN ('r', 'S', 'n') AND $3 = ''
+	    WHERE d.defaclobjtype IN ('r', 'S', 'n', 'f') AND $3 = ''
 	  ) g
 	  WHERE ($1 = '' OR grantee = $1) AND ($2 = '' OR schema = $2) AND ($3 = '' OR object = $3)
-	  GROUP BY ord, level, database, schema, object, grantee, grantor, grantable, owner, future
-	  ORDER BY ord, database, schema, object, grantee
+	  GROUP BY ord, level, database, schema, object, detail, grantee, grantor, grantable, owner, future
+	  ORDER BY ord, database, schema, object, detail, grantee
 	  LIMIT $4`, f.Role, f.Schema, f.Table, maxGrants+1)
 	if err != nil {
 		return nil, false, err
@@ -606,10 +711,18 @@ func (postgresDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([
 	out := []Grant{}
 	for rows.Next() {
 		var g Grant
-		var privileges string
-		if err := rows.Scan(&g.Level, &g.Database, &g.Schema, &g.Table, &g.Grantee, &g.Grantor,
+		var object, detail, privileges string
+		if err := rows.Scan(&g.Level, &g.Database, &g.Schema, &object, &detail, &g.Grantee, &g.Grantor,
 			&g.Grantable, &g.Owner, &g.Future, &privileges); err != nil {
 			return nil, false, err
+		}
+		switch g.Level {
+		case GrantOnFunction:
+			g.Routine, g.Arguments = object, detail
+		case GrantOnColumn:
+			g.Table, g.Column = object, detail
+		default:
+			g.Table = object
 		}
 		g.Privileges = strings.Split(privileges, ",")
 		if len(out) == maxGrants {

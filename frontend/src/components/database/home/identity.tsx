@@ -15,14 +15,15 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { DatabaseVerbs } from "@/components/database/shell/database-verbs"
 import { connectionFacts } from "@/components/database/shell/facts"
 import { DatabaseStatusMark } from "@/components/database/shell/status"
+import { supportFact } from "@/components/database/support"
 
 /**
  * The line a database's home opens on (`HostIdentity`): the engine as the
  * mark, the name — which is also the control that goes to another database —
- * and what it is, where it runs, who it is dialled as and how long it has
- * been up. At the line's end: whether it answers and how fast, and the page's
- * commands, of which one wears the brand — opening what the database holds,
- * in the engine's own word.
+ * and what it is and until when its release is maintained, where it runs, who
+ * it is dialled as and how long it has been up. At the line's end: whether it
+ * answers and how fast, and the page's commands, of which one wears the brand
+ * — opening what the database holds, in the engine's own word.
  *
  * The line measures itself, not the window (§12): the rail takes a column of
  * its own, so a laptop's worth of window is a tablet's worth of line. Where
@@ -75,6 +76,13 @@ export function HomeIdentity({
                   {fact.text}
                 </span>
               </Fact>,
+              // Said of the version, beside it, as a fact: no colour, no
+              // badge, nothing to press.
+              fact.key === "engine" && summary?.endOfLife && (
+                <Fact key="support">
+                  <span className="truncate">{supportFact(summary.endOfLife)}</span>
+                </Fact>
+              ),
               fact.key === "engine" && where && (
                 <Fact key="where">
                   <HostFact product={where.product}>

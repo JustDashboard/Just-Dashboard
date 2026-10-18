@@ -38,20 +38,32 @@ func (a *Authenticator) ClearSessionCookie(w http.ResponseWriter) {
 // Routes mounted behind it are unreachable without a valid credential — the
 // UI shell is a separate concern and never stands in for this check.
 func (a *Authenticator) Authenticate(next http.Handler) http.Handler {
-	return a.authenticate(next, false)
+	return a.authenticate(next, false, false)
+}
+
+// AuthenticateScoped is Authenticate for the few routes a scoped API key may
+// reach. Every other group refuses such a key outright, so a key made for one
+// job cannot reach a route that was never meant to name it.
+func (a *Authenticator) AuthenticateScoped(next http.Handler) http.Handler {
+	return a.authenticate(next, false, true)
 }
 
 // AuthenticatePasswordChange still requires every configured factor, but lets
 // an account replace its temporary password before normal feature access.
 func (a *Authenticator) AuthenticatePasswordChange(next http.Handler) http.Handler {
-	return a.authenticate(next, true)
+	return a.authenticate(next, true, false)
 }
 
-func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange bool) http.Handler {
+func (a *Authenticator) authenticate(next http.Handler, allowPasswordChange, allowScoped bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := a.resolveWithPasswordChange(r, allowPasswordChange)
 		if err != nil {
 			WriteError(w, r, err)
+			return
+		}
+		if p.Scope != "" && !allowScoped {
+			WriteError(w, r, Err(http.StatusForbidden, "key_scope",
+				"this API key is limited to "+p.Scope+" and cannot reach this route"))
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
@@ -94,7 +106,7 @@ func (a *Authenticator) resolveWithPasswordChange(r *http.Request, allowPassword
 			return nil, passwordChangeRequired()
 		}
 		return &Principal{
-			User: user, Role: role, TokenID: tok.ID, Kind: "token",
+			User: user, Role: role, TokenID: tok.ID, Kind: "token", Scope: tok.Scope,
 			IP: ClientIP(r), UserAgent: r.UserAgent(), Elevated: true,
 		}, nil
 	}
@@ -165,6 +177,20 @@ func RequireCapability(c auth.Capability) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RequireToken is the mirror of RequireSession, for a route that exists to be
+// called by a script: a signed-in browser has no business there, and a cookie
+// is never the credential for it.
+func RequireToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if MustPrincipal(r).Kind != "token" {
+			WriteError(w, r, Err(http.StatusForbidden, "token_required",
+				"this route is for API keys, not an interactive session"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // RequireSession blocks API-token principals from routes that must be driven

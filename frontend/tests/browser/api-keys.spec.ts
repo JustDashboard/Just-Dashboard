@@ -100,6 +100,36 @@ test("replacement keeps the old key until the new secret is copied and revocatio
   await expect(page.getByText("vpsd_synthetic_key_101", { exact: true })).toHaveCount(0)
 })
 
+test("replacing a metrics-only key makes another metrics-only key, never a wider one", async ({
+  page,
+}) => {
+  const minutes = (ago: number) => new Date(Date.now() - ago * 60_000).toISOString()
+  const { calls } = await mockKeys(page, "admin", [
+    {
+      id: 7,
+      userId: 1,
+      name: "prometheus",
+      prefix: "vpsd_77aa88bb",
+      role: "readonly",
+      scope: "metrics.read",
+      createdAt: minutes(60 * 24 * 12),
+      lastUsedAt: minutes(2),
+      revoked: false,
+    },
+  ])
+  await page.goto("/account/keys")
+  await expect(rows(page)).toContainText("metrics only")
+  await action(page, "prometheus", "Replace key")
+  const editor = page.getByRole("dialog", { name: "Replace API key" })
+  await expect(editor).toContainText("Reads database metrics only")
+  await expect(editor).not.toContainText("Read-only")
+  await editor.getByRole("button", { name: "Create replacement" }).click()
+  expect(calls[0].body).toEqual({ name: "prometheus", scope: "metrics.read", ttlDays: 90 })
+  const secret = page.getByRole("dialog", { name: "Your new key" })
+  await expect(secret).toContainText("/api/v1/metrics/databases")
+  await expect(secret).not.toContainText("/api/v1/system/host")
+})
+
 test("the first key keeps its one-time secret through refresh, then discards it on Done", async ({
   page,
 }) => {

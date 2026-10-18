@@ -18,13 +18,22 @@ export const TABLE_VIEWS = [
   "columns",
   "indexes",
   "keys",
+  "policies",
   "triggers",
   "definition",
   "statistics",
 ] as const
 export type TableViewId = (typeof TABLE_VIEWS)[number]
 
-export const CREATIONS = ["table", "view", "schema", "type"] as const
+export const CREATIONS = [
+  "table",
+  "view",
+  "schema",
+  "type",
+  "function",
+  "procedure",
+  "trigger",
+] as const
 export type Creation = (typeof CREATIONS)[number]
 
 export type Selected =

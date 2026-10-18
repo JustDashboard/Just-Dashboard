@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test"
+import scripts from "../../../../../backend/internal/dbx/testdata/statement-splits.json"
 import { dialectOf } from "./dialect"
-import { firstLine, runTarget, splitStatements, statementAt, tokenize } from "./sql-text"
+import {
+  firstLine,
+  readScript,
+  runTarget,
+  splitStatements,
+  statementAt,
+  tokenize,
+} from "./sql-text"
 
 const pg = dialectOf("postgres")
 const mysql = dialectOf("mysql")
 const mssql = dialectOf("sqlserver")
+const oracle = dialectOf("oracle")
 const texts = (sql, dialect = pg) => splitStatements(sql, dialect).map((span) => span.text)
 
 describe("splitting a text into statements", () => {
@@ -68,6 +77,69 @@ describe("splitting a text into statements", () => {
   })
 })
 
+describe("a script read as its engine reads it", () => {
+  // The scripts the server's own tests read (`dbx/statement-splits.json`):
+  // the editor must find the same statements in them, where the server does,
+  // or "run the statement at the cursor" sends a piece of one.
+  for (const script of scripts) {
+    test(`${script.driver}: ${script.name}`, () => {
+      const spans = splitStatements(script.sql, dialectOf(script.driver))
+      expect(spans.map((span) => ({ sql: span.text, line: span.line }))).toEqual(script.statements)
+    })
+  }
+
+  test("every engine with bodies of its own has a script there", () => {
+    const drivers = new Set(scripts.map((script) => script.driver))
+    for (const driver of ["postgres", "mysql", "sqlite", "sqlserver", "oracle"]) {
+      expect(drivers.has(driver)).toBe(true)
+    }
+  })
+
+  test("a body is told from a statement, and a PL/SQL unit from a SQL Server routine", () => {
+    const kinds = (sql, dialect) => splitStatements(sql, dialect).map((span) => span.body ?? "")
+    expect(kinds("create procedure p() begin select 1; end; select 2", mysql)).toEqual([
+      "block",
+      "",
+    ])
+    expect(kinds("begin null; end;\n/\nselect 1 from dual", oracle)).toEqual(["plsql", ""])
+    expect(kinds("create procedure p as select 1\ngo\nexec p", mssql)).toEqual(["routine", ""])
+  })
+
+  test("a PL/SQL unit with no / after it runs to the end, and says so", () => {
+    const [unit] = splitStatements("begin\n  null;\nend;\nselect 1 from dual;", oracle)
+    expect(unit.runsOn).toBe(true)
+    const [ended] = splitStatements("begin\n  null;\nend;\n/\nselect 1 from dual;", oracle)
+    expect(ended.runsOn).toBeUndefined()
+  })
+
+  test("a SQL Server routine that takes in what follows its END says so", () => {
+    const [took] = splitStatements("create procedure p as begin select 1 end\nexec p\ngo", mssql)
+    expect(took.text).toBe("create procedure p as begin select 1 end\nexec p")
+    expect(took.runsOn).toBe(true)
+    const [stopped] = splitStatements("create procedure p as begin select 1 end;\nexec p", mssql)
+    expect(stopped.runsOn).toBeUndefined()
+    // A body with no BEGIN is the batch's to the end, which is how it is meant.
+    expect(splitStatements("create procedure p as select 1\ngo", mssql)[0].runsOn).toBeUndefined()
+  })
+
+  test("a GO line belongs to the batch it ends, for the cursor", () => {
+    const sql = "select 1\ngo\nselect 2"
+    const spans = splitStatements(sql, mssql)
+    expect(statementAt(spans, sql.indexOf("go") + 2)?.text).toBe("select 1")
+    expect(statementAt(spans, sql.indexOf("select 2"))?.text).toBe("select 2")
+  })
+
+  test("the separators of a script are part of what it is, and nothing else", () => {
+    const sql = "-- two procedures\nDELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\n"
+    expect(readScript(sql, mysql).reach).toEqual({
+      start: sql.indexOf("DELIMITER"),
+      end: sql.indexOf("END$$") + 5,
+    })
+    expect(readScript("select 1;\nselect 2;", pg).reach).toEqual({ start: 0, end: 18 })
+    expect(readScript("-- nothing", pg).reach).toBeNull()
+  })
+})
+
 describe("the statement under the cursor", () => {
   const sql = "select 1;\n\nselect 2\nfrom t;\n\n"
   const spans = splitStatements(sql, pg)
@@ -123,6 +195,32 @@ describe("what Run sends", () => {
   })
   test("nothing to run in an empty text", () => {
     expect(runTarget("  \n-- nothing\n", null, 0, pg)).toBeNull()
+  })
+  test("the cursor in a procedure's body runs the whole procedure", () => {
+    const sql =
+      "DELIMITER $$\nCREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\n  SELECT 2;\nEND$$\nDELIMITER ;\nCALL p();"
+    expect(runTarget(sql, null, sql.indexOf("SELECT 2"), mysql)).toEqual({
+      scope: "statement",
+      sql: "CREATE PROCEDURE p()\nBEGIN\n  SELECT 1;\n  SELECT 2;\nEND",
+      offset: sql.indexOf("CREATE"),
+      line: 2,
+    })
+  })
+  test("everything goes with the DELIMITER it needs, and the count of its last GO", () => {
+    const delimited =
+      "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;\nCALL p()"
+    expect(runTarget(delimited, null, 0, mysql, true)?.sql).toBe(delimited)
+    const repeated = "INSERT INTO t DEFAULT VALUES\nGO 3"
+    expect(runTarget(repeated, null, 0, mssql)).toEqual({
+      scope: "statement",
+      sql: repeated,
+      offset: 0,
+      line: 1,
+    })
+  })
+  test("a PL/SQL block is sent with the semicolon after its END and without its /", () => {
+    const sql = "BEGIN\n  NULL;\nEND;\n/\nSELECT 1 FROM dual"
+    expect(runTarget(sql, null, 3, oracle)?.sql).toBe("BEGIN\n  NULL;\nEND;")
   })
 })
 

@@ -427,6 +427,287 @@ describe("the requests a set of presses becomes", () => {
   })
 })
 
+describe("functions and columns", () => {
+  const FUNCTION = {
+    level: "function",
+    privileges: ["EXECUTE", "ALL"],
+    needs: ["schema", "routine"],
+    allObjects: true,
+    future: true,
+    grantOption: true,
+  }
+  const COLUMN = {
+    level: "column",
+    privileges: ["SELECT", "INSERT", "UPDATE", "REFERENCES", "ALL"],
+    needs: ["schema", "table", "columns"],
+    grantOption: true,
+  }
+  const OVERLOADS = [FUNCTION, COLUMN]
+  const nothing = { privileges: [], owned: [], grantable: false, other: [] }
+  const fn = (name, signature) => ({ level: "function", schema: "public", table: name, signature })
+  const column = (name, table = "orders") => ({
+    level: "column",
+    schema: "public",
+    table,
+    column: name,
+  })
+  const holdsNothing = () => nothing
+
+  test("what an account was given on functions and columns is counted in its summary", () => {
+    const grants = [
+      {
+        grantee: "app",
+        level: "function",
+        schema: "public",
+        routine: "total",
+        arguments: "integer",
+        privileges: ["EXECUTE"],
+      },
+      {
+        grantee: "app",
+        level: "function",
+        schema: "public",
+        routine: "total",
+        arguments: "text",
+        privileges: ["EXECUTE"],
+      },
+      {
+        grantee: "app",
+        level: "column",
+        schema: "public",
+        table: "orders",
+        column: "id",
+        privileges: ["SELECT"],
+      },
+      {
+        grantee: "app",
+        level: "column",
+        schema: "public",
+        table: "orders",
+        column: "total",
+        privileges: ["SELECT"],
+      },
+      {
+        grantee: "app",
+        level: "column",
+        schema: "public",
+        table: "orders",
+        column: "total",
+        privileges: ["UPDATE"],
+        grantor: "other",
+      },
+    ]
+    expect(grantSummary({ superuser: false }, grants)).toBe("Granted on 2 functions, 2 columns")
+  })
+
+  test("a function is told from its namesakes by the types it takes", () => {
+    expect(cellKey(fn("total", "integer"))).not.toBe(cellKey(fn("total", "text")))
+    const grants = [
+      {
+        grantee: "app",
+        level: "function",
+        schema: "public",
+        routine: "total",
+        arguments: "integer",
+        privileges: ["EXECUTE"],
+      },
+    ]
+    expect(heldOn(grants, fn("total", "integer"), FUNCTION).privileges).toEqual(["EXECUTE"])
+    expect(heldOn(grants, fn("total", "text"), FUNCTION).privileges).toEqual([])
+    expect(heldOn(grants, fn("other", "integer"), FUNCTION).privileges).toEqual([])
+    // A function with no arguments is told from one that takes some.
+    const none = [
+      {
+        grantee: "app",
+        level: "function",
+        schema: "public",
+        routine: "now_utc",
+        arguments: "",
+        privileges: ["EXECUTE"],
+      },
+    ]
+    expect(heldOn(none, fn("now_utc", ""), FUNCTION).privileges).toEqual(["EXECUTE"])
+    expect(heldOn(none, fn("now_utc", "integer"), FUNCTION).privileges).toEqual([])
+  })
+
+  test("a function grant names the routine and its types, and says them in a review as written", () => {
+    const wanted = {
+      [cellKey(fn("total", "n integer"))]: {
+        cell: fn("total", "n integer"),
+        privileges: ["EXECUTE"],
+      },
+    }
+    const [planned] = plannedRequests(wanted, holdsNothing, OVERLOADS, {}, [])
+    expect(planned.body).toEqual({
+      level: "function",
+      schema: "public",
+      routine: "total",
+      arguments: "n integer",
+      privileges: ["EXECUTE"],
+    })
+    expect(planned.act).toBe("Grant on function")
+    expect(planned.on).toBe("public.total(n integer)")
+  })
+
+  test("EXECUTE on every function of a schema is one request for the schema, which can cover later ones", () => {
+    const cells = [fn("a", ""), fn("b", "integer")]
+    const wanted = Object.fromEntries(
+      cells.map((cell) => [cellKey(cell), { cell, privileges: ["EXECUTE"] }]),
+    )
+    const planned = plannedRequests(
+      wanted,
+      holdsNothing,
+      OVERLOADS,
+      { [scopeKey({ level: "function", schema: "public" })]: ["a()", "b(integer)"] },
+      [],
+      { future: true },
+    )
+    expect(planned).toHaveLength(1)
+    expect(planned[0].body).toEqual({
+      level: "function",
+      schema: "public",
+      privileges: ["EXECUTE"],
+      future: true,
+    })
+    expect(planned[0].about).toBe("Grant on every function in public")
+  })
+
+  test("a schema that holds functions the matrix does not list is never asked for as a whole", () => {
+    // Pressed on every function that is listed; an extension installed more
+    // in the schema, and ALL ROUTINES IN SCHEMA would grant those as well.
+    const cells = [fn("a", ""), fn("b", "integer")]
+    const key = scopeKey({ level: "function", schema: "public" })
+    const grant = Object.fromEntries(
+      cells.map((cell) => [cellKey(cell), { cell, privileges: ["EXECUTE"] }]),
+    )
+    const asked = (wanted, holds, options) =>
+      plannedRequests(wanted, holds, OVERLOADS, { [key]: ["a()", "b(integer)"] }, [], options)
+
+    const planned = asked(grant, holdsNothing, { future: true, unlisted: [key] })
+    expect(planned.map((one) => [one.action, one.body])).toEqual([
+      [
+        "grant",
+        {
+          level: "function",
+          schema: "public",
+          routine: "a",
+          arguments: "",
+          privileges: ["EXECUTE"],
+        },
+      ],
+      [
+        "grant",
+        {
+          level: "function",
+          schema: "public",
+          routine: "b",
+          arguments: "integer",
+          privileges: ["EXECUTE"],
+        },
+      ],
+    ])
+    expect(planned.some((one) => one.body.future)).toBe(false)
+
+    // The same for a revoke of what is held on every listed function.
+    const held = () => ({ ...nothing, privileges: ["EXECUTE"] })
+    const revoke = Object.fromEntries(
+      cells.map((cell) => [cellKey(cell), { cell, privileges: [] }]),
+    )
+    const revoked = asked(revoke, held, { unlisted: [key] })
+    expect(revoked.map((one) => [one.action, one.body.routine])).toEqual([
+      ["revoke", "a"],
+      ["revoke", "b"],
+    ])
+
+    // And without the extension's functions in the schema, the whole is still one request.
+    expect(asked(grant, holdsNothing, {})).toHaveLength(1)
+    expect(
+      asked(grant, holdsNothing, { unlisted: [scopeKey({ level: "function", schema: "other" })] }),
+    ).toHaveLength(1)
+  })
+
+  test("a column is held on its table, by its name", () => {
+    const grants = [
+      {
+        grantee: "app",
+        level: "column",
+        schema: "public",
+        table: "orders",
+        column: "total",
+        privileges: ["SELECT", "UPDATE"],
+      },
+      { grantee: "app", level: "table", schema: "public", table: "orders", privileges: ["DELETE"] },
+    ]
+    expect(heldOn(grants, column("total"), COLUMN).privileges).toEqual(["SELECT", "UPDATE"])
+    expect(heldOn(grants, column("status"), COLUMN).privileges).toEqual([])
+    expect(heldOn(grants, column("total", "customers"), COLUMN).privileges).toEqual([])
+    expect(cellKey(column("total"))).not.toBe(cellKey(column("status")))
+  })
+
+  test("columns pressed the same way are one request, and different ones are two", () => {
+    const presses = {
+      id: ["SELECT"],
+      total: ["SELECT"],
+      status: ["SELECT", "UPDATE"],
+    }
+    const wanted = Object.fromEntries(
+      Object.entries(presses).map(([name, privileges]) => [
+        cellKey(column(name)),
+        { cell: column(name), privileges },
+      ]),
+    )
+    const planned = plannedRequests(wanted, holdsNothing, OVERLOADS, {}, [])
+    expect(planned.map((one) => one.body)).toEqual([
+      {
+        level: "column",
+        schema: "public",
+        table: "orders",
+        columns: ["id", "total"],
+        privileges: ["SELECT"],
+      },
+      {
+        level: "column",
+        schema: "public",
+        table: "orders",
+        columns: ["status"],
+        privileges: ["SELECT", "UPDATE"],
+      },
+    ])
+    expect(planned[0].act).toBe("Grant on columns of")
+    expect(planned[0].on).toBe("public.orders (id, total)")
+    expect(planned[1].act).toBe("Grant on column")
+  })
+
+  test("a column revoke takes only what was held there, and a column of another table stays apart", () => {
+    const held = (cell) =>
+      cell.column === "total" ? { ...nothing, privileges: ["SELECT", "UPDATE"] } : nothing
+    const wanted = {
+      [cellKey(column("total"))]: { cell: column("total"), privileges: ["SELECT"] },
+      [cellKey(column("ref", "customers"))]: {
+        cell: column("ref", "customers"),
+        privileges: ["SELECT"],
+      },
+    }
+    const planned = plannedRequests(wanted, held, OVERLOADS, {}, [])
+    expect(
+      planned.map((one) => [one.action, one.body.table, one.body.columns, one.body.privileges]),
+    ).toEqual([
+      ["revoke", "orders", ["total"], ["UPDATE"]],
+      ["grant", "customers", ["ref"], ["SELECT"]],
+    ])
+  })
+
+  test("every privilege of the column level at once is its own word, and the grant option is carried", () => {
+    const every = ["SELECT", "INSERT", "UPDATE", "REFERENCES"]
+    const wanted = { [cellKey(column("id"))]: { cell: column("id"), privileges: every } }
+    const [planned] = plannedRequests(wanted, holdsNothing, OVERLOADS, {}, [], {
+      grantOption: true,
+    })
+    expect(planned.body.privileges).toEqual(["ALL"])
+    expect(planned.body.grantOption).toBe(true)
+  })
+})
+
 describe("the string a new account connects with", () => {
   const conn = { driver: "postgres", host: "127.0.0.1", port: "5432", database: "shop" }
 

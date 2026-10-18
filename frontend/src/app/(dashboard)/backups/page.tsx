@@ -26,6 +26,7 @@ import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
 import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverage"
+import { BackupKeyPanel } from "@/components/backups/backup-key"
 import { JobCard } from "@/components/backups/job-card"
 import { ProtectionMap } from "@/components/backups/protection-map"
 import { jobProducts } from "@/components/backups/marks"
@@ -244,6 +245,8 @@ export default function BackupsPage() {
           </Panel>
         )}
         {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
+
+        <BackupKeyPanel encrypting={list.some((job) => job.encrypt)} confirm={confirm} />
 
         {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
         <CoveragePanel

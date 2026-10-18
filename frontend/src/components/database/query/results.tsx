@@ -78,6 +78,7 @@ export function Results({
   onCancel,
   onFetchMore,
   onExplain,
+  onOpenStatement,
   onExport,
   exporting,
   onShowInEditor,
@@ -105,6 +106,8 @@ export function Results({
   /** Runs the same statement again for more rows. */
   onFetchMore: (step: RunStep, limit: number) => void
   onExplain: (analyze: boolean) => void
+  /** Opens a statement in the editor. */
+  onOpenStatement: (sql: string, title?: string) => void
   onExport: (sql: string, format: DbExportFormat, limit: number) => void
   exporting: boolean
   /** Marks a failed statement in the editor. */
@@ -188,6 +191,7 @@ export function Results({
         onAsk={onAskAboutPlan}
         canAnalyze={canAnalyze}
         why={noPlanWhy}
+        onOpenStatement={onOpenStatement}
       />
     )
   } else if (view === "chart") {

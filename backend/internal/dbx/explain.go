@@ -19,6 +19,11 @@ type ExplainOptions struct {
 	Analyze bool
 	// Format is "text" or "json". Empty means text.
 	Format string
+	// Verbose asks PostgreSQL for the schema of each relation and a qualifier
+	// on every column, which is what lets a plan's conditions be read back to
+	// the columns they test. Only the dashboard's own readers of a plan set it:
+	// it is not a request field.
+	Verbose bool
 }
 
 const (

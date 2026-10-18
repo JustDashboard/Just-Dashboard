@@ -13,7 +13,7 @@ type mysqlDialect struct{}
 
 func (mysqlDialect) Driver() Driver               { return DriverMySQL }
 func (mysqlDialect) SQLDriverName() string        { return "mysql" }
-func (mysqlDialect) NormaliseDSN(d string) string { return d }
+func (mysqlDialect) NormaliseDSN(d string) string { return mysqlServerCA(d) }
 func (mysqlDialect) VersionQuery() string         { return "SELECT version()" }
 func (mysqlDialect) TunePool(*sql.DB)             {}
 func (mysqlDialect) Placeholder(int) string       { return "?" }

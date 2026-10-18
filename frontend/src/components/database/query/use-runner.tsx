@@ -250,7 +250,12 @@ export function useRunner({
           maxRows: options.limit,
           queryId,
         })
-          .then((answer) => done({ steps: stepsOfQuery(answer, sql, target.line) }))
+          .then((answer) =>
+            // The text sent may begin with a separator (DELIMITER) above the statement.
+            done({
+              steps: stepsOfQuery(answer, sql, target.line + verdict.statements[0].line - 1),
+            }),
+          )
           .catch((err: unknown) =>
             done(
               cancelled(err)
@@ -261,7 +266,7 @@ export function useRunner({
                       {
                         index: 0,
                         sql,
-                        line: target.line,
+                        line: target.line + verdict.statements[0].line - 1,
                         risk: verdict.statements[0].risk,
                         status: "error",
                         error: errorMessage(err),

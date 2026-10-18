@@ -46,10 +46,14 @@ func (d Display) normalized() Display {
 }
 
 // The browser client decodes these itself; offering anything else makes guacd
-// send formats it would then drop.
+// send formats it would then drop. WebP is left out on purpose: guacd uses it
+// in place of JPEG for the parts of the screen that change often, and libwebp
+// spends several times libjpeg-turbo's CPU on each one. The server's CPU is
+// what caps the frame rate, not the tailnet's bandwidth, so the cheaper
+// encoder wins; PNG still draws the parts that hold still.
 var (
 	audioTypes = []string{"audio/L8", "audio/L16"}
-	imageTypes = []string{"image/png", "image/jpeg", "image/webp"}
+	imageTypes = []string{"image/png", "image/jpeg"}
 )
 
 // handshake does guacd's side of the connection setup, so the parameters,
@@ -133,8 +137,11 @@ func (s *Session) Close() error {
 }
 
 // The browser client sends whole instructions per frame and parses each frame
-// it receives as whole instructions, so batches only ever end on a ";".
-const batchBytes = 8 << 10
+// it receives as whole instructions, so batches only ever end on a ";". A
+// batch is sent the moment guacd has nothing more buffered, so this is only
+// how much a backlog is cut into: a screen's worth of image data is a few
+// frames rather than a few hundred.
+const batchBytes = 64 << 10
 
 // Relay copies the session both ways until either side ends. It returns the
 // error that ended it, nil when the remote side or the browser simply closed.
