@@ -364,146 +364,150 @@ export function OnlineImport() {
 
   return (
     <Page register="flow" className="animate-rise">
-      <FlowHeader
-        eyebrow={
-          <span className="inline-flex items-center gap-2">
-            {eyebrow}
-            {readOnly && <ProtectedTag />}
-          </span>
-        }
-        question={question}
-        steps={<FlowSteps steps={steps} current={step} />}
-        actions={
-          mayStart &&
-          chosen !== "new" &&
-          chosen !== undefined && (
-            <Button size="sm" variant="outline" onClick={startNew}>
-              <Plus />
-              New import
-            </Button>
-          )
-        }
-      />
+      {/* One centred column for the question, the steps and what they ask, so the
+          spine is exactly as wide as the panel under it. */}
+      <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6 md:gap-8">
+        <FlowHeader
+          eyebrow={
+            <span className="inline-flex items-center gap-2">
+              {eyebrow}
+              {readOnly && <ProtectedTag />}
+            </span>
+          }
+          question={question}
+          steps={<FlowSteps steps={steps} current={step} />}
+          actions={
+            mayStart &&
+            chosen !== "new" &&
+            chosen !== undefined && (
+              <Button size="sm" variant="outline" onClick={startNew}>
+                <Plus />
+                New import
+              </Button>
+            )
+          }
+        />
 
-      <div className="grid min-w-0 items-start gap-x-6 gap-y-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="min-w-0 space-y-6">
-          {chosen === undefined ? (
-            list.error ? (
-              <ErrorState error={list.error} onRetry={list.refresh} />
+        <div className="flex min-w-0 flex-col gap-6">
+          <div className="min-w-0 space-y-6">
+            {chosen === undefined ? (
+              list.error ? (
+                <ErrorState error={list.error} onRetry={list.refresh} />
+              ) : (
+                <LoadingPanel rows={4} />
+              )
+            ) : chosen === "new" ? (
+              !mayStart ? (
+                <EmptyState
+                  mark={<EngineMark engine={engine} size="md" />}
+                  title={
+                    readOnly
+                      ? `${conn.name} is protected`
+                      : "Bringing a database over needs an administrator"
+                  }
+                  description={
+                    readOnly
+                      ? "A protected connection refuses every change made through this dashboard, and an import makes a database here. Turn protection off in its settings first."
+                      : "It creates a database on this server and opens a connection to another one."
+                  }
+                />
+              ) : inspection ? (
+                <PlanStep
+                  engine={engine}
+                  current={conn.database}
+                  inspection={inspection}
+                  plan={plan}
+                  starting={starting}
+                  checking={checking}
+                  refusal={startRefusal}
+                  onPlan={setPlan}
+                  onStart={() => void start()}
+                  onRecheck={() => void inspect()}
+                  onChangeSource={() => {
+                    setInspection(undefined)
+                    setStartRefusal(undefined)
+                  }}
+                />
+              ) : (
+                <SourceStep
+                  engine={engine}
+                  driver={driver}
+                  draft={draft}
+                  checking={checking}
+                  refusal={sourceRefusal}
+                  onDraft={setDraft}
+                  onCheck={() => void inspect()}
+                />
+              )
+            ) : live ? (
+              <>
+                <RunStep
+                  live={live}
+                  mayAct={mayStart}
+                  mayStop={mayStop}
+                  busy={working}
+                  onCutover={() => setAsking(true)}
+                  onStopReplication={stopReplication}
+                  onStopJob={() => void transfer.stop()}
+                  onOpen={mayOpen ? () => void open(live.import.database) : undefined}
+                  onForget={forget}
+                  onNew={startNew}
+                />
+                {transfer.current && !dismissed.includes(watchedId) && (
+                  <TransferProgress
+                    watched={transfer.current}
+                    canStop={false}
+                    onStop={() => {}}
+                    onDismiss={() => setDismissed((held) => [...held, watchedId])}
+                  />
+                )}
+                {transfer.missing && namedJob && (
+                  <FormNote role="status">
+                    No job of {conn.name} is kept under that id: the server remembers its last fifty
+                    operations.
+                  </FormNote>
+                )}
+              </>
+            ) : liveRead.error ? (
+              <ErrorState error={liveRead.error} onRetry={liveRead.refresh} />
             ) : (
               <LoadingPanel rows={4} />
-            )
-          ) : chosen === "new" ? (
-            !mayStart ? (
-              <EmptyState
-                mark={<EngineMark engine={engine} size="md" />}
+            )}
+          </div>
+
+          {imports.length > 0 && (
+            <Panel plain aria-label="Imports">
+              <PanelHeader
                 title={
-                  readOnly
-                    ? `${conn.name} is protected`
-                    : "Bringing a database over needs an administrator"
-                }
-                description={
-                  readOnly
-                    ? "A protected connection refuses every change made through this dashboard, and an import makes a database here. Turn protection off in its settings first."
-                    : "It creates a database on this server and opens a connection to another one."
+                  <span className="flex items-baseline gap-2">
+                    Imports
+                    <span className="numeric text-hint font-normal text-muted-foreground">
+                      {imports.length}
+                    </span>
+                  </span>
                 }
               />
-            ) : inspection ? (
-              <PlanStep
-                engine={engine}
-                current={conn.database}
-                inspection={inspection}
-                plan={plan}
-                starting={starting}
-                checking={checking}
-                refusal={startRefusal}
-                onPlan={setPlan}
-                onStart={() => void start()}
-                onRecheck={() => void inspect()}
-                onChangeSource={() => {
-                  setInspection(undefined)
-                  setStartRefusal(undefined)
-                }}
-              />
-            ) : (
-              <SourceStep
-                engine={engine}
-                driver={driver}
-                draft={draft}
-                checking={checking}
-                refusal={sourceRefusal}
-                onDraft={setDraft}
-                onCheck={() => void inspect()}
-              />
-            )
-          ) : live ? (
-            <>
-              <RunStep
-                live={live}
-                mayAct={mayStart}
-                mayStop={mayStop}
-                busy={working}
-                onCutover={() => setAsking(true)}
-                onStopReplication={stopReplication}
-                onStopJob={() => void transfer.stop()}
-                onOpen={mayOpen ? () => void open(live.import.database) : undefined}
-                onForget={forget}
-                onNew={startNew}
-              />
-              {transfer.current && !dismissed.includes(watchedId) && (
-                <TransferProgress
-                  watched={transfer.current}
-                  canStop={false}
-                  onStop={() => {}}
-                  onDismiss={() => setDismissed((held) => [...held, watchedId])}
-                />
-              )}
-              {transfer.missing && namedJob && (
-                <FormNote role="status">
-                  No job of {conn.name} is kept under that id: the server remembers its last fifty
-                  operations.
-                </FormNote>
-              )}
-            </>
-          ) : liveRead.error ? (
-            <ErrorState error={liveRead.error} onRetry={liveRead.refresh} />
-          ) : (
-            <LoadingPanel rows={4} />
+              <PanelBody>
+                <ChoiceList>
+                  {imports.map((one) => {
+                    const { word, tone } = statusWords(one.status)
+                    return (
+                      <ChoiceRow
+                        key={one.id}
+                        leading={<StatusDot tone={tone} />}
+                        title={<span className="font-mono">{one.database}</span>}
+                        verb={`Open the import of ${one.database}`}
+                        description={`${word} · ${one.source.address} · ${relativeTime(one.updatedAt)}`}
+                        busy={one.status === "running" || one.status === "cutting"}
+                        onSelect={() => select({ import: String(one.id), job: null })}
+                      />
+                    )
+                  })}
+                </ChoiceList>
+              </PanelBody>
+            </Panel>
           )}
         </div>
-
-        {imports.length > 0 && (
-          <Panel plain aria-label="Imports">
-            <PanelHeader
-              title={
-                <span className="flex items-baseline gap-2">
-                  Imports
-                  <span className="numeric text-hint font-normal text-muted-foreground">
-                    {imports.length}
-                  </span>
-                </span>
-              }
-            />
-            <PanelBody>
-              <ChoiceList>
-                {imports.map((one) => {
-                  const { word, tone } = statusWords(one.status)
-                  return (
-                    <ChoiceRow
-                      key={one.id}
-                      leading={<StatusDot tone={tone} />}
-                      title={<span className="font-mono">{one.database}</span>}
-                      verb={`Open the import of ${one.database}`}
-                      description={`${word} · ${one.source.address} · ${relativeTime(one.updatedAt)}`}
-                      busy={one.status === "running" || one.status === "cutting"}
-                      onSelect={() => select({ import: String(one.id), job: null })}
-                    />
-                  )
-                })}
-              </ChoiceList>
-            </PanelBody>
-          </Panel>
-        )}
       </div>
 
       {asking && live && (
