@@ -11,7 +11,8 @@ import (
 )
 
 type Store struct {
-	DB *sql.DB
+	DB    *sql.DB
+	guard *walGuard
 }
 
 // DatabaseFile is the SQLite file inside the data directory. It keeps its
@@ -1840,10 +1841,18 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{DB: db}, nil
+	guard, err := holdWALGuard(path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{DB: db, guard: guard}, nil
 }
 
-func (s *Store) Close() error { return s.DB.Close() }
+func (s *Store) Close() error {
+	s.guard.release()
+	return s.DB.Close()
+}
 
 func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {
 	var v string

@@ -33,6 +33,7 @@ import (
 	mysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/sys/unix"
 )
 
 // The inventory's routes, driven against a machine written out by hand.
@@ -1412,6 +1413,61 @@ func TestFileScanFindsDatabasesByTheirFirstBytes(t *testing.T) {
 	}
 	if !strings.Contains(result.scan.Reason, "outside the file roots") {
 		t.Errorf("a root outside JD_FILE_ROOTS: reason %q", result.scan.Reason)
+	}
+}
+
+// The scan never reads the dashboard's own store. Closing any descriptor for a
+// file releases every lock this process holds on it, SQLite's included, and
+// with those gone another SQLite closing its connection deletes the -wal and
+// -shm the store is still writing through. The store is SQLite by definition,
+// so there is nothing to learn from its first bytes.
+func TestFileScanLeavesTheStoresLocksInPlace(t *testing.T) {
+	s, _ := inventoryRouter(t, auth.RoleAdmin, &fakeMachine{})
+	path := filepath.Join(s.Cfg.DataDir, store.DatabaseFile)
+	inventorySQLiteFile(t, path)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var mode string
+	if err := db.QueryRow(`PRAGMA journal_mode = WAL`).Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("journal_mode = %q, %v", mode, err)
+	}
+	var notes int
+	if err := db.QueryRow(`SELECT count(*) FROM notes`).Scan(&notes); err != nil {
+		t.Fatal(err)
+	}
+	// Whether this process holds SQLite's shared lock (PENDING_BYTE + 2, 510
+	// bytes): an open file description lock conflicts with record locks of the
+	// same process, so a write lock asked for on that range is refused only
+	// while it is held. The probe stays open to the end, since closing it
+	// would release the lock too.
+	probe, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Close()
+	held := func() bool {
+		lock := unix.Flock_t{Type: unix.F_WRLCK, Whence: io.SeekStart, Start: 0x40000000 + 2, Len: 510}
+		if err := unix.FcntlFlock(probe.Fd(), unix.F_OFD_GETLK, &lock); err != nil {
+			t.Fatal(err)
+		}
+		return lock.Type != unix.F_UNLCK
+	}
+	if !held() {
+		t.Fatal("SQLite holds no shared lock on the store before the scan")
+	}
+
+	listed := false
+	for _, f := range s.scanDatabaseFiles(t.Context()).files {
+		listed = listed || (f.Path == path && f.Engine == "sqlite")
+	}
+	if !listed {
+		t.Error("the store is not listed as a SQLite file")
+	}
+	if !held() {
+		t.Fatal("the scan opened the store and released SQLite's lock on it")
 	}
 }
 
