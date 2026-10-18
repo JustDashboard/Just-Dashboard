@@ -234,7 +234,7 @@ async function mockImports(page: Page, options: Mock = {}) {
         options.jobs?.[read[1]] ?? { job: job(read[1], "import", "running"), lines: [] },
       )
     }
-    if (path === "/databases/1/server/databases/connect") {
+    if (/^\/databases\/\d+\/server\/databases\/connect$/.test(path)) {
       write()
       return answer({ ...SHOP, id: 9, name: "shop_copy", database: "shop_copy" })
     }
@@ -599,7 +599,7 @@ test("a finished import leads to its database", async ({ page }) => {
       }),
     ],
   })
-  await visit(page, "/databases/1/import")
+  await visit(page, "/databases/1/import?import=7")
   await expect(question(page, "Is it all here?")).toBeVisible()
   const run = page.getByRole("region", { name: /→ shop_copy/ })
   await expect(run).toContainText("shop_copy is on this server")
