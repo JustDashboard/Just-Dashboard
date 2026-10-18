@@ -1642,7 +1642,7 @@ var gatedCapabilities = []string{
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
-	"comments", "indexes", "extensions", "schemaDiff", "pooler",
+	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",
 	// watching and maintaining a server
 	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
 	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "statementsSetup", "statementHistory",

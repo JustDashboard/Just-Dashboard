@@ -119,6 +119,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"comments":          "sql -sqlite",
 		"indexes":           "sql mongodb",
 		"extensions":        "postgres -cockroachdb mysql -tidb",
+		"rowSecurity":       "postgres -cockroachdb",
 		"pooler":            "postgres -cockroachdb -yugabytedb",
 
 		// watching and maintaining a server

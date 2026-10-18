@@ -95,6 +95,9 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   trigger) ask for `destructive` on every request, whatever the body says, because the SQL console
   classifies the same `CREATE` as high risk; they sit at `service.control` only so a form can ask for
   its statement as it is filled in, and a run spends `destrLim`. Their drops are in `s.destructive`.
+  `PATCH …/ddl/row-security` is `system.admin` and asks for `destructive`, and spends `destrLim`,
+  when the body turns a table's row-level security off or stops forcing it on the owner
+  (`dbx.RowSecurityChange.TurnsOff`): either shows rows to someone the policies were filtering.
 - **Maintenance.** `POST …/maintenance` is `service.control` and names its action in the body. An
   action that locks a table against the application while it runs, or can lose rows (`vacuum_full`,
   `reindex`, MySQL `optimize` and `repair`, SQLite `vacuum`, SQL Server `rebuild`), asks for

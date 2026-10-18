@@ -38,6 +38,9 @@ func schemaRouter(t *testing.T, role auth.Role) (*Server, http.Handler, *sql.DB)
 	// The audit middleware is mounted as it is in the real router, so what a
 	// handler records — and what a preview does not — can be read back.
 	r.Use(httpx.AuditMutations(s.Audit))
+	// A preview of every structure route is more destructive requests than the
+	// budget's burst of ten, and the budget has tests of its own.
+	s.destrLim = httpx.NewLimiter(1<<20, 1<<20)
 	s.mountDatabaseRoutes(r)
 
 	path := filepath.Join(s.Cfg.FileRoots[0], "shop.db")
@@ -579,6 +582,10 @@ func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
 		"POST /ddl/comment":       `{"table":"orders","comment":"x"}`,
 		"POST /ddl/enum":          `{"name":"state","values":["new"]}`,
 		"POST /ddl/enum/value":    `{"name":"state","value":"done"}`,
+		"POST /ddl/policy":        `{"table":"orders","name":"mine","using":"true"}`,
+		"PATCH /ddl/policy":       `{"table":"orders","name":"mine","using":"true"}`,
+		"PATCH /ddl/row-security": `{"table":"orders","enabled":true}`,
+		"DELETE /ddl/policy":      `{"table":"orders","name":"mine"}`,
 		"POST /ddl/truncate":      `{"table":"customers"}`,
 		"POST /ddl/routine":       `{"kind":"function","name":"f","language":"sql","returns":"int","body":"SELECT 1"}`,
 		"POST /ddl/trigger":       `{"name":"orders_stamp","table":"orders","timing":"after","events":["insert"],"forEach":"row","body":"SELECT 1"}`,

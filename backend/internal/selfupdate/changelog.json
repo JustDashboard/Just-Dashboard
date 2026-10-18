@@ -99,6 +99,16 @@
         },
         {
           "kind": "added",
+          "text": "Edit a PostgreSQL table's row-level security and try it as a role",
+          "detail": "Databases → Schema → a table has a Row security reading. Turn security on or off, hold the owner to it, and add, change and drop policies from templates (owner only, owner by a setting, tenant isolation, read-only for a role), each with the statement shown before it runs. Try it as a role runs one SELECT as that role with the settings its policies read, in a transaction that is rolled back."
+        },
+        {
+          "kind": "added",
+          "text": "Grant EXECUTE on functions and privileges on single columns",
+          "detail": "Databases → Access → an account's PostgreSQL grants list Functions and Columns beside Tables. Press EXECUTE on one function or on every function of a schema, and the ones made later, or SELECT, INSERT, UPDATE and REFERENCES on chosen columns of a table."
+        },
+        {
+          "kind": "added",
           "text": "Bring a database over from another server, keeping it current until you cut over",
           "detail": "A database's new Import page takes the source's connection string, says what stands in the way, and brings the database into a new one on that server. On PostgreSQL it uses logical replication: the structure is copied, the dashboard publishes the tables on the source (or gives you the statement to run yourself), subscribes the target, and shows each table's copy and how far behind the target is. The cutover waits for zero lag, sets the sequences to the source's positions and takes the subscription and its slot away. Every other engine that can restore under another name reads a dump from the source and loads it as it is read. The source's password is sealed for as long as a replication needs it and is never shown again."
         },

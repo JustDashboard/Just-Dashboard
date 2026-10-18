@@ -258,6 +258,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   comments: false,
   indexes: false,
   extensions: false,
+  rowSecurity: false,
   schemaDiff: false,
   pooler: false,
   stats: false,

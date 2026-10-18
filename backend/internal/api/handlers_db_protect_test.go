@@ -134,6 +134,12 @@ var protectedRouteVerdicts = map[string]string{
 	"DELETE /ddl/routine":     previewOnly,
 	"POST /ddl/trigger":       previewOnly,
 	"DELETE /ddl/trigger":     previewOnly,
+	"POST /ddl/policy":        previewOnly,
+	"PATCH /ddl/policy":       previewOnly,
+	"DELETE /ddl/policy":      previewOnly,
+	"PATCH /ddl/row-security": previewOnly,
+	// What a role sees: a read in a transaction that is rolled back.
+	"POST /rls/test": byContent,
 	// Watching a server: stopping work in flight stays possible, and a
 	// consistency check; everything that changes the server does not.
 	"POST /activity/cancel":  staysOpen,
@@ -552,6 +558,15 @@ func TestProtectedBodiesAreReadAndFailClosed(t *testing.T) {
 		{"an export's statement given twice", "/export/query", `{"sql":"select 1","Sql":"drop table orders"}`, true},
 		{"an export with no statement", "/export/query", `{"format":"csv"}`, true},
 		{"an export with a field the handler does not have", "/export/query", `{"sql":"select 1","then":"drop table orders"}`, true},
+
+		{"a test of what a role sees", "/rls/test", `{"role":"web","query":"select * from orders","claims":[{"name":"app.tenant_id","value":"1"}],"schema":"main","table":"orders","maxRows":10}`, false},
+		{"a test whose statement writes", "/rls/test", `{"role":"web","query":"delete from orders"}`, true},
+		{"a test whose statement stores its result", "/rls/test", `{"role":"web","query":"select * into copied from orders"}`, true},
+		{"a test of two statements, one a write", "/rls/test", `{"role":"web","query":"select 1; drop table orders"}`, true},
+		{"a test's statement under a name in another case", "/rls/test", `{"role":"web","Query":"drop table orders"}`, true},
+		{"a test's statement given twice", "/rls/test", `{"role":"web","query":"select 1","Query":"drop table orders"}`, true},
+		{"a test with no statement", "/rls/test", `{"role":"web"}`, true},
+		{"a test with a field the handler does not have", "/rls/test", `{"role":"web","query":"select 1","then":"drop table orders"}`, true},
 
 		{"a change set that is only shown", "/changes", `{"schema":"main","table":"orders","changes":[{"op":"update","key":{"id":7},"values":{"paid":true}}],"dryRun":true}`, false},
 		{"a change set that is applied", "/changes", `{"schema":"main","table":"orders","changes":[{"op":"update","key":{"id":7},"values":{"paid":true}}]}`, true},
