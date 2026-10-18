@@ -72,6 +72,10 @@ export interface Standing {
   /** Which statement the cursor is on, 1-based, and how many there are. */
   at: number
   of: number
+  /** The lines the statement Run would send runs over, first and last. */
+  lines?: readonly [number, number]
+  /** That statement is a body its separator did not end (`StatementSpan.runsOn`). */
+  runsOn?: "plsql" | "routine"
 }
 
 /**
@@ -279,10 +283,21 @@ export function SqlEditor({
                 ]
               : [],
           )
+          // The statement Run sends when it sends one, whether or not there are others.
+          const sent = picked?.scope === "statement" ? span : undefined
           latest.current.onStanding({
             target: picked,
             at: span ? spans.indexOf(span) + 1 : 0,
             of: spans.length,
+            ...(sent && {
+              lines: [
+                model.getPositionAt(sent.start).lineNumber,
+                model.getPositionAt(sent.end).lineNumber,
+              ] as const,
+            }),
+            ...(sent?.runsOn && (sent.body === "plsql" || sent.body === "routine")
+              ? { runsOn: sent.body }
+              : {}),
           })
         }
         const onCursor = editor.onDidChangeCursorSelection(stand)

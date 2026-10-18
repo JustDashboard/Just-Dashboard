@@ -287,6 +287,10 @@ to the contribution terms above, including the additional licence grant to the p
   generate credentials, require setup, have no application login, or remain unavailable.
 - Object-storage backups against a real S3 API (MinIO in a container: target test, upload, retention,
   restore): `JD_DEPLOY_LIVE=1 go test ./internal/backups -run TestLiveObjectStorageBackupUploadsPrunesAndRestores -count=1 -v`.
+  Encrypted archives in a bucket take an S3-compatible service you started yourself, named by
+  `JD_TEST_S3_ENDPOINT` and its keys: `go test ./internal/backups -run TestLiveEncryptedArchiveRoundTripsThroughObjectStorage -count=1 -v`;
+  a native dump restored from an encrypted archive takes `JD_TEST_POSTGRES_DSN` and
+  `JD_TEST_MYSQL_ADMIN_DSN`: `go test ./internal/api -run TestLiveEncryptedArchiveRestoresANativeDump -count=1 -v`.
 - The public-certificate journey against a real ACME authority (an isolated Caddy and a Pebble that
   validates nothing, on one Docker network):
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddyIssuesThroughAConfiguredACMEDirectory -count=1 -v`.
@@ -328,6 +332,13 @@ to the contribution terms above, including the additional licence grant to the p
   These fixtures cover new-preview isolation and production-preserving quarantine of older previews.
   Compose backup coverage changes run
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
+- Changes to the connection pooler (`dbx/pooler.go`, `api/database_pooler.go`, its routes, or how a
+  deployment reaches it) also run
+  `JD_POOLER_LIVE=1 go test ./internal/api -run TestLivePooler -count=1 -v` on a Docker host. It starts a
+  PostgreSQL container and, through the routes, a PgBouncer beside it, signs in through the pooler in both
+  authentication modes, reads its statistics, changes a setting and a password, follows the database's
+  power, reaches it from a probe container on a deployment network, then removes it and forgets the
+  connection, and removes its own containers, volumes and networks.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
   on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
@@ -335,6 +346,15 @@ to the contribution terms above, including the additional licence grant to the p
   replaces databases at a different IP, reconnects the same clients using their original URLs,
   verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
   integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
+- Changes to server TLS for the databases the dashboard starts (`api/database_tls*.go`, `internal/dbtls`,
+  `dbx/servertls.go`) also run
+  `JD_DB_TLS_LIVE=1 go test ./internal/api -run TestLiveDatabaseServerTLS -count=1 -v` on a Docker host
+  with the engines' images already pulled (`postgres:17-alpine`, `redis:8-alpine`, `mysql:8.4`,
+  `mariadb:11.4`, `mariadb:10.11`, `mongo:8`, `valkey/valkey:8-alpine`). `JD_DB_TLS_ENGINES=postgres,mariadb-10.11` (the subtests' names) narrows it to
+  some of them, and `openssl` is read for the certificate a SQL server presents. For each engine it
+  starts a server, switches it to TLS, requires TLS, checks the certificate on the wire against the
+  recorded serial, renews it (by request and by the schedule) without a restart, switches TLS off,
+  and removes its container and volumes.
 - Changes to the ingress request record — the rendered `log` block, `accesslog.Store`, or either
   reader in `proxysvc/deployment_access_log.go` — also run
   `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveCaddyAccessLogReader -count=1 -v`, which
@@ -387,7 +407,11 @@ to the contribution terms above, including the additional licence grant to the p
   install in the world reads to find out whether it is behind. If your change
   is worth a release, add the entry there and run `scripts/release.sh <version>`;
   it bumps the version everywhere it appears and regenerates the markdown. The
-  Go test run fails if the two ever disagree, in either direction.
+  Go test run fails if the changelog's newest release and the version ever
+  disagree, in either direction. It does not compare the markdown's entries, so a
+  note added after the version was bumped reaches `CHANGELOG.md` only when
+  `scripts/release.sh` runs again with the version the branch already carries,
+  which rewrites nothing else.
 - Match the surrounding code. Comments explain *why*, not *what*.
 
 ## Security issues
@@ -441,12 +465,13 @@ likely to be somebody's data as a fixture.
 | --- | --- | --- |
 | `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
 | `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
-| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts |
-| `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts, encrypted backups, statement history, stored programs |
+| `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop, statement history |
 | `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
 | `JD_TEST_MONGO_RS_DSN` | a MongoDB replica set the run owns: accounts and views are made in `admin` | replication, accounts, the credential guards |
 | `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignInIsNotAPing` |
+| `JD_TEST_POSTGRES_HYPOPG_DSN` | a PostgreSQL with the `hypopg` extension created in the database the DSN names (`postgres:17` plus `postgresql-17-hypopg`, then `CREATE EXTENSION hypopg`); the tables the tests make are named `jdt_index_advice_…` | the what-if index on the Explain view: `TestLiveHypotheticalIndexChangesThePlanAndNothingElse`, `TestLiveIndexAdviceThroughTheRouter` |
 | `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
 | `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
 | `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |
@@ -455,6 +480,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
 | `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
 | `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
+| `JD_TEST_S3_ENDPOINT`, `JD_TEST_S3_ACCESS_KEY`, `JD_TEST_S3_SECRET_KEY` | an S3-compatible service (MinIO, versitygw) and keys that may create buckets; the test makes one named `jdt-backup-encryption-…` and empties and removes it | `TestLiveEncryptedArchiveRoundTripsThroughObjectStorage` |
 
 Some tests reach past a database to the machine and run only when asked:
 
@@ -462,11 +488,16 @@ Some tests reach past a database to the machine and run only when asked:
 | --- | --- |
 | `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventoryNeverCarriesAContainerSecret`); it only reads |
 | `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
-| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
+| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`), and starts each under a memory and a processor limit, raises them in place, replaces the container and lifts the processor limit (`TestLiveProvisionedLimitsAreAppliedInPlaceAndSurviveAReplacement`, never more than 512 MiB a server); both create and remove their own containers and volumes |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
+| `JD_TEST_STATEMENTS_CONTAINER=<name>` | starts PostgreSQL servers of its own, one at a time, as `<name>-postgres`, `-pgvector`, `-postgis`, `-timescaledb` and `-setup` with a `-data` volume each: every PostgreSQL template counting its statements from its first start (`TestLiveTemplatesCountStatementsFromTheFirstStart`), and the preload, restart and extension on a server that never loaded the module (`TestLiveStatementsSetupKeepsTheLibrariesAServerLoads`); it removes each container and volume when its part is done |
+| `JD_TEST_PRELOAD_POSTGRES_DSN` | a PostgreSQL in a container of its own, with `preload` in its name and nothing on its command line about the libraries it loads, signed in to as a superuser: the test adds libraries to `shared_preload_libraries`, restarts it through the power route, creates the extensions and puts it back as it was (`TestLivePreloadRestartAndCreate`); pg_cron is used where the image has it |
+| `JD_TEST_UPGRADE_LIVE=1` | starts a PostgreSQL 16 of its own from `postgres:16-alpine` and moves it to 17 and back (`TestLiveUpgradePostgres16To17`): check, upgrade, revert, recovery of an interrupted upgrade, upgrade again and finish; it needs both images and removes the `jdt-major-upgrade-pg…` containers and volumes it makes |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
+| `JD_TEST_WALG=<path>` | a WAL-G release binary, the one `backend/Dockerfile` pins: provisions a PostgreSQL 17 through the route, archives it into a directory, recovers copies to a moment and to a restore point, switches one in, turns archiving off and deletes an archive (`TestLivePointInTimeRecoveryIntoADirectory`); it creates and removes its own `jdt-pitr-postgres-…` containers, volumes and directory |
+| `JD_TEST_PITR_S3=http://key:secret@host:port/bucket` | with `JD_TEST_WALG`, the same through an S3 store the run owns — a MinIO container on Docker's network, so the server's container reaches it — including a recovery while the server is stopped and one past the end of the archive (`TestLivePointInTimeRecoveryIntoS3`) |
 
-The ones that need Docker (the inventory, provisioning and power tests) read
+The ones that need Docker (the inventory, provisioning, power, preload, statements and point-in-time recovery and upgrade tests) read
 `JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
 
 ### Fixtures
@@ -526,8 +557,9 @@ Each area of the section has its own browser spec over one mocked server
 (`frontend/tests/browser/database-fixture.ts`, which answers with the driver
 catalogue above, and `database-fleet-fixture.ts` for a machine with and without
 Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
-`database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
-`database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-fleet-backups.spec.ts`, `database-home.spec.ts`, `database-data.spec.ts`,
+`database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
+the editor), `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.
 `scripts/test-changed.sh` picks the ones a change can reach: it follows a
 changed file through its imports to the pages that use it and runs the specs

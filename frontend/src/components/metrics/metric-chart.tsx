@@ -124,6 +124,7 @@ export function MetricChart({
   className,
   thresholds,
   yTicks,
+  axisWidth,
 }: {
   rows: ChartRowLike[]
   series: Series[]
@@ -156,6 +157,12 @@ export function MetricChart({
   className?: string
   /** Horizontal lines marking where a value stops being acceptable. */
   thresholds?: { value: number; label: string; tone?: "warning" | "danger" }[]
+  /**
+   * A fixed y-axis gutter, for charts stacked in one column and read against
+   * each other, whose plots then start on one line. Fitted to the labels when
+   * absent.
+   */
+  axisWidth?: number
 }) {
   // Deliberately *not* subscribed to the crosshair.
   //
@@ -329,7 +336,7 @@ export function MetricChart({
             // "48 MB" and "59" a band of nothing between the scale and the
             // plot, so charts in one row started at different distances from
             // their own labels.
-            width="auto"
+            width={axisWidth ?? "auto"}
             tickLine={false}
             axisLine={false}
             fontSize={10}

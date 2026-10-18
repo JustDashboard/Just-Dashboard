@@ -9,6 +9,7 @@ import { tallySessions } from "@/components/database/ops/performance-activity"
 import { readActivity } from "@/components/database/ops/performance-api"
 import { FileView, MergesView, PartsView } from "@/components/database/ops/performance-engine"
 import { type LiveSessions } from "@/components/database/ops/performance-figures"
+import { StatementHistoryView } from "@/components/database/ops/performance-history"
 import { IndexesView } from "@/components/database/ops/performance-indexes"
 import { LocksView } from "@/components/database/ops/performance-locks"
 import { OverviewView } from "@/components/database/ops/performance-overview"
@@ -16,6 +17,7 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { ReplicationView } from "@/components/database/ops/performance-replication"
 import { SessionsView } from "@/components/database/ops/performance-sessions"
 import { StatementsView } from "@/components/database/ops/performance-statements"
+import { StatementsSetupHost } from "@/components/database/ops/statements-setup"
 import { TablesView } from "@/components/database/ops/performance-tables"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -30,6 +32,7 @@ type View =
   | "sessions"
   | "locks"
   | "statements"
+  | "history"
   | "tables"
   | "indexes"
   | "parts"
@@ -40,7 +43,9 @@ export function SqlPerformance() {
   const { status } = useDatabase()
   return (
     <SectionFrame section="performance">
-      {isDown(status.state) ? <ServerDown what="Performance" /> : <Answering key="answering" />}
+      <StatementsSetupHost>
+        {isDown(status.state) ? <ServerDown what="Performance" /> : <Answering key="answering" />}
+      </StatementsSetupHost>
     </SectionFrame>
   )
 }
@@ -90,6 +95,9 @@ function Answering() {
         : []),
       ...(engine.can("locks") ? [{ id: "locks" as const, label: "Locks" }] : []),
       ...(engine.can("statements") ? [{ id: "statements" as const, label: "Statements" }] : []),
+      ...(engine.can("statementHistory")
+        ? [{ id: "history" as const, label: "Statement history" }]
+        : []),
       ...(engine.can("tableStats")
         ? [{ id: "tables" as const, label: objects[0].toUpperCase() + objects.slice(1) }]
         : []),
@@ -221,6 +229,8 @@ function Answering() {
           <LocksView activity={activity} />
         ) : view === "statements" ? (
           <StatementsView />
+        ) : view === "history" ? (
+          <StatementHistoryView />
         ) : view === "tables" ? (
           <TablesView />
         ) : view === "indexes" ? (

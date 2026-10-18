@@ -361,7 +361,7 @@ func redisDatabaseIndex(dsn, database string) (int, error) {
 		}
 		return n, nil
 	}
-	if opt, err := redis.ParseURL(dsn); err == nil {
+	if opt, err := redisOptions(dsn); err == nil {
 		return opt.DB, nil
 	}
 	return 0, nil

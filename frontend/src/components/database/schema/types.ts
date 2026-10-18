@@ -77,6 +77,10 @@ export interface DdlAnswer {
   preview?: true
   /** Functions the request's own SQL calls that the server does not vouch for. */
   calls?: string[]
+  /** How a change that is more than its statements is carried out: a drop and create in one transaction, a check afterwards. */
+  note?: string
+  /** What the catalogue calls the routine that was saved, where the engine tells overloads apart. */
+  signature?: string
 }
 
 /** One table's figures (`GET /{id}/tablestats`). A count the engine does not keep is -1. */

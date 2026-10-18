@@ -106,10 +106,13 @@ export function HistoryRange({
   hours,
   onHours,
   retentionHours,
+  label = "Activity history range",
 }: {
   hours: number
   onHours: (hours: number) => void
   retentionHours: number
+  /** What the window is of, for a screen reader. */
+  label?: string
 }) {
   return (
     <ToggleGroup
@@ -119,7 +122,7 @@ export function HistoryRange({
       onValueChange={(next) => next && onHours(Number(next))}
       variant="outline"
       size="sm"
-      aria-label="Activity history range"
+      aria-label={label}
     >
       {rangesWithin(retentionHours).map((range) => (
         <ToggleGroupItem

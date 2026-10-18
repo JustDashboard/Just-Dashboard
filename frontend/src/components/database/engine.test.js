@@ -182,6 +182,7 @@ describe("which pages an engine has", () => {
       "logs",
       "access",
       "backups",
+      "alerts",
       "settings",
     ])
     expect(titles(redis).slice(1, 3)).toEqual(["Keys", "Console"])
@@ -200,6 +201,7 @@ describe("which pages an engine has", () => {
       "logs",
       "access",
       "backups",
+      "alerts",
       "settings",
     ])
     expect(titles(mongo).slice(1, 3)).toEqual(["Documents", "Aggregations"])

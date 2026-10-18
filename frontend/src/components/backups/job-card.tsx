@@ -94,6 +94,7 @@ export function JobCard({
         </>
       )}
       <span className={cn(job.targetKind === "local" && "font-mono")}>{targetLabel(job)}</span>
+      {job.encrypt && " · encrypted"}
     </>
   )
   const next = <span>{nextLabel(job)}</span>
