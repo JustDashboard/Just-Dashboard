@@ -1955,6 +1955,7 @@ export type DbCapabilityFlag =
   | "profiler"
   // Code generation and moving data.
   | "orm" // the targets are `ormTargets`
+  | "seed" // POST /{id}/seed/plan and /{id}/seed: mock rows written into existing tables
   | "export" // the formats are `exportFormats`
   | "exportColumns"
   | "exportQuery"

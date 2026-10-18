@@ -3,7 +3,7 @@
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ChevronDown, CloudDownload, Code, Sparkles, Warning } from "@/components/icons"
+import { ChevronDown, CloudDownload, Code, Sparkles, Table, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -51,6 +51,7 @@ import {
   type OrmResult,
   type OrmTarget,
 } from "@/components/database/generate/options"
+import { SeedPanel } from "@/components/database/generate/seed"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import { downloadArchive } from "@/components/database/generate/zip"
 
@@ -60,6 +61,9 @@ type OutlineEntry = { schema: string; name: string; type: string }
 
 const NO_OPTIONS: Record<string, OptionValues> = {}
 const NO_NAMES: string[] = []
+
+/** The card that is not a code generator: rows for the tables themselves. */
+const SEED = "seed"
 
 /** How long the page waits after a switch is pressed before it asks again. */
 const SETTLE_MS = 450
@@ -91,6 +95,11 @@ const SCHEMA_CHIPS = 4
  *
  * The page takes the reading register's exit from headline tiles: what the
  * files hold is counted in the result's own head.
+ *
+ * Beside the generators, where the engine has it, is Seed data: rows of mock
+ * data written into the same tables (`seed.tsx`). It reads the catalogue as
+ * they do and then, unlike them, can write — which only it offers, and only
+ * where the role and the connection allow.
  */
 export function Generate() {
   const { id, engine, selection } = useDatabase()
@@ -119,6 +128,7 @@ export function Generate() {
     [target, chosen],
   )
   const reason = target ? unsupportedReason(target, engine.driver) : undefined
+  const seeding = storedTarget === SEED && engine.can("seed")
 
   // Beside the files where there is room for both; folded to the chosen one where there is not.
   const beside = useMediaQuery("(min-width: 1280px)")
@@ -173,12 +183,13 @@ export function Generate() {
   )
   const several = schemas.length > 1
   // What can be kept or left out is a table: views follow their own switch.
+  const tableEntries = useMemo(
+    () => (outline.data ?? []).filter((entry) => !/view|dictionary/i.test(entry.type)),
+    [outline.data],
+  )
   const tableNames = useMemo(
-    () =>
-      (outline.data ?? [])
-        .filter((entry) => !/view|dictionary/i.test(entry.type))
-        .map((entry) => tableName(entry.schema, entry.name, several)),
-    [outline.data, several],
+    () => tableEntries.map((entry) => tableName(entry.schema, entry.name, several)),
+    [tableEntries, several],
   )
   const [pickedTables, setPickedTables] = useSessionState<string[]>(
     `databases.${id}.generate.tables`,
@@ -235,6 +246,14 @@ export function Generate() {
     // Choosing a generator is asking for its files.
     if (!unsupportedReason(next, engine.driver)) setArmed(true)
   }
+  // Choosing Seed data on this visit is asking for its plan; one remembered
+  // from the last visit waits for Preview, as the generators wait for Generate.
+  const [seedHere, setSeedHere] = useState(false)
+  const chooseSeed = () => {
+    setSeedHere(true)
+    setStoredTarget(SEED)
+    setBrowsing(false)
+  }
   const setOption = (option: OrmOption, value: boolean | string) => {
     if (!target) return
     setChosen((all) => ({ ...all, [target.id]: { ...all[target.id], [option.id]: value } }))
@@ -281,7 +300,7 @@ export function Generate() {
               return (
                 <ChoiceCard
                   key={entry.id}
-                  selected={entry.id === target.id}
+                  selected={!seeding && entry.id === target.id}
                   aria-label={cannot ? `${entry.label}, not for ${engine.label}` : entry.label}
                   onClick={() => choose(entry)}
                   className={cn("min-h-0 gap-1 p-2.5", cannot && "opacity-55")}
@@ -303,7 +322,52 @@ export function Generate() {
           </div>
         </section>
       ))}
+      {engine.can("seed") && (
+        <section aria-label="Data" className="space-y-2">
+          <GroupRule label="Data" count={1} />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2">
+            <ChoiceCard
+              selected={seeding}
+              aria-label="Seed data"
+              onClick={chooseSeed}
+              className="min-h-0 gap-1 p-2.5"
+              data-target={SEED}
+            >
+              <span
+                title="Rows of mock data written into the tables, parents first"
+                className="max-w-full truncate text-body font-medium"
+              >
+                Seed data
+              </span>
+              <Tag icon={Table} className="max-w-full">
+                Rows
+              </Tag>
+            </ChoiceCard>
+          </div>
+        </section>
+      )}
     </div>
+  )
+
+  const browseButton = !beside && (
+    <Button
+      size="sm"
+      variant="outline"
+      aria-expanded={browsing}
+      onClick={() => setBrowsing(!browsing)}
+    >
+      {browsing
+        ? "Keep this one"
+        : `All ${targets.length + (engine.can("seed") ? 1 : 0)} generators`}
+    </Button>
+  )
+  const schemaChips = scoped && (
+    <SchemaChips
+      named={named}
+      picked={schemas}
+      // One is always read: the last cannot be taken off.
+      onChange={(next) => next.length > 0 && setPickedSchemas(next)}
+    />
   )
 
   return (
@@ -311,88 +375,85 @@ export function Generate() {
       <div className="grid min-w-0 items-start gap-x-8 gap-y-5 xl:grid-cols-[21rem_minmax(0,1fr)] [&>*]:min-w-0">
         {beside && generators}
 
-        <Panel plain>
-          <PanelHeader
-            title={
-              <span className="flex min-w-0 items-center gap-2.5">
-                <span className="min-w-0 truncate">{target.label}</span>
-                <Tag className="shrink-0">
-                  <LanguageMark language={target.language} />
-                </Tag>
-              </span>
-            }
-            actions={
-              <>
-                {!beside && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-expanded={browsing}
-                    onClick={() => setBrowsing(!browsing)}
-                  >
-                    {browsing ? "Keep this one" : `All ${targets.length} generators`}
-                  </Button>
-                )}
-                {!reason && (
-                  <Button
-                    size="sm"
-                    onClick={generate}
-                    pending={generation.loading}
-                    disabled={Boolean(problem)}
-                  >
-                    <Sparkles />
-                    Generate
-                  </Button>
-                )}
-              </>
-            }
+        {seeding ? (
+          <SeedPanel
+            targets={tableEntries}
+            several={several}
+            loading={outline.loading}
+            scope={schemaChips}
+            browse={browseButton}
+            browsing={!beside && browsing}
+            generators={generators}
+            armedAtStart={seedHere}
           />
-          <PanelBody className="space-y-2">
-            {!beside && browsing ? (
-              // In the files' place, not under them: the list is what was asked for.
-              generators
-            ) : reason ? (
-              <EmptyState
-                mark={<EngineMark engine={engine} />}
-                title={`${target.label} is not written for ${engine.label}`}
-                description={reason}
-              />
-            ) : (
-              <>
-                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-                  {scoped && (
-                    <SchemaChips
-                      named={named}
-                      picked={schemas}
-                      // One is always read: the last cannot be taken off.
-                      onChange={(next) => next.length > 0 && setPickedSchemas(next)}
-                    />
+        ) : (
+          <Panel plain>
+            <PanelHeader
+              title={
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span className="min-w-0 truncate">{target.label}</span>
+                  <Tag className="shrink-0">
+                    <LanguageMark language={target.language} />
+                  </Tag>
+                </span>
+              }
+              actions={
+                <>
+                  {browseButton}
+                  {!reason && (
+                    <Button
+                      size="sm"
+                      onClick={generate}
+                      pending={generation.loading}
+                      disabled={Boolean(problem)}
+                    >
+                      <Sparkles />
+                      Generate
+                    </Button>
                   )}
-                  <TablePicker
-                    names={tableNames}
-                    picked={tables}
-                    loading={outline.loading}
-                    onChange={setPickedTables}
-                  />
-                </div>
-
-                {target.options.length > 0 && (
-                  <OptionFold target={target} values={values} onChange={setOption} />
-                )}
-
-                <Output
-                  key={target.id}
-                  result={shown}
-                  error={generation.error}
-                  onRetry={generate}
-                  writing={writing}
-                  problem={problem}
-                  target={target}
+                </>
+              }
+            />
+            <PanelBody className="space-y-2">
+              {!beside && browsing ? (
+                // In the files' place, not under them: the list is what was asked for.
+                generators
+              ) : reason ? (
+                <EmptyState
+                  mark={<EngineMark engine={engine} />}
+                  title={`${target.label} is not written for ${engine.label}`}
+                  description={reason}
                 />
-              </>
-            )}
-          </PanelBody>
-        </Panel>
+              ) : (
+                <>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                    {schemaChips}
+                    <TablePicker
+                      names={tableNames}
+                      picked={tables}
+                      loading={outline.loading}
+                      onChange={setPickedTables}
+                    />
+                  </div>
+
+                  {target.options.length > 0 && (
+                    <OptionFold target={target} values={values} onChange={setOption} />
+                  )}
+
+                  <Output
+                    key={target.id}
+                    result={shown}
+                    error={generation.error}
+                    onRetry={generate}
+                    writing={writing}
+                    problem={problem}
+                    target={target}
+                  />
+                </>
+              )}
+            </PanelBody>
+          </Panel>
+        )}
       </div>
     </SectionFrame>
   )

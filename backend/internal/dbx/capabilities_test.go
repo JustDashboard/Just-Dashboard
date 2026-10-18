@@ -166,6 +166,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 
 		// code generation and moving data
 		"orm":                "sql",
+		"seed":               "sql",
 		"export":             "sql mongodb",
 		"exportColumns":      "sql",
 		"exportQuery":        "sql",

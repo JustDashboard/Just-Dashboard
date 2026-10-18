@@ -316,6 +316,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   validation: false,
   profiler: false,
   orm: false,
+  seed: false,
   export: false,
   exportColumns: false,
   exportQuery: false,

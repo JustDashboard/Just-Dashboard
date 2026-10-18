@@ -33,6 +33,16 @@
           "detail": "A new Compare page under Schema lists what differs between this connection's schema and another schema of the same engine, side by side: tables with their columns, keys, indexes, constraints and foreign keys, views, sequences, enum types, and functions and procedures as text. The migration is ordered so tables exist before the keys that point at them and a key is dropped before its table, destructive steps are marked, and what the engine cannot change in place is said so in a comment. It is text to copy, save or open in Query and is never run by the dashboard. PostgreSQL, MySQL and MariaDB, SQL Server and SQLite."
         },
         {
+          "kind": "added",
+          "text": "Fill tables with believable mock rows from the Generate page",
+          "detail": "Seed data, beside the code generators, plans rows for every table or the ones chosen: each column filled by what its name and type say it holds (names, emails, addresses, prices, dates in the past or ahead), an enum's labels or a CHECK's list or bounds, and a column the server numbers or computes left to it. Tables are written parents first so every foreign key points at a row that is there, a table that points at itself points at its own earlier rows, and unique columns stay unique when the seed is run again. A tab per table shows its first rows and lets each column's generator be changed; the rows shown are the rows written, by the seed number both carry. Writing shows the statements first and runs as one transaction; a row the table refuses is left out and counted with its reason. Addresses, domains and telephone numbers are the ones reserved for examples and fiction. The preview is open to every role and on a protected connection; writing needs a role that may change data and is refused on a protected one. PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle and ClickHouse, which has no transaction and writes each table on its own."
+        },
+        {
+          "kind": "fixed",
+          "text": "Keep an Oracle import going past more than a few refused rows",
+          "detail": "An import into Oracle that was told to skip bad rows lost its connection when its first several rows were refused (ORA-03138), and imported nothing. Each refused row's statement is now prepared again before the next row."
+        },
+        {
           "kind": "removed",
           "text": "Remove automatic attention panels, issue badges and settings recommendations",
           "detail": "Docker, databases, security, deployments, proxy, networking, backups and PM2 keep their operational readings and controls without proactive advice panels. The database Advisor page and recommendation comparisons in SSH, kernel protection and nginx settings are removed."
