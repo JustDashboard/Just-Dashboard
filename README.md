@@ -128,6 +128,8 @@ free.
 - Import from another server, kept current by logical replication on PostgreSQL until you cut over
 - Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
+- An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the
+  databases you choose, read-only unless you allow changes, never a protected one, every call audited
 
 </td>
 </tr>

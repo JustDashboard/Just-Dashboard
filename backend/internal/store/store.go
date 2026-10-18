@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   prefix       TEXT NOT NULL,
   token_hash   TEXT NOT NULL UNIQUE,
   role         TEXT NOT NULL,
+  -- '' opens every route the key's role allows; a capability such as
+  -- 'metrics.read' opens only the routes that name it; 'mcp' opens the MCP
+  -- endpoint and reaches only the databases api_token_connections grants it.
   scope        TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER NOT NULL DEFAULT 0,
@@ -115,6 +118,17 @@ CREATE TABLE IF NOT EXISTS db_connections (
   read_only   INTEGER NOT NULL DEFAULT 0,
   notes       TEXT NOT NULL DEFAULT ''
 );
+
+-- The databases an MCP key reaches, and whether it may change what is in
+-- each ('read' or 'write'). A key reaches nothing that has no row here, and
+-- forgetting the connection or deleting the key's record takes the row with it.
+CREATE TABLE IF NOT EXISTS api_token_connections (
+  token_id      INTEGER NOT NULL REFERENCES api_tokens(id) ON DELETE CASCADE,
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  access        TEXT NOT NULL DEFAULT 'read',
+  PRIMARY KEY (token_id, connection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_api_token_connections_conn ON api_token_connections(connection_id);
 
 -- Databases brought over from another server. A replication import outlives the
 -- request that started it by hours, so it is a row: the target keeps the

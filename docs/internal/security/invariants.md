@@ -71,6 +71,17 @@ A change that weakens any of these has to say so explicitly.
    requires a key rather than a session (`httpx.RequireToken`), and `Principal.Can` answers only
    the scoped capability, so a route added to that group later cannot widen the key.
 
+   An MCP key (`scope = 'mcp'`, made by `CreateMCPToken`) is refused the same way by `Authenticate`
+   and `AuthenticateScoped` alike, and opens only `/api/v1/mcp` through `AuthenticateMCP`, which
+   takes no session cookie and no other key. There it keeps its role — its owner's or one made
+   narrower, never more than the owner holds now — so a statement is judged by `authoriseSQL`
+   exactly as the SQL editor judges it for that role — a destructive one
+   still needs `destructive` and spends the same budget — and the key's grants narrow it further:
+   only the connections `api_token_connections` names, each `read` or `write`, re-read on every call,
+   and never a protected connection, which is refused for every tool, reads included. A walk of
+   every route with an MCP key (`TestAnMCPKeyOpensNoOtherRoute`) holds the first half; the grants
+   are re-checked by the handler rather than trusted from the key.
+
    A database connection marked read-only adds one rule in front of all of these, and it fails closed
    the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
    is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until

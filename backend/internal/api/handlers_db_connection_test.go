@@ -1641,6 +1641,8 @@ var gatedCapabilities = []string{
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze", "indexWhatIf", "missingIndexes",
 	"assistant", "assistantPolicy",
+	// what an AI client reaches through the MCP endpoint
+	"mcp",
 	// the schema
 	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
 	"comments", "indexes", "extensions", "rowSecurity", "schemaDiff", "pooler",

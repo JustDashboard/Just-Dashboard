@@ -110,6 +110,8 @@ type Server struct {
 	// The SQL editor's assistant: its conversations, its install-wide budget
 	// and how it reaches its provider (handlers_db_assistant.go).
 	assistant *assistantState
+	// The tool calls each MCP key has in flight (handlers_mcp.go).
+	mcp mcpState
 
 	modules moduleSet
 }
