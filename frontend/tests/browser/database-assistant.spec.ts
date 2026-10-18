@@ -278,7 +278,7 @@ const editorText = (page: Page) =>
         (a, b) =>
           parseFloat((a as HTMLElement).style.top) - parseFloat((b as HTMLElement).style.top),
       )
-      .map((line) => (line.textContent ?? "").replace(/ /g, " "))
+      .map((line) => (line.textContent ?? "").replace(/\u00a0/g, " "))
       .join("\n"),
   )
 
