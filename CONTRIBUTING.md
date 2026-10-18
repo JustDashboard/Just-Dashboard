@@ -465,7 +465,7 @@ likely to be somebody's data as a fixture.
 | --- | --- | --- |
 | `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
 | `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
-| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts, encrypted backups, statement history, stored programs, schema comparison |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts, encrypted backups, statement history, stored programs, the streamed copy from MariaDB to MySQL, schema comparison |
 | `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop, statement history |
 | `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
@@ -474,6 +474,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_POSTGRES_HYPOPG_DSN` | a PostgreSQL with the `hypopg` extension created in the database the DSN names (`postgres:17` plus `postgresql-17-hypopg`, then `CREATE EXTENSION hypopg`); the tables the tests make are named `jdt_index_advice_…` | the what-if index on the Explain view: `TestLiveHypotheticalIndexChangesThePlanAndNothingElse`, `TestLiveIndexAdviceThroughTheRouter` |
 | `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
 | `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
+| `JD_TEST_POSTGRES_SUBSCRIBER_DSN` | a PostgreSQL the run owns, with a superuser login, that reaches `JD_TEST_POSTGRES_DSN` at the address that string gives — a container on the host's network, because a subscription is dialled by the subscribing server and the publisher's address means itself from inside the publisher's container. `JD_TEST_POSTGRES_DSN` must run with `wal_level=logical` and a login with the REPLICATION attribute. The tests name everything `jdt_online_import_*` and drop their publications, slots and subscriptions | `TestLiveOnlineImport*` |
 | `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |
 | `JD_TEST_REDIS_CLUSTER_DSN` | a node started with `--cluster-enabled yes` | cluster notices |
 | `JD_TEST_REDIS_SENTINEL_DSN` | a Redis Sentinel | sentinel notices |

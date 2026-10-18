@@ -135,6 +135,7 @@
       "memoryBuffer": "shared_buffers",
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": "replication",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -389,6 +390,7 @@
           "memoryBuffer": "shared_buffers",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "replication",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -599,6 +601,7 @@
           "memoryBuffer": "shared_buffers",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -798,6 +801,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1008,6 +1012,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1216,6 +1221,7 @@
       "memoryBuffer": "innodb_buffer_pool_size",
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -1462,6 +1468,7 @@
           "memoryBuffer": "innodb_buffer_pool_size",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1665,6 +1672,7 @@
           "memoryBuffer": "innodb_buffer_pool_size",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -1866,6 +1874,7 @@
           "memoryBuffer": "innodb_buffer_pool_size",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -2057,6 +2066,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": true,
           "ormTargets": [
@@ -2255,6 +2265,7 @@
       "memoryBuffer": false,
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -2474,6 +2485,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -2686,6 +2698,7 @@
       "memoryBuffer": false,
       "missingIndexes": true,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -2931,6 +2944,7 @@
           "memoryBuffer": false,
           "missingIndexes": true,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -3134,6 +3148,7 @@
           "memoryBuffer": false,
           "missingIndexes": true,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -3327,6 +3342,7 @@
       "memoryBuffer": "max_server_memory_usage",
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": true,
       "orm": true,
       "ormTargets": [
@@ -3547,6 +3563,7 @@
           "memoryBuffer": "max_server_memory_usage",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": true,
           "orm": true,
           "ormTargets": [
@@ -3747,6 +3764,7 @@
       "memoryBuffer": false,
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": false,
       "openByDefault": false,
       "orm": true,
       "ormTargets": [
@@ -3981,6 +3999,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": false,
           "openByDefault": false,
           "orm": true,
           "ormTargets": [
@@ -4149,6 +4168,7 @@
       "memoryBuffer": "wiredTigerCacheSizeGB",
       "missingIndexes": false,
       "monitor": false,
+      "onlineImport": "stream",
       "openByDefault": true,
       "orm": false,
       "ormTargets": [],
@@ -4297,6 +4317,7 @@
           "memoryBuffer": "wiredTigerCacheSizeGB",
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4442,6 +4463,7 @@
           "memoryBuffer": false,
           "missingIndexes": false,
           "monitor": false,
+          "onlineImport": "stream",
           "openByDefault": false,
           "orm": false,
           "ormTargets": [],
@@ -4588,6 +4610,7 @@
       "memoryBuffer": "maxmemory",
       "missingIndexes": false,
       "monitor": true,
+      "onlineImport": "stream",
       "openByDefault": true,
       "orm": false,
       "ormTargets": [],
@@ -4728,6 +4751,7 @@
           "memoryBuffer": "maxmemory",
           "missingIndexes": false,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -4867,6 +4891,7 @@
           "memoryBuffer": "maxmemory",
           "missingIndexes": false,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -5006,6 +5031,7 @@
           "memoryBuffer": "maxmemory",
           "missingIndexes": false,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],
@@ -5145,6 +5171,7 @@
           "memoryBuffer": "maxmemory",
           "missingIndexes": false,
           "monitor": true,
+          "onlineImport": "stream",
           "openByDefault": true,
           "orm": false,
           "ormTargets": [],

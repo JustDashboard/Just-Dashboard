@@ -124,6 +124,7 @@ free.
 - Key browser and console for Redis, documents and pipelines for MongoDB
 - Protected connections, dump backups, PostgreSQL major-version upgrades with a way back, accounts,
   grants and a live map
+- Import from another server, kept current by logical replication on PostgreSQL until you cut over
 - Point-in-time recovery for PostgreSQL: the write-ahead log archived with WAL-G, recovered to any second
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
 

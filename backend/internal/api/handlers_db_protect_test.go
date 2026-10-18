@@ -72,6 +72,12 @@ var protectedRouteVerdicts = map[string]string{
 	"POST /pitr/restores/{rid}/switch": isRefused,
 	"POST /import":                     isRefused,
 	"POST /import/upload":              isRefused,
+	// Bringing a database over makes one on this server, and its cutover and
+	// its removal change what the import made there.
+	"POST /imports":                    isRefused,
+	"POST /imports/inspect":            isRefused,
+	"POST /imports/{importId}/cutover": isRefused,
+	"DELETE /imports/{importId}":       isRefused,
 	"DELETE /database":                 isRefused,
 	// A major-version upgrade replaces the server the connection reaches,
 	// and so does its revert. Checking reads, and finishing removes the old

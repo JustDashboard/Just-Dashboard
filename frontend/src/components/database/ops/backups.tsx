@@ -94,7 +94,7 @@ type Asking =
  * are scheduled.
  */
 export function Backups() {
-  const { id, conn, engine, readOnly, status, select, param, href } = useDatabase()
+  const { id, conn, engine, readOnly, status, select, param } = useDatabase()
   const { refresh: refreshConnections } = useDatabases()
   const { can } = useAuth()
   const router = useRouter()
@@ -280,22 +280,26 @@ export function Backups() {
       : []),
   ]
 
-  // A restore or a copy that made a database: the way into it. A server
-  // that numbers its databases names several when a dump went back to each;
-  // only one new number is a place to go.
-  const loaded = transfer.current?.result?.database
+  // A restore or a copy that made a database: the way into it. A server that
+  // numbers its databases names several when a dump went back to each; only
+  // one new number is a place to go. A copy to another server made it there,
+  // and the way in is through that server's connection.
+  const result = transfer.current?.result
+  const loaded = result?.database
+  const elsewhere = result?.connection && result.connection !== id ? result : undefined
   const made =
     transfer.current?.job.status === "succeeded" &&
     transferKind(transfer.current.job) !== "backup" &&
     loaded &&
-    loaded !== conn.database &&
+    (elsewhere || loaded !== conn.database) &&
     (!data?.options.databases || /^\d+$/.test(loaded))
       ? loaded
       : undefined
+  const via = elsewhere?.connection ?? id
   const connect = async (database: string) => {
     setConnecting(true)
     try {
-      const saved = await post<DbConnection>(`/databases/${id}/server/databases/connect`, {
+      const saved = await post<DbConnection>(`/databases/${via}/server/databases/connect`, {
         database,
       })
       notify.success(`Connected ${saved.name}`)
@@ -309,12 +313,14 @@ export function Backups() {
   }
   const after = made ? (
     data?.options.databases ? (
-      <AfterAction onClick={() => router.push(href("data", { db: made }))}>
+      <AfterAction onClick={() => router.push(sectionHref(via, "data", { db: made }))}>
         Browse db {made}
+        {elsewhere?.connectionName ? ` on ${elsewhere.connectionName}` : ""}
       </AfterAction>
     ) : engine.can("serverDatabaseConnect") && can("system.admin") ? (
       <AfterAction pending={connecting} onClick={() => void connect(made)}>
         Connect {made}
+        {elsewhere?.connectionName ? ` on ${elsewhere.connectionName}` : ""}
       </AfterAction>
     ) : undefined
   ) : undefined

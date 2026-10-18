@@ -524,6 +524,13 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	// An import that is replicating holds a subscription here and a slot on
+	// the source, and finds both through this connection.
+	if active, err := s.importsActive(r.Context(), id); err != nil {
+		return httpx.Internal(err)
+	} else if active {
+		return httpx.Err(http.StatusConflict, "import_active", "an import to this connection is still under way; finish it or stop it before forgetting the connection")
+	}
 	if err := s.refuseWhileTLS(r.Context(), id); err != nil {
 		return err
 	}

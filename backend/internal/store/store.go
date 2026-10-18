@@ -116,6 +116,36 @@ CREATE TABLE IF NOT EXISTS db_connections (
   notes       TEXT NOT NULL DEFAULT ''
 );
 
+-- Databases brought over from another server. A replication import outlives the
+-- request that started it by hours, so it is a row: the target keeps the
+-- subscription and the source keeps the slot, and this is what finds both again
+-- to cut over or take them away. The source's connection string is what the
+-- cutover needs and is sealed like a saved connection's; it is emptied when the
+-- import ends, and no route returns it. source_label is the address without the
+-- credentials, which is all the page shows.
+CREATE TABLE IF NOT EXISTS db_online_imports (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id    INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  mode             TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  target_database  TEXT NOT NULL,
+  source_label     TEXT NOT NULL,
+  source_user      TEXT NOT NULL DEFAULT '',
+  source_enc       TEXT NOT NULL DEFAULT '',
+  structure_only   INTEGER NOT NULL DEFAULT 0,
+  publication_made INTEGER NOT NULL DEFAULT 0,
+  detail           TEXT NOT NULL DEFAULT '',
+  started_by       TEXT NOT NULL DEFAULT '',
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL,
+  finished_at      INTEGER NOT NULL DEFAULT 0
+);
+-- A name is what the publication, the subscription and the slot are called, so
+-- it is taken only while an import holds them.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_db_online_imports_live
+  ON db_online_imports(connection_id, name) WHERE status IN ('running', 'replicating', 'cutting');
+
 -- Background activity history is tied to the exact saved target.
 CREATE TABLE IF NOT EXISTS db_metric_samples (
   connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,

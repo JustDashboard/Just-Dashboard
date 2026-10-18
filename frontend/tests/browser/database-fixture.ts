@@ -426,6 +426,7 @@ export const DATABASE_SURFACES = [
   "/databases/1/logs",
   "/databases/1/access",
   "/databases/1/backups",
+  "/databases/1/import",
   "/databases/1/alerts",
   "/databases/1/settings",
   "/databases/1/settings/resources",

@@ -98,6 +98,16 @@
           "detail": "The pictures on Configuration, Proxy, Docker, Databases, Backups, Network, Security, Remote desktop, Account and Deployments stand on the page's own background. The database diagram and Stickyboard keep their grid settings."
         },
         {
+          "kind": "added",
+          "text": "Bring a database over from another server, keeping it current until you cut over",
+          "detail": "A database's new Import page takes the source's connection string, says what stands in the way, and brings the database into a new one on that server. On PostgreSQL it uses logical replication: the structure is copied, the dashboard publishes the tables on the source (or gives you the statement to run yourself), subscribes the target, and shows each table's copy and how far behind the target is. The cutover waits for zero lag, sets the sequences to the source's positions and takes the subscription and its slot away. Every other engine that can restore under another name reads a dump from the source and loads it as it is read. The source's password is sealed for as long as a replication needs it and is never shown again."
+        },
+        {
+          "kind": "added",
+          "text": "Copy a database to another saved connection of the same engine",
+          "detail": "The Backups page's Copy database dialog can now send the copy to another server saved here. SQL databases go from one to the other as they are read, without being written to this server's disk; MongoDB and Redis stage the dump in a directory of their own and remove it."
+        },
+        {
           "kind": "security",
           "text": "Keep passwords and other values out of PostgreSQL's statement list",
           "detail": "Databases → Performance → Statements and the busiest statements on Home showed PostgreSQL's CREATE ROLE and ALTER ROLE with the password in clear, and SET, COMMENT, DEFAULT and DO statements with their values, to any account that may read. Every value in PostgreSQL's statement text is now replaced with a placeholder before it leaves the server, a password or a setting written without quotes included, and the $1 markers the server writes stay, so a statement's plan is still asked for with values put back in. A role created or changed from Access is no longer kept in pg_stat_statements at all when the connection signs in as a superuser."

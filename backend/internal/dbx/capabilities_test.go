@@ -216,7 +216,7 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 // engines that have the feature, and false for the rest.
 var wordCapabilities = map[string]bool{
 	"rowIdentity": true, "returnsChangedRow": true, "readOnlyScope": true, "importAtomic": true,
-	"json": true, "hashFieldTtl": true, "commandReference": true, "memoryBuffer": true,
+	"json": true, "hashFieldTtl": true, "commandReference": true, "memoryBuffer": true, "onlineImport": true,
 }
 
 // The flags that carry a word or a list say what the code they describe does.
@@ -274,6 +274,16 @@ func TestCapabilityWordsAndLists(t *testing.T) {
 		{DriverMSSQL, "", "memoryBuffer", false},
 		{DriverOracle, "", "memoryBuffer", false},
 		{DriverSQLite, "", "memoryBuffer", false},
+		{DriverPostgres, "", "onlineImport", "replication"},
+		{DriverPostgres, FlavorTimescaleDB, "onlineImport", "stream"},
+		{DriverPostgres, FlavorCockroachDB, "onlineImport", "stream"},
+		{DriverMySQL, FlavorMariaDB, "onlineImport", "stream"},
+		{DriverMSSQL, "", "onlineImport", "stream"},
+		{DriverMongo, "", "onlineImport", "stream"},
+		{DriverRedis, FlavorValkey, "onlineImport", "stream"},
+		{DriverClickHouse, "", "onlineImport", false},
+		{DriverOracle, "", "onlineImport", false},
+		{DriverSQLite, "", "onlineImport", false},
 	} {
 		if got := word(c.d, c.flavor, c.flag); got != c.want {
 			t.Errorf("%s/%s: %s = %v, want %v", c.d, c.flavor, c.flag, got, c.want)

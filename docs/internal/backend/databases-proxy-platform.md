@@ -69,8 +69,8 @@ depend on what a request carries are stated once in
   that is true to a route that answers.
 - **The served table is also a file, and a test holds the two together.** The frontend's tests run
   with no server, so what `GET /databases/drivers` answers is kept as
-  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 118
-  flags (105 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 126
+  flags (110 a yes or a no, nine a word, seven a list) and its flavours' rows — which the engine
   registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
   (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
   fails the moment the route and the file differ. After giving a flag to an engine or taking one
@@ -750,9 +750,9 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
   - *Shown, not run.* A schema form asked for its statement (`/ddl/*?preview=1`) is let through:
     `runDDL` answers a preview before it executes. The flag is in the address, so it is asked in the
     middleware itself and not by a check of the body; no other route is opened by it.
-  - *Refused*: rows, structure, imports, a restore, a copy, the drop, a major-version upgrade and its
-    revert, roles, privileges, settings, extensions, keys, streams, ACL users, documents, collections,
-    indexes, validation rules, the profiler, a statistics reset.
+  - *Refused*: rows, structure, imports, an import from another server, a restore, a copy, the drop,
+    a major-version upgrade and its revert, roles, privileges, settings, extensions, keys, streams, ACL
+    users, documents, collections, indexes, validation rules, the profiler, a statistics reset.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
   calls a function of the operator's own which writes passes (the built-in ones that run SQL or outlive
   the rollback are not reads, see [the query runner](#the-query-runner)); it is not a sandbox around the
@@ -2262,6 +2262,85 @@ the detail of each classifier is below, with the surface it guards.
   that is there: overwriting it by hand gave a program with it open half of each database, and
   renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
   (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
+- **A copy can go to another saved connection of the same engine** (`copyToServer`). `to` names the
+  connection whose server receives it; the job runs, and is stopped from, the connection copied from,
+  and the target is only checked — the same engine (`400`), not protected (`409 connection_read_only`,
+  because a copy makes a database there) and with no transfer of its own running (`409
+  transfer_running`). The new database is made with the target's login and removed again if the copy
+  fails. The job's `result` line carries `connection` and `connectionName`, so the page opens the copy
+  through the server it is on. `dbx.CopyBetween` does the work (`copy_stream.go`): for a SQL engine the
+  built-in dump (`writeBuiltInDump`) is written into one end of an `io.Pipe` and `replayGenericSQL`
+  reads the other, so no dump file exists — a row is on the target while the source is still reading the
+  tables after it, and a failure on either side stops the other (a failed dump reaches the restore as a
+  failed read, a failed restore closes the pipe under the dump). The restore is the one transaction
+  `restoreGenericSQL` always was on the engines that can roll back. The native tools are not used:
+  `pg_dump`'s custom format cannot be read until it is whole. MongoDB and Redis dump to an archive that
+  is read by seeking, so they stage it in a `.copy-*` directory beside the dump directories and remove
+  it. ClickHouse, Oracle and SQLite are refused, for the reason a restore under another name is
+  (`DumpCapability.NewDatabase`). `dbx.CanCopyBetween` is that answer.
+- **A database can be brought over from another server** (`handlers_db_import.go`,
+  `dbx/online_pg.go`, `db_online_imports`). The source is a connection string typed on the Import page,
+  not a saved connection. It is never returned, never in a job line, an audit entry or an error
+  (`withoutSecrets` on every message that could quote it), and only a replication keeps it: sealed with
+  the same `Sealer` as a saved connection's, in `db_online_imports.source_enc`, because its cutover
+  needs the source hours later. The column is emptied when the import ends (`setImport`), and forgetting
+  a connection with an import under way is refused (`409 import_active`). So is replacing the server an
+  import is under way into, through any connection to it (`refuseServerOfImport`): a major-version
+  upgrade, its revert and switching in a recovered copy would take the subscription away and leave the
+  slot holding the source's log. The capability is the word
+  flag `onlineImport`: `replication` for PostgreSQL itself, `stream` for every other engine that can be
+  restored under another name (CockroachDB, YugabyteDB and TimescaleDB speak PostgreSQL's protocol
+  without publications that carry their tables), `false` for ClickHouse, Oracle and SQLite. The page is
+  the `import` section, in the Operate group, gated on it.
+  - `POST /{id}/imports/inspect` reads the source and keeps nothing: its identity, and for a
+    PostgreSQL pair the report `dbx.InspectReplicationSource` and `InspectReplicationTarget` make —
+    `wal_level`, the REPLICATION attribute (or `rds_replication`), free slots and WAL senders, every
+    table with its replica identity, sequences, unlogged tables and large objects, which replication
+    does not carry. A table with no key is a blocker, with the `ALTER TABLE … REPLICA IDENTITY FULL` to
+    run: once published the source would refuse its own updates and deletes. A subscriber whose login
+    cannot subscribe, and a source that is the target's own cluster (told by `pg_postmaster_start_time()`, which any login
+    reads, because a subscription to its own cluster waits for ever for a slot only it could make) are
+    blockers too.
+    The statement that publishes the tables is handed back for an operator who will run it themselves.
+  - `POST /{id}/imports` always makes a **new** database here (`newDatabaseName`), so an import never
+    overwrites. A row is written first, `running`, and a `database.transfer.<id>.import` job does the
+    rest. Replication: check the source again, create the database, copy the structure through the
+    stream above with the rows left out, publish the tables **both servers have** (an extension's
+    tables the structure copy leaves out would otherwise fail the subscription), make the slot, then
+    `CREATE SUBSCRIPTION` with the slot already made (`create_slot = false`), and the row is
+    `replicating`. The slot is made first on purpose: the subscription is created from a temporary
+    function whose connection string is a bind parameter, because `CREATE SUBSCRIPTION` carries it as a
+    literal and a utility statement is recorded as written by `pg_stat_statements`, which the
+    Statements page reads back — and that statement cannot be run from a function while it makes the
+    slot itself. The conninfo is rebuilt from the parsed parts (`ReplicationConninfo`), so a string
+    cannot make the target server read a file (`sslrootcert`, `passfile`, `service`) or run options.
+    Anything the import made and cannot use is removed when it fails: slot, publication, database.
+    Stream: the new database, `CopyBetween`, and the row is `done`; progress is held in memory
+    (`dbConnState.importProgress`) for the page, and only a line per table goes to the job.
+  - `GET /{id}/imports/{n}` is the live reading, any role: the target's `pg_subscription_rel` (each
+    table `waiting`, `copying`, `copied`, `synchronizing` or `ready`, with the rows a copy has taken
+    from `pg_stat_progress_copy` on PostgreSQL 14+), whether the apply worker runs, the error counts
+    from 15, and the source's `confirmed_flush_lsn` against its current WAL position as the lag in
+    bytes. A row that says it is running with no job to show for it (the dashboard restarted) is
+    settled on the read: a stream is `failed`; a replication is `replicating` if its subscription
+    exists and `failed` otherwise.
+  - `POST /{id}/imports/{n}/cutover` takes `writesStopped: true` — the operator's word that nothing
+    writes to the source, which the cutover cannot see — and refuses a replication whose subscription is
+    gone (`409 import_not_replicating`) or whose tables are not all `ready` (`409 import_copying`). The job reads the source's WAL position once, waits until the
+    slot has confirmed it (`WaitCaughtUp`, bounded by `CatchUpTimeout`), sets every sequence on the
+    target to the source's `last_value` and `is_called` (`SyncSequences`; replication does not carry
+    them), disables the subscription and detaches it from its slot, drops it, drops the slot from the
+    source's side and the publication if the dashboard made it. A failure before the subscription is
+    dropped leaves the import `replicating`, with the reason in `detail`, and the cutover can be asked
+    for again; once it is dropped the data is the target's, and a slot or a publication that could not
+    be removed from the source is a note in `detail` with the statement to run there, not a failure.
+    Nothing is changed on the source but the removal of what the import made there.
+  - `DELETE /{id}/imports/{n}` (`system.admin` and `s.destructive`) stops a replicating import by the
+    same removals, tolerating a source that no longer answers (the warnings say which statement to run
+    there), and forgets one that has ended. The database made here is left; dropping it is the server
+    page's. A running import cannot be removed under its job (`409 transfer_running`).
+  Every mutation is audited (`database.import.start`/`.finish`, `.cutover`/`.cutover.finish`,
+  `.cancel`, `.forget`); the detail has the source's address and user and no secret.
 
 ### Major-version upgrades
 
@@ -2720,7 +2799,7 @@ and `protectReadOnlyConnections`.
 | `POST` | `/databases/{id}/server/roles/{name}/privileges/revoke` | `system.admin` | — | `database.role.revoke` | refused |
 | `GET` | `/databases/{id}/server/settings` | read | — | — | — |
 
-**Moving data** (13)
+**Moving data** (19)
 
 | Method | Path | Capability | Destructive | Audited as | Protected |
 | --- | --- | --- | --- | --- | --- |
@@ -2735,6 +2814,12 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/export/status` | read | — | — | — |
 | `POST` | `/databases/{id}/import` | `service.control` | by content: `truncate` | `database.import` | refused |
 | `POST` | `/databases/{id}/import/upload` | `service.control` | by content: `replace` | `database.import` | refused |
+| `GET` | `/databases/{id}/imports` | read | — | — | — |
+| `POST` | `/databases/{id}/imports` | `system.admin` | — | `database.import.start`, `.finish` | refused |
+| `POST` | `/databases/{id}/imports/inspect` | `system.admin` | — | — | refused |
+| `GET` | `/databases/{id}/imports/{importId}` | read | — | — | — |
+| `DELETE` | `/databases/{id}/imports/{importId}` | `system.admin` + `destructive` | yes | `database.import.cancel`, `.forget` | refused |
+| `POST` | `/databases/{id}/imports/{importId}/cutover` | `system.admin` | — | `database.import.cutover`, `.cutover.finish` | refused |
 | `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
 | `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
 

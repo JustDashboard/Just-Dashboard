@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   Bell,
   ChartActivity,
+  CloudDownload,
   CodeBracket,
   FileText,
   GridSquare,
@@ -73,6 +74,7 @@ export type SectionId =
   | "logs"
   | "access"
   | "backups"
+  | "import"
   | "alerts"
   | "settings"
 
@@ -345,6 +347,7 @@ const NO_CAPABILITIES: DbCapabilities = {
   hashFieldTtl: false,
   commandReference: false,
   memoryBuffer: false,
+  onlineImport: false,
 }
 
 /**
@@ -372,6 +375,13 @@ const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
   redis: ["console", "server", "dump", "roles"],
 }
 
+/**
+ * The engines that open the Import page, which is gated on a word and not a
+ * flag. Before the catalogue is read it is the plain form: the replication
+ * one is PostgreSQL's alone, and the server says so.
+ */
+const FLOOR_IMPORT: readonly DbDriver[] = ["postgres", "mysql", "sqlserver", "mongodb", "redis"]
+
 function floorOf(driver: DbDriver): Partial<DbCapabilities> {
   const flags = FLOOR[driver]
   return {
@@ -381,6 +391,7 @@ function floorOf(driver: DbDriver): Partial<DbCapabilities> {
     alertKinds: flags.includes("server")
       ? ["down", "disk", "backup_failed", "backup_missed"]
       : ["backup_failed", "backup_missed"],
+    ...(FLOOR_IMPORT.includes(driver) && { onlineImport: "stream" as const }),
   }
 }
 
@@ -858,6 +869,15 @@ const SECTIONS: SectionSpec[] = [
     kinds: OPENED,
     needs: "dump",
     thing: "dumps",
+  },
+  {
+    id: "import",
+    group: "operate",
+    title: "Import",
+    icon: CloudDownload,
+    kinds: OPENED,
+    needs: "onlineImport",
+    thing: "imports from another server",
   },
   {
     id: "alerts",

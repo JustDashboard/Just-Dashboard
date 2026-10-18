@@ -54,6 +54,7 @@ func (s *Server) mountDatabaseTransferRoutes(r chi.Router) {
 	// page that shows them all, and how an export this caller started ended.
 	r.Method(http.MethodGet, "/backups/summary", s.handle(s.handleDBBackupSummary))
 	r.Method(http.MethodGet, "/{id}/export/status", s.handle(s.handleDBExportStatus))
+	s.mountDatabaseImportRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
 		// A statement's result as a file. It runs what the caller wrote, so
@@ -73,6 +74,9 @@ func (s *Server) mountDatabaseTransferRoutes(r chi.Router) {
 		// server page needs too.
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/{id}/copy", s.handle(s.handleDBCopy))
+		// A database brought over from another server makes one here, which is
+		// what a copy does too.
+		s.mountDatabaseImportWrites(r)
 	})
 }
 
@@ -1131,18 +1135,28 @@ func (s *Server) runningTransfer(id int64) (jobs.Job, bool) {
 // restored is a dump of neither state; a restore into one being dumped pulls
 // the tables out from under the reader.
 func (s *Server) startTransfer(w http.ResponseWriter, r *http.Request, conn *dbConnection, what, title string, run jobs.Runner) error {
+	job, err := s.launchTransfer(r, conn, what, title, run)
+	if err != nil {
+		return err
+	}
+	httpx.JSON(w, http.StatusAccepted, job)
+	return nil
+}
+
+// launchTransfer is startTransfer for a caller with something more to say than
+// the job in its answer.
+func (s *Server) launchTransfer(r *http.Request, conn *dbConnection, what, title string, run jobs.Runner) (jobs.Job, error) {
 	spec := jobs.Spec{
 		Kind: transferPrefix(conn.ID) + what, Title: title, Target: conn.Name,
 		Timeout: transferTimeout, StartedBy: httpx.MustPrincipal(r).Username(),
 	}
 	job, started := s.modules.jobs.StartExclusive(transferPrefix(conn.ID), spec, run)
 	if !started {
-		return httpx.Err(http.StatusConflict, "transfer_running",
+		return jobs.Job{}, httpx.Err(http.StatusConflict, "transfer_running",
 			fmt.Sprintf("%s is already running for this connection (started by %s). Wait for it to finish, or stop it.",
 				job.Title, job.StartedBy)).Describe(what, job.ID)
 	}
-	httpx.JSON(w, http.StatusAccepted, job)
-	return nil
+	return job, nil
 }
 
 // transferResult is the last line a transfer job writes, on the "result"
@@ -1157,6 +1171,10 @@ type transferResult struct {
 	// SafetyDump is the dump taken of the database before it was replaced.
 	SafetyDump string `json:"safetyDump,omitempty"`
 	Output     string `json:"output,omitempty"`
+	// Connection is the saved connection whose server holds Database, when
+	// that is not the one the job ran against: a copy to another server.
+	Connection     int64  `json:"connection,omitempty"`
+	ConnectionName string `json:"connectionName,omitempty"`
 }
 
 func emitResult(out jobs.Emitter, res transferResult) {
@@ -1537,6 +1555,9 @@ func (s *Server) runRestore(ctx context.Context, conn *dbConnection, dsn, dumpPa
 type dbCopyRequest struct {
 	Name          string `json:"name"`
 	StructureOnly bool   `json:"structureOnly"`
+	// To is another saved connection of the same engine, whose server receives
+	// the copy. Absent, or this connection, the copy stays on its server.
+	To int64 `json:"to"`
 }
 
 // handleDBCopy copies the connection's database into a new one on the same
@@ -1556,6 +1577,9 @@ func (s *Server) handleDBCopy(w http.ResponseWriter, r *http.Request) error {
 	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
+	}
+	if req.To != 0 && req.To != id {
+		return s.copyToServer(w, r, conn, dsn, req)
 	}
 	name := strings.TrimSpace(req.Name)
 	if err := newDatabaseName(conn, name); err != nil {
@@ -1626,5 +1650,72 @@ func (s *Server) runCopy(ctx context.Context, conn *dbConnection, dsn, name stri
 	}
 	out.Status("%s is a copy of %s: %s", name, res.Database, res.Summary)
 	emitResult(out, transferResult{Database: name, Summary: res.Summary, Tool: res.Tool})
+	return nil
+}
+
+// copyToServer copies the connection's database into a new one on the server
+// of another saved connection of the same engine. The dump goes from one to
+// the other without being written down where the engine allows it
+// (dbx.CopyBetween), so the dashboard's own volume holds none of it.
+//
+// The job runs, and is stopped from, the connection copied from: it is the
+// page the operator is on. The connection copied into is only checked, because
+// the database it is given is new and nothing already running on that server
+// can be reading it.
+func (s *Server) copyToServer(w http.ResponseWriter, r *http.Request, from *dbConnection, fromDSN string, req dbCopyRequest) error {
+	to, toDSN, err := s.dbConnRow(r.Context(), req.To)
+	if err != nil {
+		return err
+	}
+	if to.Driver != from.Driver {
+		return httpx.BadRequest("%s is a %s server and %s is a %s one; a database is copied between servers of the same engine",
+			from.Name, from.Driver, to.Name, to.Driver)
+	}
+	name := strings.TrimSpace(req.Name)
+	if err := newDatabaseName(to, name); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if to.ReadOnly {
+		return protectedRefusal("%s is protected; a database cannot be copied into it", to.Name)
+	}
+	opts := dbx.DumpOptions{SchemaOnly: req.StructureOnly}
+	if err := dbx.ValidateDumpOptions(from.Driver, opts); err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	if job, running := s.runningTransfer(to.ID); running {
+		return httpx.Err(http.StatusConflict, "transfer_running",
+			fmt.Sprintf("%s is already running for %s (started by %s). Wait for it to finish, or stop it.",
+				job.Title, to.Name, job.StartedBy)).Describe("copy", job.ID)
+	}
+	source := from.Database
+	if from.Driver == dbx.DriverRedis && source == "" {
+		source = "0"
+	}
+	base := auditBaseOf(r)
+	detail := map[string]any{"from": from.Database, "to": name, "toConnection": to.Name, "structureOnly": req.StructureOnly}
+	httpx.SetAudit(r, "database.copy", from.Name, detail)
+	title := "Copy " + from.Name + " to " + to.Name
+	return s.startTransfer(w, r, from, "copy", title, func(ctx context.Context, out jobs.Emitter) error {
+		err := s.runCopyToServer(ctx, from, fromDSN, to, toDSN, source, name, req.StructureOnly, out)
+		s.recordTransfer(base, "database.copy.finish", from.Name, detail, err)
+		return err
+	})
+}
+
+func (s *Server) runCopyToServer(ctx context.Context, from *dbConnection, fromDSN string, to *dbConnection, toDSN, source, name string, structureOnly bool, out jobs.Emitter) error {
+	if err := s.makeTargetDatabase(ctx, to, toDSN, name, out); err != nil {
+		return err
+	}
+	out.Status("Copying %s from %s into %s on %s", from.Database, from.Name, name, to.Name)
+	res, err := dbx.CopyBetween(ctx, from.Driver, fromDSN, toDSN, dbx.CopyOptions{
+		SourceDatabase: source, TargetDatabase: name, SchemaOnly: structureOnly, ScratchDir: s.importScratch(),
+		Progress: func(line string) { out.Line("stdout", line) }, Report: tableReport(out),
+	})
+	if err != nil {
+		s.dropTargetDatabase(to, toDSN, name, out)
+		return scrub(err, fromDSN, toDSN)
+	}
+	out.Status("%s on %s is a copy of %s: %s", name, to.Name, from.Name, res.Summary)
+	emitResult(out, transferResult{Database: name, Summary: res.Summary, Tool: res.Tool, Connection: to.ID, ConnectionName: to.Name})
 	return nil
 }

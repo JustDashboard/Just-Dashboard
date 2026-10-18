@@ -1673,7 +1673,7 @@ var listedCapabilities = []string{
 // and false where the engine has none of them.
 var wordedCapabilities = []string{
 	"rowIdentity", "returnsChangedRow", "readOnlyScope", "importAtomic", "json", "hashFieldTtl", "commandReference",
-	"memoryBuffer",
+	"memoryBuffer", "onlineImport",
 }
 
 func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {

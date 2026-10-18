@@ -78,6 +78,9 @@ type dbConnState struct {
 	// times over.
 	readings sync.Map
 	locks    sync.Map
+	// importProgress is how far each import being streamed has got, by import
+	// id. It is a figure the page polls, so it is not worth a row.
+	importProgress sync.Map
 	// units is the systemd unit last seen serving each connection, which is
 	// what says which unit to start once it has stopped. It is kept in memory
 	// only: after the dashboard restarts, a stopped server on a port that is
