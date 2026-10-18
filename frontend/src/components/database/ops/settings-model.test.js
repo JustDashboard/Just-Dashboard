@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import {
+  ALLOW_LIMIT,
+  addressWords,
   connectionChanges,
   draftOf,
   dropEffect,
   dropPhrase,
   firewallOutcome,
   firewallWords,
+  gatewayOutcome,
+  joinWords,
   notesProblem,
   reachRefusal,
+  sameList,
+  sourceProblem,
 } from "./settings-model"
 
 const SQL = { fileBased: false, numbered: false, documents: false }
@@ -82,7 +88,7 @@ describe("the phrase a database's deletion is typed with", () => {
 })
 
 describe("why where a server listens is not changed from the page", () => {
-  const firewall = { active: false, open: false, editable: false }
+  const firewall = { active: false, open: false, allowed: [], editable: false }
 
   test("a container the dashboard owns can be changed: nothing is in the way", () => {
     expect(reachRefusal({ managed: true, exposure: "local", container: "shop-db" })).toBeUndefined()
@@ -119,11 +125,25 @@ describe("why where a server listens is not changed from the page", () => {
       "switched off",
     )
     expect(
-      firewallWords({ firewall: { backend: "ufw", active: true, open: false }, port: 5432 }),
+      firewallWords({ firewall: { ...firewall, backend: "ufw", active: true }, port: 5432 }),
     ).toBe("ufw is on, and port 5432 is closed.")
     expect(
-      firewallWords({ firewall: { backend: "ufw", active: true, open: true }, port: 5432 }),
+      firewallWords({
+        firewall: { ...firewall, backend: "ufw", active: true, open: true },
+        port: 5432,
+      }),
     ).toBe("ufw is on, and port 5432 is open to anywhere.")
+    expect(
+      firewallWords({
+        firewall: {
+          ...firewall,
+          backend: "ufw",
+          active: true,
+          allowed: ["203.0.113.7", "198.51.100.0/24"],
+        },
+        port: 5432,
+      }),
+    ).toBe("ufw is on, and lets port 5432 in from 203.0.113.7 and 198.51.100.0/24.")
   })
 
   test("what a change did to the firewall is one sentence per word, and none for a word nobody knows", () => {
@@ -132,5 +152,59 @@ describe("why where a server listens is not changed from the page", () => {
     expect(firewallOutcome("already", 5432)).toContain("already")
     expect(firewallOutcome("none", 5432)).toContain("no firewall")
     expect(firewallOutcome("something-new", 5432)).toBe("")
+  })
+})
+
+describe("a list of the addresses that may reach a port", () => {
+  test("an address or a network is taken, and what cannot be one says why", () => {
+    expect(sourceProblem("", [])).toBeUndefined()
+    expect(sourceProblem("203.0.113.7", [])).toBeUndefined()
+    expect(sourceProblem("198.51.100.0/24", [])).toBeUndefined()
+    expect(sourceProblem("2001:db8::/32", [])).toBeUndefined()
+    expect(sourceProblem("the office", [])).toContain("Not an address")
+    expect(sourceProblem("0.0.0.0/0", [])).toContain("choose Anywhere")
+    expect(sourceProblem("::/0", [])).toContain("choose Anywhere")
+    expect(sourceProblem("127.0.0.1", [])).toContain("this server")
+    expect(sourceProblem("203.0.113.7", ["203.0.113.7"])).toBe("Already on the list.")
+    const full = Array.from({ length: ALLOW_LIMIT }, (_, i) => `192.0.2.${i + 1}`)
+    expect(sourceProblem("203.0.113.7", full)).toContain(`at most ${ALLOW_LIMIT}`)
+  })
+
+  test("a list is the same list in any order", () => {
+    expect(sameList(["a", "b"], ["b", "a"])).toBe(true)
+    expect(sameList(["a"], ["a", "b"])).toBe(false)
+    expect(sameList([], [])).toBe(true)
+  })
+
+  test("several are said as a sentence says them", () => {
+    expect(joinWords([])).toBe("")
+    expect(joinWords(["a"])).toBe("a")
+    expect(joinWords(["a", "b"])).toBe("a and b")
+    expect(joinWords(["a", "b", "c"])).toBe("a, b and c")
+  })
+
+  test("what the gateway and the firewall did is one sentence each", () => {
+    expect(gatewayOutcome("kept", 5432)).toContain("refuses new connections to port 5432")
+    expect(gatewayOutcome("released", 5432)).toContain("no longer keeps port 5432")
+    expect(gatewayOutcome("restored", 5432)).toContain("put back")
+    expect(gatewayOutcome("unchanged", 5432)).toBe("")
+    expect(firewallOutcome("opened", 5432, "allowlist")).toContain("listed addresses")
+    expect(firewallOutcome("opened", 5432, "public")).toContain("from anywhere")
+    expect(firewallOutcome("updated", 5432, "allowlist")).toContain("listed addresses")
+  })
+
+  test("an address of this machine is said by who it faces", () => {
+    expect(
+      addressWords({ address: "100.101.1.2", interface: "tailscale0", network: "tailnet" }).label,
+    ).toBe("Your tailnet")
+    expect(addressWords({ address: "10.8.0.1", interface: "wg0", network: "vpn" }).hint).toContain(
+      "wg0",
+    )
+    expect(
+      addressWords({ address: "10.0.0.5", interface: "eth1", network: "private" }).hint,
+    ).toContain("eth1's network")
+    expect(addressWords({ address: "192.168.1.10", network: "uplink" }).hint).toContain(
+      "the internet",
+    )
   })
 })

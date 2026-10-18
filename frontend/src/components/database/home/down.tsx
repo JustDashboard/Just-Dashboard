@@ -220,6 +220,7 @@ function RecordedHistory() {
       error={stats.error}
       hours={stats.hours}
       onHours={stats.setHours}
+      retentionHours={stats.retentionHours}
     />
   )
 }

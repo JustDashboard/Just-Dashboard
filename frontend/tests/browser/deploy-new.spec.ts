@@ -495,7 +495,14 @@ test("Add database from Configure creates a database, retries after a failed con
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "")
     if (path === "/databases/provision/options")
       return json(route, [
-        { engine: "postgres", label: "PostgreSQL", image: "postgres:17", driver: "postgres" },
+        {
+          engine: "postgres",
+          label: "PostgreSQL",
+          image: "postgres:17",
+          driver: "postgres",
+          versions: [{ version: "17", image: "postgres:17" }],
+          defaultVersion: "17",
+        },
       ])
     if (path === "/databases/provision") {
       provisioned++
@@ -1027,8 +1034,17 @@ test("a detected site opens with its variables, its database and its single-page
         label: "PostgreSQL 16",
         image: "postgres:16-alpine",
         driver: "postgres",
+        versions: [{ version: "16", image: "postgres:16-alpine" }],
+        defaultVersion: "16",
       },
-      { engine: "redis", label: "Redis 7", image: "redis:7-alpine", driver: "redis" },
+      {
+        engine: "redis",
+        label: "Redis 7",
+        image: "redis:7-alpine",
+        driver: "redis",
+        versions: [{ version: "7", image: "redis:7-alpine" }],
+        defaultVersion: "7",
+      },
     ]),
   )
   await page.goto("/deploy/new")

@@ -99,6 +99,7 @@ func (s *Server) pauseForUninstall(ctx context.Context, out io.Writer) error {
 	s.modules.deployPreviews.Stop()
 	s.modules.deploySchedule.Stop()
 	s.modules.deployDatabases.Stop()
+	s.modules.poolers.Stop()
 	s.modules.backupSched.Stop()
 	if s.ingressStop != nil {
 		s.ingressStop()

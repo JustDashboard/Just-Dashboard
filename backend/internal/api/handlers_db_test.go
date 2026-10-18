@@ -101,6 +101,7 @@ func TestRoutineDatabaseRoutesDoNotAskForAPhrase(t *testing.T) {
 		{http.MethodDelete, "/databases/1/ddl/index", `{"table":"t","name":"i"}`, "an index rebuilds from its own definition"},
 		{http.MethodDelete, "/databases/1", `{}`, "forgetting a connection string does not touch the server"},
 		{http.MethodPut, "/databases/1/access", `{"exposure":"public"}`, "a port binding is changed back the same way it was changed"},
+		{http.MethodPut, "/databases/1/tls", `{"enabled":false}`, "TLS is switched off the same way it was switched on"},
 		{http.MethodDelete, "/databases/1/keys", `{"key":"k"}`, "a Redis key is the unit of work in a key browser"},
 		{http.MethodDelete, "/databases/1/documents", `{"collection":"c","id":"x"}`, "a document is Mongo's row"},
 		{http.MethodPost, "/databases/1/activity/kill", `{"pid":"42"}`, "a stopped query rolls back; nothing is lost"},
@@ -296,6 +297,11 @@ func TestProvisionTemplatesAreCoherent(t *testing.T) {
 		}
 		if tmpl.image == "" || tmpl.port == 0 || tmpl.dataPath == "" {
 			t.Errorf("%s: incomplete template %+v", engine, tmpl)
+		}
+		// Every PostgreSQL template is on the official image's entrypoint,
+		// and its server counts its statements from the first start.
+		if (tmpl.driver == dbx.DriverPostgres) != tmpl.initdb {
+			t.Errorf("%s: initdb %v for a %s template", engine, tmpl.initdb, tmpl.driver)
 		}
 		// Every release a template offers has to be recognised and adoptable,
 		// not only the default: the list is what the operator chooses from.

@@ -21,9 +21,11 @@ import {
   tookWords,
   transferKind,
   transferPrefix,
+  transferWord,
 } from "@/components/database/ops/backups-model"
 import { DumpsPicture } from "@/components/database/ops/backups-picture"
 import { DumpFacts, RestoreDump } from "@/components/database/ops/backups-restore"
+import { PointInTimeRecovery } from "@/components/database/ops/pitr"
 import { TakeDump } from "@/components/database/ops/backups-take"
 import type { DbBackupFile, DbBackups } from "@/components/database/ops/backups-types"
 import { UploadDump } from "@/components/database/ops/backups-upload"
@@ -159,7 +161,7 @@ export function Backups() {
       refreshJobs()
       check()
       const kind = transferKind(job)
-      const what = kind === "restore" ? "Restore" : kind === "copy" ? "Copy" : "Backup"
+      const what = kind === "backup" || !kind ? "Backup" : transferWord(kind)
       if (job.status === "succeeded") {
         notify.success(`${what} of ${name} finished`, {
           description: result?.summary ?? result?.file ?? result?.database,
@@ -548,6 +550,8 @@ export function Backups() {
         )}
       </Panel>
 
+      {engine.can("pitr") && <PointInTimeRecovery jobs={scheduled.data ?? []} />}
+
       {asking?.kind === "take" && data && (
         <TakeDump
           options={data.options}
@@ -624,7 +628,7 @@ function RecentTransfers({
       <span className="eyebrow">recent</span>
       {shown.map((job) => {
         const kind = transferKind(job)
-        const word = kind === "restore" ? "Restore" : kind === "copy" ? "Copy" : "Dump"
+        const word = transferWord(kind)
         return (
           <FilterChip
             key={job.id}

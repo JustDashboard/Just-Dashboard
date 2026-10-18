@@ -1177,7 +1177,7 @@ test.describe("adding a database", () => {
     await expect(panel.getByLabel("Database")).toHaveCount(0)
     await panel.getByText("Account", { exact: true }).click()
     await expect(panel.getByLabel("User")).toHaveCount(0)
-    const publish = panel.getByRole("switch")
+    const publish = panel.getByRole("switch", { name: /^Publish its port/ })
     await expect(publish).not.toBeChecked()
     await publish.click()
     await expect(panel).toContainText("It will answer on every address this server has.")

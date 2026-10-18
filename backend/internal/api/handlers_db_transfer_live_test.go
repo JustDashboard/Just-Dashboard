@@ -86,11 +86,13 @@ func TestLiveAPIPostgresTransfer(t *testing.T) {
 		return do(t, r, http.MethodPost, pathf("/databases/%d/query", id), string(body))
 	}
 	for _, stmt := range []string{
+		`DROP FUNCTION IF EXISTS jd_api_add_line()`,
 		`DROP TABLE IF EXISTS jd_api_lines`, `DROP TABLE IF EXISTS jd_api_orders`,
 		`CREATE TABLE jd_api_orders (id integer PRIMARY KEY, customer text NOT NULL UNIQUE, total numeric(10,2))`,
 		`CREATE TABLE jd_api_lines (id serial PRIMARY KEY, order_id integer NOT NULL REFERENCES jd_api_orders(id), sku text)`,
 		`INSERT INTO jd_api_orders VALUES (1, 'ann', 10.50), (2, 'bo', 20)`,
 		`INSERT INTO jd_api_lines (order_id, sku) VALUES (1, 'a'), (1, 'b'), (2, 'c')`,
+		`CREATE FUNCTION jd_api_add_line() RETURNS integer LANGUAGE sql AS 'INSERT INTO jd_api_lines (order_id, sku) VALUES (1, ''z'') RETURNING id'`,
 	} {
 		if rec := query(stmt); rec.Code != http.StatusOK {
 			t.Fatalf("seed: %d %s\n%s", rec.Code, rec.Body.String(), stmt)
@@ -104,6 +106,7 @@ func TestLiveAPIPostgresTransfer(t *testing.T) {
 	}
 	dropScratch()
 	t.Cleanup(func() {
+		query(`DROP FUNCTION IF EXISTS jd_api_add_line()`)
 		query(`DROP TABLE IF EXISTS jd_api_lines`)
 		query(`DROP TABLE IF EXISTS jd_api_orders`)
 		dropScratch()
@@ -115,10 +118,11 @@ func TestLiveAPIPostgresTransfer(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "{\"customer\":\"ann\",\"lines\":\"2\"}\n{\"customer\":\"bo\",\"lines\":\"1\"}\n" {
 			t.Fatalf("query export: %d %s", rec.Code, rec.Body.String())
 		}
-		// A statement that reads as a SELECT and writes: the classifier lets
-		// it by, and the read-only transaction does not.
+		// A statement that reads as a SELECT and writes through a function of
+		// the database's own: the classifier lets it by, and the read-only
+		// transaction does not.
 		rec = do(t, r, http.MethodPost, pathf("/databases/%d/export/query", id),
-			`{"sql":"SELECT nextval('jd_api_lines_id_seq')","format":"csv"}`)
+			`{"sql":"SELECT jd_api_add_line()","format":"csv"}`)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "read-only") {
 			t.Errorf("a writing function ran inside an export: %d %s", rec.Code, rec.Body.String())
 		}

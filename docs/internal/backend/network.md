@@ -305,13 +305,14 @@ does not attach it, and restart requires a new explicit opt-in.
 
 ## Gateway and protection
 
-Files: `gateway*.go`, `blocklists.go`, `protection*.go`, `conntrack*.go`.
+Files: `gateway*.go`, `blocklists.go`, `protection*.go`, `conntrack*.go`, `port_allowlist.go`.
 
 `inet jd_gateway` only ever drops or translates, and a chain exists only while it holds a rule (an
 idle hooked chain still costs every packet a traversal). Chains: `pre` (prerouting at mangle priority,
-after conntrack: established and related return, then loopback and the trusted sets, then each
-blocklist set drops new connections, counted — so a list taking an address never cuts a session
-already open, nor the replies to this server's own outbound connections), `input` and `forward` (−10:
+after conntrack: established and related return, then loopback and the trusted sets, then each kept
+port's drops, then the exceptions, then each blocklist set drops new connections, counted — so a list
+taking an address never cuts a session already open, nor the replies to this server's own outbound
+connections), `input` and `forward` (−10:
 established and trusted return, then the rate and connection limits; a limit in the forward chain
 counts only translated flows, `ct status dnat`, and the forward chain also marks a NAT entry's new
 connections), `nat_pre` (each port forward: `fib daddr type local`, so a connection passing through to
@@ -338,6 +339,28 @@ recalculated, not RFC 6296's checksum-neutral translation. A single public addre
 device's own; a routed prefix cannot be checked. A mapping whose public side contains the address the
 requester's own replies leave from is refused with `would_lock_you_out`. Overlapping enabled entries on
 one device (not only equal sources) and two mappings of one public side are refused.
+
+**A kept port refuses every source its list does not name** (`port_allowlist.go`, `Spec.PortAllowlists`).
+Another feature owns each entry — a database's Network page, under `database:<container>` — and one
+owner keeps one port, one port one list; a spec that holds two lists for a port, or an entry that does
+not pass `normPortAllowlist`, stops the render. Its two rules sit in `pre`, one per family:
+`meta l4proto tcp th dport <port> fib daddr type local ip saddr != { … } counter drop comment
+"port-allowlist:<id>"`, and the same for `ip6 saddr`; a family the list names nothing in is dropped
+whole (`meta nfproto ipv6 … drop`). Prerouting at mangle priority runs before Docker's and a forward's
+destination translation, so the port matched is the one the visitor dialled and the rule holds for a
+port Docker publishes — whose forwarded traffic never meets the host firewall's input rules — as much
+as for a native listener; `fib daddr type local` keeps it to this host's own addresses, so a container
+reaching another server's same port is routed past it. It runs after the early returns — the trusted
+sets are the networks the dashboard itself is reached from, whose holders can already change the
+database through it — and before the exceptions, which let a network past blocklists and limits, not
+past a list somebody keeps a port to. The list is at most sixteen networks after `NormalizePortSources`
+has masked, merged and sorted it; every address, a range wider than /8 (IPv4) or /16 (IPv6), loopback,
+multicast and unspecified are refused. `SetPortAllowlist` and `RemovePortAllowlist` are ordinary gateway
+changes (the commit, the journal, the boot file, the recovery plan) that only drop, so neither waits on
+the gateway's capability; `PortAllowlistRules` is the preview of an owner's rules with the id it has or
+will take, and `PortAllowlists` reads every entry with whether both of its rules are in the loaded table
+(`enforced`), what they refused, and the trusted networks every one lets through first (`alsoAdmitted`,
+loopback aside). The Protection page does not list them yet; the database page that owns each does.
 
 **A port forward admits its own traffic.** One table's `accept` cannot override another's `drop`, and
 ufw and Docker drop forwarded traffic by default, so translated connections carry the mark
@@ -774,8 +797,11 @@ phrase.
 
 Parsers and renderers are tested against sanitized fixtures copied from the tools (`testdata/`), every
 apply's command order and rollback with the recorder, and every guard as a table. Live tests behind
-`JD_NETNS_LIVE=1` build devices, routes, rules, a gateway table with forwards, limits and blocklists,
-and shaping inside throwaway network namespaces — never on the host's own interfaces.
+`JD_NETNS_LIVE=1` build devices, routes, rules, a gateway table with forwards, limits, blocklists
+and kept ports, and shaping inside throwaway network namespaces — never on the host's own interfaces.
+`TestLiveAKeptPortAdmitsTheListAndRefusesTheRest` publishes a port the way Docker does — a DNAT in
+PREROUTING, an accept in FORWARD and a host firewall that drops the port on INPUT and is never asked —
+and shows a listed source reaching it and an unlisted one refused, for that port and a native listener.
 `TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel` applies port VLANs and VXLAN flood ends,
 reads the bridge view and readiness from the real kernel and replays the unit's bridge lines into a
 second fresh namespace; `TestLiveBridgeVLANRecoveryAfterProcessDeath` kills the applying process

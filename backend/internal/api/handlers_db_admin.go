@@ -25,15 +25,21 @@ import (
 //
 // Reading any of it is on the read surface — role names and parameters carry
 // nothing an operator with read access to the data could not already learn from the catalogue. Making an
-// account, granting it a database and enabling an extension are administrative
-// acts, so they sit with creating a connection under system.admin. Dropping an
-// account, an extension or a dump is destructive and sits there.
+// account, granting it a database, enabling or updating an extension and
+// adding a library the server loads at start are administrative acts, so they
+// sit with creating a connection under system.admin. Dropping an account, an
+// extension or a dump is destructive and sits there.
 
 func (s *Server) mountDatabaseAdminRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/server/roles", s.handle(s.handleDBRoles))
 	r.Method(http.MethodGet, "/{id}/server/extensions", s.handle(s.handleDBExtensions))
+	r.Method(http.MethodGet, "/{id}/server/extensions/{name}", s.handle(s.handleDBExtensionDetail))
 	r.Method(http.MethodGet, "/{id}/server/settings", s.handle(s.handleDBSettings))
 	r.Method(http.MethodGet, "/{id}/statements", s.handle(s.handleDBStatements))
+	// What each statement cost over a recorded window, read from the
+	// dashboard's own store (database_statements.go).
+	r.Method(http.MethodGet, "/{id}/statements/history", s.handle(s.handleDBStatementHistory))
+	r.Method(http.MethodGet, "/{id}/statements/history/{statement}", s.handle(s.handleDBStatementHistoryOne))
 	r.Method(http.MethodGet, "/{id}/backups", s.handle(s.handleDBBackupList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -46,6 +52,10 @@ func (s *Server) mountDatabaseAdminRoutes(r chi.Router) {
 		// "I can browse it" without typing a password that is already sealed.
 		r.Method(http.MethodPost, "/{id}/server/databases/connect", s.handle(s.handleDBDatabaseConnect))
 		r.Method(http.MethodPost, "/{id}/server/extensions", s.handle(s.handleDBExtensionCreate))
+		r.Method(http.MethodPatch, "/{id}/server/extensions/{name}", s.handle(s.handleDBExtensionUpdate))
+		// What the server loads at start: the step before creating an
+		// extension that needs it. The restart between is the power route's.
+		r.Method(http.MethodPost, "/{id}/server/preload", s.handle(s.handleDBPreload))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/server/roles/{name}", s.handle(s.handleDBRoleDrop))
 			r.Method(http.MethodDelete, "/{id}/server/extensions/{name}", s.handle(s.handleDBExtensionDrop))
@@ -711,97 +721,6 @@ func (s *Server) existingConnections(ctx context.Context) ([]*dbConnection, erro
 	return out, nil
 }
 
-func (s *Server) handleDBExtensions(w http.ResponseWriter, r *http.Request) error {
-	httpx.SkipAudit(r)
-	admin, conn, _, err := s.dbAdmin(r)
-	if err != nil {
-		return err
-	}
-	if admin == nil {
-		httpx.JSON(w, http.StatusOK, map[string]any{"extensions": []dbx.Extension{}, "supported": false,
-			"reason": "this engine has no extension catalogue"})
-		return nil
-	}
-	ctx, cancel := timeoutCtx(r, 30*time.Second)
-	defer cancel()
-	pool, _, err := s.dbPool(ctx, conn.ID)
-	if err != nil {
-		return err
-	}
-	list, err := admin.Extensions(ctx, pool)
-	if errors.Is(err, dbx.ErrUnsupported) {
-		httpx.JSON(w, http.StatusOK, map[string]any{"extensions": []dbx.Extension{}, "supported": false,
-			"reason": "this engine has no extension catalogue"})
-		return nil
-	}
-	if err != nil {
-		return queryFailed(err)
-	}
-	// Whether they can be changed from here: Postgres yes, MySQL's plugins no.
-	httpx.JSON(w, http.StatusOK, map[string]any{"extensions": list, "supported": true,
-		"editable": conn.Driver == dbx.DriverPostgres})
-	return nil
-}
-
-type extensionRequest struct {
-	Name string `json:"name"`
-}
-
-func (s *Server) handleDBExtensionCreate(w http.ResponseWriter, r *http.Request) error {
-	var req extensionRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	admin, conn, _, err := s.dbAdmin(r)
-	if err != nil {
-		return err
-	}
-	if admin == nil {
-		return httpx.BadRequest("%s has no extensions", conn.Driver)
-	}
-	ctx, cancel := timeoutCtx(r, 60*time.Second)
-	defer cancel()
-	pool, _, err := s.dbPool(ctx, conn.ID)
-	if err != nil {
-		return err
-	}
-	if err := admin.CreateExtension(ctx, pool, strings.TrimSpace(req.Name)); err != nil {
-		if errors.Is(err, dbx.ErrUnsupported) {
-			return httpx.BadRequest("%s extensions are installed from the server's own configuration", conn.Driver)
-		}
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.extension.create", conn.Name, map[string]any{"extension": req.Name})
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
-	return nil
-}
-
-func (s *Server) handleDBExtensionDrop(w http.ResponseWriter, r *http.Request) error {
-	name := httpx.URLParam(r, "name")
-	admin, conn, _, err := s.dbAdmin(r)
-	if err != nil {
-		return err
-	}
-	if admin == nil {
-		return httpx.BadRequest("%s has no extensions", conn.Driver)
-	}
-	ctx, cancel := timeoutCtx(r, 60*time.Second)
-	defer cancel()
-	pool, _, err := s.dbPool(ctx, conn.ID)
-	if err != nil {
-		return err
-	}
-	if err := admin.DropExtension(ctx, pool, name); err != nil {
-		if errors.Is(err, dbx.ErrUnsupported) {
-			return httpx.BadRequest("%s extensions are removed from the server's own configuration", conn.Driver)
-		}
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.extension.drop", conn.Name, map[string]any{"extension": name})
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
-	return nil
-}
-
 func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	admin, conn, dsn, err := s.dbAdmin(r)
@@ -929,7 +848,9 @@ type dbBackupFile struct {
 	Size    int64     `json:"size"`
 	TakenAt time.Time `json:"takenAt"`
 	// Format is what the file is, read from its first bytes: a pg_dump
-	// archive, SQL text, a gzipped JSON Lines document set.
+	// archive, SQL text, or the dashboard's own gzipped JSON Lines — a
+	// MongoDB collection's documents, or each Redis key's DUMP payload, which
+	// is not an RDB file and which only the dashboard restores.
 	Format string `json:"format"`
 	// The rest is what the dump's description says, where it has one. A file
 	// put in the directory by hand has none of it.

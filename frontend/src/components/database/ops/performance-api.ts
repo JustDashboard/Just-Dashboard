@@ -13,11 +13,15 @@ import type {
   DbMaintenanceRequest,
   DbMaintenanceResult,
   DbReplication,
+  DbStatementHistory,
+  DbStatementHistoryDetail,
+  DbStatementHistorySort,
   DbStatementSort,
   DbStatements,
   DbTableStats,
   SqliteFile,
 } from "@/components/database/ops/performance-types"
+import type { DbSettingChange } from "@/components/database/ops/settings-parameters-model"
 
 /**
  * The operations routes of one SQL server, each read in the shape its
@@ -134,11 +138,44 @@ export const readStatements = (
     signal,
   )
 
+/** What each statement cost over a recorded window. Read from the dashboard's own store: the server is not asked. */
+export const readStatementHistory = (
+  id: number,
+  query: { hours: number; sort: DbStatementHistorySort; limit: number },
+  signal?: AbortSignal,
+) =>
+  read<DbStatementHistory>(
+    `${base(id)}/statements/history`,
+    (answer) => Array.isArray(answer.statements) && Array.isArray(answer.buckets),
+    query satisfies Query,
+    signal,
+  )
+
+export const readStatementHistoryOf = (
+  id: number,
+  statement: string,
+  query: { hours: number },
+  signal?: AbortSignal,
+) =>
+  read<DbStatementHistoryDetail>(
+    `${base(id)}/statements/history/${encodeURIComponent(statement)}`,
+    (answer) => Array.isArray(answer.points) && record(answer.statement),
+    query satisfies Query,
+    signal,
+  )
+
 export const resetStatements = (id: number) =>
   post<{ ok: boolean; statement: string }>(`${base(id)}/statements/reset`, {})
 
 export const enableExtension = (id: number, name: string) =>
   post<unknown>(`${base(id)}/server/extensions`, { name })
+
+/**
+ * Adds pg_stat_statements to the server's shared_preload_libraries, after the
+ * libraries already listed. Nothing is loaded until the server restarts.
+ */
+export const preloadStatements = (id: number) =>
+  post<DbSettingChange>(`${base(id)}/statements/preload`, {})
 
 /** The plan of a statement, as the engine prints it. Nothing is executed. */
 export const explainStatement = (id: number, query: string, signal?: AbortSignal) =>

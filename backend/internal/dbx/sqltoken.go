@@ -125,6 +125,9 @@ const (
 	tokPunct
 	// tokSemicolon separates statements.
 	tokSemicolon
+	// tokDelimiter is the delimiter a MySQL script chose with DELIMITER. It
+	// ends a statement and is never sent: it is the client's, not the server's.
+	tokDelimiter
 )
 
 type sqlToken struct {
@@ -176,51 +179,96 @@ func (r *lexRules) quote(c byte) (rule quoteRule, closing byte) {
 
 // lexSQL turns a query into tokens. Whitespace and comments produce none.
 func lexSQL(r *lexRules, q string) ([]sqlToken, error) {
+	l := &sqlLexer{r: r, q: q}
 	tokens := make([]sqlToken, 0, 16)
-	for i := 0; i < len(q); {
+	for {
+		t, ok, err := l.next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return tokens, nil
+		}
+		tokens = append(tokens, t)
+	}
+}
+
+// sqlLexer reads a query a token at a time, so that what has been read can
+// change how the rest is: a MySQL script's DELIMITER line names what ends a
+// statement from the next line on, and a SQL Server GO line or an Oracle /
+// line is skipped as a whole.
+type sqlLexer struct {
+	r *lexRules
+	q string
+	i int
+	// delimiter, when set, ends a statement wherever it stands outside quotes
+	// and comments — inside a word too, as `END$$` — which is how the mysql
+	// client reads one.
+	delimiter string
+}
+
+// delimiterAt reports whether the chosen delimiter begins at i.
+func (l *sqlLexer) delimiterAt(i int) bool {
+	return l.delimiter != "" && strings.HasPrefix(l.q[i:], l.delimiter)
+}
+
+// peek returns the token next() would, without reading it.
+func (l *sqlLexer) peek() (sqlToken, bool) {
+	ahead := *l
+	t, ok, err := ahead.next()
+	return t, ok && err == nil
+}
+
+// next returns the next token, or false at the end of the query.
+func (l *sqlLexer) next() (sqlToken, bool, error) {
+	r, q := l.r, l.q
+	for l.i < len(q) {
+		i := l.i
 		c := q[i]
 		switch {
 		case c == 0:
-			return nil, fmt.Errorf("the statement contains a NUL byte")
+			return sqlToken{}, false, fmt.Errorf("the statement contains a NUL byte")
+		case l.delimiterAt(i):
+			l.i = i + len(l.delimiter)
+			return sqlToken{tokDelimiter, i, l.i}, true, nil
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v':
-			i++
+			l.i++
 		case c == '-' && i+1 < len(q) && q[i+1] == '-':
 			if r.dashNeedsSpace && i+2 < len(q) && q[i+2] > ' ' {
-				return nil, fmt.Errorf("ambiguous SQL comment: add whitespace after --")
+				return sqlToken{}, false, fmt.Errorf("ambiguous SQL comment: add whitespace after --")
 			}
 			end, err := lineCommentEnd(q, i+2)
 			if err != nil {
-				return nil, err
+				return sqlToken{}, false, err
 			}
-			i = end
+			l.i = end
 		case c == '#' && r.hashComment:
 			end, err := lineCommentEnd(q, i+1)
 			if err != nil {
-				return nil, err
+				return sqlToken{}, false, err
 			}
-			i = end
+			l.i = end
 		case c == '#' && r.refuseHash:
-			return nil, fmt.Errorf("use standard SQL comments in the query runner")
+			return sqlToken{}, false, fmt.Errorf("use standard SQL comments in the query runner")
 		case c == '/' && i+1 < len(q) && q[i+1] == '*':
 			end, err := blockCommentEnd(q, i)
 			if err != nil {
-				return nil, err
+				return sqlToken{}, false, err
 			}
-			i = end
+			l.i = end
 		case c == ';':
-			tokens = append(tokens, sqlToken{tokSemicolon, i, i + 1})
-			i++
+			l.i++
+			return sqlToken{tokSemicolon, i, i + 1}, true, nil
 		case c == '$' && r.refuseDollar:
-			return nil, fmt.Errorf("a $ outside quotes opens a heredoc on this engine, which the query runner does not read")
+			return sqlToken{}, false, fmt.Errorf("a $ outside quotes opens a heredoc on this engine, which the query runner does not read")
 		case c == '$' && (r.dollarQuote || r.refuseDollarQuote):
 			tag := dollarTag(q, i)
 			if tag == 0 {
-				tokens = append(tokens, sqlToken{tokPunct, i, i + 1})
-				i++
-				break
+				l.i++
+				return sqlToken{tokPunct, i, i + 1}, true, nil
 			}
 			if r.refuseDollarQuote {
-				return nil, fmt.Errorf("dollar quoted SQL is not supported by the query runner")
+				return sqlToken{}, false, fmt.Errorf("dollar quoted SQL is not supported by the query runner")
 			}
 			// The body ends at the first exact repeat of the opening delimiter.
 			// PostgreSQL's lexer examines every $ in the body as a possible
@@ -228,16 +276,15 @@ func lexSQL(r *lexRules, q string) ([]sqlToken, error) {
 			// which is the same set of candidates a substring search visits.
 			closing := strings.Index(q[i+tag:], q[i:i+tag])
 			if closing < 0 {
-				return nil, fmt.Errorf("unterminated dollar-quoted SQL")
+				return sqlToken{}, false, fmt.Errorf("unterminated dollar-quoted SQL")
 			}
-			end := i + tag + closing + tag
-			tokens = append(tokens, sqlToken{tokDollar, i, end})
-			i = end
+			l.i = i + tag + closing + tag
+			return sqlToken{tokDollar, i, l.i}, true, nil
 		case r.refuseCurlyQuotes && isCurlyQuote(q, i):
-			return nil, fmt.Errorf("typographic quotes are read as real quotes by this engine; use ' and \"")
+			return sqlToken{}, false, fmt.Errorf("typographic quotes are read as real quotes by this engine; use ' and \"")
 		case isDigit(c):
 			j := i + 1
-			for j < len(q) && isDigit(q[j]) {
+			for j < len(q) && isDigit(q[j]) && !l.delimiterAt(j) {
 				j++
 			}
 			// Letters glued to the digits belong to the same token on every
@@ -245,40 +292,39 @@ func lexSQL(r *lexRules, q string) ([]sqlToken, error) {
 			// error). On PostgreSQL that run may contain a $ once a letter has
 			// started it, and never directly after the digits.
 			if j < len(q) && isWordStart(q[j]) {
-				for j < len(q) && r.wordCont(q[j]) {
+				for j < len(q) && r.wordCont(q[j]) && !l.delimiterAt(j) {
 					j++
 				}
 			}
-			tokens = append(tokens, sqlToken{tokNumber, i, j})
-			i = j
+			l.i = j
+			return sqlToken{tokNumber, i, j}, true, nil
 		case r.wordStart(c):
 			j := i + 1
-			for j < len(q) && r.wordCont(q[j]) {
+			for j < len(q) && r.wordCont(q[j]) && !l.delimiterAt(j) {
 				j++
 			}
 			if r.refuseAltQuote && j < len(q) && q[j] == '\'' {
 				if w := strings.ToLower(q[i:j]); w == "q" || w == "nq" {
-					return nil, fmt.Errorf("alternative quoting (q'[...]') is not supported by the query runner; use doubled quotes")
+					return sqlToken{}, false, fmt.Errorf("alternative quoting (q'[...]') is not supported by the query runner; use doubled quotes")
 				}
 			}
-			tokens = append(tokens, sqlToken{tokWord, i, j})
-			i = j
+			l.i = j
+			return sqlToken{tokWord, i, j}, true, nil
 		default:
 			rule, closing := r.quote(c)
 			if rule == quoteNone {
-				tokens = append(tokens, sqlToken{tokPunct, i, i + 1})
-				i++
-				break
+				l.i++
+				return sqlToken{tokPunct, i, i + 1}, true, nil
 			}
 			end, err := quotedEnd(q, i+1, rule, closing)
 			if err != nil {
-				return nil, err
+				return sqlToken{}, false, err
 			}
-			tokens = append(tokens, sqlToken{tokQuoted, i, end})
-			i = end
+			l.i = end
+			return sqlToken{tokQuoted, i, end}, true, nil
 		}
 	}
-	return tokens, nil
+	return sqlToken{}, false, nil
 }
 
 // lineCommentEnd returns the index just past a comment that runs to the end of

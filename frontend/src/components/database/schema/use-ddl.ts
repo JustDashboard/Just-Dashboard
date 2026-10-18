@@ -11,8 +11,12 @@ const SETTLE_MS = 320
 const asError = (err: unknown) => (err instanceof Error ? err : new Error(String(err)))
 
 /** Runs a structure change. The statement in the answer is what ran. */
-export function runChange(id: number, request: DdlRequest, signal?: AbortSignal) {
-  return api<DdlAnswer>(`/databases/${id}${request.path}`, {
+export function runChange<T extends DdlAnswer = DdlAnswer>(
+  id: number,
+  request: DdlRequest,
+  signal?: AbortSignal,
+) {
+  return api<T>(`/databases/${id}${request.path}`, {
     method: request.method,
     body: request.body,
     signal,
@@ -20,8 +24,12 @@ export function runChange(id: number, request: DdlRequest, signal?: AbortSignal)
 }
 
 /** Asks for the statement a change would run. Nothing runs. */
-export function previewChange(id: number, request: DdlRequest, signal?: AbortSignal) {
-  return api<DdlAnswer>(`/databases/${id}${request.path}`, {
+export function previewChange<T extends DdlAnswer = DdlAnswer>(
+  id: number,
+  request: DdlRequest,
+  signal?: AbortSignal,
+) {
+  return api<T>(`/databases/${id}${request.path}`, {
     method: request.method,
     body: request.body,
     query: { preview: 1 },
@@ -29,16 +37,16 @@ export function previewChange(id: number, request: DdlRequest, signal?: AbortSig
   })
 }
 
-export type Preview = {
+export type Preview<T extends DdlAnswer = DdlAnswer> = {
   /** The server's plan for the request in hand; absent until it has answered for exactly that one. */
-  answer: DdlAnswer | undefined
+  answer: T | undefined
   /** Why the request in hand cannot be planned: the server's own words. */
   error: Error | undefined
   /** The request in hand has been asked about and has not been answered. */
   pending: boolean
 }
 
-type Settled = { key: string; answer?: DdlAnswer; error?: Error }
+type Settled<T> = { key: string; answer?: T; error?: Error }
 
 /**
  * The server's own statement for a form, kept in step with it.
@@ -52,15 +60,19 @@ type Settled = { key: string; answer?: DdlAnswer; error?: Error }
  * Not for the destructive routes — their previews spend the role's budget and
  * are asked once (`use-destroy.tsx`).
  */
-export function usePreview(id: number, request: DdlRequest | null, attempt = 0): Preview {
+export function usePreview<T extends DdlAnswer = DdlAnswer>(
+  id: number,
+  request: DdlRequest | null,
+  attempt = 0,
+): Preview<T> {
   const key = requestKey(request)
-  const [settled, setSettled] = useState<Settled>({ key: "" })
+  const [settled, setSettled] = useState<Settled<T>>({ key: "" })
 
   useEffect(() => {
     if (!request) return
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      previewChange(id, request, controller.signal)
+      previewChange<T>(id, request, controller.signal)
         .then((answer) => {
           if (!controller.signal.aborted) setSettled({ key, answer })
         })
