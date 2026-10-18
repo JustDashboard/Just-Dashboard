@@ -519,12 +519,15 @@ function ParameterRows({
                 onClick={() => onEdit(parameter)}
                 className="flex max-w-[48%] min-w-0 shrink-0 items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5 text-right focus-ring transition-colors hover:bg-row-hover"
               >
-                <span className="min-w-0">{value}</span>
+                <span className="flex min-w-0 flex-col items-end">{value}</span>
                 <Pencil className={cn("size-3.5 shrink-0 text-muted-foreground", ROW_DIM)} />
               </button>
             ) : (
               <div
-                className={cn("max-w-[45%] min-w-0 shrink-0 text-right", editing && "pr-[33px]")}
+                className={cn(
+                  "flex max-w-[45%] min-w-0 shrink-0 flex-col items-end text-right",
+                  editing && "pr-[33px]",
+                )}
               >
                 {value}
               </div>

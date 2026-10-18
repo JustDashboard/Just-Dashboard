@@ -216,7 +216,8 @@ for (const layout of ["expanded", "mobile"] as const) {
     const card = (await trigger.boundingBox())!
     expect(Math.abs(box!.x - card.x)).toBeLessThan(1)
     expect(Math.abs(box!.width - card.width)).toBeLessThan(1)
-    await expect(trigger.locator("svg")).toHaveCount(0)
+    // No chevron: the silhouette is the only glyph in the card.
+    await expect(trigger.locator("svg")).toHaveCount(1)
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.y).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
