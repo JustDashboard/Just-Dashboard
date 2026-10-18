@@ -28,7 +28,8 @@ A change that weakens any of these has to say so explicitly.
      `service.control`, for a preview as much as for a run. The same owner holds the routes that store
      code in the database (`POST …/ddl/routine` and `…/ddl/trigger`): the query runner classifies every
      `CREATE FUNCTION`, `PROCEDURE` and `TRIGGER` as high risk, so the form asks for what the console
-     asks, on every request;
+     asks, on every request; and `PATCH …/ddl/row-security`, where turning row-level security off or
+     no longer forcing it on the owner (`dbx.RowSecurityChange.TurnsOff`) is what makes it destructive;
    - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
      application or can lose rows, and the body of the power route, where `stop` and `restart` are
      what make the request destructive;
