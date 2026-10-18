@@ -2,6 +2,7 @@
 
 import { useRef, type RefObject } from "react"
 import type { ApiToken, Role } from "@/lib/types"
+import { LineChart } from "@/components/icons"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
@@ -20,6 +21,14 @@ import { KeyWireMark, WireMore, keyHint } from "@/components/account/marks"
 
 /** How many keys the picture draws before it counts the rest. */
 const SHOWN = 6
+
+/**
+ * Where a key is wired: through its role, or — for a key limited to one job —
+ * through that job, because the role beneath it says nothing of what it may do.
+ */
+type Door = Role | "metrics"
+const DOORS: Door[] = [...ROLES, "metrics"]
+const doorOf = (token: ApiToken): Door => (token.scope === "metrics.read" ? "metrics" : token.role)
 
 /**
  * Where the keys reach, drawn the way the deployment pages draw where a
@@ -47,7 +56,13 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
   const admin = useRef<HTMLDivElement>(null)
   const limited = useRef<HTMLDivElement>(null)
   const readonly = useRef<HTMLDivElement>(null)
-  const roleRef: Record<Role, RefObject<HTMLDivElement | null>> = { admin, limited, readonly }
+  const metrics = useRef<HTMLDivElement>(null)
+  const roleRef: Record<Door, RefObject<HTMLDivElement | null>> = {
+    admin,
+    limited,
+    readonly,
+    metrics,
+  }
 
   const usable = usableKeys(tokens, now).sort(
     (a, b) =>
@@ -63,7 +78,7 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
         <KeyNode
           key={token.id}
           containerRef={container}
-          roleRef={roleRef[token.role]}
+          roleRef={roleRef[doorOf(token)]}
           compact={!wide}
           token={token}
           line={keyLine(token, now)}
@@ -80,9 +95,14 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
     </>
   )
 
-  const roles = ROLES.map((role) => {
-    const held = usable.filter((k) => k.role === role)
-    const Mark = ROLE_MARK[role]
+  // The metrics door is drawn only when a key goes through it; the roles are
+  // drawn whether or not they hold one, as the empty doors a key could have.
+  const doors = DOORS.filter((door) => door !== "metrics" || usable.some((k) => doorOf(k) === door))
+  const roles = doors.map((role) => {
+    const held = usable.filter((k) => doorOf(k) === role)
+    const Mark = role === "metrics" ? LineChart : ROLE_MARK[role]
+    const hue = ROLE_HUE[role === "metrics" ? "readonly" : role]
+    const name = role === "metrics" ? "Metrics only" : ROLE_NAME[role]
     const line: Line = {
       still: !held.some((k) => usedToday(k, now)),
       dashed: held.length === 0,
@@ -107,11 +127,11 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
             align="center"
             mark={
               <WireMark tone="logo" className={held.length === 0 ? "opacity-50" : ""}>
-                <Mark aria-hidden style={{ color: ROLE_HUE[role] }} />
+                <Mark aria-hidden style={{ color: hue }} />
               </WireMark>
             }
             eyebrow="Role"
-            title={ROLE_NAME[role]}
+            title={name}
             hint={
               held.length === 0 ? "no key" : `${held.length} ${held.length === 1 ? "key" : "keys"}`
             }
@@ -119,9 +139,9 @@ export function KeyMap({ tokens, origin }: { tokens: ApiToken[]; origin: string 
         ) : (
           <div ref={roleRef[role]} className="relative z-10 flex">
             <WireMark tone="logo" size="md" className={held.length === 0 ? "opacity-50" : ""}>
-              <Mark aria-hidden style={{ color: ROLE_HUE[role] }} />
+              <Mark aria-hidden style={{ color: hue }} />
             </WireMark>
-            <span className="sr-only">{`${ROLE_NAME[role]}: ${held.length} keys`}</span>
+            <span className="sr-only">{`${name}: ${held.length} keys`}</span>
           </div>
         )}
       </div>
@@ -213,7 +233,7 @@ function KeyNode({
         nodeRef={node}
         align="end"
         mark={<KeyWireMark name={token.name} size="lg" />}
-        eyebrow={ROLE_NAME[token.role]}
+        eyebrow={token.scope === "metrics.read" ? "Metrics only" : ROLE_NAME[token.role]}
         title={<span className="font-mono">{token.name}</span>}
         hint={<span className={line.tone === "warning" ? "text-warning" : undefined}>{hint}</span>}
       />

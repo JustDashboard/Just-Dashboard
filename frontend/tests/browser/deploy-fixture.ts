@@ -1825,12 +1825,17 @@ const showcaseConnections: DbConnection[] = [
   },
 ]
 
+const provisionOption = (engine: string, label: string, image: string, driver: string) => {
+  const version = image.split(":")[1].replace(/-alpine$/, "")
+  return { engine, label, image, driver, versions: [{ version }], defaultVersion: version }
+}
+
 const showcaseProvisionOptions: DbProvisionOption[] = [
-  { engine: "postgres", label: "PostgreSQL", image: "postgres:17-alpine", driver: "postgres" },
-  { engine: "mysql", label: "MySQL", image: "mysql:8.4", driver: "mysql" },
-  { engine: "mariadb", label: "MariaDB", image: "mariadb:11", driver: "mysql" },
-  { engine: "redis", label: "Redis", image: "redis:7-alpine", driver: "redis" },
-  { engine: "mongodb", label: "MongoDB", image: "mongo:8", driver: "mongodb" },
+  provisionOption("postgres", "PostgreSQL", "postgres:17-alpine", "postgres"),
+  provisionOption("mysql", "MySQL", "mysql:8.4", "mysql"),
+  provisionOption("mariadb", "MariaDB", "mariadb:11", "mysql"),
+  provisionOption("redis", "Redis", "redis:7-alpine", "redis"),
+  provisionOption("mongodb", "MongoDB", "mongo:8", "mongodb"),
 ]
 
 /** Fourteen nightly runs of the job the release gates on, newest first, one failed. */

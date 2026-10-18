@@ -258,6 +258,19 @@ type Extension struct {
 	Installed        bool   `json:"installed"`
 	Schema           string `json:"schema,omitempty"`
 	Comment          string `json:"comment,omitempty"`
+	// Category, About and Library are the catalogue's (extension_catalogue.go):
+	// what it is for, in a sentence, and the library the server has to load
+	// at start before it works.
+	Category string `json:"category,omitempty"`
+	About    string `json:"about,omitempty"`
+	Library  string `json:"library,omitempty"`
+	// Module is a library with no extension to create; Installed is then
+	// whether the running server loaded it.
+	Module bool `json:"module,omitempty"`
+	// Unavailable is a catalogue entry this server's image does not ship.
+	Unavailable bool `json:"unavailable,omitempty"`
+	// SuperuserOnly is an extension only a superuser may create.
+	SuperuserOnly bool `json:"superuserOnly,omitempty"`
 }
 
 // Setting is one server parameter, with what the engine says about it: what
@@ -317,9 +330,10 @@ type Admin interface {
 	// target database rather than to whichever one the connection opens.
 	GrantNeedsDatabase() bool
 	CreateDatabase(ctx context.Context, db *sql.DB, name, owner string) error
+	// Extensions lists what the server can be extended with. Creating,
+	// updating and dropping one is ExtensionManager's, for the engines that
+	// can do that from a session.
 	Extensions(ctx context.Context, db *sql.DB) ([]Extension, error)
-	CreateExtension(ctx context.Context, db *sql.DB, name string) error
-	DropExtension(ctx context.Context, db *sql.DB, name string) error
 	Settings(ctx context.Context, db *sql.DB) ([]Setting, error)
 }
 
@@ -485,8 +499,7 @@ func (d postgresDialect) CreateRole(ctx context.Context, db *sql.DB, spec RoleSp
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "CREATE ROLE "+name+" WITH "+options)
-	return err
+	return pgExecRole(ctx, db, "CREATE ROLE "+name+" WITH "+options, spec.Password != "")
 }
 
 func (d postgresDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) error {
@@ -503,8 +516,46 @@ func (d postgresDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpe
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "ALTER ROLE "+name+" WITH "+options)
-	return err
+	return pgExecRole(ctx, db, "ALTER ROLE "+name+" WITH "+options, spec.SetPassword && spec.Password != "")
+}
+
+// pgExecRole runs a CREATE or ALTER ROLE. One that carries a password runs
+// with pg_stat_statements.track_utility off for its transaction, where this
+// account may turn it off: the extension keeps a utility statement as it was
+// sent, so the password would otherwise sit in clear in the server's statement
+// statistics, for every reader of pg_stat_statements — a monitoring role
+// among them, since pg_read_all_stats reads every account's statements. Only
+// a superuser may change the setting (from 15 also a role granted SET on it,
+// which is not looked for); for anybody else the statement is recorded as
+// before, and the Statements list shapes it like any other.
+//
+// The password is not sent hashed instead, though the server would store a
+// SCRAM secret it was given: a password check the server runs on a new
+// password (passwordcheck, credcheck) cannot judge a hash, and credcheck
+// refuses one, so hashing here would quietly set aside the operator's policy.
+func pgExecRole(ctx context.Context, db *sql.DB, stmt string, password bool) error {
+	var untracked bool
+	if password {
+		_ = db.QueryRowContext(ctx, `
+		  SELECT EXISTS (SELECT 1 FROM pg_settings WHERE name = 'pg_stat_statements.track_utility' AND setting = 'on')
+		     AND (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)`).Scan(&untracked)
+	}
+	if !untracked {
+		_, err := db.ExecContext(ctx, stmt)
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL pg_stat_statements.track_utility = off`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DropRole removes a role, taking back first what it was granted in this
@@ -811,47 +862,6 @@ func (d postgresDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, o
 		stmt += " OWNER " + o
 	}
 	_, err = db.ExecContext(ctx, stmt)
-	return err
-}
-
-func (postgresDialect) Extensions(ctx context.Context, db *sql.DB) ([]Extension, error) {
-	rows, err := db.QueryContext(ctx, `
-	  SELECT a.name, COALESCE(e.extversion, ''), COALESCE(a.default_version, ''),
-	         e.oid IS NOT NULL, COALESCE(n.nspname, ''), COALESCE(a.comment, '')
-	  FROM pg_available_extensions a
-	  LEFT JOIN pg_extension e ON e.extname = a.name
-	  LEFT JOIN pg_namespace n ON n.oid = e.extnamespace
-	  ORDER BY (e.oid IS NULL), a.name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Extension{}
-	for rows.Next() {
-		var e Extension
-		if err := rows.Scan(&e.Name, &e.Version, &e.AvailableVersion, &e.Installed, &e.Schema, &e.Comment); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
-func (d postgresDialect) CreateExtension(ctx context.Context, db *sql.DB, name string) error {
-	q, err := d.QuoteIdent(name)
-	if err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, "CREATE EXTENSION IF NOT EXISTS "+q)
-	return err
-}
-
-func (d postgresDialect) DropExtension(ctx context.Context, db *sql.DB, name string) error {
-	q, err := d.QuoteIdent(name)
-	if err != nil {
-		return err
-	}
-	_, err = db.ExecContext(ctx, "DROP EXTENSION "+q)
 	return err
 }
 
@@ -1175,9 +1185,6 @@ func (mysqlDialect) Extensions(ctx context.Context, db *sql.DB) ([]Extension, er
 	return out, rows.Err()
 }
 
-func (mysqlDialect) CreateExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
-func (mysqlDialect) DropExtension(context.Context, *sql.DB, string) error   { return ErrUnsupported }
-
 var mysqlSettingNames = []string{
 	"version", "version_comment", "datadir", "port", "bind_address", "skip_networking",
 	"max_connections", "max_user_connections", "innodb_buffer_pool_size", "innodb_log_file_size",
@@ -1320,10 +1327,6 @@ func (d clickhouseDialect) CreateDatabase(ctx context.Context, db *sql.DB, name,
 func (clickhouseDialect) Extensions(context.Context, *sql.DB) ([]Extension, error) {
 	return nil, ErrUnsupported
 }
-func (clickhouseDialect) CreateExtension(context.Context, *sql.DB, string) error {
-	return ErrUnsupported
-}
-func (clickhouseDialect) DropExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
 
 // The server settings an operator looks for first, out of the few hundred.
 var clickhouseSettingNames = []string{
@@ -1582,8 +1585,6 @@ func (d mssqlDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, _ st
 func (mssqlDialect) Extensions(context.Context, *sql.DB) ([]Extension, error) {
 	return nil, ErrUnsupported
 }
-func (mssqlDialect) CreateExtension(context.Context, *sql.DB, string) error { return ErrUnsupported }
-func (mssqlDialect) DropExtension(context.Context, *sql.DB, string) error   { return ErrUnsupported }
 
 var mssqlSettingNames = []string{
 	"user connections", "max server memory (MB)", "min server memory (MB)", "max degree of parallelism",

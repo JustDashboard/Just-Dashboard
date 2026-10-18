@@ -546,3 +546,104 @@ func (oracleDialect) byteLength(column Column, quoted string) (string, bool, err
 func (oracleDialect) emptyInsert() (string, error) {
 	return "", fmt.Errorf("Oracle cannot insert a row with no values; give at least one column")
 }
+
+// storedProgram names a program a CREATE defines: Oracle's own word for its
+// kind (the TYPE of ALL_ERRORS), its owner when the statement names one, and
+// its name as the catalogue holds it.
+type storedProgram struct {
+	kind, owner, name string
+}
+
+// oracleProgram reads the program a PL/SQL CREATE defines, or nil for one
+// that is not checked (a Java source, a library).
+func oracleProgram(statement string, tokens []sqlToken) *storedProgram {
+	word := func(at int) string {
+		if at < len(tokens) && tokens[at].kind == tokWord {
+			return strings.ToLower(statement[tokens[at].start:tokens[at].end])
+		}
+		return ""
+	}
+	// A name as the catalogue holds it: folded to upper case unless quoted.
+	name := func(at int) (string, bool) {
+		if at >= len(tokens) {
+			return "", false
+		}
+		text := statement[tokens[at].start:tokens[at].end]
+		switch {
+		case tokens[at].kind == tokWord:
+			return strings.ToUpper(text), true
+		case tokens[at].kind == tokQuoted && text[0] == '"':
+			return strings.ReplaceAll(text[1:len(text)-1], `""`, `"`), true
+		}
+		return "", false
+	}
+	if word(0) != "create" {
+		return nil
+	}
+	at := 1
+	for w := word(at); w == "or" || w == "replace" || w == "editionable" || w == "noneditionable"; w = word(at) {
+		at++
+	}
+	kind := word(at)
+	at++
+	switch kind {
+	case "procedure", "function", "trigger":
+	case "package", "type":
+		if word(at) == "body" {
+			kind += " body"
+			at++
+		}
+	default:
+		return nil
+	}
+	if word(at) == "if" {
+		// IF NOT EXISTS, from 23ai.
+		at += 3
+	}
+	first, ok := name(at)
+	if !ok {
+		return nil
+	}
+	program := &storedProgram{kind: strings.ToUpper(kind), name: first}
+	if at+1 < len(tokens) && tokens[at+1].kind == tokPunct && statement[tokens[at+1].start] == '.' {
+		if second, ok := name(at + 2); ok {
+			program.owner, program.name = first, second
+		}
+	}
+	return program
+}
+
+// compileErrors reads what the compiler said of the program just created.
+// Oracle keeps a program that does not compile, marked invalid, and answers
+// the CREATE with a warning the driver does not pass on.
+func (oracleDialect) compileErrors(ctx context.Context, q queryer, program *storedProgram) error {
+	// Oracle reads an empty text as NULL, which is the current schema here.
+	rows, err := q.QueryContext(ctx, `
+	  SELECT line, position, text FROM all_errors
+	  WHERE owner = NVL(:1, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'))
+	    AND name = :2 AND type = :3 AND attribute = 'ERROR'
+	  ORDER BY sequence
+	  FETCH FIRST 10 ROWS ONLY`, program.owner, program.name, program.kind)
+	if err != nil {
+		return fmt.Errorf("%s %s was created, and what its compiler said could not be read: %w",
+			strings.ToLower(program.kind), program.name, err)
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var line, position int
+		var text string
+		if err := rows.Scan(&line, &position, &text); err != nil {
+			return err
+		}
+		lines = append(lines, fmt.Sprintf("line %d, column %d: %s", line, position, strings.TrimSpace(text)))
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s %s was created with compilation errors, and cannot run until they are fixed:\n%s",
+		strings.ToLower(program.kind), program.name, strings.Join(lines, "\n"))
+}

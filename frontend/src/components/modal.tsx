@@ -59,6 +59,7 @@ export function Modal({
   initialFocus = "first",
   bodyClassName,
   className,
+  onCloseAutoFocus,
   children,
 }: {
   open: boolean
@@ -84,6 +85,8 @@ export function Modal({
   initialFocus?: "first" | "body"
   bodyClassName?: string
   className?: string
+  /** For a dialog opened by state, with no `DialogTrigger` to hand the keyboard back to. */
+  onCloseAutoFocus?: (event: Event) => void
   children: React.ReactNode
 }) {
   const body = useRef<HTMLDivElement>(null)
@@ -103,6 +106,7 @@ export function Modal({
               }
             : undefined
         }
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader className="shrink-0 gap-1 border-b border-hairline bg-surface-header px-4 py-3 pr-12 text-left">
           <div className="flex min-w-0 items-center gap-3">

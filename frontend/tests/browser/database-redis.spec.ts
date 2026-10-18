@@ -549,6 +549,25 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       }
       return json(route, verdict)
     }
+    if (method === "POST" && (path === "/keys/field/expire" || path === "/keys/field/persist")) {
+      const asked = body as { field: string; ttl?: number; at?: number }
+      const pttl = path.endsWith("persist")
+        ? -1
+        : asked.ttl !== undefined
+          ? asked.ttl * 1000
+          : (asked.at ?? 0) - Date.now()
+      return json(route, { ok: true, fields: [{ field: asked.field, pttl }] })
+    }
+    if (method === "POST" && path === "/keys/stream/claim") {
+      const asked = body as { ids?: string[]; auto?: boolean }
+      return json(route, {
+        // Everything idle long enough, for an automatic claim.
+        claimed: asked.ids ?? (asked.auto ? ["1790882554510-0"] : []),
+        deleted: [],
+        cursor: "0-0",
+        done: true,
+      })
+    }
     if (method === "POST" && path === "/redis/command") {
       const command = String((body as { command: string }).command)
       const [word, name] = command.trim().split(/\s+/)
@@ -759,6 +778,35 @@ const SLOW = [
     clientName: "worker",
   },
 ]
+
+/** A stream whose group has left an entry pending with one consumer for ten minutes. */
+const PENDING: Record<string, FakeKey> = {
+  "stream:orders": {
+    ...DEFAULT_KEYS["stream:orders"],
+    groups: [
+      {
+        name: "workers",
+        lastDeliveredId: "1790882554510-1",
+        pending: 1,
+        consumers: [
+          { name: "alice", pending: 1, idleMs: 600_000 },
+          { name: "bob", pending: 0, idleMs: 1000 },
+        ],
+      },
+    ],
+    pending: [{ id: "1790882554510-0", consumer: "alice", idleMs: 600_000, deliveries: 2 }],
+  },
+}
+
+/** The stream's consumer groups, with its pending entries unfolded. */
+async function openPending(page: Page) {
+  await page.goto(`${KEYS}?key=stream%3Aorders`)
+  await page
+    .locator("[data-slot=redis-key]")
+    .getByRole("button", { name: /^Consumer groups/ })
+    .click()
+  await page.locator("[data-slot=redis-key]").getByText("Pending entries").click()
+}
 
 const rail = (page: Page) => page.locator("[data-slot=redis-key-rail]")
 const pane = (page: Page) => page.locator("[data-slot=redis-key]")
@@ -1571,12 +1619,11 @@ test.describe("keys", () => {
     await expect(page).toHaveURL(/[?&]db=7(&|$)/)
   })
 
-  test("a field's own expiry is set with the server's command, every name quoted", async ({
+  test("a field's own expiry is set and removed through the field's own routes", async ({
     page,
   }) => {
     const redis = await mockRedis(page, {
       features: { hashFieldTtl: true },
-      verdicts: { HEXPIRE: { class: "write" }, HPERSIST: { class: "write" } },
       keys: {
         "user:1": {
           type: "hash",
@@ -1594,11 +1641,12 @@ test.describe("keys", () => {
     const editor = page.locator("[data-slot=popover-content]")
     await editor.getByLabel("Time to live").fill("10m")
     await editor.getByRole("button", { name: "Set expiry" }).click()
-    // No route sets a field's expiry: it is the server's command, through the
-    // console's route, with the key and the field as one argument each.
+    // The field's own route, which refuses a moment that has passed, and no
+    // console line.
     await expect
-      .poll(() => redis.asked("/redis/command").at(-1)?.body)
-      .toEqual({ command: 'HEXPIRE "user:1" 600 "FIELDS" 1 "two words"' })
+      .poll(() => redis.asked("/keys/field/expire").at(-1)?.body)
+      .toEqual({ key: "user:1", field: "two words", ttl: 600 })
+    expect(redis.asked("/redis/command")).toHaveLength(0)
     await expect(
       pane(page).getByRole("button", { name: /^Expiry of two words: 10m/ }),
     ).toBeVisible()
@@ -1608,8 +1656,8 @@ test.describe("keys", () => {
       .click()
     await editor.getByRole("button", { name: "Remove expiry" }).click()
     await expect
-      .poll(() => redis.asked("/redis/command").at(-1)?.body)
-      .toEqual({ command: 'HPERSIST "user:1" "FIELDS" 1 "token"' })
+      .poll(() => redis.asked("/keys/field/persist").at(-1)?.body)
+      .toEqual({ key: "user:1", field: "token" })
     await expect(
       pane(page).getByRole("button", { name: "Expiry of token: —. Change it" }),
     ).toBeVisible()
@@ -1619,7 +1667,6 @@ test.describe("keys", () => {
     page,
   }) => {
     const redis = await mockRedis(page, {
-      verdicts: { XCLAIM: { class: "write" } },
       keys: {
         "stream:orders": {
           ...DEFAULT_KEYS["stream:orders"],
@@ -1662,10 +1709,88 @@ test.describe("keys", () => {
     await dialog.getByRole("button", { name: "bob" }).click()
     await dialog.getByRole("button", { name: "Claim entry" }).click()
     await expect
-      .poll(() => redis.asked("/redis/command").at(-1)?.body)
+      .poll(() => redis.asked("/keys/stream/claim").at(-1)?.body)
       .toEqual({
-        command: 'XCLAIM "stream:orders" "workers" "bob" 0 "1790882554510-0" "JUSTID"',
+        key: "stream:orders",
+        group: "workers",
+        consumer: "bob",
+        ids: ["1790882554510-0"],
       })
+  })
+
+  test("what a group left pending long enough is claimed in one press, where the server can", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, { features: { streamAutoClaim: true }, keys: PENDING })
+    await openPending(page)
+    await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Claim idle entries" })
+    await expect(dialog.getByRole("button", { name: "Claim entries" })).toBeDisabled()
+    await dialog.getByRole("button", { name: "bob" }).click()
+    await dialog.getByLabel("Pending for at least").fill("5")
+    await dialog.getByRole("button", { name: "Claim entries" }).click()
+    await expect
+      .poll(() => redis.asked("/keys/stream/claim").at(-1)?.body)
+      .toEqual({
+        key: "stream:orders",
+        group: "workers",
+        consumer: "bob",
+        auto: true,
+        minIdleMs: 300_000,
+        count: 100,
+      })
+    await expect(dialog.getByRole("status")).toContainText(
+      "1 entry handed to bob. Nothing else has been pending that long.",
+    )
+    // Nothing goes through the console's route any more.
+    expect(redis.asked("/redis/command")).toHaveLength(0)
+  })
+
+  test("a claim the server refuses is said in the dialog, which stays open", async ({ page }) => {
+    await mockRedis(page, {
+      features: { streamAutoClaim: true },
+      keys: PENDING,
+      failing: /^\/keys\/stream\/claim$/,
+    })
+    await openPending(page)
+    await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Claim idle entries" })
+    await dialog.getByLabel("Hand them to").fill("carol")
+    await dialog.getByRole("button", { name: "Claim entries" }).click()
+    await expect(dialog.getByRole("alert")).toContainText("the server did not answer")
+    await expect(dialog.getByRole("button", { name: "Claim entries" })).toBeEnabled()
+  })
+
+  test("without XAUTOCLAIM there is no claim of idle entries, and a reader claims nothing", async ({
+    page,
+  }) => {
+    await mockRedis(page, { keys: PENDING })
+    await openPending(page)
+    await expect(pane(page).getByRole("button", { name: "Claim…" })).toBeVisible()
+    await expect(pane(page).getByRole("button", { name: "Claim idle entries…" })).toHaveCount(0)
+
+    await mockRedis(page, { viewer: true, features: { streamAutoClaim: true }, keys: PENDING })
+    await openPending(page)
+    await expect(pane(page).getByText("1790882554510-0")).toBeVisible()
+    await expect(pane(page).getByRole("button", { name: "Claim…" })).toHaveCount(0)
+    await expect(pane(page).getByRole("button", { name: "Claim idle entries…" })).toHaveCount(0)
+  })
+
+  test("at a phone's width the claim of idle entries scrolls nowhere sideways", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockRedis(page, { features: { streamAutoClaim: true }, keys: PENDING })
+    await openPending(page)
+    await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Claim idle entries" })
+    await expect(dialog).toBeVisible()
+    const sideways = await page.evaluate(() =>
+      [document.documentElement, ...document.querySelectorAll("[role=dialog]")].some(
+        (el) => el.scrollWidth > el.clientWidth + 1,
+      ),
+    )
+    expect(sideways, "the dialog scrolls sideways").toBe(false)
   })
 
   test("how long a key had been idle is read once, and never from the page's own reads", async ({
@@ -2277,3 +2402,47 @@ for (const [label, viewport] of [
     }
   })
 }
+
+test("the claim and the field expiry forms, for the record @shots", async ({ page }) => {
+  test.skip(!process.env.JD_SHOTS, "JD_SHOTS names where the screenshots go")
+  const shots = process.env.JD_SHOTS
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockRedis(page, {
+    features: { hashFieldTtl: true, streamAutoClaim: true },
+    keys: {
+      ...PENDING,
+      "session:index": {
+        type: "hash",
+        rows: [
+          { field: "user:7", value: "a1f9c2e0", ttl: 1800 },
+          { field: "user:12", value: "77be01d4", ttl: 240 },
+          { field: "user:31", value: "c0ffee91" },
+        ],
+      },
+    },
+  })
+  await page.goto(`${KEYS}?key=session%3Aindex`)
+  await pane(page).getByRole("button", { name: "Expiry of user:31: —. Change it" }).click()
+  await expect(page.locator("[data-slot=popover-content]")).toBeVisible()
+  await page.screenshot({ path: `${shots}/field-expiry-1440.png` })
+  await page.keyboard.press("Escape")
+
+  await openPending(page)
+  await pane(page).getByRole("button", { name: "Claim…" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "bob" }).click()
+  await page.screenshot({ path: `${shots}/claim-entry-1440.png` })
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
+
+  await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
+  const dialog = page.getByRole("dialog", { name: "Claim idle entries" })
+  await dialog.getByRole("button", { name: "bob" }).click()
+  await dialog.getByRole("button", { name: "Claim entries" }).click()
+  await expect(dialog.getByRole("status")).toBeVisible()
+  await page.screenshot({ path: `${shots}/claim-idle-1440.png` })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await openPending(page)
+  await pane(page).getByRole("button", { name: "Claim idle entries…" }).click()
+  await expect(page.getByRole("dialog", { name: "Claim idle entries" })).toBeVisible()
+  await page.screenshot({ path: `${shots}/claim-idle-390.png` })
+})

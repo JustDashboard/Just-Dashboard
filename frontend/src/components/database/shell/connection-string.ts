@@ -1,5 +1,5 @@
 import { buildDsn } from "@/lib/db-dsn"
-import type { DbAccess, DbConnection } from "@/lib/types"
+import type { DbAccess, DbConnection, DbPooler } from "@/lib/types"
 import type { ConnectParts, Engine } from "@/components/database/engine"
 
 /**
@@ -76,8 +76,15 @@ export function connectTargets(
     return [{ ...saved, note: "Anything that can reach that address connects with it." }]
   }
 
-  const address = publicAddress(access.publicAddresses)
-  const published = access.exposure === "public" && Boolean(address)
+  // One address of this machine is the address; a list or anywhere is the
+  // machine's public one, which the listed addresses dial like anybody would.
+  const address =
+    access.exposure === "private" ? access.address : publicAddress(access.publicAddresses)
+  const published =
+    (access.exposure === "public" ||
+      access.exposure === "allowlist" ||
+      access.exposure === "private") &&
+    Boolean(address)
   return [
     {
       id: "host",
@@ -104,18 +111,97 @@ export function connectTargets(
     published
       ? {
           id: "public",
-          label: "Anywhere",
+          label: outside(access.exposure).label,
           host: address,
           port: conn.port,
-          note: "Reachable from anywhere with the password. Treat the string as a secret.",
+          note: outside(access.exposure).note,
         }
-      : { id: "public", label: "Anywhere", note: "", unavailable: unpublished(access) },
+      : {
+          id: "public",
+          label: outside(access.exposure).label,
+          note: "",
+          unavailable: unpublished(access),
+        },
+  ]
+}
+
+/** What the string for another machine is called, and who can use it, by how far the port reaches. */
+function outside(exposure: DbAccess["exposure"]): { label: string; note: string } {
+  switch (exposure) {
+    case "private":
+      return {
+        label: "One network",
+        note: "Reachable from the network that address is on, with the password. Treat the string as a secret.",
+      }
+    case "allowlist":
+      return {
+        label: "Allowed addresses",
+        note: "Reachable from the addresses on the list, with the password. Treat the string as a secret.",
+      }
+    default:
+      return {
+        label: "Anywhere",
+        note: "Reachable from anywhere with the password. Treat the string as a secret.",
+      }
+  }
+}
+
+/**
+ * The same three places, through the connection's pooler: its published port
+ * on this server, its name on the network a linked deployment shares with the
+ * database, and the machine's address when the pooler is published beyond it.
+ * The account, the database and the options are the direct string's.
+ */
+export function pooledTargets(
+  conn: DbConnection,
+  pooler: DbPooler,
+  access?: DbAccess,
+): ConnectTarget[] {
+  const address = access && publicAddress(access.publicAddresses)
+  const published = pooler.exposure === "public" && Boolean(address)
+  return [
+    pooler.port
+      ? {
+          id: "host",
+          label: "This server",
+          host: conn.host,
+          port: String(pooler.port),
+          note: "Reachable from programs on this server, through the pooler.",
+        }
+      : {
+          id: "host",
+          label: "This server",
+          note: "",
+          unavailable: "The pooler's container is not published, so it has no port on this server.",
+        },
+    {
+      id: "container",
+      label: "Inside Docker",
+      host: pooler.linkedHost,
+      port: String(pooler.linkedPort),
+      note: "The name a deployment reads as its pooled reference, on the private network the dashboard joins them on.",
+    },
+    published
+      ? {
+          id: "public",
+          label: "Anywhere",
+          host: address,
+          port: String(pooler.port),
+          note: "The pooler is published on every interface, because the database was opened to anywhere. Treat the string as a secret.",
+        }
+      : {
+          id: "public",
+          label: "Anywhere",
+          note: "",
+          unavailable:
+            "The pooler is published on this server only. Opening the database to anywhere under Settings moves the pooler with it.",
+        },
   ]
 }
 
 /** Why there is no string for a laptop, in one sentence. */
 function unpublished(access: DbAccess): string {
-  if (access.exposure === "public") {
+  if (access.exposure === "public" || access.exposure === "allowlist") {
     return `This machine has no public address of its own — the provider maps one in front of it. Use that address with port ${access.port}.`
   }
   if (access.exposure === "private") {

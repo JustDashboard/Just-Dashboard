@@ -2,7 +2,6 @@ package backups
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -28,6 +27,10 @@ type Manifest struct {
 	// PausedContainers records which containers were frozen for the archive
 	// step, so the evidence of a quiet capture travels with the artifact.
 	PausedContainers []string `json:"pausedContainers,omitempty"`
+	// Encryption is set when the archive was sealed to the backup key. A
+	// pointer, so a manifest written before encryption existed encodes — and
+	// digests, for the recovery evidence bound to it — exactly as it did.
+	Encryption *ArchiveEncryption `json:"encryption,omitempty"`
 }
 
 type ManifestSource struct {
@@ -80,7 +83,7 @@ func (m *Manifest) Covers(wanted string) bool {
 // VerifyCoverage checks the actual archived entries, so a path created after
 // an older backup cannot borrow coverage from a recorded ancestor directory.
 func (r *Runner) VerifyCoverage(ctx context.Context, runID int64, sources []string) error {
-	run, path, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -101,17 +104,11 @@ func (r *Runner) VerifyCoverage(ctx context.Context, runID int64, sources []stri
 			}
 		}
 	}
-	f, err := os.Open(path)
+	reader, release, err := archive.entries()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	reader := tar.NewReader(gz)
+	defer release()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

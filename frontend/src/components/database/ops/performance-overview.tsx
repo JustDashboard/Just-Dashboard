@@ -5,7 +5,7 @@ import { Block, NotUpdating } from "@/components/database/home/blocks"
 import { offeredViews } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
 import { gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
-import { SAMPLE_EVERY_MS } from "@/components/database/home/use-samples"
+import { SAMPLE_EVERY_MS, keptFor } from "@/components/database/home/use-samples"
 import { overviewCharts, quietChart } from "@/components/database/ops/performance-figures"
 import { Notes } from "@/components/database/ops/performance-parts"
 import { NowPicture } from "@/components/database/ops/performance-picture"
@@ -29,6 +29,7 @@ export function OverviewView({
   error,
   hours,
   onHours,
+  retentionHours,
   activity,
 }: {
   samples: readonly Sample[]
@@ -39,6 +40,7 @@ export function OverviewView({
   error?: Error
   hours: number
   onHours: (hours: number) => void
+  retentionHours: number
   /** The live session list, on an engine that has one to read. */
   activity?: PollState<DbActivityResponse>
 }) {
@@ -89,7 +91,7 @@ export function OverviewView({
         actions={
           <>
             {error && samples.length > 0 && <NotUpdating error={error} />}
-            <HistoryRange hours={hours} onHours={onHours} />
+            <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
       >
@@ -119,8 +121,8 @@ export function OverviewView({
         )}
         <p className="text-hint text-muted-foreground">
           {held > 0
-            ? `Recorded activity over ${duration(held)}, collected every ${every} seconds and kept for 7 days.`
-            : "Activity is recorded in the background and kept for 7 days."}
+            ? `Recorded activity over ${duration(held)}, collected every ${every} seconds and kept for ${keptFor(retentionHours)}.`
+            : `Activity is recorded in the background and kept for ${keptFor(retentionHours)}.`}
         </p>
       </Block>
       <Notes notes={stats?.notes} />
