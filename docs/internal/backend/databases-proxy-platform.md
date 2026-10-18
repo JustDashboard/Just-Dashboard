@@ -113,8 +113,10 @@ is connected by naming the instance found, not by typing its address again.
   only its unit file names (`procs.ListInstalled`, `dbx.InstalledUnits`), and a stopped Debian PostgreSQL
   cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a cluster's port is read from
   its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never opened with a driver
-  to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and
-  time, on a ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
+  to be listed, and the dashboard's own store is not read at all: closing a descriptor for it would
+  release the store's SQLite locks (see [runtime boundaries](../architecture/runtime-boundaries.md));
+  the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and time, on a
+  ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
   than those roots — beneath `/home`, or beside all of them — the file roots themselves are walked: a
   broad root above a file root is outside the roots as a whole, and the scan used to walk nothing and
   list no file that `inventory/connect` would still take by its path. A file root with a broad root
