@@ -1,6 +1,8 @@
 import {
-  Database,
+  ArrowCircleUp,
+  Cpu,
   Globe,
+  Layers,
   Puzzle,
   SettingsGear,
   SettingsSliders,
@@ -12,7 +14,14 @@ import type { Engine } from "@/components/database/engine"
 
 /** One page of a database's Settings, as its address and the rail name it. */
 export type SettingsPageKey =
-  "general" | "network" | "parameters" | "extensions" | "databases" | "danger"
+  | "general"
+  | "network"
+  | "resources"
+  | "pooling"
+  | "parameters"
+  | "extensions"
+  | "version"
+  | "danger"
 
 export type SettingsPage = {
   key: SettingsPageKey
@@ -27,15 +36,16 @@ export type SettingsPage = {
 /**
  * The pages a database's Settings has, in the order a reader goes through
  * them: what the dashboard calls it and how it dials it, where it can be
- * reached from, the server's own parameters, what it is extended with, what
- * else the server holds, and the acts that end it.
+ * reached from, what it may use of the machine, the pooler in front of it, the server's own
+ * parameters, what it is extended with, the release it runs, and the acts that end it. What else the
+ * server holds is Home's: it changes nothing about this connection, so it is not a setting.
  *
  * Settings was one page of six sections under a strip of anchors, and the
  * section a reader most often came for — the danger zone, a parameter — was
  * the one at the foot of six screens. Each is its own page now, listed in the
  * rail the way a project's settings are (`PROJECT_SETTINGS_NAV`), and a page
  * the engine has no use for is not listed: a file has no server, so no
- * network and no neighbours; a key–value server has modules where a SQL
+ * network and nothing to limit; a key–value server has modules where a SQL
  * engine has extensions; a document database's parameters are status
  * counters, which are Performance's.
  */
@@ -45,6 +55,8 @@ export function settingsPages(engine: Engine): SettingsPage[] {
   const pages: (SettingsPage | false)[] = [
     { key: "general", title: "General", path: "", icon: SettingsGear },
     server && { key: "network", title: "Network", path: "network", icon: Globe },
+    server && { key: "resources", title: "Resources", path: "resources", icon: Cpu },
+    engine.can("pooler") && { key: "pooling", title: "Pooling", path: "pooling", icon: Layers },
     engine.can("settings") &&
       engine.kind !== "document" && {
         key: "parameters",
@@ -58,11 +70,12 @@ export function settingsPages(engine: Engine): SettingsPage[] {
       path: "extensions",
       icon: Puzzle,
     },
-    server && {
-      key: "databases",
-      title: engine.can("logicalDatabases") ? "Numbered databases" : "Databases",
-      path: "databases",
-      icon: Database,
+    engine.can("majorUpgrade") && {
+      key: "version",
+      title: "Version",
+      path: "version",
+      icon: ArrowCircleUp,
+      capability: "system.admin",
     },
     {
       key: "danger",
@@ -94,7 +107,6 @@ export function formerSettingsPage(
     reachability: "network",
     parameters: "parameters",
     extensions: "extensions",
-    databases: "databases",
     danger: "danger",
   }
   if (Object.hasOwn(named, anchor)) return named[anchor]

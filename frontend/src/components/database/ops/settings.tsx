@@ -12,10 +12,13 @@ import { BlockedState } from "@/components/database/kit/blocked-state"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { AddressSection, ConnectionForm } from "@/components/database/ops/settings-connection"
 import { DangerSection } from "@/components/database/ops/settings-danger"
-import { ServerDatabasesSection } from "@/components/database/ops/settings-databases"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
+import { PoolingSections } from "@/components/database/ops/settings-pooling"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { VersionSections } from "@/components/database/ops/settings-version"
+import { ResourcesSection } from "@/components/database/ops/settings-resources"
+import { TransportSecuritySection } from "@/components/database/ops/settings-tls"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
@@ -29,9 +32,11 @@ import {
 const MISSING: Record<SettingsPageKey, string> = {
   general: "settings",
   network: "network to configure",
+  resources: "resources to limit",
+  pooling: "connection pooling",
   parameters: "parameters to change here",
   extensions: "extensions",
-  databases: "other databases",
+  version: "release to upgrade from here",
   danger: "danger zone",
 }
 
@@ -70,7 +75,9 @@ function SettingsFrame({
         >
           {engine.can("fileBased")
             ? "It is a file on this machine: there is no server to reach, configure or share."
-            : "The engine keeps nothing of the kind for the dashboard to read or change."}
+            : page === "version"
+              ? "A PostgreSQL server Databases started is moved to a newer release here; this one is upgraded with its own tools."
+              : "The engine keeps nothing of the kind for the dashboard to read or change."}
         </BlockedState>
       </SectionFrame>
     )
@@ -94,13 +101,18 @@ function SettingsFrame({
  *
  * It is also where an address from the one-page Settings lands: `#danger`,
  * `#reachability` or a parameter search (`?q=`) is sent on, in place, to the
- * page that holds it now.
+ * page that holds it now, and `#databases` to Home, whose list of what else
+ * the server holds is the one that section was.
  */
 export function Settings() {
   const { href } = useDatabase()
   const router = useRouter()
   const search = useSearchParams()
   useEffect(() => {
+    if (window.location.hash === "#databases") {
+      router.replace(href("home"))
+      return
+    }
     const page = formerSettingsPage(window.location.hash, search)
     if (!page) return
     const query = page === "parameters" ? search.toString() : ""
@@ -120,9 +132,31 @@ export function Settings() {
 }
 
 export function SettingsNetwork() {
+  const { engine } = useDatabase()
   return (
     <SettingsFrame page="network">
-      {(confirm) => <ReachabilitySection confirm={confirm} />}
+      {(confirm) => (
+        <>
+          <ReachabilitySection confirm={confirm} />
+          {engine.can("serverTLS") && <TransportSecuritySection confirm={confirm} />}
+        </>
+      )}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsResources() {
+  return (
+    <SettingsFrame page="resources">
+      {(confirm) => <ResourcesSection confirm={confirm} />}
+    </SettingsFrame>
+  )
+}
+
+export function SettingsPooling() {
+  return (
+    <SettingsFrame page="pooling">
+      {(confirm) => <PoolingSections confirm={confirm} />}
     </SettingsFrame>
   )
 }
@@ -139,8 +173,29 @@ export function SettingsExtensions() {
   )
 }
 
-export function SettingsDatabases() {
-  return <SettingsFrame page="databases">{() => <ServerDatabasesSection />}</SettingsFrame>
+/**
+ * The release it runs and moving it to a newer one. An upgrade replaces the
+ * server, so the page is an administrator's; any other role reaching the
+ * address is told whose it is.
+ */
+export function SettingsVersion() {
+  const { engine } = useDatabase()
+  const { can } = useAuth()
+  return (
+    <SettingsFrame page="version">
+      {(confirm) =>
+        can("system.admin") ? (
+          <VersionSections confirm={confirm} />
+        ) : (
+          <EmptyState
+            mark={<EngineMark engine={engine} />}
+            title="Upgrades are an administrator's"
+            description="Which release the server runs, and moving it to a newer one, are read and done by an administrator."
+          />
+        )
+      }
+    </SettingsFrame>
+  )
 }
 
 /**

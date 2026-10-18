@@ -87,7 +87,14 @@ export function DatabaseQuickDeploy({
     return () => controller.abort()
   }, [optionsAttempt])
 
-  const selected = options?.find((option) => option.engine === engine)
+  // A template whose image is built on this server is built from Add a
+  // database, where the build's output is shown; this sheet offers it once
+  // that has been done.
+  const startable = options?.filter((option) => {
+    const release = option.versions.find((one) => one.version === option.defaultVersion)
+    return !release?.build || release.build.ready
+  })
+  const selected = startable?.find((option) => option.engine === engine)
   const inFlight = phase !== undefined
 
   const create = async () => {
@@ -223,7 +230,7 @@ export function DatabaseQuickDeploy({
           columns="fill"
           className="grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"
         >
-          {options?.map((option) => (
+          {startable?.map((option) => (
             <EngineCard
               key={option.engine}
               engine={option.engine}

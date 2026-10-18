@@ -142,6 +142,26 @@ https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cl
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+# WAL-G, which archives the write-ahead log of the PostgreSQL servers this
+# dashboard runs, for point-in-time recovery. A release, pinned by its digest.
+#
+# Nothing in this image runs it. The dashboard copies it into a server's own
+# container with the loader and C library it was linked against, taken from
+# this image, because most of the servers it starts are Alpine images with no
+# glibc at all. An architecture WAL-G publishes no build for gets none, and the
+# Backups page then says point-in-time recovery cannot be set up.
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) asset=wal-g-pg-22.04-amd64; sum=d6795c663894d836ba20840bffe8970aed81bbe25d3151bd4951f6f9c362def9 ;; \
+      arm64) asset=wal-g-pg-22.04-aarch64; sum=072eb4a4a119f817e1fa888c64a776b01e3453b2e0d967a67d149adb18fde652 ;; \
+      *) asset= ;; \
+    esac; \
+    if [ -n "$asset" ]; then \
+      curl -fsSL -o /usr/local/bin/wal-g "https://github.com/wal-g/wal-g/releases/download/v3.0.9/$asset"; \
+      echo "$sum  /usr/local/bin/wal-g" | sha256sum -c -; \
+      chmod 0755 /usr/local/bin/wal-g; \
+    fi
+
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
 COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
 

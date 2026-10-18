@@ -43,6 +43,15 @@ chat and e-mail render the kind, subject and reading. Kinds include failed certb
 certificate drift and a watched endpoint below its chosen minimum TLS grade. The Proxy Alerts panel
 owns these rules and their history; see [Proxy alerts](../backend/databases-proxy-platform.md).
 
+Database alert rules send `database.alert.firing` and `database.alert.recovered` the same way: to the
+channels the rule names, or every enabled one. A webhook receives the envelope's `database` block
+(rule, kind, connection or backup job, label, the reading with its line, since when, `test`); chat and
+e-mail render "Database disk filling up — shop" with the reading as the summary, and an e-mail's link
+line reads "Open it in Just Dashboard" rather than "Open the run". A database's Alerts page owns these
+rules and their history; see [Alerts](../backend/databases-proxy-platform.md#alerts-told-when-a-server-or-its-backups-go-wrong).
+Like the proxy's and the traffic alerts' messages they are run-less deliveries (run 0), recorded in a
+channel's history and never deduplicated or retried.
+
 Run events selectable on a channel are a closed vocabulary: `run.started`, `run.succeeded`, `run.failed` (includes
 `failed_activation` and `rolled_back`), `run.cancelled` (includes `superseded`). An empty list
 selects everything. The historical `run.finished` value remains valid as "every terminal outcome",
@@ -129,7 +138,7 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
 ## Verification
 
 - `notifications_test.go`: validation matrix, legacy event alias, rendering for every outcome,
-  a TLS grade alert's firing and recovery titles,
+  a TLS grade alert's firing and recovery titles, a database alert's title, fields and e-mail link,
   dispatcher delivery of a failed run with deduplication, disabled channel and start-only
   selection, Discord/Slack/Telegram payload shapes through a rewriting transport, e-mail through a
   captured mailer, credential masking in listings, and the notify step's new contract.

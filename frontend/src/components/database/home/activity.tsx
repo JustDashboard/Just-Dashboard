@@ -10,7 +10,7 @@ import {
   type ChartView,
 } from "@/components/database/home/charts"
 import { chartRows, gauge, heldSeconds, type Sample } from "@/components/database/home/samples"
-import { HISTORY_RANGES, SAMPLE_EVERY_MS } from "@/components/database/home/use-samples"
+import { SAMPLE_EVERY_MS, keptFor, rangesWithin } from "@/components/database/home/use-samples"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { ChartReading } from "@/components/metrics/chart-reading"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -41,9 +41,11 @@ export const Activity = memo(function Activity({
   events,
   hours,
   onHours,
+  retentionHours,
 }: {
   hours: number
   onHours: (hours: number) => void
+  retentionHours: number
   views: readonly ChartView[]
   samples: readonly Sample[]
   /** No sample has landed yet. */
@@ -71,7 +73,7 @@ export const Activity = memo(function Activity({
         actions={
           <>
             {error && samples.length > 0 && <NotUpdating error={error} />}
-            <HistoryRange hours={hours} onHours={onHours} />
+            <HistoryRange hours={hours} onHours={onHours} retentionHours={retentionHours} />
           </>
         }
       />
@@ -91,8 +93,8 @@ export const Activity = memo(function Activity({
         </div>
         <p className="text-hint text-muted-foreground">
           {held > 0
-            ? `Recorded activity over ${duration(held)}. Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed; kept for 7 days.`
-            : "Activity is recorded in the background every 30 seconds and kept for 7 days."}
+            ? `Recorded activity over ${duration(held)}. Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed; kept for ${keptFor(retentionHours)}.`
+            : `Activity is recorded in the background every 30 seconds and kept for ${keptFor(retentionHours)}.`}
         </p>
       </PanelBody>
     </Panel>
@@ -103,9 +105,14 @@ export const Activity = memo(function Activity({
 export function HistoryRange({
   hours,
   onHours,
+  retentionHours,
+  label = "Activity history range",
 }: {
   hours: number
   onHours: (hours: number) => void
+  retentionHours: number
+  /** What the window is of, for a screen reader. */
+  label?: string
 }) {
   return (
     <ToggleGroup
@@ -115,9 +122,9 @@ export function HistoryRange({
       onValueChange={(next) => next && onHours(Number(next))}
       variant="outline"
       size="sm"
-      aria-label="Activity history range"
+      aria-label={label}
     >
-      {HISTORY_RANGES.map((range) => (
+      {rangesWithin(retentionHours).map((range) => (
         <ToggleGroupItem
           key={range.hours}
           value={String(range.hours)}

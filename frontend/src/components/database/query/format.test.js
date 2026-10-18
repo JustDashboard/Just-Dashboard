@@ -111,4 +111,25 @@ describe("laying a statement out", () => {
     expect(formatSql("   ", pg)).toBe("")
     expect(meaning(formatSql("select (1, (2", pg))).toEqual(meaning("select (1, (2"))
   })
+  test("a text written against a word stays against it: it is that word's literal", () => {
+    expect(formatSql("select E'a\\nb', x'0f' from t", pg)).toBe("SELECT E'a\\nb', x'0f'\nFROM t\n")
+    expect(formatSql("exec p @sku = N'A-100'", dialectOf("sqlserver"))).toBe(
+      "exec p @sku = N'A-100'\n",
+    )
+    expect(formatSql("select 'a' 'b'", pg)).toBe("SELECT 'a' 'b'\n")
+  })
+  test("a script's separators and bodies stay as written; its plain statements are laid out", () => {
+    const tsql =
+      "create procedure p as\nbegin\n  select 1;\nend\ngo\nexec p\ngo 2\nselect a,b from t"
+    expect(formatSql(tsql, dialectOf("sqlserver"))).toBe(
+      "create procedure p as\nbegin\n  select 1;\nend\ngo\nexec p\ngo 2\nSELECT a, b\nFROM t",
+    )
+    const delimited =
+      "DELIMITER $$\ncreate procedure p() begin select 1; end$$\nDELIMITER ;\ncall p();"
+    expect(formatSql(delimited, mysql)).toBe(delimited)
+    const plsql = "begin\n  null;\nend;\n/\nselect 1 from dual"
+    expect(formatSql(plsql, dialectOf("oracle"))).toBe(
+      "begin\n  null;\nend;\n/\nSELECT 1\nFROM dual",
+    )
+  })
 })

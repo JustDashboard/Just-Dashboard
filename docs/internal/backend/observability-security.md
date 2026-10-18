@@ -316,6 +316,13 @@ Cross-cutting:
   replacement goes in **first**; deleting first and failing to add leaves a hole in the firewall, the one
   outcome an edit must never produce. The rule is read before anything is added and found again by what
   it says rather than where it sat. Ordering lives in `replaceRule`, separate from backend detection.
+- **A published container's port is not these rules' to refuse.** Docker forwards it before the input
+  chain they belong to (`PastFirewallDocker` in the port grading), so a database's *Allowed addresses*
+  are kept by the gateway table's prerouting drop ([kept ports](network.md#gateway-and-protection)).
+  The rules the database reach route writes here — one from anywhere, or one per listed network,
+  commented `just-dashboard database <port>`, as firewall plans inside `protectFirewall` and filed in the
+  history — are for this page's own listing and the traffic the firewall does see: docker-proxy's, and a
+  native listener's ([databases](databases-proxy-platform.md)).
 - `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody. With the request's access
   context (below) it also refuses a default that would refuse a required way in.
 - `ServiceCatalogue` (`GET /security/services`) is the rule form's teaching layer, served from the server

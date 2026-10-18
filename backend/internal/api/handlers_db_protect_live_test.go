@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -208,4 +210,76 @@ func TestLiveProtectedConnectionKeepsItsReadingPages(t *testing.T) {
 			t.Errorf("the protected collection holds %d documents, want the 2 it held before", counted.Value)
 		}
 	})
+}
+
+// The calls a SELECT can make that the read-only transaction does not stop,
+// against a real PostgreSQL: each is refused on a protected connection, and
+// the session one of them names and the lock another would take are as they
+// were.
+func TestLiveProtectedConnectionRefusesSelectsThatDoMoreThanRead(t *testing.T) {
+	dsn := os.Getenv("JD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("JD_TEST_POSTGRES_DSN unset")
+	}
+	s, router, id := liveAPIRouter(t, dbx.DriverPostgres, dsn)
+	ctx := context.Background()
+	pool, _, err := s.dbPool(ctx, id)
+	if err != nil {
+		t.Skip(err)
+	}
+	victim, err := pool.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer victim.Close()
+	var pid int
+	if err := victim.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE db_connections SET read_only = 1 WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	// "jdcg", so as not to meet anybody else's lock.
+	const lock = 0x6a646367
+	base := pathf("/databases/%d", id)
+	for _, query := range []string{
+		`SELECT query_to_xml('select set_'||'config(''role'', ''postgres'', false)', true, false, '')`,
+		fmt.Sprintf(`SELECT query_to_xml('select pg_terminate_'||'backend(%d)', true, false, '')`, pid),
+		`SELECT query_to_xml_and_xmlschema('select 1', true, false, '')`,
+		`SELECT cursor_to_xml('c'::refcursor, 1, false, false, '')`,
+		`SELECT table_to_xml('pg_class'::regclass, false, false, '')`,
+		`SELECT * FROM ts_stat('select to_tsvector(''a b'')')`,
+		`SELECT * FROM connectby('pg_class', 'oid', 'relnamespace', '0', 0) AS c(id oid, parent oid, level int)`,
+		`SELECT dblink_connect_u('jdcg', 'dbname=postgres')`,
+		`SELECT dblink_send_query('jdcg', 'select 1')`,
+		`SELECT pg_stat_statements_reset()`,
+		`SELECT pg_stat_reset()`,
+		`SELECT pg_stat_reset_shared('bgwriter')`,
+		fmt.Sprintf(`SELECT pg_advisory_lock(%d)`, lock),
+		fmt.Sprintf(`SELECT pg_try_advisory_lock(%d)`, lock),
+	} {
+		for path, field := range map[string]string{"/query": "query", "/script": "script"} {
+			body, _ := json.Marshal(map[string]string{field: query})
+			rec := do(t, router, http.MethodPost, base+path, string(body))
+			if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "connection_read_only") {
+				t.Errorf("POST %s %s on a protected connection = %d %s, want 409 connection_read_only",
+					path, query, rec.Code, strings.TrimSpace(rec.Body.String()))
+			}
+		}
+	}
+
+	if err := victim.QueryRowContext(ctx, `SELECT 1`).Scan(new(int)); err != nil {
+		t.Errorf("the session a refused statement named was ended: %v", err)
+	}
+	var held int
+	if err := pool.QueryRowContext(ctx,
+		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 0 AND objid = $1`, lock).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held != 0 {
+		t.Errorf("%d advisory locks taken through a protected connection", held)
+	}
+	if rec := do(t, router, http.MethodPost, base+"/query", `{"query":"SELECT current_setting('role') AS role"}`); rec.Code != http.StatusOK {
+		t.Errorf("a read on the protected connection = %d %s", rec.Code, rec.Body.String())
+	}
 }

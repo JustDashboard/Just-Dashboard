@@ -268,6 +268,14 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 			fmt.Sprintf("ip6 saddr @bl_%d_6 counter drop comment \"blocklist:%d\"", bl.ID, bl.ID))
 	}
 	allowed := allowRules(sp)
+	kept, err := normPortAllowlists(sp)
+	if err != nil {
+		return "", err
+	}
+	var keep []string
+	for _, p := range kept {
+		keep = append(keep, portAllowlistRules(p)...)
+	}
 
 	var guard, routed []string
 	for _, l := range limits {
@@ -302,15 +310,17 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 	}
 
 	returns := []string{"ct state established,related return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}
-	if len(pre) > 0 {
+	if len(pre) > 0 || len(keep) > 0 {
 		// Mangle priority, after connection tracking (-200): at raw priority a
 		// drop has no connection state to consult, so a list taking an address
 		// would cut the sessions already open with it and drop the replies to
 		// this server's own outbound connections (DNS, ACME, updates). Only a
 		// new connection from a listed network is refused.
 		head := []string{"ct state established,related return", "iif \"lo\" return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}
+		// A kept port's drops come before the exceptions, which let a
+		// network past the blocklists and limits and not past a list.
 		writeGatewayChain(&b, "pre", "type filter hook prerouting priority mangle; policy accept;",
-			append(append(head, allowed...), pre...))
+			append(append(append(head, keep...), allowed...), pre...))
 		for _, bl := range sp.Blocklists {
 			if rules, ok := excepted[bl.ID]; ok && bl.Enabled {
 				writeGatewayRegularChain(&b, fmt.Sprintf("bx_%d", bl.ID),

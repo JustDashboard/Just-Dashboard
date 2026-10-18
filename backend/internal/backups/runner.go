@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"filippo.io/age"
 )
 
 // Runner executes backup jobs. Only one run per job may be in flight: a slow
@@ -163,6 +165,14 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 		return "", 0, manifest, err
 	}
 	manifest.DatabaseDumps = dumpEvidence
+	var seal *archiveSeal
+	if job.Encrypt {
+		identity, _, err := r.store.archiveIdentity(ctx, true)
+		if err != nil {
+			return "", 0, manifest, err
+		}
+		seal = newArchiveSeal(identity)
+	}
 	name := artifactName(job, runID, time.Now())
 	local := filepath.Join(stage, name)
 
@@ -175,17 +185,23 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 	}
 	manifest.PausedContainers = append([]string{}, job.PauseContainers...)
 	fmt.Fprintf(logBuf, "archiving %d source(s) and %d database dump(s) into %s\n", len(job.Sources), len(dumps), name)
-	size, count, err := r.archiveWithSnapshots(ctx, job, local, logBuf, snapshots, dumps...)
+	size, count, err := r.archiveWithSnapshots(ctx, job, local, logBuf, seal, snapshots, dumps...)
 	resume()
 	if err != nil {
 		return "", 0, manifest, err
 	}
+	// Over the bytes the destination holds, so every later read proves the
+	// ciphertext before it decrypts any of it.
 	manifest.ArtifactDigest, err = fileDigest(ctx, local)
 	if err != nil {
 		return "", 0, manifest, err
 	}
+	manifest.Encryption = seal.evidence()
 	manifest.Complete = true
 	fmt.Fprintf(logBuf, "archived %d file(s), %d bytes\n", count, size)
+	if seal != nil {
+		fmt.Fprintf(logBuf, "encrypted with this server's backup key before leaving the server\n")
+	}
 
 	switch job.TargetKind {
 	case TargetLocal:
@@ -221,17 +237,27 @@ func (r *Runner) performWithManifest(ctx context.Context, job *Job, runID int64,
 }
 
 func (r *Runner) archive(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer) (int64, int, error) {
-	return r.archiveWithSnapshots(ctx, job, dest, logBuf, nil)
+	return r.archiveWithSnapshots(ctx, job, dest, logBuf, nil, nil)
 }
 
-func (r *Runner) archiveWithSnapshots(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer, snapshots map[string]string, extras ...archiveExtra) (int64, int, error) {
+// archiveWithSnapshots writes the archive to dest: through seal's encryption
+// when it has one, so no plaintext copy of an encrypted archive is ever on disk.
+func (r *Runner) archiveWithSnapshots(ctx context.Context, job *Job, dest string, logBuf *bytes.Buffer, seal *archiveSeal, snapshots map[string]string, extras ...archiveExtra) (int64, int, error) {
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer f.Close()
 
-	gz := gzip.NewWriter(f)
+	var out io.Writer = f
+	var sealed io.WriteCloser
+	if seal != nil {
+		if sealed, err = age.Encrypt(f, seal.recipient); err != nil {
+			return 0, 0, err
+		}
+		out = io.MultiWriter(sealed, seal)
+	}
+	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
 
 	count := 0
@@ -335,6 +361,13 @@ func (r *Runner) archiveWithSnapshots(ctx context.Context, job *Job, dest string
 	}
 	if err := gz.Close(); err != nil {
 		return 0, count, err
+	}
+	// The last chunk is written only here, and without it the archive is
+	// one age refuses as truncated.
+	if sealed != nil {
+		if err := sealed.Close(); err != nil {
+			return 0, count, err
+		}
 	}
 	st, err := f.Stat()
 	if err != nil {
@@ -523,8 +556,12 @@ func artifactName(job *Job, runID int64, at time.Time) string {
 	}
 	// IDs distinguish jobs with the same sanitized name; entropy also separates
 	// restored database copies writing to a shared object-store prefix.
-	return fmt.Sprintf("%s-job%d-run%d-%s-%s.tar.gz", name, job.ID, runID,
+	out := fmt.Sprintf("%s-job%d-run%d-%s-%s.tar.gz", name, job.ID, runID,
 		at.UTC().Format("20060102-150405"), rand.Text())
+	if job.Encrypt {
+		out += encryptedSuffix
+	}
+	return out
 }
 
 func sanitise(name string) string {
