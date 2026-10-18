@@ -21,7 +21,9 @@ import {
   type RdOS,
   type RdStream,
   type StreamQuality,
+  type StreamStats,
 } from "@/lib/remote-desktop"
+import { meterVideo } from "@/lib/remote-desktop-stats"
 import { notify } from "@/lib/toast"
 import type { Job } from "@/lib/types"
 
@@ -69,6 +71,7 @@ export function StreamPane({
   readyStream,
   error,
   onPlayback,
+  onStats,
   quality,
   attempt,
   pointer,
@@ -81,6 +84,8 @@ export function StreamPane({
   readyStream: RdStream | undefined
   error: Error | undefined
   onPlayback: (playing: boolean) => void
+  /** What the stream measures of itself each second; undefined once it stops. */
+  onStats: (stats: StreamStats | undefined) => void
   quality: StreamQuality
   attempt: number
   pointer: boolean
@@ -94,6 +99,7 @@ export function StreamPane({
         computer={computer}
         stream={readyStream}
         onPlayback={onPlayback}
+        onStats={onStats}
         quality={quality}
         attempt={attempt}
         pointer={pointer}
@@ -267,6 +273,17 @@ function sunshineSteps(os: RdOS): Step[] {
         ),
       },
       page,
+      {
+        title: "Use the software encoder",
+        detail: (
+          <>
+            On that page, {path("Configuration", "Audio/Video", "Encoder")}: choose Software, then
+            Save and Apply. Sunshine&apos;s VideoToolbox path holds each frame about 120 ms before
+            it leaves the Mac; the software encoder about 10, and an Apple silicon Mac encodes
+            1080p60 with it easily.
+          </>
+        ),
+      },
     ]
   if (os === "windows")
     return [
@@ -558,6 +575,7 @@ function StreamFrame({
   pointer,
   onFrame,
   onPlayback,
+  onStats,
 }: {
   computer: RdComputerView
   stream: RdStream
@@ -566,6 +584,7 @@ function StreamFrame({
   pointer: boolean
   onFrame: (frame: HTMLIFrameElement | null) => void
   onPlayback: (playing: boolean) => void
+  onStats: (stats: StreamStats | undefined) => void
 }) {
   const app = desktopApp(stream.apps)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -575,12 +594,14 @@ function StreamFrame({
   const src = app ? streamPageUrl(stream.hostId, app.id) : undefined
   useEffect(() => {
     onPlayback(false)
+    onStats(undefined)
     stopObserving.current()
     return () => {
       stopObserving.current()
       onPlayback(false)
+      onStats(undefined)
     }
-  }, [key, onPlayback])
+  }, [key, onPlayback, onStats])
   useEffect(() => {
     if (!src || !frame.current) return
     let held: Record<string, unknown> = {}
@@ -624,10 +645,24 @@ function StreamFrame({
       onLoad={(event) => {
         stopObserving.current()
         onPlayback(false)
+        onStats(undefined)
         const doc = event.currentTarget.contentDocument
         if (!doc?.head) return
         let interrupted = false
+        // The frames are counted on the first video the page draws; the
+        // page is this origin, so its element can be read.
+        let metered: HTMLVideoElement | null = null
+        let stopMetering = () => {}
+        const meter = () => {
+          const video = doc.querySelector("video")
+          if (video === metered) return
+          stopMetering()
+          metered = video
+          stopMetering = video ? meterVideo(video, onStats) : () => {}
+          if (!video) onStats(undefined)
+        }
         const update = (event?: Event) => {
+          meter()
           if (event && (event.target as HTMLElement | null)?.tagName !== "VIDEO") return
           if (
             event &&
@@ -662,6 +697,7 @@ function StreamFrame({
         observer.observe(doc.body, { childList: true, subtree: true })
         stopObserving.current = () => {
           observer.disconnect()
+          stopMetering()
           for (const name of events) doc.removeEventListener(name, update, true)
         }
         update()

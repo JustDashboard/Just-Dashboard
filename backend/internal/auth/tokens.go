@@ -11,25 +11,27 @@ import (
 
 const tokenPrefix = "vpsd_"
 
-// ScopeMCP is the scope of a key made for an AI client: it opens the MCP
-// endpoint and nothing else, and reaches only the databases granted to it.
+// ScopeMCP is the scope of a key made for an AI client. Unlike a capability
+// scope it narrows where the key goes, not what its role may do there: it
+// opens the MCP endpoint and nothing else, and reaches only the databases
+// granted to it.
 const ScopeMCP = "mcp"
 
 var ErrTokenInvalid = errors.New("api token invalid, revoked or expired")
 
 type APIToken struct {
-	ID         int64      `json:"id"`
-	UserID     int64      `json:"userId"`
-	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	Role       Role       `json:"role"`
+	ID     int64  `json:"id"`
+	UserID int64  `json:"userId"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	Role   Role   `json:"role"`
+	// Scope narrows the key to one capability. Empty is an ordinary key, bound
+	// only by its role; a scoped key reaches nothing but the routes that name it.
+	Scope      string     `json:"scope"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	ExpiresAt  *time.Time `json:"expiresAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt"`
 	Revoked    bool       `json:"revoked"`
-	// Scope is "" for a key that opens every route its role allows, or
-	// ScopeMCP for one that opens the MCP endpoint and nothing else.
-	Scope string `json:"scope"`
 	// Connections are the databases an MCP key reaches, as ListAPITokens
 	// reads them. Every other key has none.
 	Connections []TokenConnection `json:"connections,omitempty"`
@@ -38,6 +40,23 @@ type APIToken struct {
 // CreateAPIToken mints a scripting credential. The role may narrow the owner's
 // role but never widen it, so a leaked token cannot exceed its creator.
 func (s *Service) CreateAPIToken(ctx context.Context, owner *User, name string, role Role, ttl time.Duration) (*APIToken, string, error) {
+	return s.createAPIToken(ctx, owner, name, role, "", ttl)
+}
+
+// CreateScopedAPIToken mints a key for one job, such as a metrics scraper. It is
+// read-only whatever its owner is, so a scraper's credential on a monitoring
+// host cannot do more than the one thing it was made for.
+func (s *Service) CreateScopedAPIToken(ctx context.Context, owner *User, name string, scope Capability, ttl time.Duration) (*APIToken, string, error) {
+	if scope != CapMetricsRead {
+		return nil, "", fmt.Errorf("unknown key scope %q", scope)
+	}
+	if !owner.Role.Can(scope) {
+		return nil, "", fmt.Errorf("a %s account cannot mint a %s key", owner.Role, scope)
+	}
+	return s.createAPIToken(ctx, owner, name, RoleReadOnly, string(scope), ttl)
+}
+
+func (s *Service) createAPIToken(ctx context.Context, owner *User, name string, role Role, scope string, ttl time.Duration) (*APIToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", errors.New("token name required")
@@ -48,7 +67,7 @@ func (s *Service) CreateAPIToken(ctx context.Context, owner *User, name string, 
 	if !roleAtMost(role, owner.Role) {
 		return nil, "", fmt.Errorf("cannot mint a %s token from a %s account", role, owner.Role)
 	}
-	id, full, err := insertAPIToken(ctx, s.st.DB, owner, name, role, ttl, "")
+	id, full, err := insertAPIToken(ctx, s.st.DB, owner, name, role, scope, ttl)
 	if err != nil {
 		return nil, "", err
 	}
@@ -61,7 +80,7 @@ func (s *Service) CreateAPIToken(ctx context.Context, owner *User, name string, 
 
 // insertAPIToken writes a new credential and returns its id and the secret,
 // which exists nowhere else: only its hash is kept.
-func insertAPIToken(ctx context.Context, db execer, owner *User, name string, role Role, ttl time.Duration, scope string) (int64, string, error) {
+func insertAPIToken(ctx context.Context, db execer, owner *User, name string, role Role, scope string, ttl time.Duration) (int64, string, error) {
 	full := tokenPrefix + RandomToken(32)
 	var expires int64
 	if ttl > 0 {
@@ -69,9 +88,9 @@ func insertAPIToken(ctx context.Context, db execer, owner *User, name string, ro
 	}
 	prefix := full[:len(tokenPrefix)+8]
 	res, err := db.ExecContext(ctx,
-		`INSERT INTO api_tokens(user_id, name, prefix, token_hash, role, created_at, expires_at, scope)
+		`INSERT INTO api_tokens(user_id, name, prefix, token_hash, role, scope, created_at, expires_at)
 		 VALUES(?,?,?,?,?,?,?,?)`,
-		owner.ID, name, prefix, HashToken(full), string(role), time.Now().Unix(), expires, scope)
+		owner.ID, name, prefix, HashToken(full), string(role), scope, time.Now().Unix(), expires)
 	if err != nil {
 		return 0, "", err
 	}
@@ -88,7 +107,7 @@ func roleAtMost(want, have Role) bool {
 	return rank[want] <= rank[have]
 }
 
-const apiTokenColumns = `id, user_id, name, prefix, role, created_at, expires_at, last_used_at, revoked, scope`
+const apiTokenColumns = `id, user_id, name, prefix, role, scope, created_at, expires_at, last_used_at, revoked`
 
 func (s *Service) apiTokenByID(ctx context.Context, id int64) (*APIToken, error) {
 	row := s.st.DB.QueryRowContext(ctx, `SELECT `+apiTokenColumns+` FROM api_tokens WHERE id = ?`, id)
@@ -102,7 +121,7 @@ func scanAPIToken(row interface{ Scan(...any) error }) (*APIToken, error) {
 		created, expires, used int64
 		revoked                int
 	)
-	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &created, &expires, &used, &revoked, &t.Scope); err != nil {
+	if err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &role, &t.Scope, &created, &expires, &used, &revoked); err != nil {
 		return nil, err
 	}
 	t.Role = Role(role)

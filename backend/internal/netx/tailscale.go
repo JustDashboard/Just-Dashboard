@@ -639,3 +639,18 @@ func (s *Service) SetTailscaleChecked(ctx context.Context, req TailscaleSetReque
 	}
 	return &TailscaleSetResult{Tailscale: view, Note: note}, nil
 }
+
+// TailscaleWarm asks Tailscale to find its direct path to a peer, for a
+// session about to open to it. A path is only sought when there is traffic,
+// and lapses after a few idle minutes, so a session's first seconds
+// otherwise go through the nearest relay at twice the round trip. `ping`
+// stops at the first direct answer; three tries at a second each bound how
+// long an unreachable peer is waited on. Only a tailnet address is pinged:
+// this is the tailnet's own tool, not a way to reach anything else.
+func (s *Service) TailscaleWarm(ctx context.Context, address string) {
+	ip, err := netip.ParseAddr(address)
+	if err != nil || !(tsTailnetV4.Contains(ip.Unmap()) || tsTailnetV6.Contains(ip)) || !has("tailscale") {
+		return
+	}
+	run(ctx, "tailscale", "ping", "-c", "3", "--timeout", "1s", ip.String())
+}

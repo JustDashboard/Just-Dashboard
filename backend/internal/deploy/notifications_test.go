@@ -200,6 +200,37 @@ func TestRenderProxyGradeAlertNamesTheRuleAndReading(t *testing.T) {
 	}
 }
 
+func TestRenderDatabaseAlertNamesTheDatabaseAndReading(t *testing.T) {
+	since := time.Date(2026, 10, 17, 3, 4, 0, 0, time.UTC)
+	envelope := NotificationEnvelope{
+		Event: NotificationEventDatabaseFiring, URL: "https://dash.example.test/databases/3/alerts",
+		Database: &DatabaseAlertEnvelope{
+			Kind: "disk", ConnectionID: 3, Subject: "connection:3", Label: "shop",
+			Detail: "92% of the volume shop-data is used (184.0 GB of 200.0 GB); the line is 90%.", Since: since,
+		},
+	}
+	message := renderNotification(envelope)
+	if message.Title != "Database disk filling up — shop" || message.Summary != envelope.Database.Detail ||
+		strings.Join(flattenFields(message.Fields), "|") != "Database=shop|Since=2026-10-17 03:04 UTC" {
+		t.Fatalf("disk alert message = %+v", message)
+	}
+	envelope.Event = NotificationEventDatabaseRecovered
+	if recovered := renderNotification(envelope); recovered.Title != "Resolved: "+message.Title || recovered.Emoji != "✅" {
+		t.Fatalf("disk recovery message = %+v", recovered)
+	}
+	envelope.Event = NotificationEventDatabaseFiring
+	envelope.Database = &DatabaseAlertEnvelope{Kind: "backup_failed", JobID: 4, Label: "nightly", Detail: "The run failed.", Test: true}
+	backup := renderNotification(envelope)
+	if backup.Title != "[test] Backup failed — nightly" || flattenFields(backup.Fields)[0] != "Backup job=nightly" {
+		t.Fatalf("backup alert message = %+v", backup)
+	}
+	_, mail := emailMessage(NotificationConfig{From: "ops@example.test", To: []string{"team@example.test"}}, message, since)
+	if !strings.Contains(string(mail), "Open it in Just Dashboard: https://dash.example.test/databases/3/alerts") ||
+		strings.Contains(string(mail), "Open the run") {
+		t.Fatalf("a database alert's mail sends its reader to a run:\n%s", mail)
+	}
+}
+
 func flattenFields(fields [][2]string) []string {
 	out := make([]string, 0, len(fields))
 	for _, field := range fields {

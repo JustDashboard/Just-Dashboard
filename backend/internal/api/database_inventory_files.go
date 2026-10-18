@@ -601,7 +601,12 @@ func (sc *dbFileScanner) file(path string, info os.FileInfo) {
 		return
 	}
 	sc.seenFiles[path] = true
-	engine, ok := fileEngine(path)
+	// The store is SQLite by definition, and reading it would close a
+	// descriptor for it in this process, which releases SQLite's locks on it.
+	engine, ok := string(dbx.DriverSQLite), true
+	if path != sc.storePath {
+		engine, ok = fileEngine(path)
+	}
 	if !ok {
 		return
 	}

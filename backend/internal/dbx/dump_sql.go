@@ -62,21 +62,7 @@ const (
 // dumpBuiltInSQL writes a SQL text dump of one database using nothing but the
 // engine's own driver.
 func dumpBuiltInSQL(ctx context.Context, driver Driver, dsn, outDir string, opts DumpOptions) (*DumpResult, error) {
-	d, err := DialectFor(driver)
-	if err != nil {
-		return nil, err
-	}
 	database := opts.Database
-	db, err := openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
-	sel, err := newDumpSelection(opts.Tables, opts.ExcludeTables)
-	if err != nil {
-		return nil, err
-	}
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -107,33 +93,10 @@ func dumpBuiltInSQL(ctx context.Context, driver Driver, dsn, outDir string, opts
 		}
 	}()
 
-	// One snapshot for the catalogue and every table, where the engine has
-	// one to give. Without it each table is read at a different moment, and a
-	// dump taken while the application writes holds an order whose customer
-	// was created after the customers table was read.
-	q, release, err := dumpSnapshot(ctx, db, driver)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-
-	plan, err := planDump(ctx, q, db, d, database, sel, opts)
-	if err != nil {
-		return nil, err
-	}
-
 	buffered := bufio.NewWriterSize(file, 256<<10)
-	fence, err := newDumpFence()
+	summary, err := writeBuiltInDump(ctx, driver, dsn, buffered, opts, start)
 	if err != nil {
 		return nil, err
-	}
-	w := &countingWriter{w: buffered, fence: fence}
-	summary, err := writeDumpPlan(ctx, w, q, d, database, plan, opts, start)
-	if err != nil {
-		return nil, err
-	}
-	if w.err != nil {
-		return nil, w.err
 	}
 	if err := buffered.Flush(); err != nil {
 		return nil, err
@@ -153,6 +116,59 @@ func dumpBuiltInSQL(ctx context.Context, driver Driver, dsn, outDir string, opts
 		StartedAt: start.UTC(), Summary: summary, Output: summary,
 		Tool: BuiltInDumpTool,
 	}, nil
+}
+
+// writeBuiltInDump reads one database over its own connection and writes the
+// dump to w: the part of a dump that does not care whether w is a file, which
+// is what lets a copy between two servers write straight into the restore
+// reading it (copy_stream.go).
+func writeBuiltInDump(ctx context.Context, driver Driver, dsn string, w io.Writer, opts DumpOptions, start time.Time) (string, error) {
+	d, err := DialectFor(driver)
+	if err != nil {
+		return "", err
+	}
+	database := opts.Database
+	db, err := openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	sel, err := newDumpSelection(opts.Tables, opts.ExcludeTables)
+	if err != nil {
+		return "", err
+	}
+	if driver == DriverSQLite {
+		if info, err := ParseDSN(driver, dsn); err == nil {
+			database = filepath.Base(info.Database)
+		}
+	}
+
+	// One snapshot for the catalogue and every table, where the engine has
+	// one to give. Without it each table is read at a different moment, and a
+	// dump taken while the application writes holds an order whose customer
+	// was created after the customers table was read.
+	q, release, err := dumpSnapshot(ctx, db, driver)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	plan, err := planDump(ctx, q, db, d, database, sel, opts)
+	if err != nil {
+		return "", err
+	}
+
+	fence, err := newDumpFence()
+	if err != nil {
+		return "", err
+	}
+	cw := &countingWriter{w: w, fence: fence}
+	summary, err := writeDumpPlan(ctx, cw, q, d, database, plan, opts, start)
+	if err != nil {
+		return "", err
+	}
+	return summary, cw.err
 }
 
 // dumpQueryer is the part of a pool, a pinned connection and a transaction the
@@ -247,6 +263,15 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 	for _, stmt := range plan.session {
 		writeStatement(w, stmt)
 	}
+	if opts.trace != nil && opts.trace.planned != nil {
+		var withRows []Table
+		for _, pt := range plan.tables {
+			if data && !pt.noData {
+				withRows = append(withRows, pt.table)
+			}
+		}
+		opts.trace.planned(withRows)
+	}
 
 	if structure {
 		for _, stmt := range plan.beforeDrops {
@@ -315,6 +340,9 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 		dumped++
 		rowsAll += n
 		opts.progress("%s: %d rows", pt.rel, n)
+		if opts.trace != nil && opts.trace.wrote != nil {
+			opts.trace.wrote(pt.rel, n)
+		}
 		if w.err != nil {
 			return "", w.err
 		}
@@ -577,15 +605,22 @@ func dropTableStatement(driver Driver, rel string) string {
 
 // restoreGenericSQL replays a dump this package wrote.
 func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path string, opts RestoreOptions) (string, error) {
-	d, err := DialectFor(driver)
-	if err != nil {
-		return "", err
-	}
 	text, closeDump, err := openDumpText(path)
 	if err != nil {
 		return "", err
 	}
 	defer closeDump()
+	return replayGenericSQL(ctx, driver, dsn, database, text, opts)
+}
+
+// replayGenericSQL is restoreGenericSQL for a dump that is not a file: the
+// text arrives from a reader, which is how a copy between two servers feeds
+// the restore from the dump as it is written.
+func replayGenericSQL(ctx context.Context, driver Driver, dsn, database string, text io.Reader, opts RestoreOptions) (string, error) {
+	d, err := DialectFor(driver)
+	if err != nil {
+		return "", err
+	}
 	if driver == DriverMySQL {
 		dsn = mysqlOneStatementDSN(dsn)
 	}

@@ -236,7 +236,7 @@ func TestTheMCPEndpointTakesAnMCPKeyAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := b.post(api, ping, nil); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "token_scope") {
+	if w := b.post(api, ping, nil); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "key_scope") {
 		t.Errorf("a key for the API on the endpoint: %d %s", w.Code, w.Body.String())
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mcp", strings.NewReader(ping))
@@ -279,7 +279,7 @@ func TestAnMCPKeyOpensNoOtherRoute(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		b.h.ServeHTTP(w, req)
-		if w.Code < 400 || (w.Code == http.StatusForbidden && !strings.Contains(w.Body.String(), "token_scope") &&
+		if w.Code < 400 || (w.Code == http.StatusForbidden && !strings.Contains(w.Body.String(), "key_scope") &&
 			!strings.Contains(w.Body.String(), "network_denied")) {
 			t.Errorf("%s %s answered an MCP key with %d: %s", rt.method, rt.pattern, w.Code, strings.TrimSpace(w.Body.String()))
 		}

@@ -21,6 +21,9 @@ type Principal struct {
 	// Token is the key behind a token principal, scope and all.
 	Token     *auth.APIToken
 	Kind      string // "session" | "token"
+	// Scope is the one capability a scoped API key holds; empty for a session
+	// and for an ordinary key.
+	Scope     string
 	IP        string
 	UserAgent string
 	// Elevated is whether this credential has passed its second factor. It is
@@ -35,7 +38,14 @@ type Principal struct {
 	FailureReason string
 }
 
-func (p *Principal) Can(c auth.Capability) bool { return p.Role.Can(c) }
+// Can fails closed for a scoped key: whatever its role would grant, it holds
+// only the capability it was narrowed to.
+func (p *Principal) Can(c auth.Capability) bool {
+	if p.Scope != "" && string(c) != p.Scope {
+		return false
+	}
+	return p.Role.Can(c)
+}
 
 func (p *Principal) Username() string {
 	if p == nil || p.User == nil {

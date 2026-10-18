@@ -26,11 +26,14 @@ import {
   osProduct,
   protocolLabel,
   STREAM_QUALITIES,
+  type ControlDensity,
+  type ControlStats,
   type KeyCombo,
   type RdComputerView,
   type RdStream,
   type SessionMode,
   type StreamQuality,
+  type StreamStats,
 } from "@/lib/remote-desktop"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -114,8 +117,53 @@ export function SessionPanel({
         />
       </div>
 
+      {mode === "control" && computer.os === "macos" && (
+        <div
+          data-slot="mac-control-note"
+          className="flex flex-col gap-2.5 border-b border-hairline bg-wash-warning px-4 py-3.5 text-hint"
+        >
+          <p className="text-muted-foreground">
+            <span className="font-medium text-foreground">
+              Screen Sharing is slow for anything but Apple&apos;s own app:
+            </span>{" "}
+            a few frames a second however short the path. Use Control to sign in and set things up,
+            and Stream for the rest. If Control must do, set the Mac to 1920 × 1080 rather than its
+            Retina size.
+          </p>
+          <Button
+            size="xs"
+            variant="outline"
+            className="self-start"
+            onClick={() => onMode("stream")}
+          >
+            <ProductGlyph id="sunshine" className="size-3" />
+            {computer.streamHostId ? "Switch to Stream" : "Set up Stream"}
+          </Button>
+        </div>
+      )}
+
       {children}
     </aside>
+  )
+}
+
+/**
+ * A session's own numbers, read each second: three figures in a row, each
+ * named under it, so the eye lands on the figure first.
+ */
+function Readout({ items }: { items: { label: string; value: string }[] }) {
+  return (
+    <ul data-slot="session-readout" className="grid grid-cols-3 gap-2">
+      {items.map((item) => (
+        <li
+          key={item.label}
+          className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-hairline bg-surface-sunken px-2.5 py-2"
+        >
+          <span className="numeric truncate text-body font-semibold">{item.value}</span>
+          <span className="truncate text-micro text-muted-foreground">{item.label}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -318,6 +366,7 @@ export function KeyboardSection({
 export function StreamSections({
   computer,
   stream,
+  stats,
   quality,
   onQuality,
   pointer,
@@ -327,6 +376,7 @@ export function StreamSections({
 }: {
   computer: RdComputerView
   stream: RdStream | undefined
+  stats: StreamStats | undefined
   quality: StreamQuality
   onQuality: (quality: StreamQuality) => void
   pointer: boolean
@@ -373,10 +423,29 @@ export function StreamSections({
           note={
             webrtc
               ? `${routeNote(computer)}; to this browser over UDP on the tailnet`
-              : `${routeNote(computer)}; to this browser over the dashboard's own connection`
+              : `${routeNote(computer)}; to this browser over the dashboard's own connection, where a lost packet holds every frame behind it. Reach the dashboard over the tailnet and the picture goes over UDP instead.`
           }
         />
       </PanelSection>
+
+      {stats && (
+        <PanelSection title="Live">
+          <Readout
+            items={[
+              { label: "frames a second", value: String(stats.fps) },
+              {
+                label: "arrival to screen",
+                value: stats.delayMs === undefined ? "—" : `${stats.delayMs} ms`,
+              },
+              { label: "dropped", value: String(stats.dropped) },
+            ]}
+          />
+          <p className="text-hint text-muted-foreground">
+            What this browser adds once a frame has arrived. The rest of the delay is the path: the
+            computer to the bridge, the bridge to here.
+          </p>
+        </PanelSection>
+      )}
 
       <PanelSection title="Quality">
         <div role="radiogroup" aria-label="Stream quality" className="grid grid-cols-2 gap-1.5">
@@ -447,6 +516,9 @@ export function StreamSections({
 export function ControlSections({
   computer,
   connected,
+  density,
+  onDensity,
+  stats,
   remoteClip,
   localClip,
   onLocalClip,
@@ -459,6 +531,9 @@ export function ControlSections({
 }: {
   computer: RdComputerView
   connected: boolean
+  density: ControlDensity
+  onDensity: (density: ControlDensity) => void
+  stats: ControlStats | undefined
   remoteClip: string
   localClip: string
   onLocalClip: (text: string) => void
@@ -488,6 +563,61 @@ export function ControlSections({
           note={`${routeNote(computer)} · ${osLabel(computer.os)}${computer.username ? `, signed in as ${computer.username}` : ""}`}
         />
       </PanelSection>
+
+      {connected && stats && (
+        <PanelSection title="Live">
+          <Readout
+            items={[
+              { label: "drawn a second", value: String(stats.clientFps) },
+              { label: "sent a second", value: String(stats.serverFps) },
+              { label: "to draw one", value: `${stats.lagMs} ms` },
+            ]}
+          />
+          <p className="text-hint text-muted-foreground">
+            {stats.lagMs > 50
+              ? "This browser is what holds the session back: guacd sends fewer, rougher frames while a frame takes this long to draw. Smooth below helps."
+              : "Frames guacd sends, frames this browser draws, and how long each takes once it arrives. Few sent with little to draw is the computer or the path."}
+          </p>
+        </PanelSection>
+      )}
+
+      {computer.protocol === "rdp" && (
+        <PanelSection title="Picture">
+          <div role="radiogroup" aria-label="Picture density" className="grid grid-cols-2 gap-1.5">
+            {(
+              [
+                { key: "smooth", label: "Smooth", detail: "One pixel per pixel" },
+                { key: "sharp", label: "Sharp", detail: "This screen's own density" },
+              ] as { key: ControlDensity; label: string; detail: string }[]
+            ).map((option) => {
+              const selected = option.key === density
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={option.label}
+                  onClick={() => onDensity(option.key)}
+                  className={cn(
+                    "flex min-w-0 flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left focus-ring transition-colors",
+                    selected
+                      ? "border-rule-brand bg-wash-brand"
+                      : "border-hairline hover:border-border-strong hover:bg-row-hover",
+                  )}
+                >
+                  <span className="text-body font-semibold">{option.label}</span>
+                  <span className="text-hint text-muted-foreground">{option.detail}</span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-hint text-muted-foreground">
+            Sharp asks {computer.name} for a screen of this display&apos;s pixels: on a 2x display
+            four times as many to encode and decode, and that many fewer frames a second.
+          </p>
+        </PanelSection>
+      )}
 
       <PanelSection title="Clipboard">
         <Textarea

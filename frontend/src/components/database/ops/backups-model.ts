@@ -21,12 +21,44 @@ export const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 /** How many operations the strip of outcomes draws. */
 export const STRIP = 14
 
-export type TransferKind = "backup" | "restore" | "copy"
+/**
+ * The operations one connection runs one at a time: a dump, a restore, a
+ * copy, an import from another server, and a major-version upgrade's check,
+ * upgrade and revert, which move the whole server and so wait for, and hold
+ * off, the others.
+ */
+export type TransferKind =
+  | "backup"
+  | "restore"
+  | "copy"
+  | "import"
+  | "major-upgrade"
+  | "major-upgrade-check"
+  | "major-upgrade-revert"
 
-/** Which operation a transfer job is, read off the end of its kind. */
+const TRANSFER_WORDS: Record<TransferKind, string> = {
+  backup: "Dump",
+  restore: "Restore",
+  copy: "Copy",
+  import: "Import",
+  "major-upgrade": "Upgrade",
+  "major-upgrade-check": "Upgrade check",
+  "major-upgrade-revert": "Revert",
+}
+
+/**
+ * Which operation a transfer job is, read off the end of its kind. An import's
+ * cutover is the import's other job and reads as one.
+ */
 export function transferKind(job: Pick<Job, "kind">): TransferKind | undefined {
   const word = job.kind.slice(job.kind.lastIndexOf(".") + 1)
-  return word === "backup" || word === "restore" || word === "copy" ? word : undefined
+  if (word === "import-cutover") return "import"
+  return Object.hasOwn(TRANSFER_WORDS, word) ? (word as TransferKind) : undefined
+}
+
+/** An operation's name, as a chip or a toast says it. */
+export function transferWord(kind: TransferKind | undefined): string {
+  return kind ? TRANSFER_WORDS[kind] : "Dump"
 }
 
 /** The kind prefix every dump, restore and copy of one connection runs under. */

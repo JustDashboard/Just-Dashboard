@@ -131,10 +131,13 @@ func (s *Server) Routes() http.Handler {
 			s.mountRemoteDesktopRoutes(r)
 		})
 
-		// The MCP endpoint (handlers_mcp.go) takes an MCP key and nothing
-		// else, so no browser cookie reaches it and it needs no CSRF header.
-		// An agent has no databases of its own to offer an AI client.
 		if !s.Cfg.AgentMode {
+			s.mountDatabaseMetricsExport(r)
+
+			// The MCP endpoint (handlers_mcp.go) takes an MCP key and nothing
+			// else, so no browser cookie reaches it and it needs no CSRF
+			// header. An agent has no databases of its own to offer an AI
+			// client.
 			r.Group(func(r chi.Router) {
 				r.Use(s.Authn.AuthenticateMCP)
 				r.Use(s.apiLim.ByPrincipal)

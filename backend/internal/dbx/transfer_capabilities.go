@@ -62,5 +62,22 @@ func init() {
 		Capability{"restoreNewDatabase", dump(func(c DumpCapability) bool { return c.NewDatabase })},
 		Capability{"copy", dump(func(c DumpCapability) bool { return c.NewDatabase })},
 		Capability{"copyStructureOnly", dump(func(c DumpCapability) bool { return c.NewDatabase && c.SchemaOnly })},
+		// A database brought over from another server into a new one here. A
+		// word, because it comes in two forms: "replication" keeps the target
+		// current through logical replication until a cutover, which is
+		// PostgreSQL's own (CockroachDB and YugabyteDB speak its wire protocol
+		// and have no publications; TimescaleDB's chunks are not published as
+		// the hypertable); "stream" is a dump read from the source and loaded as
+		// it is written. The engines that cannot restore under another name
+		// have neither.
+		Capability{"onlineImport", func(d Driver, flavor string) any {
+			if !DumpCapabilities(d).NewDatabase {
+				return false
+			}
+			if d == DriverPostgres && flavor == FlavorPostgres {
+				return "replication"
+			}
+			return "stream"
+		}},
 	)
 }

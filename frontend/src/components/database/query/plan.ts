@@ -1,3 +1,4 @@
+import { spanText } from "@/components/database/query/run-model"
 import type { QueryResult } from "@/components/database/query/types"
 
 /**
@@ -6,10 +7,11 @@ import type { QueryResult } from "@/components/database/query/types"
  * Four shapes arrive as JSON — PostgreSQL's `[{ Plan }]`, MySQL's
  * `query_block`, MySQL 8.3's measured `{ operation, inputs }`, MariaDB's
  * `query_block` with its `r_` measurements — and two as rows that name their
- * own parent (SQL Server's SHOWPLAN, SQLite's EXPLAIN QUERY PLAN). Each is
- * read into the same node: what the step is, what it acts on, what it costs,
- * how many rows it expects and — when the statement was run — how many came
- * and how long they took. A shape nobody has described is not guessed at: the
+ * own parent (SQL Server's SHOWPLAN, SQLite's EXPLAIN QUERY PLAN). Three
+ * more arrive as printed text and are read in `plan-text.ts`. Each is read
+ * into the same node: what the step is, what it acts on, what it costs, how
+ * many rows it expects and — when the statement was run — how many came and
+ * how long they took. A shape nobody has described is not guessed at: the
  * page shows the engine's own text.
  */
 
@@ -22,7 +24,7 @@ export interface PlanNode {
   notes: string[]
   /** Estimated cost of this step and everything under it, in the planner's units. */
   cost?: number
-  /** Rows the planner expects out of it. */
+  /** Rows the planner expects out of it, in one loop. */
   rows?: number
   /** Rows that came out, over all its loops. Only when the statement was run. */
   actualRows?: number
@@ -31,6 +33,13 @@ export interface PlanNode {
   /** Milliseconds spent in the step alone, where that is what the engine measured. */
   ownTimeMs?: number
   loops?: number
+  /**
+   * The step stops reading what is under it once it has what it needs: a
+   * limit once it has its rows (`inputs`), a semi- or anti-join once its
+   * inner input — the last — has matched (`inner`). What runs under it then
+   * hands over fewer rows than the planner, which plans a whole run, expected.
+   */
+  stops?: "inputs" | "inner"
   /** Whatever else the engine said about the step. */
   facts: [string, string][]
   children: PlanNode[]
@@ -132,6 +141,7 @@ function postgresNode(raw: Dict): PlanNode {
     }
   }
   const type = text(raw["Node Type"] ?? "Step")
+  const joins = text(raw["Join Type"] ?? "")
   return {
     title: raw["Parallel Aware"] === true ? `Parallel ${type}` : type,
     target: target.length > 0 ? target.join(" ") : undefined,
@@ -141,6 +151,13 @@ function postgresNode(raw: Dict): PlanNode {
     actualRows: perLoop("Actual Rows"),
     timeMs: perLoop("Actual Total Time"),
     loops,
+    // A merge join stops reading either input once the other has run out.
+    stops:
+      type === "Limit" || type === "Merge Join"
+        ? "inputs"
+        : type === "Nested Loop" && (joins === "Semi" || joins === "Anti")
+          ? "inner"
+          : undefined,
     facts: factsOf(raw, used),
     children: Array.isArray(raw["Plans"]) ? raw["Plans"].filter(isDict).map(postgresNode) : [],
   }
@@ -207,6 +224,12 @@ function treeNode(raw: Dict): PlanNode {
     actualRows: scaled("actual_rows"),
     timeMs: scaled("actual_last_row_ms"),
     loops,
+    stops:
+      raw.access_type === "limit"
+        ? "inputs"
+        : raw.join_algorithm === "nested_loop" && /semi|anti/.test(text(raw.join_type ?? ""))
+          ? "inner"
+          : undefined,
     facts: factsOf(raw, TREE_USED, words),
     children: Array.isArray(raw.inputs) ? raw.inputs.filter(isDict).map(treeNode) : [],
   }
@@ -300,7 +323,18 @@ function blockNode(key: string, raw: Dict): PlanNode {
     num(raw.cost) ??
     num(info.query_cost) ??
     (read !== undefined || evaluated !== undefined ? (read ?? 0) + (evaluated ?? 0) : undefined)
-  const actual = num(raw.r_rows)
+  // A table's rows are the ones its condition kept, as every other engine's
+  // step counts what it hands on; what it read is a fact about it. MariaDB
+  // states the condition's share as `filtered`, and measures it as
+  // `r_filtered`: a condition that was misjudged reads the whole table as
+  // planned and keeps a hundredth of what was expected, so comparing the rows
+  // read would never show it.
+  const kept = (rows: number | undefined, percent: number | undefined) =>
+    rows === undefined || percent === undefined ? rows : (rows * percent) / 100
+  const examined = num(raw.rows_examined_per_scan) ?? num(raw.rows)
+  const scanned = num(raw.r_rows)
+  const expected = kept(examined, num(raw.filtered))
+  const actual = kept(scanned, num(raw.r_filtered))
   const tableTime = num(raw.r_table_time_ms)
   const otherTime = num(raw.r_other_time_ms)
   const children: PlanNode[] = []
@@ -325,12 +359,16 @@ function blockNode(key: string, raw: Dict): PlanNode {
   const facts = factsOf(raw, BLOCK_USED, words)
   for (const [name, value] of Object.entries(stats)) facts.push([words(name), text(value)])
   if (raw.possible_keys !== undefined) facts.push(["Possible keys", text(raw.possible_keys)])
+  const readRows = scanned === undefined ? examined : scanned * (loops ?? 1)
+  if (readRows !== undefined && (actual !== scanned || expected !== examined)) {
+    facts.push(["Rows read", readRows.toLocaleString("en-US", { maximumFractionDigits: 2 })])
+  }
   return {
     title,
     target: target.length > 0 ? target.join(" ") : undefined,
     notes,
     cost,
-    rows: num(raw.rows_examined_per_scan) ?? num(raw.rows),
+    rows: expected,
     actualRows: actual === undefined ? undefined : actual * (loops ?? 1),
     // A block's time is everything under it; a sort's and a table's is their own.
     timeMs: key === "query_block" ? num(raw.r_total_time_ms) : undefined,
@@ -449,6 +487,22 @@ export function planText(result: QueryResult): string | null {
 
 /* ------------------------------------------------------- lay out to draw */
 
+/**
+ * How many times the rows that came must differ from the rows expected, one
+ * way or the other, before a step is said to be far off.
+ */
+export const FAR_OFF = 10
+
+/** What the planner expected of a step that ran against what came, over all its loops. */
+export interface RowsEstimate {
+  expected: number
+  actual: number
+  /** How many times the larger is the smaller, each counted as at least one row. */
+  factor: number
+  /** The two are FAR_OFF or more apart, and the comparison is a fair one. */
+  farOff: boolean
+}
+
 export interface PlanRow {
   /** Its place in the tree: "0", "0.1", "0.1.0". */
   id: string
@@ -460,11 +514,19 @@ export interface PlanRow {
   /** Cost and time with what is under the step filled in where the engine left it out. */
   cost?: number
   timeMs?: number
+  /** The time spent in the step itself, what is under it left out. */
+  selfMs?: number
   /** The step's own share of the whole plan's cost and time, 0–1: what is under it left out. */
   costShare?: number
   timeShare?: number
+  /** The share of the whole plan's time spent in the step and everything under it, 0–1. */
+  totalShare?: number
   /** Its rows against the most any step handles, 0–1. */
   rowsShare?: number
+  /** Only in a plan that was run, for a step that ran and has both counts. */
+  estimate?: RowsEstimate
+  /** The plan was run and this step never was: nothing above it asked it for a row. */
+  never?: boolean
 }
 
 type Totals = { cost?: number; timeMs?: number }
@@ -473,6 +535,35 @@ const sum = (values: (number | undefined)[]) =>
   values.some((value) => value !== undefined)
     ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
     : undefined
+
+/**
+ * The rows a measured step was expected to hand on against those it did.
+ *
+ * Whether the two are far apart is decided a loop at a time, each side at
+ * least one row. PostgreSQL never plans fewer than one row a loop and, before
+ * 18, rounds what came to whole rows a loop: a lookup that mostly finds
+ * nothing reads as one row expected and none come in each of its ten
+ * thousand loops, which is the planner's floor and not a misjudgement. Over
+ * the whole run the same comparison says ten thousand to none. The figures
+ * shown are the whole run's, because that is what the step's row count is.
+ *
+ * Fewer rows than planned is not a misjudgement either where something above
+ * the step stopped asking (`cut`): the planner plans the run to its end.
+ */
+function estimateOf(node: PlanNode, cut: boolean): RowsEstimate | undefined {
+  const { rows, actualRows } = node
+  const loops = node.loops ?? 1
+  if (rows === undefined || actualRows === undefined || loops === 0) return undefined
+  const expected = rows * loops
+  const perLoop = [Math.max(rows, 1), Math.max(actualRows / loops, 1)]
+  const apart = Math.max(...perLoop) / Math.min(...perLoop)
+  return {
+    expected,
+    actual: actualRows,
+    factor: Math.max(expected, actualRows, 1) / Math.max(Math.min(expected, actualRows), 1),
+    farOff: apart >= FAR_OFF && !(cut && actualRows < expected),
+  }
+}
 
 /** The tree as rows, top to bottom, with the bars' proportions worked out. */
 export function planRows(plan: Plan): PlanRow[] {
@@ -504,8 +595,17 @@ export function planRows(plan: Plan): PlanRow[] {
   }
   cap(plan.root, undefined)
   const whole = inclusive.get(plan.root) ?? {}
+  const share = (part: number | undefined, of: number | undefined) =>
+    part !== undefined && of ? Math.min(1, part / of) : undefined
   let mostRows = 0
-  const walk = (node: PlanNode, id: string, depth: number, rails: boolean[], last: boolean) => {
+  const walk = (
+    node: PlanNode,
+    id: string,
+    depth: number,
+    rails: boolean[],
+    last: boolean,
+    cut: boolean,
+  ) => {
     const own = inclusive.get(node) ?? {}
     const below = node.children.map((child) => inclusive.get(child) ?? {})
     const self = (mine: number | undefined, theirs: (number | undefined)[]) =>
@@ -532,10 +632,12 @@ export function planRows(plan: Plan): PlanRow[] {
       last,
       cost: own.cost,
       timeMs: own.timeMs,
-      costShare:
-        selfCost !== undefined && whole.cost ? Math.min(1, selfCost / whole.cost) : undefined,
-      timeShare:
-        selfTime !== undefined && whole.timeMs ? Math.min(1, selfTime / whole.timeMs) : undefined,
+      selfMs: selfTime,
+      costShare: share(selfCost, whole.cost),
+      timeShare: share(selfTime, whole.timeMs),
+      totalShare: share(own.timeMs, whole.timeMs),
+      estimate: plan.analyzed ? estimateOf(node, cut) : undefined,
+      never: plan.analyzed && node.loops === 0 ? true : undefined,
     })
     node.children.forEach((child, index) =>
       walk(
@@ -544,13 +646,72 @@ export function planRows(plan: Plan): PlanRow[] {
         depth + 1,
         depth === 0 ? [] : [...rails, !last],
         index === node.children.length - 1,
+        cut ||
+          node.stops === "inputs" ||
+          (node.stops === "inner" && index === node.children.length - 1),
       ),
     )
   }
-  walk(plan.root, "0", 0, [], true)
+  walk(plan.root, "0", 0, [], true, false)
   for (const row of rows) {
     const seen = row.node.actualRows ?? row.node.rows
     row.rowsShare = seen !== undefined && mostRows > 0 ? seen / mostRows : undefined
   }
   return rows
+}
+
+/**
+ * The same rows with the steps that took the longest themselves first, out of
+ * the tree: where a step sits no longer orders it, so none is drawn as under
+ * another. A step the plan did not time keeps its place after the timed ones.
+ */
+export function slowestFirst(rows: PlanRow[]): PlanRow[] {
+  return [...rows]
+    .sort((a, b) => (b.selfMs ?? -1) - (a.selfMs ?? -1))
+    .map((row) => ({ ...row, depth: 0, rails: [], last: true }))
+}
+
+/** A row count as a plan states one: whole above ten, a fraction of a row below. */
+export function rowsText(rows: number): string {
+  return rows.toLocaleString("en-US", {
+    maximumFractionDigits: rows >= 10 ? 0 : rows >= 1 ? 1 : 2,
+  })
+}
+
+/** How many times apart, to two figures: "×12", "×4,000". */
+export function factorText(factor: number): string {
+  return `×${Number(factor.toPrecision(2)).toLocaleString("en-US")}`
+}
+
+/** A far-off step's fact: "est 12 · actual 48,210 (×4,000)". */
+export function estimateText(estimate: RowsEstimate): string {
+  return `est ${rowsText(estimate.expected)} · actual ${rowsText(estimate.actual)} (${factorText(estimate.factor)})`
+}
+
+/** A share of the plan as a reader says it: "45%", "under 1%". */
+export function shareText(share: number): string {
+  return share > 0 && share < 0.005 ? "under 1%" : `${Math.round(share * 100)}%`
+}
+
+/**
+ * What a step's line says only in figures, as facts to read under it: the
+ * time it took itself and with what is under it, each as its share of the
+ * whole, and the rows it was expected to hand on.
+ */
+export function readingsOf(row: PlanRow): [string, string][] {
+  const readings: [string, string][] = []
+  if (row.selfMs !== undefined && row.timeShare !== undefined) {
+    readings.push(["Time in this step", `${spanText(row.selfMs)} · ${shareText(row.timeShare)}`])
+  }
+  if (row.node.children.length > 0 && row.timeMs !== undefined && row.totalShare !== undefined) {
+    readings.push([
+      "With the steps under it",
+      `${spanText(row.timeMs)} · ${shareText(row.totalShare)}`,
+    ])
+  }
+  if (row.estimate) readings.push(["Rows expected", rowsText(row.estimate.expected)])
+  if (row.node.loops !== undefined && row.node.loops > 1) {
+    readings.push(["Loops", rowsText(row.node.loops)])
+  }
+  return readings
 }

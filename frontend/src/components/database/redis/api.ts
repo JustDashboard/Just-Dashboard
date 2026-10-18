@@ -1,6 +1,5 @@
 import { del, downloadUrl, get, getText, post, type Query } from "@/lib/api"
 import { keyQuery, prefixQuery } from "@/components/database/redis/bytes"
-import { commandLine } from "@/components/database/redis/command-line"
 import { nodeAt, parseJsonDoc, type JsonNode } from "@/components/database/redis/keys/json-doc"
 import { noteRead } from "@/components/database/redis/own-reads"
 import { recordedSamples } from "@/components/database/redis/performance/samples"
@@ -15,15 +14,16 @@ import type {
   RedisCommandResult,
   RedisCommandStats,
   RedisDeleteRequest,
+  RedisFieldExpiry,
   RedisKeyMeta,
   RedisLatency,
   RedisMembers,
   RedisPage,
   RedisPubSub,
-  RedisReply,
   RedisServer,
   RedisSlowlog,
   RedisStats,
+  RedisStreamClaimed,
   RedisStreamInfo,
   RedisStreamPending,
   RedisTree,
@@ -229,6 +229,33 @@ export function redisPersist(target: RedisTarget, key: RedisBytes) {
   )
 }
 
+/** One field's expiry, set: `ttl` seconds from now, or `at` a moment in milliseconds. */
+export function redisFieldExpire(
+  target: RedisTarget,
+  body: { key: RedisBytes; field: RedisBytes; ttl?: number; at?: number },
+) {
+  return post<{ ok: true; fields: RedisFieldExpiry[] }>(
+    `${at(target.id)}/keys/field/expire`,
+    body,
+    {
+      query: db(target),
+    },
+  )
+}
+
+export function redisFieldPersist(
+  target: RedisTarget,
+  body: { key: RedisBytes; field: RedisBytes },
+) {
+  return post<{ ok: true; fields: RedisFieldExpiry[] }>(
+    `${at(target.id)}/keys/field/persist`,
+    body,
+    {
+      query: db(target),
+    },
+  )
+}
+
 export function redisRename(
   target: RedisTarget,
   body: { key: RedisBytes; to: RedisBytes; overwrite?: boolean },
@@ -310,6 +337,28 @@ export function redisTrim(
   })
 }
 
+/**
+ * Hands a group's pending entries to one of its consumers: the ones named, or
+ * with `auto` whatever has been pending at least `minIdleMs`, a page at a time.
+ */
+export function redisClaim(
+  target: RedisTarget,
+  body: {
+    key: RedisBytes
+    group: RedisBytes
+    consumer: RedisBytes
+    ids?: string[]
+    auto?: boolean
+    minIdleMs?: number
+    cursor?: string
+    count?: number
+  },
+) {
+  return post<RedisStreamClaimed>(`${at(target.id)}/keys/stream/claim`, body, {
+    query: db(target),
+  })
+}
+
 export function redisClassify(target: RedisTarget, command: string) {
   return post<RedisClassifyResponse>(`${at(target.id)}/redis/classify`, {
     command,
@@ -319,28 +368,6 @@ export function redisClassify(target: RedisTarget, command: string) {
 
 export function redisCommand(target: RedisTarget, command: string) {
   return post<RedisCommandResult>(`${at(target.id)}/redis/command`, { command, db: target.db })
-}
-
-/**
- * A command that has no route of its own — a hash field's expiry, a claim on
- * a pending entry — run through the console's, where the server classifies
- * and audits it like a line typed there. Its arguments are quoted, so a name
- * is one argument whatever it holds. An error reply is thrown as one.
- */
-export async function redisRun(
-  target: RedisTarget,
-  command: string,
-  args: readonly (RedisBytes | number)[],
-): Promise<RedisReply> {
-  const result = await redisCommand(target, commandLine(command, args))
-  if (result.reply.type === "error") throw new Error(String(result.reply.value))
-  return result.reply
-}
-
-/** The whole numbers of a reply that is a list of them: what `HEXPIRE` and its kin answer, one per field. */
-export function replyCodes(reply: RedisReply): number[] {
-  if (reply.type !== "array") return []
-  return reply.items.flatMap((item) => (item.type === "integer" ? [Number(item.value)] : []))
 }
 
 export function redisCommands(id: number, signal?: AbortSignal) {

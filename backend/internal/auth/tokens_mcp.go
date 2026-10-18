@@ -59,7 +59,7 @@ func (s *Service) CreateMCPToken(ctx context.Context, owner *User, name string, 
 		return nil, "", err
 	}
 	defer tx.Rollback()
-	id, full, err := insertAPIToken(ctx, tx, owner, name, owner.Role, ttl, ScopeMCP)
+	id, full, err := insertAPIToken(ctx, tx, owner, name, owner.Role, ScopeMCP, ttl)
 	if err != nil {
 		return nil, "", err
 	}

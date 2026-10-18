@@ -25,6 +25,7 @@ func (s *Server) databaseApplicationURL(ctx context.Context, conn *dbConnection,
 	if err != nil {
 		return "", httpx.BadRequest("the saved connection could not be read")
 	}
+	dsn = s.applicationDSN(ctx, conn, dsn)
 	host, port := info.Host, info.Port
 	if databaseLoopback(host) {
 		_, internalPort, err := s.databaseContainer(ctx, conn, info)
