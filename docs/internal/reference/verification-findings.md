@@ -36,6 +36,31 @@ routes instead use `gitx.Resolve`, which independently cleans, resolves symlinks
 validate sources/local targets through `files.Resolve`; artifact reads and retention validate their
 stored paths under current roots as well. Git's parallel resolver remains a design-convergence item.
 
+## PostgreSQL statement statistics keep utility literals
+
+Found on 2026-10-17. The Databases reference holds the statement statistics
+(`GET /databases/{id}/statements`, read capability) to a statement's shape, never one execution. On
+PostgreSQL the text was `pg_stat_statements.query` as the extension keeps it, and the extension replaces
+constants only in the statements it plans (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`); utility
+statements are kept as they were sent while `pg_stat_statements.track_utility` is on, its default.
+Checked against PostgreSQL 17.11: `CREATE ROLE … PASSWORD '…'` and `ALTER ROLE … PASSWORD '…'` were
+listed with the password in clear, as were a `SET` value (a bare word as well as a quoted one), a
+`COMMENT`, a column `DEFAULT` and a `DO` body. The dashboard's own role form sends a new password that
+way (`dbx.passwordLiteral`), so an account that may only read could be shown a password an
+administrator set from the dashboard.
+
+That finding is closed. PostgreSQL's text is shaped before it leaves `dbx` by `pgStatementShape`, which
+reads it by PostgreSQL's own lexical rules, replaces every literal with `?`, keeps the extension's `$n`
+markers, and masks a role's password and a setting's value however they are written; a plain string is
+read both with and without backslash escapes, since the text does not record whether
+`standard_conforming_strings` was on ([Databases reference](../backend/databases-proxy-platform.md),
+*Statement statistics*). The role form also keeps its statement out of `pg_stat_statements` where the
+account may turn `track_utility` off for the transaction, which a superuser may. `TestPostgresStatementShapeDropsEveryLiteralAndKeepsTheMarkers` holds
+the rule over a table of statements; `TestLivePostgresStatementsShowAShapeAndNoValue` and
+`TestLiveAPIPostgresStatementsShowAViewerNoPassword` hold it on a server, the second as a viewer reads
+the list. `/activity` and `/querylog` still return statement text with its literals at read capability,
+as documented; that is their contract, not this finding.
+
 ## Verified inventory drift corrected in this documentation change
 
 - The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.

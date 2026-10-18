@@ -2,8 +2,8 @@ package backups
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,12 +11,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // A backup job may name saved database connections. Each run asks the
 // Databases owner for a native dump of every one of them (pg_dump, mysqldump,
-// mongodump, a Redis RDB, or the built-in driver dump) and stores the files in
-// the archive next to the filesystem sources. A dump is a transaction boundary
+// mongodump, or the dashboard's built-in dump) and stores the files in the
+// archive next to the filesystem sources. A Redis dump is always the built-in
+// one: gzipped JSON Lines of each key's DUMP payload, which the dashboard
+// restores and redis-server does not load — it is not an RDB file. A dump is a transaction boundary
 // the engine chose; a filesystem copy of a running database is not, which is
 // why the deployment gate prefers this evidence for a linked database.
 
@@ -162,10 +165,50 @@ func (m *Manifest) CoversDatabase(connectionID int64) bool {
 	return false
 }
 
+// LastDatabaseDumps is when a backup job last backed up each saved connection
+// it has dumped: the start of the newest successful run whose archive holds
+// that connection's native dump, by the test a restore applies. The runs are
+// what count rather than the jobs' current lists, so a connection taken out of
+// a job keeps the backups that still hold it, and one just added has none
+// until a run has taken it.
+func (s *Store) LastDatabaseDumps(ctx context.Context) (map[int64]time.Time, error) {
+	// Newest first, so the first run found holding a connection is its
+	// answer; a run that dumped no database is not read at all.
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT started_at, manifest_json FROM backup_runs
+		 WHERE status = ? AND artifact != '' AND instr(manifest_json, '"databaseDumps"') > 0
+		 ORDER BY started_at DESC, id DESC`, string(StatusSuccess))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var (
+			started int64
+			raw     string
+		)
+		if err := rows.Scan(&started, &raw); err != nil {
+			return nil, err
+		}
+		var manifest Manifest
+		// A manifest that cannot be read vouches for nothing in its archive.
+		if json.Unmarshal([]byte(raw), &manifest) != nil {
+			continue
+		}
+		for _, dump := range manifest.DatabaseDumps {
+			if _, found := out[dump.ConnectionID]; !found && manifest.CoversDatabase(dump.ConnectionID) {
+				out[dump.ConnectionID] = time.Unix(started, 0).UTC()
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
 // VerifyDatabaseCoverage confirms the archive really holds the dump entries
 // the manifest names for these connections, with the recorded sizes.
 func (r *Runner) VerifyDatabaseCoverage(ctx context.Context, runID int64, connectionIDs []int64) error {
-	run, path, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -182,7 +225,7 @@ func (r *Runner) VerifyDatabaseCoverage(ctx context.Context, runID int64, connec
 		}
 	}
 	found := map[string]bool{}
-	if err := walkArchive(ctx, path, func(header *tar.Header, _ *tar.Reader) error {
+	if err := walkArchive(ctx, archive, func(header *tar.Header, _ *tar.Reader) error {
 		if size, ok := wanted[header.Name]; ok && header.Typeflag == tar.TypeReg && header.Size == size {
 			found[header.Name] = true
 		}
@@ -206,7 +249,7 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	if r.databases == nil {
 		return "", errors.New("the database dump owner is unavailable")
 	}
-	run, path, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +273,7 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	defer os.RemoveAll(directory)
 	target := filepath.Join(directory, selected.File)
 	extracted := false
-	if err := walkArchive(ctx, path, func(header *tar.Header, reader *tar.Reader) error {
+	if err := walkArchive(ctx, archive, func(header *tar.Header, reader *tar.Reader) error {
 		if header.Name != selected.ArchivePath || header.Typeflag != tar.TypeReg {
 			return nil
 		}
@@ -263,18 +306,12 @@ func (r *Runner) RestoreDatabase(ctx context.Context, runID, connectionID int64,
 	return r.databases.RestoreDatabase(ctx, connectionID, database, target)
 }
 
-func walkArchive(ctx context.Context, path string, visit func(*tar.Header, *tar.Reader) error) error {
-	f, err := os.Open(path)
+func walkArchive(ctx context.Context, archive ArchiveFile, visit func(*tar.Header, *tar.Reader) error) error {
+	reader, release, err := archive.entries()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	reader := tar.NewReader(gz)
+	defer release()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

@@ -29,10 +29,10 @@ import { VerbActions, type Verb } from "@/components/verbs"
 import { EngineMark } from "@/components/database/kit"
 import {
   redisAck,
+  redisClaim,
   redisDelete,
   redisGroupRemove,
   redisGroupSet,
-  redisRun,
   redisStream,
   redisStreamPending,
   redisTrim,
@@ -808,7 +808,9 @@ function Groups({
 /**
  * What a group was handed and has not acknowledged. An entry leaves the list
  * two ways: acknowledged, which says its work is done, or claimed, which
- * hands it to another consumer because the one holding it will not finish.
+ * hands it to another consumer because the one holding it will not finish —
+ * one entry at a time, or, where the server can, everything that has been
+ * pending longer than a while.
  */
 function Pending({
   redis,
@@ -825,6 +827,7 @@ function Pending({
   onAcked: () => void
 }) {
   const [claiming, setClaiming] = useState<{ id: string; holder: RedisBytes } | null>(null)
+  const [sweeping, setSweeping] = useState(false)
   const pending = usePoll(
     (signal) => redisStreamPending(redis.target, name, { group, count: 200 }, signal),
     0,
@@ -850,8 +853,16 @@ function Pending({
   if (!pending.data) return <LoadingRows rows={2} />
   const entries = pending.data.entries
   if (entries.length === 0) return <EmptyNote className="py-3">Nothing is pending.</EmptyNote>
+  const sweeps = redis.canWrite && Boolean(redis.server.data?.features.streamAutoClaim)
   return (
     <div className="space-y-2">
+      {sweeps && (
+        <div className="flex justify-end">
+          <Button size="xs" variant="outline" onClick={() => setSweeping(true)}>
+            Claim idle entries…
+          </Button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -910,6 +921,19 @@ function Pending({
       {!pending.data.done && (
         <FormNote>The first {entries.length.toLocaleString()} are listed.</FormNote>
       )}
+      {sweeping && (
+        <SweepDialog
+          redis={redis}
+          name={name}
+          group={group}
+          consumers={consumers}
+          onOpenChange={setSweeping}
+          onClaimed={() => {
+            pending.refresh()
+            onAcked()
+          }}
+        />
+      )}
       {claiming && (
         <ClaimDialog
           redis={redis}
@@ -932,10 +956,9 @@ function Pending({
 /**
  * Hand a pending entry to another consumer of its group.
  *
- * The server has the command and the dashboard no route for it, so it goes
- * through the console's: `XCLAIM`, classified and audited as a line typed
- * there. Only the entry's owner changes — nothing is read, so the entry's
- * fields never pass through here.
+ * Only the entry's owner changes: the claim moves ids and reads nothing, so
+ * the entry's fields never pass through here, and its count of deliveries is
+ * left as it was — it was reassigned, not delivered again.
  */
 function ClaimDialog({
   redis,
@@ -959,16 +982,17 @@ function ClaimDialog({
   const [to, setTo] = useState("")
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
-  const others = consumers.filter(
-    (consumer): consumer is string =>
-      typeof consumer === "string" && consumer !== "" && bytesId(consumer) !== bytesId(holder),
-  )
   const claim = async () => {
     setBusy(true)
     setRefused("")
     try {
-      const reply = await redisRun(redis.target, "XCLAIM", [name, group, to, 0, entry, "JUSTID"])
-      if (reply.type === "array" && reply.items.length === 0) {
+      const answer = await redisClaim(redis.target, {
+        key: name,
+        group,
+        consumer: to,
+        ids: [entry],
+      })
+      if (answer.claimed.length === 0) {
         setRefused("The entry is not pending any more: it was acknowledged, or removed.")
         return
       }
@@ -1015,19 +1039,160 @@ function ClaimDialog({
           onChange={(event) => setTo(event.target.value)}
         />
       </Field>
-      {others.length > 0 && (
-        <div role="group" aria-label="The group's other consumers" className="flex flex-wrap gap-1">
-          {others.slice(0, 12).map((consumer) => (
-            <FilterChip
-              key={consumer}
-              selected={to === consumer}
-              className="font-mono"
-              onClick={() => setTo(consumer)}
-            >
-              {consumer}
-            </FilterChip>
-          ))}
-        </div>
+      <ConsumerChips consumers={consumers} except={holder} value={to} onPick={setTo} />
+    </MemberDialog>
+  )
+}
+
+/** The group's other consumers as chips, for a claim's "hand them to". */
+function ConsumerChips({
+  consumers,
+  except,
+  value,
+  onPick,
+}: {
+  consumers: RedisBytes[]
+  except?: RedisBytes
+  value: string
+  onPick: (consumer: string) => void
+}) {
+  const others = consumers.filter(
+    (consumer): consumer is string =>
+      typeof consumer === "string" &&
+      consumer !== "" &&
+      (except === undefined || bytesId(consumer) !== bytesId(except)),
+  )
+  if (others.length === 0) return null
+  return (
+    <div role="group" aria-label="The group's other consumers" className="flex flex-wrap gap-1">
+      {others.slice(0, 12).map((consumer) => (
+        <FilterChip
+          key={consumer}
+          selected={value === consumer}
+          className="font-mono"
+          onClick={() => onPick(consumer)}
+        >
+          {consumer}
+        </FilterChip>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * Hand everything a group has left pending for at least a while to one
+ * consumer: `XAUTOCLAIM`, a hundred entries a press. The server walks the
+ * pending list from where the last press stopped, so a long list is claimed
+ * by pressing again, and an entry the stream no longer has is dropped from
+ * the list as it is found, which the answer says.
+ */
+function SweepDialog({
+  redis,
+  name,
+  group,
+  consumers,
+  onOpenChange,
+  onClaimed,
+}: {
+  redis: KeyEditorProps["redis"]
+  name: RedisBytes
+  group: string
+  consumers: RedisBytes[]
+  onOpenChange: (open: boolean) => void
+  onClaimed: () => void
+}) {
+  const [to, setTo] = useState("")
+  const [minutes, setMinutes] = useState("5")
+  const [busy, setBusy] = useState(false)
+  const [refused, setRefused] = useState("")
+  // Where the last press stopped, and what the presses so far have moved.
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [moved, setMoved] = useState({ claimed: 0, deleted: 0, done: false })
+  const idle = Number(minutes)
+  const valid = to !== "" && Number.isFinite(idle) && idle >= 0
+  const started = cursor !== null || moved.done
+
+  const sweep = async () => {
+    setBusy(true)
+    setRefused("")
+    try {
+      const answer = await redisClaim(redis.target, {
+        key: name,
+        group,
+        consumer: to,
+        auto: true,
+        minIdleMs: Math.round(idle * 60_000),
+        cursor: cursor ?? undefined,
+        count: 100,
+      })
+      setMoved((held) => ({
+        claimed: held.claimed + answer.claimed.length,
+        deleted: held.deleted + answer.deleted.length,
+        done: answer.done,
+      }))
+      setCursor(answer.done ? null : answer.cursor)
+      onClaimed()
+    } catch (err) {
+      setRefused(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <MemberDialog
+      open
+      onOpenChange={onOpenChange}
+      onCancel={() => onOpenChange(false)}
+      title="Claim idle entries"
+      name={name}
+      type="stream"
+      db={redis.db}
+      command={moved.done ? "Claim again" : started ? "Claim the next 100" : "Claim entries"}
+      onSubmit={sweep}
+      busy={busy}
+      error={refused}
+      disabled={!valid}
+    >
+      <DetailList className="font-mono">
+        <Detail label="Group">{group}</Detail>
+      </DetailList>
+      <Field label="Hand them to" htmlFor="redis-sweep-consumer">
+        <Input
+          id="redis-sweep-consumer"
+          value={to}
+          disabled={started}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono"
+          onChange={(event) => setTo(event.target.value)}
+        />
+      </Field>
+      {!started && <ConsumerChips consumers={consumers} value={to} onPick={setTo} />}
+      <Field
+        label="Pending for at least"
+        htmlFor="redis-sweep-idle"
+        hint="Minutes. An entry a consumer was handed more recently is left with it."
+      >
+        <Input
+          id="redis-sweep-idle"
+          inputMode="decimal"
+          value={minutes}
+          disabled={started}
+          className="w-28 font-mono"
+          onChange={(event) => setMinutes(event.target.value)}
+        />
+      </Field>
+      {started && (
+        <FormNote role="status">
+          {plural(moved.claimed, "entry", "entries")} handed to {to}
+          {moved.deleted > 0 &&
+            `; ${plural(moved.deleted, "entry", "entries")} no longer in the stream dropped from the list`}
+          .{" "}
+          {moved.done
+            ? "Nothing else has been pending that long."
+            : "More may be pending: claim the next hundred."}
+        </FormNote>
       )}
     </MemberDialog>
   )

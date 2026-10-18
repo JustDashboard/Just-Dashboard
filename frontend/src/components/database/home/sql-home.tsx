@@ -90,6 +90,7 @@ export function SqlHome() {
         <Activity
           hours={stats.hours}
           onHours={stats.setHours}
+          retentionHours={stats.retentionHours}
           views={analytic ? CLICKHOUSE_VIEWS : SQL_VIEWS}
           samples={samples}
           loading={stats.loading}

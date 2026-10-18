@@ -150,7 +150,7 @@ func TestDatabaseMetricsScopeRetentionBucketsAndGaps(t *testing.T) {
 	if count != 3 {
 		t.Fatalf("retention kept %d samples", count)
 	}
-	for _, hours := range []string{"0", "169", "oops"} {
+	for _, hours := range []string{"0", "2161", "oops"} {
 		if reply := viewer.do(http.MethodGet, path+"?hours="+hours, "", nil); reply.Code != 400 {
 			t.Fatalf("invalid hours %q accepted: %d", hours, reply.Code)
 		}
@@ -186,7 +186,7 @@ func TestDatabaseMetricsRedisRespectsCollectionDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	s.recordDatabaseMetric(ctx, rec)
+	s.recordDatabaseMetric(ctx, rec, nil)
 	if elapsed := time.Since(started); elapsed > 750*time.Millisecond {
 		t.Fatalf("a slow Redis reply outlived the collection deadline: %s", elapsed)
 	}

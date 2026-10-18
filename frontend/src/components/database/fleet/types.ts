@@ -197,6 +197,14 @@ export type DbProvisionTemplate = {
   database: boolean
   /** What an image built on this server adds to the official one, by extension name. */
   extensions?: string[]
+  /** What the form fills in once the reader chooses to limit the server. */
+  defaultLimits: DbProvisionLimits
+  /** The smallest memory limit its first start survives, in MiB. */
+  minMemoryMb: number
+  /** The server counts its statements from the first start (pg_stat_statements). */
+  statements?: boolean
+  /** It can be asked to log the plans of its slow statements as well (`autoExplain`). */
+  autoExplain?: boolean
 }
 
 /** One release a template can start. */
@@ -212,6 +220,12 @@ export type DbProvisionRelease = {
   build?: { ready: boolean; job?: string }
 }
 
+/** What a new server's container may use: MiB and cores, zero for no limit. */
+export type DbProvisionLimits = { memoryMb: number; cpus: number }
+
+/** This machine as Docker sees it (`GET /databases/provision/capacity`). */
+export type DbHostCapacity = { memoryBytes: number; cpus: number }
+
 export type DbProvisionRequest = {
   engine: string
   name?: string
@@ -220,6 +234,10 @@ export type DbProvisionRequest = {
   version?: string
   user?: string
   password?: string
+  /** Left out: no limit. */
+  memoryMb?: number
+  cpus?: number
+  autoExplain?: boolean
 }
 
 export type DbProvisionResponse = {

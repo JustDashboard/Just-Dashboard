@@ -987,6 +987,10 @@ type provisionTemplate struct {
 	// pulled. extensions is what that image adds to the official one.
 	recipe     string
 	extensions []string
+	// initdb marks an image on the official PostgreSQL entrypoint, which runs
+	// the scripts in /docker-entrypoint-initdb.d once, when it initialises
+	// the data directory. The server is created with postgresFirstBoot there.
+	initdb bool
 }
 
 // provisionVersion is one release a template can start. dataPath is where
@@ -1021,6 +1025,58 @@ func postgresProvisionEnv(user, pw, db string) []dockerx.EnvVar {
 		{Name: "POSTGRES_PASSWORD", Value: pw},
 		{Name: "POSTGRES_DB", Value: db},
 	}
+}
+
+// postgresFirstBootScript is where a PostgreSQL template's first-boot script
+// is written. The image runs the directory's files in name order, after its
+// own: TimescaleDB's image puts two there.
+const postgresFirstBootScript = "/docker-entrypoint-initdb.d/jd-statements.sql"
+
+// postgresFirstBoot is what a PostgreSQL template runs once, when the image
+// initialises its data directory: pg_stat_statements loaded from the first
+// start and the extension made in the new database, so the Performance page
+// has statements to rank without a restart nobody planned. With autoExplain
+// the server also logs the plan of each statement that takes over a second.
+//
+// The libraries are added to the list in postgresql.auto.conf through ALTER
+// SYSTEM rather than to the container's command line. A -c on the command
+// line outranks every configuration file, so the list could never be changed
+// again from the Parameters page: a library added there later, pg_cron say,
+// would be stored and silently not loaded. And they are added to what the
+// image already preloads rather than written over it — TimescaleDB's image
+// names its own library in postgresql.conf — which only the server can read,
+// so the statement is built by the server (\gexec runs the one row the
+// SELECT returns).
+//
+// auto_explain's thresholds are the ones that are safe to leave on: a second
+// is what an operator calls slow and seldom enough that the log stays
+// readable, the plans carry each node's actual rows and buffers, and per-node
+// timing — the part of EXPLAIN ANALYZE that costs every statement, logged or
+// not — is off. Each is an ordinary parameter afterwards.
+func postgresFirstBoot(autoExplain bool) string {
+	libraries := "pg_stat_statements"
+	if autoExplain {
+		libraries += ",auto_explain"
+	}
+	script := `-- Written by Just Dashboard when it created this server.
+SELECT format('ALTER SYSTEM SET shared_preload_libraries = %s',
+              string_agg(quote_literal(name), ', ' ORDER BY first))
+  FROM (SELECT btrim(item, ' "') AS name, min(n) AS first
+          FROM unnest(string_to_array(current_setting('shared_preload_libraries') || ',` + libraries + `', ','))
+               WITH ORDINALITY AS listed(item, n)
+         WHERE btrim(item, ' "') <> ''
+         GROUP BY 1) AS libraries
+\gexec
+`
+	if autoExplain {
+		script += `LOAD 'auto_explain';
+ALTER SYSTEM SET auto_explain.log_min_duration = '1s';
+ALTER SYSTEM SET auto_explain.log_analyze = on;
+ALTER SYSTEM SET auto_explain.log_buffers = on;
+ALTER SYSTEM SET auto_explain.log_timing = off;
+`
+	}
+	return script + "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;\n"
 }
 
 // passwordProvisionEnv is the environment of the engines that take a
@@ -1059,7 +1115,7 @@ var provisionTemplates = map[string]provisionTemplate{
 			postgresRelease("14", "postgres:14-alpine"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
-		env: postgresProvisionEnv,
+		env: postgresProvisionEnv, initdb: true,
 	},
 	// The same server with the extension a retrieval or geospatial schema
 	// creates on its first migration; the official image ships neither.
@@ -1070,7 +1126,7 @@ var provisionTemplates = map[string]provisionTemplate{
 			postgresRelease("16", "pgvector/pgvector:pg16"), postgresRelease("15", "pgvector/pgvector:pg15"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
-		env: postgresProvisionEnv,
+		env: postgresProvisionEnv, initdb: true,
 	},
 	"postgis": {
 		driver: dbx.DriverPostgres, flavor: dbx.FlavorPostgres, label: "PostgreSQL + PostGIS", image: "postgis/postgis:18-3.6-alpine",
@@ -1079,7 +1135,7 @@ var provisionTemplates = map[string]provisionTemplate{
 			postgresRelease("16", "postgis/postgis:16-3.5-alpine"), postgresRelease("15", "postgis/postgis:15-3.5-alpine"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
-		env: postgresProvisionEnv,
+		env: postgresProvisionEnv, initdb: true,
 	},
 	// Every extension a schema commonly reaches for at once, on the official
 	// image's layout and contract. The image is built here from a recipe in
@@ -1095,6 +1151,7 @@ var provisionTemplates = map[string]provisionTemplate{
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
 		env:        postgresProvisionEnv,
+		initdb:     true,
 		recipe:     postgresFullRecipe,
 		extensions: []string{"vector", "postgis", "pg_cron", "pg_partman", "pgaudit", "hypopg", "pg_repack"},
 	},
@@ -1111,7 +1168,7 @@ var provisionTemplates = map[string]provisionTemplate{
 			postgresRelease("16", "timescale/timescaledb:2.30.2-pg16"),
 		},
 		port: 5432, dataPath: "/var/lib/postgresql/data", user: "jd", database: true,
-		env: postgresProvisionEnv,
+		env: postgresProvisionEnv, initdb: true,
 	},
 	"mysql": {
 		driver: dbx.DriverMySQL, flavor: dbx.FlavorMySQL, label: "MySQL", image: "mysql:8.4",
@@ -1254,6 +1311,15 @@ type provisionOption struct {
 	Database    bool   `json:"database"`
 	// Extensions is what a template built here adds to the official image.
 	Extensions []string `json:"extensions,omitempty"`
+	// DefaultLimits is what the form fills in when the operator limits it,
+	// and MinMemoryMB the smallest memory limit its first start survives.
+	DefaultLimits provisionLimits `json:"defaultLimits"`
+	MinMemoryMB   int64           `json:"minMemoryMb"`
+	// Statements reports a server that counts its statements from the first
+	// start, and AutoExplain one that can be asked to log the plans of its
+	// slow ones as well (`autoExplain` in the request).
+	Statements  bool `json:"statements"`
+	AutoExplain bool `json:"autoExplain"`
 }
 
 type provisionVersionOption struct {
@@ -1273,6 +1339,43 @@ type provisionBuild struct {
 	Job   string `json:"job,omitempty"`
 }
 
+// provisionLimits is what a new server's container may use: memory in MiB
+// and processors in cores, zero for no limit.
+type provisionLimits struct {
+	MemoryMB int64   `json:"memoryMb"`
+	CPUs     float64 `json:"cpus"`
+}
+
+// defaultProvisionLimits is what the form offers once the operator chooses to
+// limit a new server: room for the engine's own defaults (128 MiB of shared
+// buffers or of InnoDB's pool) and a working set beside them, a key–value
+// server's data, and ClickHouse's appetite for memory per query. A request
+// that names no limit still gets none, which is Docker's default and what a
+// server made before limits were offered has.
+func defaultProvisionLimits(t provisionTemplate) provisionLimits {
+	switch t.driver {
+	case dbx.DriverRedis:
+		return provisionLimits{MemoryMB: 512, CPUs: 1}
+	case dbx.DriverClickHouse:
+		return provisionLimits{MemoryMB: 2048, CPUs: 2}
+	}
+	return provisionLimits{MemoryMB: 1024, CPUs: 1}
+}
+
+// provisionMinMemoryMB is the smallest memory limit a template's first start
+// survives. MySQL's entrypoint loads the time zone tables into a temporary
+// server before it makes the account, and under 512 MiB the kernel stops it
+// part way: the restart that follows finds a data directory and skips
+// initialising it, so the server runs with no account the dashboard can
+// sign in with. The others start under 448 MiB, which the live limits test
+// holds them to, and a smaller limit is the operator's to choose.
+func provisionMinMemoryMB(t provisionTemplate) int64 {
+	if t.flavor == dbx.FlavorMySQL {
+		return 512
+	}
+	return dockerMinMemoryMB
+}
+
 func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	// The catalogue is the page's first read; a Docker that is slow to say
@@ -1290,7 +1393,9 @@ func (s *Server) handleDBProvisionOptions(w http.ResponseWriter, r *http.Request
 		option := provisionOption{
 			Engine: key, Label: t.label, Image: t.image, Driver: string(t.driver), Flavor: t.flavor,
 			Versions: []provisionVersionOption{}, Port: t.port, DefaultUser: t.user, Database: t.database,
-			Extensions: t.extensions,
+			Extensions:    t.extensions,
+			DefaultLimits: defaultProvisionLimits(t), MinMemoryMB: provisionMinMemoryMB(t),
+			Statements: t.initdb, AutoExplain: t.initdb,
 		}
 		for _, v := range t.versions {
 			one := provisionVersionOption{Version: v.id, Image: v.image}
@@ -1326,6 +1431,12 @@ type provisionRequest struct {
 	// sent back to it.
 	User     string `json:"user"`
 	Password string `json:"password"`
+	// MemoryMB and CPUs limit what the container may use; zero, or left
+	// out, is no limit.
+	provisionLimits
+	// AutoExplain has a PostgreSQL server log the plan of each statement
+	// that takes over a second (postgresFirstBoot). Off unless asked for.
+	AutoExplain bool `json:"autoExplain"`
 }
 
 // provisionBinding turns the requested exposure into the host address the
@@ -1400,6 +1511,9 @@ func provisionAccount(engine string, t provisionTemplate, user, password string)
 // the firewall did are audited, and the saved connection dials loopback
 // either way: hostAddress maps a 0.0.0.0 binding to 127.0.0.1, which is the
 // address this process can reach.
+//
+// A PostgreSQL server counts its statements from its first start, and logs
+// the plans of its slow ones when the request asks (postgresFirstBoot).
 func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error {
 	var req provisionRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -1423,6 +1537,9 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 			"%s %s is built on this server before its first start, and %s has not been built from the current recipe; build it first",
 			tmpl.label, version.id, version.image))
 	}
+	if req.AutoExplain && !tmpl.initdb {
+		return httpx.BadRequest("%s has no query plans to log; auto_explain is PostgreSQL's", tmpl.label)
+	}
 	// MongoDB 5 and later die with an illegal instruction on a CPU without
 	// AVX (a Proxmox default CPU type) or ARMv8.2 atomics, and the linked
 	// application then restarts in a loop; saying so here is cheaper than a
@@ -1437,6 +1554,12 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	exposure, hostIP, err := provisionBinding(req.Exposure)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
+	}
+	if problem := dbLimitsProblem(req.MemoryMB, req.CPUs, s.hostCapacity(r.Context())); problem != "" {
+		return httpx.BadRequest("%s", problem)
+	}
+	if least := provisionMinMemoryMB(tmpl); req.MemoryMB > 0 && req.MemoryMB < least {
+		return httpx.BadRequest("%s needs a memory limit of at least %d MiB to initialise its data on the first start", tmpl.label, least)
 	}
 	if s.modules.docker == nil {
 		return httpx.Err(http.StatusServiceUnavailable, "docker_unavailable",
@@ -1501,9 +1624,15 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		Mounts: []dockerx.MountSpec{
 			{Type: "volume", Source: volume, Target: cmp.Or(version.dataPath, tmpl.dataPath)},
 		},
+		Limits: dockerx.ResourceLimits{MemoryMB: req.MemoryMB, CPUs: req.CPUs},
 	}
 	if tmpl.bootstrap != "" {
 		spec.Command = []string{"sh", "-c", tmpl.bootstrap}
+	}
+	if tmpl.initdb {
+		spec.Files = []dockerx.ContainerFile{
+			{Path: postgresFirstBootScript, Content: []byte(postgresFirstBoot(req.AutoExplain))},
+		}
 	}
 	created, err := s.modules.docker.Create(ctx, spec, nil)
 	if err != nil {
@@ -1520,6 +1649,10 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 	detail := map[string]any{
 		"engine": req.Engine, "image": version.image, "version": version.id, "port": port,
 		"exposure": exposure, "user": user, "passwordSupplied": req.Password != "",
+		"memoryMb": req.MemoryMB, "cpus": req.CPUs,
+	}
+	if tmpl.initdb {
+		detail["statements"], detail["autoExplain"] = true, req.AutoExplain
 	}
 	// The container is up before the engine is, but the firewall rule can go
 	// in now: nothing answers on the port until the engine does, and the
@@ -1544,7 +1677,7 @@ func (s *Server) handleDBProvision(w http.ResponseWriter, r *http.Request) error
 		"container": name, "engine": req.Engine, "driver": tmpl.driver, "flavor": tmpl.flavor,
 		"version": version.id, "image": version.image,
 		"host": "127.0.0.1", "port": port, "user": user, "database": database,
-		"exposure": exposure, "firewall": firewall,
+		"exposure": exposure, "firewall": firewall, "memoryMb": req.MemoryMB, "cpus": req.CPUs,
 	}
 	if ferr != nil {
 		resp["firewallError"] = ferr.Error()

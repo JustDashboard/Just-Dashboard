@@ -88,10 +88,24 @@ type Server struct {
 	// (handlers_procs.go).
 	procContainers containerNames
 
-	dbConns        dbConnState
+	dbConns dbConnState
+	// Certificates for the databases this dashboard started
+	// (database_tls.go).
+	dbTLS dbTLSState
+	// Point-in-time recovery's readings and base backup schedule
+	// (database_pitr.go).
+	pitr           pitrState
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}
 	dbMetricOffset int
+	// dbMetricThinnedAt is when thinning the history past its raw window was
+	// last tried, and dbMetricThinnedTo how far back it has completed; only
+	// the recorder's pass reads or writes them.
+	dbMetricThinnedAt time.Time
+	dbMetricThinnedTo int64
+	// The statement recorder's readings between one and the next
+	// (database_statements.go).
+	dbStatements statementHistory
 
 	modules moduleSet
 }
@@ -177,12 +191,21 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	s.sweepPITR(cleanupCtx)
 	// Before the engine resumes any run: a release task this process's
 	// predecessor was running has nobody reading its output or its exit.
 	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
 		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
 	}
 	cleanupCancel()
+	// A database upgrade this process's predecessor was carrying out has
+	// nobody left to finish it or undo it: the old server is put back in the
+	// background, since it may have to be started and waited for.
+	go func() {
+		upgradeCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		s.recoverDatabaseUpgrades(upgradeCtx)
+	}()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
 	// purpose is to have been running while nobody was looking.
@@ -208,6 +231,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// happen, whether or not anybody has the Routing page open.
 	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
+	s.startDatabaseTLS(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -231,6 +255,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupSched.Start(ctx); err != nil {
 		return err
 	}
+	s.startPITRSchedule(ctx)
 	ingressCtx, stopIngress := context.WithCancel(ctx)
 	s.ingressStop, s.ingressDone = stopIngress, make(chan struct{})
 	go func() {
@@ -253,6 +278,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.modules.deployGit.Start(ctx)
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
+	s.modules.poolers.Start(ctx)
 	return nil
 }
 
@@ -283,6 +309,7 @@ func (s *Server) Shutdown() {
 	s.modules.deployGit.Stop()
 	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
+	s.modules.poolers.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an
 	// activation or restoration.
@@ -297,6 +324,7 @@ func (s *Server) Shutdown() {
 	}
 	s.stopProxyExtras()
 	s.stopDatabaseMetrics()
+	s.stopDatabaseTLS()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
 	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {
@@ -306,6 +334,7 @@ func (s *Server) Shutdown() {
 		s.Log.Warn("remote desktop runtime client shutdown failed", "err", err)
 	}
 	s.modules.backupSched.Stop()
+	s.stopPITRSchedule()
 	s.modules.deploySchedule.Stop()
 	s.modules.selfUpdate.Stop()
 	s.modules.certKeeper.Stop()

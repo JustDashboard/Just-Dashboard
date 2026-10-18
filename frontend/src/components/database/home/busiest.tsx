@@ -29,6 +29,8 @@ import type {
   RedisCommandStats,
   SqliteFile,
 } from "@/components/database/home/types"
+import { useStatementsSetup } from "@/components/database/ops/statements-setup"
+import { setupStart } from "@/components/database/ops/statements-setup-model"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** How many rows a ranked block shows. */
@@ -77,7 +79,8 @@ export function millis(value: number): string {
  * The text is a shape with its literals removed — the server never sends one
  * execution — so a row is something to recognise, and it opens the page that
  * has every figure about it. Where the statistics are off, the block says
- * what turns them on, and offers it where one statement does.
+ * what turns them on, and offers it where one statement does — or, where the
+ * module is not loaded yet, the guided setup the Statements view opens.
  */
 export function BusiestStatements() {
   const { id, engine, readOnly, href, goto } = useDatabase()
@@ -94,6 +97,7 @@ export function BusiestStatements() {
     60_000,
     [id],
   )
+  const openSetup = useStatementsSetup(statements.refresh)
 
   const enable = async (extension: string) => {
     setEnabling(true)
@@ -163,9 +167,12 @@ export function BusiestStatements() {
                 {data.enable
                   ? `This server is not counting its ${words}.`
                   : `The ${words} this server has run could not be read.`}{" "}
-                <span className="wrap-anywhere">{sentence(data.enable?.note ?? data.reason)}</span>
+                <span className="wrap-anywhere">
+                  {sentence(data.enable?.note ?? data.reason)}
+                  {data.enable?.blocked && ` ${sentence(data.enable.blocked)}`}
+                </span>
               </Quiet>
-              {data.enable?.sql && data.enable.extension && can("system.admin") && !readOnly && (
+              {data.enable?.sql && data.enable.extension && can("system.admin") && !readOnly ? (
                 <Button
                   size="sm"
                   variant="outline"
@@ -174,6 +181,21 @@ export function BusiestStatements() {
                 >
                   Turn on statement statistics
                 </Button>
+              ) : (
+                data.enable &&
+                setupStart(data.enable) &&
+                openSetup &&
+                engine.can("statementsSetup") &&
+                can("system.admin") &&
+                !readOnly && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => data.enable && openSetup({ enable: data.enable })}
+                  >
+                    Turn on statement statistics
+                  </Button>
+                )
               )}
             </div>
           )

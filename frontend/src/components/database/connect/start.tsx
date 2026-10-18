@@ -10,7 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid, EngineCard } from "@/components/choice-card"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
-import { Disclosure, Field, FieldRow, OptionList, OptionRow } from "@/components/form"
+import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { JobConsole } from "@/components/job-console"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
@@ -19,6 +19,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { BorderBeam } from "@/components/ui/border-beam"
+import { LimitField } from "@/components/deploy/settings/limit-field"
 import { DatabaseProgress } from "@/components/database/connect/progress"
 import { engineOf, sectionHref } from "@/components/database/engine"
 import {
@@ -35,7 +36,7 @@ import {
   type ProvisionPhase,
 } from "@/components/database/connect/provision"
 import { reveal } from "@/components/database/connect/reveal"
-import { readInventory, readTemplates } from "@/components/database/fleet/read"
+import { readCapacity, readInventory, readTemplates } from "@/components/database/fleet/read"
 import type {
   DbProvisionRelease,
   DbProvisionResponse,
@@ -43,6 +44,7 @@ import type {
 } from "@/components/database/fleet/types"
 import { EngineMark } from "@/components/database/kit"
 import { supportWords } from "@/components/database/support"
+import { MIB, coresWord, defaultLimitsFor, sizeOf } from "@/components/database/kit/limits"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** How long a started engine is asked for before the page says it has not answered. */
@@ -118,6 +120,10 @@ export function DatabaseCreation({
   const inventory = usePoll(readInventory, 0)
   const docker = inventory.data?.scans.find((scan) => scan.source === "docker")
   const noDocker = docker && !docker.ok ? (docker.reason ?? "Docker did not answer.") : undefined
+  // What a limit is held to. Until it is read the server holds a limit to
+  // this machine on its own, so the form waits for nothing.
+  const capacity = usePoll(readCapacity, 0)
+  const host = capacity.data
 
   const [draft, setDraft] = useState<ProvisionDraft>(EMPTY_PROVISION)
   const [work, setWork] = useState<Work | null>(null)
@@ -254,7 +260,11 @@ export function DatabaseCreation({
   }
 
   const create = async () => {
-    if (!template || provisioning.current || Object.keys(provisionProblems(template, draft)).length)
+    if (
+      !template ||
+      provisioning.current ||
+      Object.keys(provisionProblems(template, draft, host)).length
+    )
       return
     provisioning.current = true
     const started = Date.now()
@@ -298,7 +308,7 @@ export function DatabaseCreation({
     }
   }
 
-  const problems = template ? provisionProblems(template, draft) : {}
+  const problems = template ? provisionProblems(template, draft, host) : {}
   const image = template ? provisionImage(template, draft) : ""
   const release = template ? chosenRelease(template, draft) : undefined
   const version = release?.version ?? ""
@@ -604,6 +614,66 @@ export function DatabaseCreation({
                   </FieldRow>
                 </Disclosure>
                 <OptionList>
+                  {template.autoExplain && (
+                    <OptionRow
+                      title="Log the plan of every statement that takes longer than a second"
+                      hint="auto_explain · each step's actual rows, without per-step timing"
+                      checked={draft.autoExplain}
+                      onCheckedChange={(autoExplain) => set({ autoExplain })}
+                    />
+                  )}
+                  <OptionRow
+                    title="Limit the memory and processors it may use"
+                    checked={draft.limited}
+                    onCheckedChange={(limited) =>
+                      set(
+                        limited
+                          ? { limited, ...defaultLimitsFor(template.defaultLimits, host) }
+                          : { limited },
+                      )
+                    }
+                  >
+                    <FieldRow>
+                      <LimitField
+                        id={`${id}-memory`}
+                        label="Memory limit"
+                        unit="MiB"
+                        step={64}
+                        value={draft.memoryMb}
+                        max={host?.memoryBytes ? Math.floor(host.memoryBytes / MIB) : undefined}
+                        peakLabel={(value) => `${Math.round(value)} MiB`}
+                        info="Zero means no limit. The kernel stops the container when it goes past its limit, so leave room for the engine's own buffers."
+                        facts={
+                          host?.memoryBytes ? (
+                            <span className="block">
+                              this server has {sizeOf(host.memoryBytes)}
+                            </span>
+                          ) : undefined
+                        }
+                        error={problems.memory}
+                        disabled={false}
+                        onChange={(memoryMb) => set({ memoryMb })}
+                      />
+                      <LimitField
+                        id={`${id}-cpus`}
+                        label="CPU limit"
+                        unit="cores"
+                        step={0.25}
+                        value={draft.cpus}
+                        max={host?.cpus || undefined}
+                        peakLabel={(value) => `${value.toFixed(2)} cores`}
+                        info="Whole or fractional processors, for example 0.5 or 2. Zero means no limit."
+                        facts={
+                          host?.cpus ? (
+                            <span className="block">this server has {coresWord(host.cpus)}</span>
+                          ) : undefined
+                        }
+                        error={problems.cpus}
+                        disabled={false}
+                        onChange={(cpus) => set({ cpus })}
+                      />
+                    </FieldRow>
+                  </OptionRow>
                   <OptionRow
                     // Amber only while it is on: the risk is the choice, not the option.
                     tone={draft.shared ? "warning" : "default"}
@@ -612,6 +682,12 @@ export function DatabaseCreation({
                     onCheckedChange={(shared) => set({ shared })}
                   />
                 </OptionList>
+                {template.statements && (
+                  <FormNote>
+                    It counts its statements from the first start: pg_stat_statements is loaded and
+                    created in the new database, so Performance ranks them at once.
+                  </FormNote>
+                )}
               </fieldset>
             </FlowPanelBody>
           )}

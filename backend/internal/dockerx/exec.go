@@ -3,9 +3,12 @@ package dockerx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // ExecSession is an interactive shell inside a container. It is functionally
@@ -82,6 +85,89 @@ func (c *Client) detectShell(ctx context.Context, id string) (string, error) {
 		}
 	}
 	return "", ErrNoShell
+}
+
+// ExecStreams are the standard streams of a command run without a terminal.
+// A nil Stdin runs it with none, and a nil writer discards what it prints.
+type ExecStreams struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+// ExecPipe runs a closed argv in a container with its standard streams joined
+// to the caller's, and returns its exit code once it has exited.
+//
+// It is how a server's own tools are run beside its own data — an archive
+// written by one container's pg_dump and read by another's pg_restore — with
+// the bytes passing through this process rather than through a shell, a file
+// or a network path between the two containers. Env carries what a tool reads
+// from its environment, a password among it, so that nothing secret is an
+// argument. Ending ctx closes the streams, which a tool writing to or reading
+// from them stops on: Docker has no way to signal an exec'd process.
+func (c *Client) ExecPipe(ctx context.Context, id, user string, cmd, env []string, streams ExecStreams) (int, error) {
+	if len(cmd) == 0 {
+		return -1, errors.New("exec command is empty")
+	}
+	cli, err := c.api()
+	if err != nil {
+		return -1, err
+	}
+	created, err := cli.ContainerExecCreate(ctx, id, container.ExecOptions{
+		User: user, Cmd: append([]string(nil), cmd...), Env: env,
+		AttachStdin: streams.Stdin != nil, AttachStdout: true, AttachStderr: true,
+	})
+	if err != nil {
+		return -1, err
+	}
+	attached, err := cli.ContainerExecAttach(ctx, created.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return -1, err
+	}
+	defer attached.Close()
+	stop := context.AfterFunc(ctx, attached.Close)
+	defer stop()
+	if streams.Stdin != nil {
+		// Not waited for: a command that exits before reading all of its
+		// input leaves this blocked on a reader the caller closes, and its
+		// exit code is the answer whatever the copy did.
+		go func() {
+			_, _ = io.Copy(attached.Conn, streams.Stdin)
+			_ = attached.CloseWrite()
+		}()
+	}
+	stdout, stderr := streams.Stdout, streams.Stderr
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	_, copyErr := stdcopy.StdCopy(stdout, stderr, attached.Reader)
+	if ctx.Err() != nil {
+		return -1, ctx.Err()
+	}
+	if copyErr != nil && !errors.Is(copyErr, io.EOF) {
+		return -1, copyErr
+	}
+	// The output ends a moment before the Engine records the exit.
+	for wait := 0; ; wait++ {
+		inspected, err := cli.ContainerExecInspect(ctx, created.ID)
+		if err != nil {
+			return -1, err
+		}
+		if !inspected.Running {
+			return inspected.ExitCode, nil
+		}
+		if wait == 100 {
+			return -1, fmt.Errorf("%s closed its output and did not exit", cmd[0])
+		}
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func (s *ExecSession) Resize(ctx context.Context, rows, cols uint) error {

@@ -446,9 +446,11 @@ func mapAuthError(err error) error {
 // --- API tokens ---
 
 type createTokenRequest struct {
-	Name    string    `json:"name"`
-	Role    auth.Role `json:"role"`
-	TTLDays int       `json:"ttlDays"`
+	Name string    `json:"name"`
+	Role auth.Role `json:"role"`
+	// Scope narrows the key to one capability; empty is an ordinary key.
+	Scope   auth.Capability `json:"scope"`
+	TTLDays int             `json:"ttlDays"`
 }
 
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) error {
@@ -471,11 +473,19 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) error
 	if req.TTLDays > 0 {
 		ttl = time.Duration(req.TTLDays) * 24 * time.Hour
 	}
-	tok, secret, err := s.Auth.CreateAPIToken(r.Context(), p.User, req.Name, req.Role, ttl)
+	var tok *auth.APIToken
+	var secret string
+	var err error
+	if req.Scope != "" {
+		tok, secret, err = s.Auth.CreateScopedAPIToken(r.Context(), p.User, req.Name, req.Scope, ttl)
+	} else {
+		tok, secret, err = s.Auth.CreateAPIToken(r.Context(), p.User, req.Name, req.Role, ttl)
+	}
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "dashboard.token.create", tok.Name, map[string]any{"role": tok.Role, "ttlDays": req.TTLDays})
+	httpx.SetAudit(r, "dashboard.token.create", tok.Name,
+		map[string]any{"role": tok.Role, "scope": tok.Scope, "ttlDays": req.TTLDays})
 	// The secret is returned exactly once; only its hash is retained.
 	httpx.JSON(w, http.StatusCreated, map[string]any{"token": tok, "secret": secret})
 	return nil

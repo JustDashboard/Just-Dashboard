@@ -1,21 +1,28 @@
 package api
 
 import (
+	"archive/tar"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
 // provisionCreated is what the test engine was asked to create, in the
-// Engine API's own shape.
+// Engine API's own shape, and the files written into it before it started,
+// by their path.
 type provisionCreated struct {
 	Image      string   `json:"Image"`
 	Env        []string `json:"Env"`
@@ -30,7 +37,10 @@ type provisionCreated struct {
 			Source string `json:"Source"`
 			Target string `json:"Target"`
 		} `json:"Mounts"`
+		Memory   int64 `json:"Memory"`
+		NanoCpus int64 `json:"NanoCpus"`
 	} `json:"HostConfig"`
+	Files map[string]string `json:"-"`
 }
 
 func provisionNameEngine(t *testing.T, s *Server, containers, volumes map[string]bool) *[]provisionCreated {
@@ -53,6 +63,8 @@ func provisionEngine(t *testing.T, s *Server, containers, volumes map[string]boo
 		switch {
 		case path == "/_ping":
 			w.Header().Set("API-Version", "1.47")
+		case path == "/info":
+			_ = json.NewEncoder(w).Encode(map[string]any{"NCPU": 4, "MemTotal": int64(4 << 30)})
 		case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/json"):
 			name := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
 			if !containers[name] {
@@ -98,7 +110,7 @@ func provisionEngine(t *testing.T, s *Server, containers, volumes map[string]boo
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			var spec provisionCreated
+			spec := provisionCreated{Files: map[string]string{}}
 			if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 				t.Errorf("the create request is not a container spec: %v", err)
 			}
@@ -106,6 +118,25 @@ func provisionEngine(t *testing.T, s *Server, containers, volumes map[string]boo
 			containers[name], volumes[name+"-data"] = true, true
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]string{"Id": name})
+		case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/archive") && r.Method == http.MethodPut:
+			name := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/archive")
+			last := &(*created)[len(*created)-1]
+			if !containers[name] {
+				t.Errorf("a file was written into %s, which does not exist", name)
+			}
+			reader := tar.NewReader(r.Body)
+			for {
+				header, err := reader.Next()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					t.Fatalf("the archive for %s: %v", name, err)
+				}
+				content, _ := io.ReadAll(reader)
+				last.Files[r.URL.Query().Get("path")+"/"+header.Name] = string(content)
+			}
+			w.WriteHeader(http.StatusOK)
 		case strings.HasPrefix(path, "/containers/") && strings.HasSuffix(path, "/start"):
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -197,6 +228,13 @@ func TestProvisionOptionsListEveryTemplateWithItsVersions(t *testing.T) {
 		Port           int    `json:"port"`
 		DefaultUser    string `json:"defaultUser"`
 		Database       bool   `json:"database"`
+		DefaultLimits  struct {
+			MemoryMB int64   `json:"memoryMb"`
+			CPUs     float64 `json:"cpus"`
+		} `json:"defaultLimits"`
+		MinMemoryMB int64 `json:"minMemoryMb"`
+		Statements  bool  `json:"statements"`
+		AutoExplain bool  `json:"autoExplain"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &options); err != nil {
 		t.Fatal(err)
@@ -236,6 +274,15 @@ func TestProvisionOptionsListEveryTemplateWithItsVersions(t *testing.T) {
 		}
 		if (o.DefaultUser == "") != (tmpl.driver == "redis") {
 			t.Errorf("%s: default user %q; only the password-only engines have none", o.Engine, o.DefaultUser)
+		}
+		// What the form fills in when the operator limits a server is a
+		// limit the engine starts in, offered for every template.
+		if o.DefaultLimits.MemoryMB < 512 || o.DefaultLimits.CPUs < 1 || o.MinMemoryMB < dockerMinMemoryMB ||
+			o.DefaultLimits.MemoryMB < o.MinMemoryMB {
+			t.Errorf("%s: limits offered %+v, at least %d MiB", o.Engine, o.DefaultLimits, o.MinMemoryMB)
+		}
+		if postgres := tmpl.driver == "postgres"; o.Statements != postgres || o.AutoExplain != postgres {
+			t.Errorf("%s: statements %v, autoExplain %v; every PostgreSQL template and nothing else has both", o.Engine, o.Statements, o.AutoExplain)
 		}
 	}
 	for engine := range provisionTemplates {
@@ -603,5 +650,142 @@ func TestProvisionBootstrapsCarryNoRequestText(t *testing.T) {
 	const redis = `set -eu; umask 077; conf=/tmp/jd-redis-server.conf; rm -f "$conf"; printf 'requirepass %s\n' "$REDIS_PASSWORD" > "$conf"; chown redis:redis "$conf"; exec docker-entrypoint.sh redis-server "$conf"`
 	if provisionTemplates["redis"].bootstrap != redis {
 		t.Errorf("redis bootstrap = %q", provisionTemplates["redis"].bootstrap)
+	}
+}
+
+// A new server is started with the limits the request named, held to the
+// machine before anything is pulled, and with none where it named none.
+func TestProvisionStartsTheContainerWithTheLimitsAsked(t *testing.T) {
+	s, router := dbTestRouter(t)
+	created := provisionNameEngine(t, s, map[string]bool{}, map[string]bool{})
+
+	rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"postgres","name":"jd-capped","memoryMb":1024,"cpus":1.5}`)
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"memoryMb":1024`) {
+		t.Fatalf("provision = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"redis","name":"jd-open"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("provision = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(*created) != 2 {
+		t.Fatalf("%d containers were created", len(*created))
+	}
+	if hc := (*created)[0].HostConfig; hc.Memory != 1024<<20 || hc.NanoCpus != 1_500_000_000 {
+		t.Errorf("the limited server was created with %d bytes and %d nano-processors", hc.Memory, hc.NanoCpus)
+	}
+	if hc := (*created)[1].HostConfig; hc.Memory != 0 || hc.NanoCpus != 0 {
+		t.Errorf("a server with no limit asked for was created with %d bytes and %d nano-processors", hc.Memory, hc.NanoCpus)
+	}
+
+	for body, want := range map[string]string{
+		`{"engine":"postgres","memoryMb":5000}`: "4096 MiB of memory",
+		`{"engine":"postgres","cpus":6}`:        "4 processors",
+		`{"engine":"postgres","memoryMb":2}`:    "at least 6 MiB",
+		`{"engine":"postgres","cpus":-1}`:       "cannot be negative",
+		`{"engine":"mysql","memoryMb":448}`:     "MySQL needs a memory limit of at least 512 MiB",
+	} {
+		rec := do(t, router, http.MethodPost, "/databases/provision", body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("provision %s = %d %s, want 400 saying %q", body, rec.Code, strings.TrimSpace(rec.Body.String()), want)
+		}
+	}
+	if len(*created) != 2 {
+		t.Errorf("a refused limit created a container: %d", len(*created))
+	}
+}
+
+// Every PostgreSQL template starts counting its statements at its first
+// start: the image's own first-boot step adds pg_stat_statements to the
+// libraries it loads and creates the extension in the new database. It does
+// that through postgresql.auto.conf and never through the command line, which
+// would outrank every later change to the list. auto_explain is the
+// operator's choice, and only a PostgreSQL server has plans to log.
+func TestPostgresTemplatesCountStatementsFromTheFirstStart(t *testing.T) {
+	s, _ := dbTestRouter(t)
+	router := asRole(s, auth.RoleAdmin)
+	created := provisionNameEngine(t, s, map[string]bool{}, map[string]bool{})
+	for _, engine := range []string{"postgres", "pgvector", "postgis", "timescaledb"} {
+		if engine == "postgis" && !deploy.PostGISImageSupported(runtime.GOARCH) {
+			continue
+		}
+		for _, autoExplain := range []bool{false, true} {
+			before := len(*created)
+			body := fmt.Sprintf(`{"engine":%q,"name":"jd-%s-%v","autoExplain":%v}`, engine, engine, autoExplain, autoExplain)
+			if rec := do(t, router, http.MethodPost, "/databases/provision", body); rec.Code != http.StatusAccepted {
+				t.Fatalf("provision %s = %d %s", body, rec.Code, rec.Body.String())
+			}
+			if len(*created) != before+1 {
+				t.Fatalf("%s: %d containers were created", body, len(*created)-before)
+			}
+			spec := (*created)[before]
+			if len(spec.Cmd) != 0 {
+				t.Errorf("%s: the image's command was replaced: %q", engine, spec.Cmd)
+			}
+			script, ok := spec.Files["/docker-entrypoint-initdb.d/jd-statements.sql"]
+			if !ok || len(spec.Files) != 1 {
+				t.Fatalf("%s: files written = %v", engine, spec.Files)
+			}
+			if script != postgresFirstBoot(autoExplain) {
+				t.Errorf("%s: the script is not the first-boot script:\n%s", engine, script)
+			}
+			if strings.Contains(script, "auto_explain") != autoExplain {
+				t.Errorf("%s, autoExplain %v:\n%s", engine, autoExplain, script)
+			}
+		}
+	}
+	target, detail, status := auditEntry(t, s, "database.server.provision")
+	if status != http.StatusAccepted || !strings.Contains(detail, `"statements":true`) || !strings.Contains(detail, `"autoExplain":true`) {
+		t.Errorf("audit: %s %s %d", target, detail, status)
+	}
+
+	before := len(*created)
+	if rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"mysql","name":"jd-plans"}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("provision mysql = %d %s", rec.Code, rec.Body.String())
+	}
+	if files := (*created)[before].Files; len(files) != 0 {
+		t.Errorf("a MySQL server was given PostgreSQL's first boot: %v", files)
+	}
+	for _, engine := range []string{"mysql", "redis", "mongodb", "clickhouse"} {
+		rec := do(t, router, http.MethodPost, "/databases/provision", `{"engine":"`+engine+`","autoExplain":true}`)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "auto_explain") {
+			t.Errorf("%s with auto_explain = %d %s", engine, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// The script is the SQL the image runs as the server's first account, once.
+// The library list is built by the server from what the image already loads,
+// so TimescaleDB keeps its own; the extension is made after the list is
+// stored; auto_explain is loaded before its parameters are set, so the
+// server checks each value against the parameter it then knows.
+func TestPostgresFirstBootStoresTheLibrariesBeforeTheExtension(t *testing.T) {
+	plain, plans := postgresFirstBoot(false), postgresFirstBoot(true)
+	for _, script := range []string{plain, plans} {
+		store := strings.Index(script, "ALTER SYSTEM SET shared_preload_libraries")
+		run := strings.Index(script, "\\gexec")
+		create := strings.Index(script, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
+		if store < 0 || run < store || create < run || !strings.HasSuffix(script, "pg_stat_statements;\n") {
+			t.Errorf("the steps are out of order:\n%s", script)
+		}
+		if !strings.Contains(script, "current_setting('shared_preload_libraries')") {
+			t.Errorf("the list does not start from what the image loads:\n%s", script)
+		}
+		if strings.Contains(script, "-c shared_preload_libraries") {
+			t.Errorf("the list is on a command line:\n%s", script)
+		}
+	}
+	if !strings.Contains(plain, "|| ',pg_stat_statements'") || strings.Contains(plain, "auto_explain") {
+		t.Errorf("without auto_explain:\n%s", plain)
+	}
+	if !strings.Contains(plans, "|| ',pg_stat_statements,auto_explain'") {
+		t.Errorf("with auto_explain the library is not added:\n%s", plans)
+	}
+	load := strings.Index(plans, "LOAD 'auto_explain';")
+	for _, setting := range []string{
+		"auto_explain.log_min_duration = '1s'", "auto_explain.log_analyze = on",
+		"auto_explain.log_buffers = on", "auto_explain.log_timing = off",
+	} {
+		if at := strings.Index(plans, "ALTER SYSTEM SET "+setting+";"); at < 0 || load < 0 || at < load {
+			t.Errorf("%s is not set after the library is loaded:\n%s", setting, plans)
+		}
 	}
 }

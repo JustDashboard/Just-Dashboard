@@ -732,7 +732,8 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 	}
 	want := map[Driver]map[string]bool{
 		DriverPostgres: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
-			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
+			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset",
+			"statementsSetup"),
 		DriverMySQL: on("stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats",
 			"maintenance", "settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset"),
 		DriverSQLite: on("stats", "tableStats", "indexStats", "maintenance", "settings", "settingsWrite",
@@ -957,8 +958,8 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 		// Names keep their digits; bind markers keep theirs.
 		{`SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, `SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, false},
 		{`SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = 0x1F`, `SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = ?`, true},
-		// An apostrophe in a comment starts no string.
-		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? -- don't stop\nFROM t WHERE s = ? /* it's 5 */ AND n = ?", false},
+		// An apostrophe in a comment starts no string, and a comment goes with what is in it.
+		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? \nFROM t WHERE s = ? AND n = ?", false},
 		// Text the engine cut short: the open string is dropped with its end.
 		{`INSERT INTO sessions (token) VALUES ('eyJhbGciOiJIUzI1NiIsInR5`, `INSERT INTO sessions (token) VALUES (?`, false},
 		{`SELECT TOP (10) name FROM sys.objects`, `SELECT TOP (?) name FROM sys.objects`, true},

@@ -159,6 +159,7 @@ func TestOpsReadRoutesAnswerAViewer(t *testing.T) {
 		{"/sqlite/file", `"pageSize"`},
 		{"/server/privileges", `"supported":false`},
 		{"/statements?sort=calls&limit=5", `"sort":"calls"`},
+		{"/statements/history?hours=24", `"supported":false`},
 		{"/activity", `"supported":false`},
 	} {
 		rec := h.viewer.do(http.MethodGet, h.base+c.path, "", nil)
@@ -203,6 +204,7 @@ func TestOpsWritesNeedTheirCapability(t *testing.T) {
 	}{
 		{http.MethodPost, "/maintenance", `{"action":"quick_check"}`, true},
 		{http.MethodPost, "/statements/reset", `{}`, false},
+		{http.MethodPost, "/statements/preload", `{}`, false},
 		{http.MethodPut, "/settings", `{"name":"user_version","value":"3"}`, false},
 		{http.MethodPost, "/server/roles/app/privileges", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
 		{http.MethodPost, "/server/roles/app/privileges/revoke", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
@@ -243,6 +245,7 @@ func TestOpsRoutesDoNotAskForAPhrase(t *testing.T) {
 		{http.MethodPost, "/activity/cancel", `{"pid":"7"}`},
 		{http.MethodPost, "/maintenance", `{"action":"vacuum"}`},
 		{http.MethodPost, "/statements/reset", `{}`},
+		{http.MethodPost, "/statements/preload", `{}`},
 		{http.MethodPut, "/settings", `{"name":"journal_mode","value":"wal"}`},
 		{http.MethodPost, "/server/roles/app/privileges/revoke", `{"level":"table","schema":"s","table":"t","privileges":["ALL"]}`},
 	} {

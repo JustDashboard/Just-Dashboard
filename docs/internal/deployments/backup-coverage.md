@@ -30,7 +30,9 @@ recoverable transaction boundary. Jobs capture explicitly selected SQLite files 
 owner's native snapshot, and they capture **native dumps of saved database connections**
 (`backup_jobs.database_dumps`, additive): every run asks the Databases owner (`backupDatabaseDumper`,
 which opens the sealed DSN like every Databases route and calls `dbx.Dump`) for `pg_dump`,
-`mysqldump`, `mongodump`, a Redis snapshot or the built-in driver dump of each connection, stores the
+`mysqldump`, `mongodump` or the built-in driver dump of each connection — for Redis always the built-in
+one, gzipped JSON Lines of each key's `DUMP` payload, which only the dashboard restores and which is not an
+RDB file — stores the
 file under `database-NNNN/<file>` beside the `source-NNNN` trees, and records
 `manifest.databaseDumps` (connection, engine, database, method, file, archive path, SHA-256, bytes).
 A failed dump fails the run; a runner without the dump owner fails rather than pretending. The

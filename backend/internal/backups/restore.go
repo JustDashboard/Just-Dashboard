@@ -2,7 +2,6 @@ package backups
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -38,7 +37,7 @@ type RestoreOptions struct {
 // explicit destination, so recovering a single file does not require
 // overwriting a live tree. RestoreInPlace is the one that does.
 func (r *Runner) Restore(ctx context.Context, runID int64, destination string, opts ...RestoreOptions) (*RestoreResult, error) {
-	_, archivePath, cleanup, err := r.localArtifact(ctx, runID)
+	_, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +52,7 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string, o
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, err
 	}
-	res, err := extractArchiveBounded(ctx, archivePath, dest, runID, 0, restorePlan{filter: newPathFilter(opts)})
+	res, err := extractArchiveBounded(ctx, archive, dest, runID, 0, restorePlan{filter: newPathFilter(opts)})
 	if res != nil {
 		res.Targets = []string{dest}
 	}
@@ -67,7 +66,7 @@ func (r *Runner) Restore(ctx context.Context, runID int64, destination string, o
 // added since the backup still holds. Database dumps are never written to
 // disk by this; they go back through the Databases owner.
 func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...RestoreOptions) (*RestoreResult, error) {
-	run, archivePath, cleanup, err := r.localArtifact(ctx, runID)
+	run, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +87,7 @@ func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...Restor
 		plan.roots[source.ArchivePath] = resolved
 		targets = append(targets, resolved)
 	}
-	res, err := extractArchiveBounded(ctx, archivePath, "", runID, 0, plan)
+	res, err := extractArchiveBounded(ctx, archive, "", runID, 0, plan)
 	if res != nil {
 		res.Destination = ""
 		res.Targets = targets
@@ -153,23 +152,17 @@ func (f *pathFilter) wants(name string) bool {
 }
 
 func extractArchive(ctx context.Context, archivePath, dest string, runID int64) (*RestoreResult, error) {
-	return extractArchiveBounded(ctx, archivePath, dest, runID, 0, restorePlan{})
+	return extractArchiveBounded(ctx, ArchiveFile{Path: archivePath}, dest, runID, 0, restorePlan{})
 }
 
-func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID int64, maxBytes int64, plan restorePlan) (*RestoreResult, error) {
-	f, err := os.Open(archivePath)
+func extractArchiveBounded(ctx context.Context, archive ArchiveFile, dest string, runID int64, maxBytes int64, plan restorePlan) (*RestoreResult, error) {
+	tr, release, err := archive.entries()
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	defer gz.Close()
+	defer release()
 
 	res := &RestoreResult{RunID: runID, Destination: dest, Skipped: []string{}}
-	tr := tar.NewReader(gz)
 	seen := 0
 	for {
 		if ctx.Err() != nil {
@@ -266,27 +259,21 @@ func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID 
 // ListArchive shows what a run contains without extracting it, so an operator
 // can confirm a backup holds what they expect before restoring anything.
 func (r *Runner) ListArchive(ctx context.Context, runID int64, limit int) ([]ArchiveEntry, error) {
-	_, path, cleanup, err := r.localArtifact(ctx, runID)
+	_, archive, cleanup, err := r.localArtifact(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
-	f, err := os.Open(path)
+	tr, release, err := archive.entries()
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	defer gz.Close()
+	defer release()
 
 	if limit <= 0 || limit > 20000 {
 		limit = 2000
 	}
 	out := []ArchiveEntry{}
-	tr := tar.NewReader(gz)
 	for len(out) < limit {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
@@ -333,18 +320,19 @@ func verifyArtifact(ctx context.Context, path string, run *Run) error {
 }
 
 // OpenArtifact hands a caller the verified archive file for a run: the local
-// artifact, or a private download of a remote one. The cleanup releases the
-// retention pin and removes the download, and must be called.
-func (r *Runner) OpenArtifact(ctx context.Context, runID int64) (*Run, string, func(), error) {
+// artifact, or a private download of a remote one, with the key that opens it
+// when it was encrypted. The cleanup releases the retention pin and removes
+// the download, and must be called.
+func (r *Runner) OpenArtifact(ctx context.Context, runID int64) (*Run, ArchiveFile, func(), error) {
 	return r.localArtifact(ctx, runID)
 }
 
 // localArtifact pins the run against retention and uses its original target
 // configuration. Cleanup releases both the pin and a private download, if any.
-func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, string, func(), error) {
+func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, ArchiveFile, func(), error) {
 	release, err := r.beginRead()
 	if err != nil {
-		return nil, "", nil, err
+		return nil, ArchiveFile{}, nil, err
 	}
 	stage := ""
 	cleanup := func() {
@@ -353,9 +341,9 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, string, 
 		}
 		release()
 	}
-	failed := func(err error) (*Run, string, func(), error) {
+	failed := func(err error) (*Run, ArchiveFile, func(), error) {
 		cleanup()
-		return nil, "", nil, err
+		return nil, ArchiveFile{}, nil, err
 	}
 	run, err := r.store.Run(ctx, runID)
 	if err != nil {
@@ -387,7 +375,7 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, string, 
 		if err != nil {
 			return failed(err)
 		}
-		path = filepath.Join(stage, "archive.tar.gz")
+		path = filepath.Join(stage, "archive")
 		if err := downloadObject(ctx, job, secrets, run.Artifact, path); err != nil {
 			return failed(err)
 		}
@@ -395,5 +383,9 @@ func (r *Runner) localArtifact(ctx context.Context, runID int64) (*Run, string, 
 	if err := verifyArtifact(ctx, path, run); err != nil {
 		return failed(err)
 	}
-	return run, path, cleanup, nil
+	archive, err := r.archiveFile(ctx, run, path)
+	if err != nil {
+		return failed(err)
+	}
+	return run, archive, cleanup, nil
 }
