@@ -144,9 +144,12 @@ describe("words", () => {
     expect(listWords(["a", "b", "c"])).toBe("a, b and c")
   })
 
-  test("an extension is drawn as PostgreSQL's only when it is PostgreSQL's", () => {
-    expect(extensionLogo("pg_stat_statements", "postgresql", false)).toBe("postgresql")
+  test("an extension is drawn as its own project's mark, and as none where it has none", () => {
+    expect(extensionLogo("pg_stat_statements", "postgresql", false)).toBeUndefined()
     expect(extensionLogo("timescaledb_toolkit", "postgresql", false)).toBe("timescaledb")
+    expect(extensionLogo("postgis_raster", "postgresql", false)).toBe("postgis-extension")
+    expect(extensionLogo("plpython3u", "postgresql", false)).toBe("python")
+    expect(extensionLogo("constructor", "postgresql", false)).toBeUndefined()
     expect(extensionLogo("vector", "postgresql", false)).toBeUndefined()
     expect(extensionLogo("InnoDB", "mysql", true)).toBe("mysql")
   })

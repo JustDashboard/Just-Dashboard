@@ -1,7 +1,23 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Puzzle } from "@/components/icons"
+import {
+  ChartActivity,
+  Clock,
+  Code,
+  Globe,
+  Layers,
+  LineChart,
+  Link,
+  ListOrdered,
+  MagnifyingGlass,
+  Puzzle,
+  Shield,
+  Table,
+  Terminal,
+  Topology,
+  Wrench,
+} from "@/components/icons"
 import { del, errorMessage } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -78,14 +94,49 @@ function useExtensionDetail(name: string) {
   )
 }
 
-/** The extension drawn as itself: the product it is, or a piece of a puzzle. */
-export function ExtensionMark({ extension }: { extension: DbExtension }) {
+/**
+ * What a category is drawn as where its extension has no mark of its own: the
+ * kind of thing it does, so a column of contrib modules reads as a column of
+ * different things rather than of one elephant.
+ */
+/** Keyed by the backend's closed list of categories. */
+const CATEGORY_GLYPHS: Partial<Record<string, React.ComponentType<{ className?: string }>>> = {
+  "Data types": Table,
+  "Foreign data": Link,
+  Functions: Code,
+  Geospatial: Globe,
+  Indexing: ListOrdered,
+  Languages: Terminal,
+  Maintenance: Wrench,
+  Monitoring: ChartActivity,
+  Partitioning: Layers,
+  Scheduling: Clock,
+  Search: MagnifyingGlass,
+  Security: Shield,
+  "Time series": LineChart,
+  Vectors: Topology,
+}
+
+/** A category's glyph on its own, beside its heading. */
+export function CategoryGlyph({ category, className }: { category?: string; className?: string }) {
+  const Glyph = CATEGORY_GLYPHS[category ?? ""] ?? Puzzle
+  return <Glyph className={className} />
+}
+
+/** The extension drawn as itself: its project's mark, or what kind of thing it is. */
+export function ExtensionMark({
+  extension,
+  size = "sm",
+}: {
+  extension: DbExtension
+  size?: "sm" | "md"
+}) {
   const { engine } = useDatabase()
   return (
     <ProductLogo
       id={extensionLogo(extension.name, engine.logo, false)}
-      size="sm"
-      fallback={Puzzle}
+      size={size}
+      fallback={CATEGORY_GLYPHS[extension.category ?? ""] ?? Puzzle}
     />
   )
 }
